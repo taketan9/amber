@@ -93,6 +93,9 @@ struct ContentView: View {
                                 ForEach(NotesStore.Order.allCases) { Text($0.label).tag($0) }
                             }
                             Divider()
+                            Toggle(isOn: $store.tree) {
+                                Label("フォルダごと（ツリー）", systemImage: "list.bullet.indent")
+                            }
                             Toggle(isOn: $store.flat) {
                                 Label("全部まとめて見る", systemImage: "list.bullet")
                             }
@@ -400,6 +403,15 @@ struct ContentView: View {
         withAnimation(.easeOut(duration: 0.24)) { walked = store.at }
     }
 
+    /// Whether the tree is what is being drawn right now.
+    ///
+    /// One answer, asked in four places — the folder rows, the favourites,
+    /// the tree itself and the bands all have to agree, and four copies of
+    /// the same condition is how three of them end up agreeing.
+    private var treeing2: Bool {
+        store.tree && needle.isEmpty && store.only.isEmpty && !store.flat
+    }
+
     private var list: some View {
         List {
             if needle.isEmpty, store.only.isEmpty {
@@ -423,7 +435,11 @@ struct ContentView: View {
             // The notebooks first, then the notes in this one. Folders above
             // files is what every file manager since the first one has done,
             // and this is the same gesture: go in, come back.
-            if !store.flat && needle.isEmpty {
+            // The one-level-at-a-time listing. **Not while the tree is on**,
+            // or the folders and the favourites are each drawn twice — which
+            // is exactly what happened the first time, and reads as the list
+            // having lost its mind rather than as two views agreeing.
+            if !store.flat && needle.isEmpty && !treeing2 {
                 // The way out, and a place to drop things through it. cian's
                 // own panes have had a `..` row since the beginning, and it
                 // has always meant both: go up, and put this up there.
@@ -483,7 +499,7 @@ struct ContentView: View {
             // Pinned notes under a heading that says what pinning did.
             // A note that silently jumps to the top is a note that moved for
             // no reason you can see.
-            let stuck = store.pinnedHere(needle)
+            let stuck = treeing2 ? [] : store.pinnedHere(needle)
             if !stuck.isEmpty {
                 Section {
                     ForEach(stuck) { row($0) }
@@ -506,36 +522,21 @@ struct ContentView: View {
                     }
                 }
             }
-            // The tags this pile actually has, to press instead of type.
-            if !store.tagsHere.isEmpty {
-                Section {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 7) {
-                            ForEach(store.tagsHere, id: \.self) { t in
-                                let on = store.only.contains(t)
-                                Button {
-                                    if on { store.only.remove(t) } else { store.only.insert(t) }
-                                } label: {
-                                    Text("#\(t)").font(.caption)
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(on ? Color.accentColor : nil)
-                            }
-                            if !store.only.isEmpty {
-                                Button("すべて外す") { store.only.removeAll() }
-                                    .font(.caption)
-                                    .buttonStyle(.borderless)
-                            }
-                        }
-                        .padding(.vertical, 2)
+            // **The tree, unless you are looking for something.** A tree of
+            // search results is not a shape anybody reads — when you are
+            // narrowing, what you want is the shortest list of answers, and
+            // when you are not, what you want is to see where things are.
+            if treeing2 {
+                Nest(store: store, open: { note in
+                    desk.open(note)
+                    showing = true
+                }, row: { note in AnyView(row(note)) })
+            } else {
+                // Under headings that follow the ordering — see `bands`.
+                ForEach(store.bands(store.matching(needle))) { band in
+                    Section(band.name) {
+                        ForEach(band.notes) { row($0) }
                     }
-                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                }
-            }
-            // Under headings that follow the ordering — see `bands`.
-            ForEach(store.bands(store.matching(needle))) { band in
-                Section(band.name) {
-                    ForEach(band.notes) { row($0) }
                 }
             }
         }
@@ -579,8 +580,23 @@ struct ContentView: View {
         // to `.inline` so the wordmark can have the top of the list, the
         // search field would otherwise be somewhere you have to know about.
         .searchable(text: $needle, placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: "タイトル・タグ・本文")
-        .onChange(of: needle) { _, now in store.find(now) }
+                    prompt: "タイトル・タグ・本文　（空白で AND、OR で OR）")
+        // **The tags, offered where you are already typing.** They used to be
+        // a bar of chips above the list, which cost a row of the screen for
+        // ever so that they could be pressed occasionally. Suggestions appear
+        // when the field is, and are gone the rest of the time.
+        .searchSuggestions {
+            if needle.trimmingCharacters(in: .whitespaces).isEmpty {
+                ForEach(store.tagsHere.prefix(20), id: \.self) { t in
+                    Label("#\(t)", systemImage: "tag")
+                        .searchCompletion("#\(t)")
+                }
+            }
+        }
+        .onChange(of: needle) { _, now in
+            store.read(now)
+            store.find(now)
+        }
         .refreshable { store.reload() }
         // One screen for every open note, with the tabs above them.
         .navigationDestination(isPresented: $showing) { DeskView(desk: desk, store: store) }

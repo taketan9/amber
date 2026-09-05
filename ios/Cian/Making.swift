@@ -23,7 +23,7 @@ struct Making: View {
         NavigationStack {
             Form {
                 Section("タイトル") {
-                    TextField("あたらしいノート", text: $title)
+                    TextField("新しいノート", text: $title)
                         .focused($naming)
                         // Return moves on to the tags rather than making the
                         // note: the note is made by the button that says so.
@@ -58,7 +58,7 @@ struct Making: View {
                     }
                 }
             }
-            .navigationTitle("あたらしいノート")
+            .navigationTitle("新しいノート")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

@@ -417,6 +417,15 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "path": to.display().to_string() }))
         }
 
+        // What a search box means, as groups of words.
+        //
+        // Asked once per query rather than once per note: the *meaning* of
+        // the query is the decision, and it belongs here; running it over a
+        // list that is already in the phone's memory does not.
+        "terms" => {
+            Ok(serde_json::json!({ "groups": cian_core::note::terms(&arg(p, "q")) }))
+        }
+
         // Split a note into how it describes itself and what it says.
         //
         // **So the writing half can show only the second part.** The front

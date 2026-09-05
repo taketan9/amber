@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Where the notes are, and what is in there.
 ///
@@ -286,6 +287,43 @@ final class NotesStore: ObservableObject {
         }
     }
 
+    /// Which folders and shelves are open in the tree.
+    ///
+    /// On the store rather than in the view: the list is rebuilt on every
+    /// keystroke and every reload, and a disclosure state that lived in the
+    /// view would close every folder each time a note was saved.
+    @Published var unfolded: Set<String> = []
+
+    func opened(_ key: String) -> Binding<Bool> {
+        Binding(
+            get: { self.unfolded.contains(key) },
+            set: { if $0 { self.unfolded.insert(key) } else { self.unfolded.remove(key) } }
+        )
+    }
+
+    /// Show the tree rather than one folder at a time. The default, because
+    /// knowing what is there is what a notes app is mostly for.
+    @Published var tree = true
+
+    /// The folders directly inside one, wherever the list is standing.
+    ///
+    /// Like `books` but from a given path rather than from `at` — the tree
+    /// asks about every level, not only the one that is open.
+    func shelfless(in book: String) -> [(name: String, path: String, count: Int)] {
+        let prefix = book.isEmpty ? "" : book + "/"
+        var seen: [String] = []
+        for b in allBooks where b.hasPrefix(prefix) {
+            let rest = String(b.dropFirst(prefix.count))
+            guard !rest.isEmpty else { continue }
+            let head = rest.split(separator: "/").first.map(String.init) ?? rest
+            let full = prefix + head
+            if !seen.contains(full) { seen.append(full) }
+        }
+        return seen.map { full in
+            (String(full.dropFirst(prefix.count)), full, under(full))
+        }
+    }
+
     /// The favourites standing directly on one shelf.
     func starred(on shelf: String) -> [Note] {
         sorted(notes.filter { $0.star == shelf })
@@ -379,6 +417,19 @@ final class NotesStore: ObservableObject {
         return parts.joined(separator: "/")
     }
 
+    /// The query, as groups of words: an OR of ANDs.
+    ///
+    /// **What the query means is `cian-core`'s answer** (`note::terms`) —
+    /// asked once when the text changes, not once per note. Three front ends
+    /// each deciding what two words mean is three search boxes that agree
+    /// until somebody types two words.
+    private var groups: [[String]] = []
+
+    func read(_ needle: String) {
+        let q = needle.trimmingCharacters(in: .whitespaces)
+        groups = (try? Cian.call("terms", ["q": q])["groups"] as? [[String]]) ?? []
+    }
+
     /// Narrow by what a note is *about*, not by what its file is called.
     func matching(_ needle: String) -> [Note] {
         let n = needle.trimmingCharacters(in: .whitespaces).lowercased()
@@ -391,7 +442,12 @@ final class NotesStore: ObservableObject {
         if !flat && n.isEmpty && only.isEmpty { out = out.filter { $0.book == at } }
         if !n.isEmpty {
             // Either half: what the listing knows, or what was found inside.
-            out = out.filter { $0.search.contains(n) || hits[$0.path] != nil }
+            // Every word of one group has to be there; any group will do.
+            out = out.filter { note in
+                if hits[note.path] != nil { return true }
+                guard !groups.isEmpty else { return note.search.contains(n) }
+                return groups.contains { g in g.allSatisfy { note.search.contains($0) } }
+            }
         }
         if !only.isEmpty { out = out.filter { only.isSubset(of: Set($0.tags)) } }
         // The favourites are drawn in their own section above this, so they
