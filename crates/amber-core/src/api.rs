@@ -392,7 +392,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // 窓と電話で同じでなければならない ── 同じフォルダを二つの端末で
         // 触るので、片方の決まりで消したものを、もう片方が残っていると思う。
 
-        /// いまの姿を一つ残す。`gap` 秒たっていなければ何もしない。
+        // いまの姿を一つ残す。`gap` 秒たっていなければ何もしない。
         "keep" => {
             let root = std::path::PathBuf::from(arg(p, "root"));
             let note = std::path::PathBuf::from(arg(p, "path"));
@@ -407,7 +407,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "stamp": stamp }))
         }
 
-        /// 前の姿を、新しい順に。`path` はノートでもフォルダでもよい。
+        // 前の姿を、新しい順に。`path` はノートでもフォルダでもよい。
         "history" => {
             let root = std::path::PathBuf::from(arg(p, "root"));
             let at = std::path::PathBuf::from(arg(p, "path"));
@@ -430,7 +430,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
-        /// 一つの姿の中身。
+        // 一つの姿の中身。
         "oldtext" => {
             let root = std::path::PathBuf::from(arg(p, "root"));
             let note = std::path::PathBuf::from(arg(p, "path"));
@@ -438,7 +438,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "text": text }))
         }
 
-        /// 「残す」の印を付ける／外す。
+        // 「残す」の印を付ける／外す。
         "keepmark" => {
             let root = std::path::PathBuf::from(arg(p, "root"));
             let note = std::path::PathBuf::from(arg(p, "path"));

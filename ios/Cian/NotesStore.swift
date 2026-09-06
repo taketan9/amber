@@ -837,6 +837,15 @@ final class NotesStore: ObservableObject {
     }
 
     func save(_ note: Note, text: String, stamp: String, force: Bool = false) throws -> Saved {
+        // **書き込む直前の姿を、履歴に渡す。** 一世代にするかどうかを決める
+        // のは core（最後の一区切りから間が空いたときだけ）── 電話と窓で
+        // 決まりが違うと、片方で消えたものをもう片方が残っていると思う。
+        // 履歴が置けないことで、保存が止まる理由はない。
+        if let root = root?.path {
+            _ = try? Cian.call("keep", [
+                "root": root, "path": note.path, "gap": 300,
+            ])
+        }
         var params: [String: Any] = ["path": note.path, "text": text, "force": force]
         if !stamp.isEmpty { params["stamp"] = stamp }
         let answer = try Cian.call("write", params)

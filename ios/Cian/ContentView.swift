@@ -43,6 +43,8 @@ struct ContentView: View {
     @State private var treeing = false
     /// The folder the list is drawn for, and which way it last moved.
     @State private var walked = ""
+    /// 履歴を見せている相手（ノートかフォルダ）。
+    @State private var past: Past.Which?
     @State private var deeper = true
     @State private var wide: CGFloat = 393
 
@@ -90,6 +92,9 @@ struct ContentView: View {
                         .accessibilityLabel("設定")
                 }
             }
+        }
+        .sheet(item: $past) { w in
+            Past(store: store, at: w.at, isBook: w.book)
         }
         .sheet(isPresented: $picking) {
             // The sheet closes itself first; these open a beat later, from
@@ -354,6 +359,11 @@ struct ContentView: View {
                     ShareLink(item: URL(fileURLWithPath: note.path)) {
                         Label("エクスポート", systemImage: "square.and.arrow.up")
                     }
+                    // **長押しから履歴へ。** 窓は右押しで開く ── 電話に
+                    // 右押しは無いので、同じ意味の手ぶりに割り当てる。
+                    Button { past = .init(at: note.path, book: false) } label: {
+                        Label("前の姿（履歴）", systemImage: "clock.arrow.circlepath")
+                    }
                 }
     }
 
@@ -606,6 +616,14 @@ struct ContentView: View {
                     .contextMenu {
                         Button { colouring = b.path } label: {
                             Label("色をつける", systemImage: "paintpalette")
+                        }
+                        // フォルダの履歴は、**中のノートの姿をまとめて** ──
+                        // 「あのあたりで壊した」は、どのノートかを覚えて
+                        // いないほうが多い。
+                        Button {
+                            past = .init(at: store.rootPath + "/" + b.path, book: true)
+                        } label: {
+                            Label("前の姿（履歴）", systemImage: "clock.arrow.circlepath")
                         }
                         Button {
                             renaming = b.path

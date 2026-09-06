@@ -25,11 +25,36 @@ struct NoteView: View {
     /// Whether the seldom-used half of the writing bar is unfolded.
     @State private var more = false
     @State private var trouble: String?
+    @State private var fixing: Block?
+
+    /// 直した図を、本文の中の元の場所へ返す。
+    ///
+    /// **枠ごと入れ替える。** 行番号で切ると、前書きのあるノートでずれる
+    /// ── 元の字そのものを探して置き換えるほうが、数え方を一つ減らせる。
+    /// 同じ図が二つあるノートでは前のほうが変わるが、そこで人が見ている
+    /// のはたいてい前のほう。
+    private func swapFence(_ whole: String, was: String, now: String) -> String {
+        let from = "```mermaid\n" + was + "\n```"
+        let to = "```mermaid\n" + now.trimmingCharacters(in: .whitespacesAndNewlines) + "\n```"
+        if whole.contains(from) { return whole.replacingOccurrences(of: from, with: to) }
+        // 枠の言葉が `mermaid` 以外（大文字など）で書かれていることがある。
+        if whole.contains(was) { return whole.replacingOccurrences(of: was, with: now) }
+        return whole
+    }
 
     var body: some View {
         Group {
             if tab.reading {
-                ScrollView { Reading(blocks: tab.blocks, base: folder, tick: tick) }
+                ScrollView {
+                    Reading(blocks: tab.blocks, base: folder, tick: tick, fix: { fixing = $0 })
+                }
+                // **工房はここで開く。** 図は読む面の中にあり、直した字を
+                // 戻す先はこのノートの本文なので、間に人を挟まない。
+                .sheet(item: $fixing) { b in
+                    Studio(source: b.text) { now in
+                        tab.text = swapFence(tab.text, was: b.text, now: now)
+                    }
+                }
             } else {
                 VStack(spacing: 0) {
                     Editor(pen: pen, text: $tab.text, pick: $tab.pick, editing: $writing)

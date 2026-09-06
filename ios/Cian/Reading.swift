@@ -61,6 +61,9 @@ struct Reading: View {
     /// shopping list is read *while* it is being crossed off, and going back
     /// to the editor to type an `x` between two brackets is not that.
     var tick: ((Block) -> Void)?
+    /// 図を直したいと言われたとき。**読むだけの面から出る唯一の道**なので、
+    /// 受け取る側（`Desk`）が工房を開く。
+    var fix: ((Block) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -125,7 +128,11 @@ struct Reading: View {
             // 電話が `flowchart LR` と出していたので、同じノートが開く端末に
             // よって別のものに読めていた。
             if b.lang == "mermaid" {
+                // **長押しで工房。** 窓は右押しで開く ── 電話に右押しは
+                // 無いので、同じ意味の手ぶりに割り当てる。
                 Drawing(source: b.text)
+                    .contentShape(Rectangle())
+                    .onLongPressGesture(minimumDuration: 0.4) { fix?(b) }
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     Text(b.text).font(.callout.monospaced())

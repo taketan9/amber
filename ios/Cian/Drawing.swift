@@ -166,6 +166,10 @@ private struct Paper: UIViewRepresentable {
         // view inside a scroll view swallows the flick.
         web.scrollView.isScrollEnabled = false
         web.scrollView.bounces = false
+        // **触りは通す。** 図そのものは押しても何もしないので、web view が
+        // 受け取る意味が無い ── 受け取ってしまうと、長押しで工房を開く手が
+        // 図の上でだけ効かなくなる（いちばん押したいところで）。
+        web.isUserInteractionEnabled = false
         if let page = Diagrams.tool {
             web.loadFileURL(page, allowingReadAccessTo: page.deletingLastPathComponent())
         }

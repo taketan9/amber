@@ -65,6 +65,7 @@
 				1A0000000000000000000007 /* Resources */,
 				1A0000000000000000000032 /* 見本のノート */,
 				1A0000000000000000000033 /* 図の道具 */,
+				1A0000000000000000000034 /* 図の読み書き */,
 			);
 			buildRules = (
 			);
@@ -168,6 +169,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "# mermaid を束ねの中へ。**窓と同じ一本を使う**（`gui/vendor`）──\n# 別の版を電話に積むと、同じノートが二つの amber で違う図になる。\n#\n# `gui/vendor/` は git に入っていない（3.4MB を複製のたびに永久に配る\n# 理由が無い）。無いときは**図の出ないアプリが建つ** ── 落ちるのでは\n# なく、ノートは字のまま出る。それを警告で言う。\nset -e\nfrom=\"$SRCROOT/../gui/vendor/mermaid/mermaid.min.js\"\nto=\"$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/mermaid.min.js\"\nif [ ! -f \"$from\" ]; then\n  echo \"warning: mermaid がありません（node gui/vendor.js）。図は字のまま出ます\"\n  rm -f \"$to\"\n  exit 0\nfi\ncp \"$from\" \"$to\"\n";
+		};
+		1A0000000000000000000034 /* 図の読み書き */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "図の読み書き";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# 図を読み戻す／組み直すところを、窓から切り出して束ねに入れる。\n#\n# **写しを持たない。** 八種類の形をもう一組 Swift で書けば、答えが\n# もう一組できる ── 食い違うのはマインドマップの深さや予定表の日付と\n# いう、いちばん確かめにくいところになる。`scripts/diagram-test.js` が\n# 同じ切り出し方で往復を見ているので、電話が使うのは**試験の通った\n# ものそのもの**。\nset -e\nfrom=\"$SRCROOT/../gui/renderer.js\"\nto=\"$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/diagram.js\"\npython3 - \"$from\" \"$to\" <<'PY'\nimport io, sys\nsrc = io.open(sys.argv[1], encoding='utf-8').read()\na = src.index('function mmdKind(')\nb = src.index('const FLOW_SHAPE')\nio.open(sys.argv[2], 'w', encoding='utf-8').write(src[a:b])\nPY\necho \"図の読み書きを入れました\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
