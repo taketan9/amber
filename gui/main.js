@@ -244,6 +244,7 @@ app.whenReady().then(() => {
     engine = new Engine();
     ipcMain.handle('amber:call', async (_e, method, params) => engine.call(method, params));
     ipcMain.handle('amber:recall', () => ({ root: firstRoot(), ...recall() }));
+    ipcMain.handle('amber:appVersion', () => app.getVersion());
     ipcMain.handle('amber:remember', (_e, patch) => remember(patch));
     ipcMain.handle('amber:pickFolder', async () => {
         const r = await dialog.showOpenDialog(win, {

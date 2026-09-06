@@ -48,9 +48,14 @@ jobs:
           - os: windows-latest
             name: amber-server-win-x64.exe
             from: target/release/amber-server.exe
+          # **mac は二つの機械を一枚にする（universal）。** runner は Apple
+          # シリコンなので、素直に組むと arm64 だけの一枚が出る ── Intel の
+          # Mac に落とした人の手元では、Release のものが動かない（実際に
+          # 動かなかった）。`lipo` で束ねれば、どちらの Mac でも同じ一枚。
           - os: macos-latest
-            name: amber-server-mac-arm64
-            from: target/release/amber-server
+            name: amber-server-mac-universal
+            from: target/universal/amber-server
+            lipo: "yes"
           - os: ubuntu-latest
             name: amber-server-linux-x64
             from: target/release/amber-server
@@ -70,9 +75,26 @@ jobs:
       # 走らせるだけなら runner の上では通ってしまう（runner には redist が
       # 入っている）── 下の DLL の検査だけが、これを捕まえた。
       - name: 組む
+        if: matrix.lipo != 'yes'
         run: cargo build --release -p amber-server
         env:
           RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+
+      - name: 二つ組んで、一枚に束ねる（mac）
+        if: matrix.lipo == 'yes'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release -p amber-server --target aarch64-apple-darwin
+          cargo build --release -p amber-server --target x86_64-apple-darwin
+          mkdir -p target/universal
+          lipo -create -output target/universal/amber-server \
+            target/aarch64-apple-darwin/release/amber-server \
+            target/x86_64-apple-darwin/release/amber-server
+          # **束ねたと言い張らない。** 片方しか入っていない一枚は、
+          # 落とした人の機械の上でしか分からない。
+          lipo -info target/universal/amber-server
+          lipo -info target/universal/amber-server | grep -q arm64
+          lipo -info target/universal/amber-server | grep -q x86_64
 
       # **一往復して、本当に話すか見る。** 組めたことと動くことは別で、
       # 動かないほうは配ったあとにしか出ない。`version` は何も要らない
@@ -122,9 +144,71 @@ jobs:
           path: out/${{ matrix.name }}
           if-no-files-found: error
 
+  # 画面（`gui/`）を、そのまま置けば動く一枚に。
+  #
+  # **これは組んだものではなく、集めたもの。** `gui/` の中身は Electron が
+  # 読むただのファイルで、要るのは `gui/vendor/` を積んである状態 ──
+  # そこは git に入れていない（数メガの、決して変わらないもの）。同梱する側は
+  # いま「タグのソースを落として `npm install` → `node gui/vendor.js`」を
+  # やっていて、動いてはいるが**こちらがエディタの積み方を変えるたびに
+  # 追随が要る**。積み終えた形で配れば、その追随が要らなくなる。
+  #
+  # `packaging/amber-mark.png` も同じ zip に入れる ── 画面は印を
+  # `../packaging/amber-mark.png` と指しているので、`gui/` だけでは
+  # 印の出ない画面になる。
+  #
+  # **`node_modules` は入れない。** あそこには Electron 本体（200MB 超）が
+  # 居て、同梱する側は自分の Electron の中でこの画面を動かす。
+  # **`amber-server` も入れない** ── 実行ファイルは機械ごとに別で、
+  # 置く場所（画面の隣）は同梱する側が決めている。
+  screen:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: エディタと図を積む
+        working-directory: gui
+        run: |
+          npm install --no-audit --no-fund
+          node vendor.js
+
+      - name: 積み終えたか、見る
+        run: |
+          for f in gui/vendor/monaco/vs/loader.js \
+                   gui/vendor/monaco-vim/monaco-vim.umd.js \
+                   gui/vendor/mermaid/mermaid.min.js \
+                   packaging/amber-mark.png; do
+            [ -f "$f" ] || { echo "ありません: $f"; exit 1; }
+          done
+          # 積み忘れは「窓は開くが中身が真っ白」として出る ── 数えて言う。
+          echo "monaco $(du -sh gui/vendor/monaco | cut -f1) / mermaid $(du -sh gui/vendor/mermaid | cut -f1)"
+
+      - name: 同梱する側との約束を確かめる
+        run: node scripts/contract.js
+
+      - name: 一枚にまとめる
+        run: |
+          mkdir -p out pack/packaging
+          cp -R gui pack/gui
+          rm -rf pack/gui/node_modules
+          cp packaging/amber-mark.png pack/packaging/
+          cp LICENSE pack/ 2>/dev/null || true
+          (cd pack && zip -qr ../out/amber-gui.zip gui packaging LICENSE)
+          unzip -l out/amber-gui.zip | tail -3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amber-gui.zip
+          path: out/amber-gui.zip
+          if-no-files-found: error
+
   # **札を押したときだけ出す。** 手で走らせた回は資材だけ残る。
   publish:
-    needs: build
+    needs: [build, screen]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:

@@ -43,4 +43,13 @@ contextBridge.exposeInMainWorld('amber', {
     ring: (title, body) => ipcRenderer.invoke('amber:ring', title, body),
     /// 貼り付けられた画像の生バイト（base64）。
     clipboardImage: () => ipcRenderer.invoke('amber:clipboardImage'),
+
+    /// 画面そのものの版。**エンジンの版とは別に要る** ── 同梱するときは
+    /// 実行ファイルだけ差し替えられるので、この二つはずれうる。
+    ///
+    /// 主に訊く。**ここで `require('./package.json')` はできない** ──
+    /// サンドボックスの preload が読めるのは Electron の一部だけで、
+    /// ファイルを読もうとすると preload ごと落ち、`window.amber` が
+    /// まるごと消える（実際に消えた）。
+    appVersion: () => ipcRenderer.invoke('amber:appVersion'),
 });

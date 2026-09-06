@@ -42,6 +42,7 @@ Node.js** の二つだけ。
 ```
 cargo test --workspace          # 判断のテスト
 node scripts/diagram-test.js    # 図が、直しても失われないか
+node scripts/contract.js        # 同梱する側（crmaine）との約束が生きているか
 node gui/vendor.js              # Monaco・vim・mermaid を落とす（git に入れていない）
 ./scripts/ios-build.sh          # iPhone 向け（3ターゲット、記号まで見る）
 python3 packaging/amber_icon.py # アイコンを焼く

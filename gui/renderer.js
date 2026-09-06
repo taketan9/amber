@@ -2931,6 +2931,7 @@ const CMDS = [
     { id: 'backup', name: '一括バックアップ', app: true, sep: true, run: cmdBackup },
     { id: 'root', name: 'amber保存ディレクトリ変更', app: true, run: cmdRoot },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
+    { id: 'about', name: 'amber について', app: true, run: cmdAbout },
 
     // ── 表には要るが、献立には出さないもの
     { id: 'mkbook', name: '新しいフォルダを作る', run: () => cmdMkBook() },
@@ -3829,6 +3830,32 @@ async function cmdRoot() {
     applyView();
     await reload({});
     say('置き場所を変えました: ' + dir);
+}
+
+/// いま動いている amber の身元。
+///
+/// **不具合が人づてに回ってくるから要る。** amber の画面は crmaine の中でも
+/// 動いていて、そちらは社内の Windows 端末に配られる ── 戻ってくる報せは
+/// たいてい「amber が変です」だけで、どの版のどのエンジンかは書いていない。
+/// 押せば読める場所に三つ（版・エンジン・置き場所）を出しておけば、
+/// 伝えるほうも訊くほうも一往復で済む。
+///
+/// **画面とエンジンを別々に出す。** 同梱するときは実行ファイルだけ差し替え
+/// られるので、この二つはずれうる ── ずれているのが原因のときに、
+/// 一つの数字しか出していないと辿れない。
+async function cmdAbout() {
+    let engine = '（答えません）';
+    try {
+        const r = await ask('version', {});
+        engine = 'amber-server ' + (r.amber || '?');
+    } catch (e) {
+        engine = '答えません: ' + e.message;
+    }
+    await askPick('amber について', [
+        { name: '画面', sub: 'amber ' + (await window.amber.appVersion() || '?'), value: null },
+        { name: 'エンジン', sub: engine, value: null },
+        { name: 'ノートの置き場所', sub: state.root || '（まだ決めていません）', value: null },
+    ], '不具合を伝えるときは、この三つを添えてください');
 }
 
 /* ── 小窓 ── */
