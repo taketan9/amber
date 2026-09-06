@@ -81,7 +81,7 @@ function drawRail() {
         // **一つも無くても段は出す。** 無いときに段ごと消えると、
         // 最初の一つを作る道がどこにも無くなる ── 「実装されていないのか、
         // 見えないだけなのか」が使う人には見分けられない。
-        rows.push(head('お気に入り', 'star'));
+        rows.push(head('ブックマーク', 'star'));
         rows.push(dest('star', '', '★ すべて', stars.length, on('star', '')));
         for (const sh of state.stars) {
             const n = stars.filter((x) => x.star === sh || (x.star || '').startsWith(sh + '/')).length;
@@ -102,7 +102,7 @@ function drawRail() {
     {
         rows.push(head('タグ', 'tag'));
         // 30 で切る。**タグは増える一方**で、全部並べると行き先の列が
-        // 「タグの一覧」になり、フォルダもお気に入りも押し出される。
+        // 「タグの一覧」になり、フォルダもブックマークも押し出される。
         for (const [t, n] of tags.slice(0, 30)) rows.push(dest('tag', t, '#' + t, n, on('tag', t)));
     }
     el('rail').innerHTML = rows.join('');
@@ -241,7 +241,7 @@ function drawList() {
         all: 'すべてのノート',
         book: what.split('/').pop(),
         tag: '#' + what,
-        star: what ? '★ ' + what.split('/').pop() : '★ お気に入り',
+        star: what ? '★ ' + what.split('/').pop() : '★ ブックマーク',
     }[state.dest.kind] || 'すべてのノート';
     el('where').textContent = name;
     const all = state.notes.filter(inDest).length;
@@ -252,7 +252,7 @@ function drawList() {
             + '</div>';
         return;
     }
-    // お気に入りは**上に別枠で**（iPhone と同じ形）。並び順に混ぜて上へ
+    // ブックマークは**上に別枠で**（iPhone と同じ形）。並び順に混ぜて上へ
     // 寄せるのではなく、別の段にする ── 二つの場所に同じノートが出ると、
     // 人はそれを二度消そうとする。「上に留める」を別に作らないのはこれが
     // あるからで、「これは大事」と言う道を二つ持たない。
@@ -260,7 +260,7 @@ function drawList() {
     const rest = state.dest.kind === 'star' ? rows : rows.filter((n) => !starred(n));
     let html = '';
     if (stuck.length) {
-        html += '<div class="sect">お気に入り</div>' + stuck.map(row).join('');
+        html += '<div class="sect">ブックマーク</div>' + stuck.map(row).join('');
         if (rest.length) html += '<div class="sect">ノート</div>';
     }
     html += rest.map(row).join('');
@@ -1064,6 +1064,17 @@ const readPut = (text) => readSourceEdit((md) => (md.trim() ? md + '\n\n' : '') 
 /// マークダウンの書き方。**押せる形で出す** ── 選ぶとその場に入る。
 ///
 /// 読むだけの一覧にすると、読んでから自分で打ち直すことになる。
+/// vim の入切。**歯車の中だけ** ── 道具の帯からは外した（使うのは
+/// たいてい一人で、毎日見る帯に居座る値打ちは無い）。選んだことは憶える。
+async function cmdVim() {
+    const to = await askPick('vimモード', [
+        { name: 'vim で打つ', sub: 'ノーマル / 挿入 / ビジュアル、`:w` も', value: true },
+        { name: '素のメモ帳で打つ', sub: 'ふつうの入力', value: false },
+    ], vimOn ? 'いま: vim' : 'いま: 素のメモ帳');
+    if (to === null || to === vimOn) return;
+    setVim(to);
+}
+
 async function cmdSyntax() {
     const rows = [
         ['見出し', '# 大きい見出し', '# から始める。## で一段小さく'],
@@ -1105,28 +1116,26 @@ const MARKS = [
     [
         ['見出し', '⌘1', () => onRead() ? readHeading() : applyMark('heading')],
         ['箇条書き', '⌘⇧8', () => onRead() ? readBlockAs('ul') : applyMark('line', '- ')],
-        ['チェック', '⌘⇧9', () => onRead() ? readMark('line', '- [ ] ') : applyMark('line', '- [ ] ')],
+        ['チェックリスト', '⌘⇧9', () => onRead() ? readMark('line', '- [ ] ') : applyMark('line', '- [ ] ')],
+        ['番号リスト', '⌘⇧7', () => onRead() ? readBlockAs('ol') : applyMark('line', '1. ')],
         ['太字', '⌘B', () => onRead() ? readDress('bold') : applyMark('wrap', '**')],
         ['画像', '', pickPicture],
+        // **フローは画像の隣。** 図は「使う人は使う」もので、二列目に
+        // 畳んでおくと、あることに気づかれない。
+        ['フロー', '', cmdDiagram],
     ],
     [
         ['斜体', '⌘I', () => onRead() ? readDress('italic') : applyMark('wrap', '*')],
         ['取り消し線', '⌘⇧X', () => onRead() ? readDress('strikeThrough') : applyMark('wrap', '~~')],
-        ['コード', '⌘⇧C', () => onRead() ? readMark('wrap', '`') : applyMark('wrap', '`')],
         ['|'],
         ['リンク', '⌘K', () => onRead() ? readPut('[見せる字](https://)') : put('[](https://)', 1)],
         ['表', '', () => onRead()
             ? readPut('| 見出し | 見出し |\n| --- | --- |\n|  |  |')
             : put('| 見出し | 見出し |\n| --- | --- |\n|  |  |\n', 2)],
-        ['コード枠', '', () => onRead() ? readPut('```\n\n```') : put('```\n\n```\n', 4)],
         ['水平線', '', () => onRead() ? readPut('---') : put('\n---\n\n')],
-        ['注記', '', cmdAlert],
-        ['図', '', cmdDiagram],
         ['|'],
         ['引用', '', () => onRead() ? readBlockAs('blockquote') : applyMark('line', '> ')],
-        ['番号つき', '⌘⇧7', () => onRead() ? readBlockAs('ol') : applyMark('line', '1. ')],
-        ['|'],
-        ['文字色', '', cmdPaint],
+        ['注記', '', cmdAlert],
     ],
 ];
 
@@ -1172,13 +1181,11 @@ function drawMarks() {
         if (n === 0) {
             const sep = document.createElement('div');
             sep.className = 'sep';
-            const v = document.createElement('button');
-            v.textContent = 'vim';
-            v.title = vimOn ? 'vim をやめる' : 'vim で打つ';
-            v.classList.toggle('on', vimOn);
-            v.onclick = () => setVim(!vimOn);
+            // **vim の釦は置かない。** 使うのはたいてい一人で、毎日見る
+            // 帯に居座る値打ちは無い ── ⚙ の中にある。
             const more = document.createElement('button');
-            more.textContent = moreMarks ? 'たたむ' : 'ほかの記号';
+            more.textContent = moreMarks ? 'たたむ' : '…';
+            more.title = moreMarks ? '畳む' : 'ほかの記号';
             more.classList.toggle('on', moreMarks);
             more.onclick = () => {
                 moreMarks = !moreMarks;
@@ -1186,7 +1193,7 @@ function drawMarks() {
                 window.amber.remember({ moreMarks });
                 if (editor) editor.layout();
             };
-            r.append(sep, more, v);
+            r.append(sep, more);
         }
         box.append(r);
     });
@@ -1514,8 +1521,12 @@ function mermaidOpts() {
 /// そこまでを画面に載せると「難しいもの」に見えて誰も押さなくなる。
 async function cmdDiagram() {
     const kind = await askPick('どんな図', [
-        { name: '流れ図', sub: 'A → B → C。手順や分岐に', value: 'flow' },
-        { name: '分かれ道のある流れ図', sub: '「はい / いいえ」で分かれる', value: 'branch' },
+        { name: '流れ図', sub: 'A → B → C。手順や段取りに', value: 'flow' },
+        { name: '分かれ道', sub: '「はい / いいえ」で分かれる', value: 'branch' },
+        { name: 'マインドマップ', sub: '一つの言葉から枝を広げる', value: 'mind' },
+        { name: '年表', sub: 'いつ何があったか。日記や記録に', value: 'time' },
+        { name: '予定表', sub: '棒で見る段取り（ガント）', value: 'gantt' },
+        { name: '四象限', sub: '大事さと急ぎで、やることを置く', value: 'quad' },
         { name: 'やりとり', sub: '誰が誰に何を、の順番', value: 'seq' },
         { name: '円グラフ', sub: '割合を見せる', value: 'pie' },
     ], '選ぶと骨組みが入ります。中の言葉は、あとから書き換えられます');
@@ -1525,12 +1536,16 @@ async function cmdDiagram() {
         const v = await askText(title, or_ || '', foot);
         return v === null ? null : (v.trim() || or_ || '');
     };
+    // 読点でも矢印でも切れるようにする ── 打ちながら決めるので、
+    // どちらで区切ったかを覚えていられない。
+    const parts = (v) => v.split(/\s*(?:→|->|、|,)\s*/).filter(Boolean);
+    const name = (n) => String.fromCharCode(65 + n);
     let md = '';
+
     if (kind === 'flow') {
         const v = await ask3('順に並べる言葉', '「→」か読点で区切ってください', '書く → 見直す → 出す');
         if (v === null) return;
-        const step = v.split(/\s*(?:→|->|、|,)\s*/).filter(Boolean);
-        const name = (n) => String.fromCharCode(65 + n);
+        const step = parts(v);
         md = '```mermaid\nflowchart LR\n'
             + step.map((t, n) => '  ' + name(n) + '[' + t + ']').join('\n') + '\n'
             + step.slice(1).map((_, n) => '  ' + name(n) + ' --> ' + name(n + 1)).join('\n')
@@ -1544,20 +1559,62 @@ async function cmdDiagram() {
         if (no === null) return;
         md = '```mermaid\nflowchart LR\n  A{' + q + '}\n  B[' + yes + ']\n  C[' + no + ']\n'
             + '  A -->|はい| B\n  A -->|いいえ| C\n```';
+    } else if (kind === 'mind') {
+        const root = await ask3('まん中に置く言葉', '', '来年やること');
+        if (root === null) return;
+        const v = await ask3('そこから広げる言葉', '読点で区切ってください', '仕事、家、体、学び');
+        if (v === null) return;
+        md = '```mermaid\nmindmap\n  root((' + root + '))\n'
+            + parts(v).map((t) => '    ' + t).join('\n') + '\n```';
+    } else if (kind === 'time') {
+        const title = await ask3('年表の題', '', '今年');
+        if (title === null) return;
+        const v = await ask3('できごと', '「いつ: なに」を読点で区切ってください',
+            '4月: 引っ越し、7月: 新しい仕事、11月: 旅行');
+        if (v === null) return;
+        const rows = parts(v).map((x) => {
+            const m = /^(.*?)\s*[:：]\s*(.*)$/.exec(x.trim());
+            return m ? '  ' + m[1] + ' : ' + m[2] : '  ' + x.trim() + ' : ';
+        });
+        md = '```mermaid\ntimeline\n  title ' + title + '\n' + rows.join('\n') + '\n```';
+    } else if (kind === 'gantt') {
+        const title = await ask3('予定表の題', '', '段取り');
+        if (title === null) return;
+        const v = await ask3('やること', '「なに: 始まり, 何日」を読点で区切ってください',
+            '下ごしらえ: 2026-09-10, 3d、本番: 2026-09-13, 5d');
+        if (v === null) return;
+        const rows = v.split(/\s*[、]\s*/).filter(Boolean).map((x, n) => {
+            const m = /^(.*?)\s*[:：]\s*(.*)$/.exec(x.trim());
+            return m ? '  ' + m[1] + ' :t' + n + ', ' + m[2] : '  ' + x.trim() + ' :t' + n + ', 1d';
+        });
+        md = '```mermaid\ngantt\n  title ' + title + '\n  dateFormat YYYY-MM-DD\n'
+            + '  axisFormat %m/%d\n  section やること\n' + rows.join('\n') + '\n```';
+    } else if (kind === 'quad') {
+        const v = await ask3('置くもの', '「なに: 大事さ, 急ぎ」を 0〜1 で。読点で区切ってください',
+            '週報: 0.8, 0.9、片付け: 0.3, 0.2、勉強: 0.9, 0.2');
+        if (v === null) return;
+        const rows = v.split(/\s*[、]\s*/).filter(Boolean).map((x) => {
+            const m = /^(.*?)\s*[:：]\s*([\d.]+)\s*,\s*([\d.]+)/.exec(x.trim());
+            return m ? '  "' + m[1] + '": [' + m[3] + ', ' + m[2] + ']' : null;
+        }).filter(Boolean);
+        md = '```mermaid\nquadrantChart\n  title やることの置きどころ\n'
+            + '  x-axis いつでも --> いま\n  y-axis 小さい --> 大きい\n'
+            + '  quadrant-1 すぐやる\n  quadrant-2 段取りする\n'
+            + '  quadrant-3 あとで\n  quadrant-4 誰かに頼む\n' + rows.join('\n') + '\n```';
     } else if (kind === 'seq') {
-        const a = await ask3('だれが', '', '私');
-        if (a === null) return;
-        const b = await ask3('だれに', '', '相手');
-        if (b === null) return;
+        const a2 = await ask3('だれが', '', '私');
+        if (a2 === null) return;
+        const b2 = await ask3('だれに', '', '相手');
+        if (b2 === null) return;
         const what = await ask3('なにを', '', 'お願いする');
         if (what === null) return;
-        md = '```mermaid\nsequenceDiagram\n  participant ' + a + '\n  participant ' + b + '\n'
-            + '  ' + a + '->>' + b + ': ' + what + '\n  ' + b + '-->>' + a + ': わかった\n```';
+        md = '```mermaid\nsequenceDiagram\n  participant ' + a2 + '\n  participant ' + b2 + '\n'
+            + '  ' + a2 + '->>' + b2 + ': ' + what + '\n  ' + b2 + '-->>' + a2 + ': わかった\n```';
     } else {
         const v = await ask3('割合', '「名前 数」を読点で区切ってください', '仕事 5、家 3、ほか 2');
         if (v === null) return;
         const rows = v.split(/\s*[、,]\s*/).filter(Boolean).map((x) => {
-            const m = /^(.*?)\s+(\d+(?:\.\d+)?)$/.exec(x.trim());
+            const m = /^(.*?)\s+([\d.]+)$/.exec(x.trim());
             return m ? '  "' + m[1] + '" : ' + m[2] : '  "' + x.trim() + '" : 1';
         });
         md = '```mermaid\npie showData\n' + rows.join('\n') + '\n```';
@@ -1997,8 +2054,8 @@ function walk(step) {
 /// 置き場所（いつもある）。`menu` が真なら、⋯ の献立にも出る。
 const CMDS = [
     { id: 'new', name: '新しいノート', key: '⌘N', run: () => newNote() },
-    { id: 'outside', name: 'amber の外のノートを開く', sub: '単発。窓に落としても同じ',
-      key: '⌘O', app: true, run: cmdOpenOutside },
+    { id: 'outside', name: 'amberフォルダ以外のノートを開く', key: '⌘O', app: true,
+      run: cmdOpenOutside },
     { id: 'save', name: '保存', key: '⌘S', need: 'note', run: () => save() },
     { id: 'read', name: '表示 / コードを入れ替え', key: '⌘E', need: 'note', run: () => toggleRead() },
     { id: 'split', name: '並べて表示', key: '⌘P', need: 'note', run: () => toggleSplit() },
@@ -2007,29 +2064,31 @@ const CMDS = [
     { id: 'rail', name: '左の列を畳む', key: '⌘/', run: () => toggleRail() },
     { id: 'back', name: '前に見たノート', key: '⌘←', run: () => walk(-1) },
     { id: 'fwd', name: '次に見たノート', key: '⌘→', run: () => walk(1) },
-    { id: 'find', name: '絞り込む', key: '⌘F', run: () => { el('find').focus(); el('find').select(); } },
+    { id: 'find', name: 'ノートを探す', key: '⌘F', run: () => { el('find').focus(); el('find').select(); } },
     { id: 'find2', name: 'フィルタ（タグ・フォルダ・期間）', app: true, run: cmdFind },
 
-    { id: 'star', name: 'お気に入りに入れる / 外す', key: '⌘D', need: 'note', menu: true, run: cmdStar },
-    { id: 'shelf', name: 'お気に入りの棚を選ぶ', need: 'note', menu: true, run: cmdShelf },
-    { id: 'tags', name: 'タグを付け外しする', need: 'note', menu: true, run: cmdTags },
-    { id: 'paint', name: '文字に色を付ける', need: 'note', menu: true, run: cmdPaint },
-    { id: 'move', name: 'フォルダへ移す', need: 'note', menu: true, run: cmdMove },
-    { id: 'remind', name: '通知を仕掛ける', need: 'note', menu: true, run: cmdRemind },
-    { id: 'export', name: '書き出す', need: 'note', menu: true, run: cmdExport },
-    { id: 'syntax', name: 'マークダウンの書き方', key: '⌘⇧/', app: true, run: cmdSyntax },
-    { id: 'theme', name: '見た目を変える', app: true, run: cmdTheme },
+    // ── このノートにすること（⋯ と、ノートの右押し）
+    { id: 'star', name: 'ブックマークに登録', key: '⌘D', need: 'note', menu: true, run: cmdStar },
+    { id: 'tags', name: 'ノートのタグ設定', need: 'note', menu: true, run: cmdTags },
+    { id: 'move', name: 'フォルダへ移動', need: 'note', menu: true, run: cmdMove },
+    { id: 'remind', name: '通知設定', need: 'note', menu: true, run: cmdRemind },
+    { id: 'export', name: 'エクスポート', need: 'note', menu: true, run: cmdExport },
     { id: 'delete', name: 'ゴミ箱へ入れる', need: 'note', menu: true, sep: true, run: cmdDelete },
 
+    // ── amber のこと（⚙）
+    { id: 'syntax', name: 'マークダウンの書き方', key: '⌘⇧/', app: true, run: cmdSyntax },
+    { id: 'theme', name: 'テーマ', app: true, run: cmdTheme },
+    { id: 'vim', name: 'vimモード', app: true, run: cmdVim },
+    { id: 'backup', name: '一括バックアップ', app: true, sep: true, run: cmdBackup },
+    { id: 'root', name: 'amber保存ディレクトリ変更', app: true, run: cmdRoot },
+    { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
+
+    // ── 表には要るが、献立には出さないもの
     { id: 'mkbook', name: '新しいフォルダを作る', run: () => cmdMkBook() },
-    { id: 'color', name: 'フォルダに色を付ける', app: true, run: cmdColor },
-    { id: 'backup', name: 'バックアップを取る', app: true, sep: true, run: cmdBackup },
-    { id: 'root', name: 'ノートの置き場所を変える', sub: 'いまの場所も出ます', app: true, run: cmdRoot },
-    { id: 'vim', name: 'vim で打つ / やめる', app: true, run: () => setVim(!vimOn) },
+    { id: 'color', name: 'フォルダに色を付ける', sub: 'フォルダを右押しでも', run: () => cmdColor() },
     { id: 'bigger', name: '字を大きく', key: '⌘+', run: () => setFont(fontStep + 1) },
     { id: 'smaller', name: '字を小さく', key: '⌘−', run: () => setFont(fontStep - 1) },
-    { id: 'font0', name: '字の大きさを戻す', key: '⌘0', app: true, run: () => setFont(0) },
-    { id: 'all', name: 'すべての命令', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
+    { id: 'font0', name: '字の大きさを戻す', key: '⌘0', run: () => setFont(0) },
 ];
 
 const canRun = (c) => c.need !== 'note' || !!state.open;
@@ -2053,7 +2112,13 @@ async function palette() {
 function openMenu(at, which) {
     const box = el('more');
     const key = which === 'app' ? 'app' : 'menu';
-    const items = CMDS.filter((c) => c[key] && canRun(c));
+    const items = CMDS.filter((c) => c[key] && canRun(c)).map((c) => {
+        // **いまどうなっているかを、押す前に見せる。**
+        if (c.id === 'theme') return { ...c, sub: 'いま: ' + themeName() };
+        if (c.id === 'vim') return { ...c, sub: vimOn ? 'いま: vim' : 'いま: 素のメモ帳' };
+        if (c.id === 'root') return { ...c, sub: shortPath(state.root) };
+        return c;
+    });
     if (!items.length) return;
     // 区切りは**印の付いた命令の手前**に置く ── 「最後の一つの前」に
     // すると、命令が増えた日に区切りが勝手に動く。
@@ -2178,8 +2243,14 @@ function setTheme(name) {
     }
 }
 
+/// いま出ているテーマの名前。献立に添える。
+function themeName() {
+    const t = THEMES.find(([k]) => k === theme);
+    return t ? t[1].split(' ── ')[0] + (t[1].includes('──') ? '・' + t[1].split('── ')[1] : '') : '琥珀';
+}
+
 async function cmdTheme() {
-    const at = await askPick('見た目', THEMES.map(([k, n]) => ({
+    const at = await askPick('テーマ', THEMES.map(([k, n]) => ({
         name: n, sub: k === theme ? '● いま' : '', value: k,
     })), '琥珀は育ててきたもの。ayu は書く道具の定番。紙は刷るため');
     if (at === null) return;
@@ -2190,7 +2261,7 @@ async function cmdTheme() {
 
 /// 段の見出しに「＋」を添える。
 ///
-/// **できることは前からあった。** フォルダも棚も `仕事/2026` と書けば階層に
+/// **できることは前からあった。** フォルダもブックマークも階層に
 /// なるし、タグもノートに付ければ増える ── ただ、それを言う場所が画面に
 /// 無かった。使えないのと、あるのに見えないのは、使う人には同じこと。
 function head(name, plus) {
@@ -2202,7 +2273,7 @@ function head(name, plus) {
 async function railPlus(kind) {
     if (kind === 'book') { await cmdMkBook(); return; }
     if (kind === 'star') {
-        const name = await askText('新しい棚の名前', '', '仕事/週次 と書けば階層になります');
+        const name = await askText('新しいブックマークの置き場所の名前', '', '仕事/週次 と書けば階層になります');
         if (name === null || !name.trim()) return;
         try {
             await ask('shelf', { path: state.root, name: name.trim() });
@@ -2221,15 +2292,26 @@ async function railPlus(kind) {
     }
 }
 
-/// 行き先を右押ししたときの献立。**フォルダ・タグ・棚を、名前ごと直す。**
+/// 行き先を右押ししたときの献立。**フォルダ・タグ・ブックマークを、名前ごと直す。**
 function railMenu(kind, what, at) {
     if (!what) return;
     const box = el('more');
-    const items = [
-        { name: '名前を変える', run: () => railRename(kind, what) },
-        { name: kind === 'book' ? 'このフォルダをゴミ箱へ' : (kind === 'tag' ? 'このタグを全部のノートから外す' : 'この棚を全部のノートから外す'),
-          sep: true, run: () => railDrop(kind, what) },
-    ];
+    const items = [];
+    // **下の階層は、ここから作る。** 名前に「/」を打たせるのは、
+    // 書き方を知っている人にしか通じない。
+    if (kind === 'book') {
+        items.push({ name: 'この中にフォルダを作る', run: () => cmdMkBook(what) });
+        items.push({ name: 'フォルダに色を付ける', run: () => cmdColor(what) });
+    }
+    if (kind === 'star') {
+        items.push({ name: 'この中に置き場所を作る', run: () => newShelf(what) });
+    }
+    items.push({ name: '名前を変える', sep: items.length > 0, run: () => railRename(kind, what) });
+    items.push({
+        name: kind === 'book' ? 'このフォルダをゴミ箱へ'
+            : (kind === 'tag' ? 'このタグを全部のノートから外す' : 'この置き場所を全部のノートから外す'),
+        run: () => railDrop(kind, what),
+    });
     box.innerHTML = items.map((c, n) =>
         (c.sep ? '<div class="sep"></div>' : '')
         + '<button data-n="' + n + '">' + escapeHtml(c.name) + '</button>').join('');
@@ -2243,7 +2325,7 @@ function railMenu(kind, what, at) {
     setTimeout(() => document.addEventListener('mousedown', closeMenuOnce, { once: true }), 0);
 }
 
-/// そのフォルダ・タグ・棚に居るノート。
+/// そのフォルダ・タグ・ブックマークに居るノート。
 function underRail(kind, what) {
     if (kind === 'book') {
         return state.notes.filter((n) => n.book === what || (n.book || '').startsWith(what + '/'));
@@ -2284,7 +2366,7 @@ async function railRename(kind, what) {
 
 async function railDrop(kind, what) {
     const hit = underRail(kind, what);
-    const what2 = kind === 'book' ? 'フォルダ' : (kind === 'tag' ? 'タグ' : '棚');
+    const what2 = kind === 'book' ? 'フォルダ' : (kind === 'tag' ? 'タグ' : 'ブックマーク');
     const ask2 = kind === 'book'
         ? '「' + what + '」を、中の ' + hit.length + ' 件ごとゴミ箱へ入れますか'
         : '「' + what + '」の' + what2 + 'を ' + hit.length + ' 件から外しますか（ノートは残ります）';
@@ -2308,7 +2390,7 @@ async function railDrop(kind, what) {
     }
 }
 
-/// 一本のノートのタグ（または棚）を、付け替える。`to` が `null` なら外す。
+/// 一本のノートのタグ（またはブックマーク）を、付け替える。`to` が `null` なら外す。
 ///
 /// **開いているノートは、開いたまま直す。** 直接ファイルを書くと、窓が
 /// 持っている字と食い違い、次の保存でどちらかが消える。
@@ -2478,35 +2560,62 @@ function stem() {
     return f.replace(/\.[^.]*$/, '');
 }
 
-async function cmdStar() {
-    const on = starred(state.open);
-    if (await editNote((t) => ask('star', on ? { text: t } : { text: t, shelf: '' })
-        .then((r) => r.text))) {
-        say(on ? 'お気に入りから外しました' : 'お気に入りに入れました');
-    }
-}
-
-async function cmdShelf() {
-    const shelves = [{ name: '（棚に入れない）', value: '' },
-        ...state.stars.map((s) => ({ name: s, value: s })),
-        { name: '＋ 新しい棚を作る', value: ' new' }];
-    let sh = await askPick('どの棚に', shelves, '棚は 仕事/週次 と書けば階層になります');
-    if (sh === null) return;
-    if (sh === ' new') {
-        sh = await askText('新しい棚の名前', '', '仕事/週次 と書けば階層になります');
-        if (sh === null || !sh.trim()) return;
-        sh = sh.trim();
-    }
-    if (await editNote((t) => ask('star', { text: t, shelf: sh }).then((r) => r.text))) {
-        say(sh ? '「' + sh + '」に入れました' : 'お気に入りに入れました');
-    }
-}
-
-/// タグを**選ぶ**。打たせない。
+/// ブックマークに登録する。
 ///
-/// 前は空白区切りの一行を打たせていた。すでに `#仕事` があるのに `#仕事 `
-/// と打ち直すことになり、打ち間違えれば**似た名前のタグがもう一つ生える**
-/// ── タグは打つものではなく、選ぶもの。無いものだけ、そこで作る。
+/// **どこに置くかを、その場で選ぶ。** 前は「入れる／外す」と「置き場所を
+/// 選ぶ」が別の命令になっていて、入れたあとにもう一度探して選ぶ形だった
+/// ── フォルダへ移動と同じ一手で済む話。置き場所が無ければ、その場で作る。
+async function cmdStar() {
+    if (starred(state.open)) {
+        const now = state.open.star;
+        const off = await askPick('このノートはブックマーク済みです',
+            [{ name: 'ブックマークから外す', value: 'off' },
+             { name: '置き場所を変える', value: 'move' }],
+            now && now !== 'true' ? 'いま: ' + now : 'いま: ブックマークの直下');
+        if (off === null) return;
+        if (off === 'off') {
+            if (await editNote((t) => ask('star', { text: t }).then((r) => r.text))) {
+                say('ブックマークから外しました');
+            }
+            return;
+        }
+    }
+    const where = [{ name: '（ブックマークの直下）', value: '' },
+        ...state.stars.map((x) => ({ name: x, value: x })),
+        { name: '＋ 新しい置き場所を作る', value: ' new' }];
+    let to = await askPick('どこに登録しますか', where);
+    if (to === null) return;
+    if (to === ' new') {
+        const made = await newShelf();
+        if (made === null) return;
+        to = made;
+    }
+    if (await editNote((t) => ask('star', { text: t, shelf: to }).then((r) => r.text))) {
+        say(to ? '「' + to + '」に登録しました' : 'ブックマークに登録しました');
+    }
+}
+
+/// ブックマークの置き場所を一つ作る。`under` があれば、その下に。
+///
+/// **「/」を打たせない。** 階層は親を右押しして作る ── 一行に全部書かせる
+/// のは、書き方を知っている人にしか通じない。
+async function newShelf(under) {
+    const name = await askText(under ? '「' + under + '」の下に作る名前' : '新しい置き場所の名前',
+        '', under ? '' : '下の階層は、置き場所を右押しして作れます');
+    if (name === null || !name.trim()) return null;
+    const leaf = name.trim().replace(/\//g, '／');
+    const full = under ? under + '/' + leaf : leaf;
+    try {
+        await ask('shelf', { path: state.root, name: full });
+        await reload({ quiet: true });
+        say('「' + full + '」を作りました');
+        return full;
+    } catch (e) {
+        say('作れません: ' + e.message);
+        return null;
+    }
+}
+
 async function cmdTags() {
     let now = [...(state.open.tags || [])];
     for (;;) {
@@ -2673,14 +2782,21 @@ async function cmdMove() {
     }
 }
 
-async function cmdMkBook() {
-    const name = await askText('新しいフォルダの名前', '', '仕事/2026 と書けば階層になります');
+/// フォルダを一つ作る。`under` があれば、その下に。
+///
+/// **「/」を打たせない。** 「仕事/2026」と書けば階層になる、は書き方を
+/// 知っている人にしか通じない ── 下の階層は、親を右押しして作る。
+async function cmdMkBook(under) {
+    const name = await askText(under ? '「' + under + '」の下に作る名前' : '新しいフォルダの名前',
+        '', under ? '' : '下の階層は、フォルダを右押しして作れます');
     if (name === null || !name.trim()) return null;
+    const leaf = name.trim().replace(/\//g, '／');
+    const full = under ? under + '/' + leaf : leaf;
     try {
-        await ask('mkbook', { dir: state.root + '/' + name.trim() });
+        await ask('mkbook', { dir: state.root + '/' + full });
         await reload({ quiet: true });
-        say('「' + name.trim() + '」を作りました');
-        return name.trim();
+        say('「' + full + '」を作りました');
+        return full;
     } catch (e) {
         say('作れません: ' + e.message);
         return null;
@@ -2808,48 +2924,25 @@ const PALETTE = [
     ['#5E8C42', '緑'], ['#7A7A7A', '灰'],
 ];
 
-async function cmdColor() {
-    if (state.dest.kind !== 'book' || !state.dest.what) {
-        say('色を付けるフォルダを、左から選んでください');
+/// フォルダに色を付ける。**フォルダを右押ししたときだけ。**
+///
+/// 歯車の中に置いていた頃は「どのフォルダの話か」を画面が言っておらず、
+/// いま選んでいるものが相手だと知っている人にしか使えなかった。
+async function cmdColor(folder) {
+    const what = folder || (state.dest.kind === 'book' ? state.dest.what : '');
+    if (!what) {
+        say('色を付けるフォルダを右押ししてください');
         return;
     }
-    const hex = await askPick('「' + state.dest.what + '」の色', [
+    const hex = await askPick('「' + what + '」の色', [
         { name: '（色を外す）', value: '' },
         ...PALETTE.map(([h, n]) => ({ name: n, sub: h, value: h })),
     ]);
     if (hex === null) return;
     try {
-        const r = await ask('color', { path: state.root, folder: state.dest.what, color: hex || null });
+        const r = await ask('color', { path: state.root, folder: what, color: hex || null });
         state.colors = r.colors || {};
         drawRail();
-    } catch (e) {
-        say('色を付けられません: ' + e.message);
-    }
-}
-
-/// 選んだ字に色を付ける。**Markdown に文字色は無い**ので、書き方は
-/// `<span style="color:#rrggbb">` ── GitHub は `style` を落とすが、
-/// **字は読める**。ノートは文へ壊れるべきで、記法へ壊れてはいけない。
-async function cmdPaint() {
-    if (!editor) return;
-    if (onRead()) {
-        const hex = await askPick('文字の色', PALETTE.map(([h, n]) => ({ name: n, sub: h, value: h })));
-        if (hex === null) return;
-        el('read').focus();
-        document.execCommand('foreColor', false, hex);
-        readChanged();
-        return;
-    }
-    if (view === 'read') return;
-    const hex = await askPick('文字の色', PALETTE.map(([h, n]) => ({ name: n, sub: h, value: h })));
-    if (hex === null) return;
-    const sel = editor.getSelection();
-    const chosen = editor.getModel().getValueInRange(sel);
-    if (!chosen) { say('色を付ける字を選んでください'); return; }
-    try {
-        const out = (await ask('paint', { text: chosen, color: hex })).text;
-        editor.executeEdits('paint', [{ range: sel, text: out }]);
-        editor.focus();
     } catch (e) {
         say('色を付けられません: ' + e.message);
     }
@@ -2934,6 +3027,13 @@ function sheet({ title, value, placeholder, items, foot }) {
     input.oninput = () => { at = 0; draw(); };
     input.onkeydown = (e) => {
         e.stopPropagation();
+        // **変換中の Enter は、変換の確定であって返事ではない。**
+        //
+        // 「さかな」→「魚」を Enter で確定した瞬間に小窓まで閉じ、
+        // 「魚の目」と打つつもりが「魚」というフォルダが出来る。
+        // `isComposing` は変換中に真になり、それを見ない環境でも
+        // `keyCode 229` が同じことを言う（古い実装が残っている）。
+        if (e.isComposing || e.keyCode === 229) return;
         if (e.code === 'Escape') { e.preventDefault(); closeSheet(null); return; }
         if (!items) {
             if (e.code === 'Enter') { e.preventDefault(); closeSheet(input.value); }
