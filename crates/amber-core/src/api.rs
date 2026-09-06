@@ -405,6 +405,96 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "stars": crate::notebook::read(&root).stars }))
         }
 
+        // 合わせ方を決める。**繋がない。**
+        //
+        // 向こうにあるものの一覧は、呼ぶ側が持ってくる（通信は I/O なので
+        // core の外）── ここがするのは、こちらを歩いて指紋を取り、前に
+        // 合わせたときの憶えと突き合わせて、**運ぶ向きを決める**こと。
+        "syncplan" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let who = p["who"].as_str().unwrap_or("drive");
+            let stop = std::sync::atomic::AtomicBool::new(false);
+            let (found, _) = crate::note::list(
+                &root,
+                crate::survey::Limits { depth: 6, rows: 4000, hidden: false, ..Default::default() },
+                &stop,
+            );
+            let here: Vec<crate::sync::Here> = found
+                .iter()
+                .map(|f| crate::sync::Here {
+                    rel: f.rel.clone(),
+                    hash: crate::sync::fingerprint(
+                        &std::fs::read(&f.note.path).unwrap_or_default(),
+                    ),
+                })
+                .collect();
+            let there: Vec<crate::sync::There> = p["remote"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| {
+                            Some(crate::sync::There {
+                                rel: v.get("rel")?.as_str()?.to_string(),
+                                id: v.get("id")?.as_str()?.to_string(),
+                                tag: v.get("tag")?.as_str()?.to_string(),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let was = crate::sync::recall(&root, who);
+            let steps: Vec<serde_json::Value> = crate::sync::plan(&here, &there, &was)
+                .into_iter()
+                .map(|s| {
+                    let (id, rel) = match &s {
+                        crate::sync::Step::Up { id, rel } => (id.clone(), rel.clone()),
+                        crate::sync::Step::Down { id, rel }
+                        | crate::sync::Step::DropThere { id, rel }
+                        | crate::sync::Step::Clash { id, rel } => (Some(id.clone()), rel.clone()),
+                        crate::sync::Step::DropHere { rel } => (None, rel.clone()),
+                    };
+                    serde_json::json!({ "do": s.word(), "rel": rel, "id": id })
+                })
+                .collect();
+            Ok(serde_json::json!({ "steps": steps }))
+        }
+
+        // 運び終わったぶんを憶える。
+        //
+        // **全部やるか何もしないか、にしない** ── 電波の悪いところで一本も
+        // 進まなくなる。運べたぶんだけ憶えて、残りは次に。
+        "synced" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let who = p["who"].as_str().unwrap_or("drive");
+            let done: Vec<crate::sync::Was> = p["done"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| {
+                            let rel = v.get("rel")?.as_str()?.to_string();
+                            // 指紋は、いまディスクにあるものから取り直す ──
+                            // 呼ぶ側に計算させると、二つの土台で違う答えが出る。
+                            let hash = crate::sync::fingerprint(
+                                &std::fs::read(root.join(&rel)).unwrap_or_default(),
+                            );
+                            Some(crate::sync::Was {
+                                rel,
+                                hash,
+                                id: v.get("id")?.as_str()?.to_string(),
+                                tag: v.get("tag")?.as_str()?.to_string(),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let gone: Vec<String> = p["gone"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            crate::sync::remember(&root, who, &done, &gone)?;
+            Ok(serde_json::json!({ "kept": done.len(), "dropped": gone.len() }))
+        }
+
         // 共有の棚にする（`off` で、やめる）。
         //
         // **分けるのはクラウドの仕事。** amber がするのは、そのフォルダに
@@ -1634,6 +1724,76 @@ mod tests {
             "root": root.display().to_string(), "path": outside.display().to_string(),
             "text": "よそ", "gap": 0,
         })).is_err());
+    }
+
+    #[test]
+    fn 合わせ方を決めて_運び終わったぶんを憶える() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("こちらだけ.md"), "本文\n").unwrap();
+        std::fs::write(d.path().join("両方.md"), "本文\n").unwrap();
+        let root = d.path().to_string_lossy().to_string();
+
+        // 一度目 ── 憶えが無いので、こちらのは上へ、向こうのは下へ。
+        let out = call("syncplan", &serde_json::json!({
+            "path": root, "who": "drive",
+            "remote": [
+                { "rel": "両方.md", "id": "id2", "tag": "v1" },
+                { "rel": "あちらだけ.md", "id": "id3", "tag": "v1" },
+            ],
+        }))
+        .unwrap();
+        let steps = out["steps"].as_array().unwrap();
+        let got: Vec<(&str, &str)> = steps
+            .iter()
+            .map(|s| (s["rel"].as_str().unwrap(), s["do"].as_str().unwrap()))
+            .collect();
+        assert_eq!(got, vec![
+            ("あちらだけ.md", "down"),
+            ("こちらだけ.md", "up"),
+            // 前に合わせたことがなく、同じ名前で両方にある ── 混ぜる。
+            ("両方.md", "clash"),
+        ], "{got:?}");
+
+        // 運び終わったことにする。
+        call("synced", &serde_json::json!({
+            "path": root, "who": "drive",
+            "done": [{ "rel": "こちらだけ.md", "id": "id1", "tag": "v1" }],
+        }))
+        .unwrap();
+
+        // 二度目 ── **憶えたぶんは、もう運ばない。**
+        let remote = serde_json::json!([
+            { "rel": "こちらだけ.md", "id": "id1", "tag": "v1" },
+            { "rel": "両方.md", "id": "id2", "tag": "v1" },
+        ]);
+        let out = call("syncplan", &serde_json::json!({
+            "path": root, "who": "drive", "remote": remote,
+        }))
+        .unwrap();
+        let got: Vec<(&str, &str)> = out["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| (s["rel"].as_str().unwrap(), s["do"].as_str().unwrap()))
+            .collect();
+        // 憶えた一本は消え、まだ混ぜていない一本だけが残る。
+        assert_eq!(got, vec![("両方.md", "clash")], "{got:?}");
+
+        // 中身を直せば、また上へ。**時刻ではなく指紋で見ている。**
+        std::fs::write(d.path().join("こちらだけ.md"), "直した\n").unwrap();
+        let out = call("syncplan", &serde_json::json!({
+            "path": root, "who": "drive", "remote": remote,
+        }))
+        .unwrap();
+        let up = out["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["rel"] == "こちらだけ.md")
+            .unwrap()
+            .clone();
+        assert_eq!(up["do"], "up");
+        assert_eq!(up["id"], "id1", "行き先を憶えているので、作り直さない");
     }
 
     #[test]

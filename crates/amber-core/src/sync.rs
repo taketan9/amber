@@ -152,6 +152,99 @@ pub fn plan(here: &[Here], there: &[There], was: &[Was]) -> Vec<Step> {
     out
 }
 
+/* ── 前に合わせたときの姿を、憶えておく ── */
+
+/// 憶えの置き場所。**ノートの隣ではなく `.amber` の中** ── これは amber の
+/// 都合であって、ノートの中身ではない。
+pub fn ledger(root: &std::path::Path) -> std::path::PathBuf {
+    root.join(".cian").join("sync.json")
+}
+
+/// 相手ごとの憶え。`who` は `drive` など ── **一つに決め打たない**。
+/// いつか二つ目の相手が来たときに、片方の憶えがもう片方を上書きしない。
+pub fn recall(root: &std::path::Path, who: &str) -> Vec<Was> {
+    let Ok(text) = std::fs::read_to_string(ledger(root)) else { return Vec::new() };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return Vec::new() };
+    let Some(files) = v.get(who).and_then(|w| w.get("files")).and_then(|f| f.as_object()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Was> = files
+        .iter()
+        .filter_map(|(rel, f)| {
+            Some(Was {
+                rel: rel.clone(),
+                hash: f.get("hash")?.as_str()?.to_string(),
+                id: f.get("id")?.as_str()?.to_string(),
+                tag: f.get("tag")?.as_str()?.to_string(),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.rel.cmp(&b.rel));
+    out
+}
+
+/// 憶え直す。**運び終わったぶんだけ。**
+///
+/// 途中で切れたら、運べたぶんだけが憶えに残る ── 次に合わせたときに、
+/// 残りをもう一度運ぶ。**全部やるか何もしないか、にしない**のは、電波の
+/// 悪いところで一本も進まなくなるから。
+pub fn remember(root: &std::path::Path, who: &str, done: &[Was], gone: &[String])
+    -> anyhow::Result<()>
+{
+    let at = ledger(root);
+    let mut v: serde_json::Value = std::fs::read_to_string(&at)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !v.is_object() {
+        v = serde_json::json!({});
+    }
+    let files = v
+        .as_object_mut()
+        .unwrap()
+        .entry(who.to_string())
+        .or_insert_with(|| serde_json::json!({ "files": {} }))
+        .as_object_mut()
+        .unwrap()
+        .entry("files".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !files.is_object() {
+        *files = serde_json::json!({});
+    }
+    let m = files.as_object_mut().unwrap();
+    for d in done {
+        m.insert(
+            d.rel.clone(),
+            serde_json::json!({ "hash": d.hash, "id": d.id, "tag": d.tag }),
+        );
+    }
+    for g in gone {
+        m.remove(g);
+    }
+    if let Some(dir) = at.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(at, serde_json::to_string_pretty(&v)?)?;
+    Ok(())
+}
+
+/// 中身の指紋。**時刻では比べない。**
+///
+/// クラウドから降りてきたファイルの時刻は、書いた時刻とは限らない ── 時計の
+/// ずれた端末が毎回勝つか毎回負ける。中身そのものを見れば、そこは揺れない。
+///
+/// 暗号の強さは要らない（守るのではなく、変わったかを見るだけ）ので、
+/// **依存を増やさずに書ける FNV-1a** で足りる。同じ二本が違う指紋になること
+/// は無く、違う二本が同じになるのは 1800京分の1。
+pub fn fingerprint(bytes: &[u8]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x1000_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +255,48 @@ mod tests {
     }
     fn w(rel: &str, hash: &str, tag: &str) -> Was {
         Was { rel: rel.into(), hash: hash.into(), id: format!("id:{rel}"), tag: tag.into() }
+    }
+
+    #[test]
+    fn 憶えは_相手ごとに分かれている() {
+        let d = tempfile::tempdir().unwrap();
+        let one = vec![Was { rel: "a.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }];
+        remember(d.path(), "drive", &one, &[]).unwrap();
+        // **一つに決め打たない** ── 二つ目の相手が来ても、片方の憶えが
+        // もう片方を上書きしない。
+        let two = vec![Was { rel: "b.md".into(), hash: "2".into(), id: "j".into(), tag: "y".into() }];
+        remember(d.path(), "webdav", &two, &[]).unwrap();
+
+        assert_eq!(recall(d.path(), "drive"), one);
+        assert_eq!(recall(d.path(), "webdav"), two);
+        assert!(recall(d.path(), "だれか").is_empty());
+
+        // 消したものは憶えから落ちる。
+        remember(d.path(), "drive", &[], &["a.md".to_string()]).unwrap();
+        assert!(recall(d.path(), "drive").is_empty());
+        assert_eq!(recall(d.path(), "webdav"), two, "隣の憶えは触らない");
+    }
+
+    #[test]
+    fn 壊れた憶えでも_落ちずに一から合わせる() {
+        // **憶えが読めないのは、合わせ直せば済むこと。** ここで落ちると、
+        // ノートが一本も見られなくなる。
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join(".cian")).unwrap();
+        std::fs::write(ledger(d.path()), "{ こわれている").unwrap();
+        assert!(recall(d.path(), "drive").is_empty());
+        // 書き直せる（壊れた字を持ち越さない）。
+        let one = vec![Was { rel: "a.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }];
+        remember(d.path(), "drive", &one, &[]).unwrap();
+        assert_eq!(recall(d.path(), "drive"), one);
+    }
+
+    #[test]
+    fn 指紋は_中身だけを見る() {
+        assert_eq!(fingerprint(b"abc"), fingerprint(b"abc"));
+        assert_ne!(fingerprint(b"abc"), fingerprint(b"abd"));
+        assert_ne!(fingerprint(b""), fingerprint(b" "));
+        assert_eq!(fingerprint(b"").len(), 16);
     }
 
     #[test]
