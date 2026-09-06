@@ -638,6 +638,22 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
 
         // Make a notebook. A folder, because that is what a notebook is
         // here — somebody looking at the same place from a Mac sees folders.
+        // クラウドの中に、amber の置き場所を用意する。
+        //
+        // **`mkbook` と分けてある。** あちらは「新しいフォルダを作る」で、
+        // 既にあれば止まるのが正しい（同じ名前の二つ目を黙って作らない）。
+        // こちらは「ここに置きたい」で、**二度目に同じところを選んだ人を
+        // 止める理由が無い** ── 一度目に作ったフォルダが、二度目には
+        // エラーになるのはおかしい。
+        "place" => {
+            let dir = std::path::PathBuf::from(arg(p, "dir"));
+            if dir.as_os_str().is_empty() {
+                anyhow::bail!("場所がありません");
+            }
+            std::fs::create_dir_all(&dir)?;
+            Ok(serde_json::json!({ "dir": dir.to_string_lossy() }))
+        }
+
         "mkbook" => {
             let dir = std::path::PathBuf::from(arg(p, "dir"));
             if dir.as_os_str().is_empty() {
@@ -1548,6 +1564,29 @@ mod tests {
             "root": root.display().to_string(), "path": outside.display().to_string(),
             "text": "よそ", "gap": 0,
         })).is_err());
+    }
+
+    #[test]
+    fn 置き場所は_二度目でも作れる() {
+        // **`mkbook` と分けてある理由そのもの。** 一度目に作ったフォルダが
+        // 二度目にはエラーになるのはおかしい ── クラウドを選び直した人は、
+        // たいてい同じところをもう一度選ぶ。
+        let d = tempfile::tempdir().unwrap();
+        let ask = |dir: &std::path::Path| {
+            call("place", &serde_json::json!({ "dir": dir.to_string_lossy() }))
+        };
+        let dir = d.path().join("amber");
+        assert!(ask(&dir).is_ok());
+        assert!(dir.is_dir());
+        assert!(ask(&dir).is_ok(), "二度目で止まってはいけない");
+
+        // 深いところも、途中を作りながら。
+        let deep = d.path().join("Library").join("CloudStorage").join("Dropbox").join("amber");
+        assert!(ask(&deep).is_ok());
+        assert!(deep.is_dir());
+
+        // 場所が空なら、作らずに言う。
+        assert!(call("place", &serde_json::json!({ "dir": "" })).is_err());
     }
 
     #[test]

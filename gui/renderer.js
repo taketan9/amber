@@ -4919,19 +4919,71 @@ async function cmdRoot() {
     // **いまどこかを先に見せる。** 「amber のディレクトリはどうやって
     // 決めるのか」が分からなかったのは、決める場所が無かったからではなく、
     // **いまどこを見ているのかが画面のどこにも出ていなかった**から。
-    const go = await askPick('ノートの置き場所', [
-        { name: '別の場所を選ぶ', sub: 'フォルダを一つ選びます', value: 'pick' },
-    ], 'いま: ' + state.root);
+    //
+    // **クラウドは名前で選ばせる。** どのサービスも机の上ではただの
+    // フォルダなので、amber は同期の仕組みを一つも知らなくていい ──
+    // けれど `~/Library/Mobile Documents/com~apple~CloudDocs` を覚えて
+    // いる人はいない。入っているものだけ並べる。
+    let found = [];
+    try { found = await window.amber.clouds(); } catch { /* 一つも無い機械 */ }
+    const here = found.find((c) => state.root.startsWith(c.dir));
+    const items = [
+        ...found.map((c) => ({
+            name: c.name,
+            sub: c.dir === (here || {}).dir ? 'いまここ' : 'この中の「amber」に置く',
+            value: c.dir,
+        })),
+        { name: '別の場所を選ぶ', sub: 'フォルダを一つ選びます', value: ' pick' },
+    ];
+    const go = await askPick('ノートの置き場所', items,
+        'いま: ' + shortPath(state.root) + (here ? '（' + here.name + '）' : ''));
     if (go === null) return;
-    const dir = await window.amber.pickFolder();
-    if (!dir) return;
+
+    let dir;
+    if (go === ' pick') {
+        dir = await window.amber.pickFolder();
+        if (!dir) return;
+    } else {
+        // クラウドの直下には置かない ── 同期フォルダの根っこにノートを
+        // ばら撒くと、ほかの物と混ざって二度と分けられない。
+        dir = go + '/amber';
+        try {
+            await ask('place', { dir });
+        } catch (e) {
+            say('作れません: ' + e.message);
+            return;
+        }
+    }
+    if (dir === state.root) return;
+
+    // **いままでのノートは、ひとりでには付いてこない。**
+    // 新しいフォルダは空のフォルダで、そうと知らずに移した人は、書いた
+    // ものが全部見えなくなったところに立たされる（電話は前から訊いて
+    // いる ── 窓だけ訊いていなかった）。
+    const had = state.notes.length;
+    const was = state.root;
+    if (had > 0 && await askYes('いままでの ' + had + ' 件を、新しい場所へ移しますか')) {
+        try {
+            // **数えるのは人が数えるもの。** `migrate` が返すのは動かした
+            // ファイルの数（絵も履歴も `.amber` も入る）で、6 件のノートが
+            // 「14 件を移しました」になる ── 何が 14 なのか誰も分からない。
+            await ask('migrate', { from: was, to: dir });
+            say('ノート ' + had + ' 件を、絵と履歴ごと移しました');
+        } catch (e) {
+            // **移せなくても、置き場所は変えない。** 半分だけ移った状態で
+            // 向こうを見せると、残りが消えたようにしか見えない。
+            say('移せません: ' + e.message);
+            return;
+        }
+    }
+
     state.root = dir;
     window.amber.remember({ root: dir });
     window.amber.watch(dir);
     state.open = null;
     applyView();
     await reload({});
-    say('置き場所を変えました: ' + dir);
+    say('置き場所を変えました: ' + shortPath(dir));
 }
 
 /// いま動いている amber の身元。

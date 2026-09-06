@@ -84,6 +84,71 @@ function remember(patch) {
     return now;
 }
 
+/// 机の上にある、クラウドのフォルダ。**あるものだけ返す。**
+///
+/// 入っていないサービスを並べると、押した人は「入れれば使える」のか
+/// 「amber が壊れている」のか見分けられない ── 見えるのは、いまこの機械に
+/// 実際に置かれているフォルダだけ。
+///
+/// macOS 12 以降、外のサービスは**ぜんぶ `~/Library/CloudStorage` に並ぶ**
+/// （Dropbox も Google Drive も OneDrive も）。昔ながらの `~/Dropbox` も
+/// 残っている機械があるので、両方見て同じ場所は一度だけ出す。
+function clouds() {
+    const home = os.homedir();
+    const out = [];
+    const seen = new Set();
+    const add = (name, dir) => {
+        if (!dir) return;
+        let real;
+        try {
+            if (!fs.statSync(dir).isDirectory()) return;
+            real = fs.realpathSync(dir);
+        } catch {
+            return;
+        }
+        if (seen.has(real)) return;
+        seen.add(real);
+        out.push({ name, dir });
+    };
+
+    if (process.platform === 'darwin') {
+        add('iCloud Drive', path.join(home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs'));
+        const box = path.join(home, 'Library', 'CloudStorage');
+        try {
+            for (const name of fs.readdirSync(box).sort()) {
+                if (name.startsWith('.')) continue;
+                add(cloudName(name), path.join(box, name));
+            }
+        } catch { /* 一つも入っていない機械 */ }
+    } else if (process.platform === 'win32') {
+        add('iCloud Drive', path.join(home, 'iCloudDrive'));
+        add('OneDrive', process.env.OneDrive || process.env.OneDriveConsumer);
+        add('OneDrive（会社・学校）', process.env.OneDriveCommercial);
+        add('Google Drive', 'G:\\My Drive');
+    }
+    // どの土台でも見る、昔ながらの置き場所。
+    add('Dropbox', path.join(home, 'Dropbox'));
+    add('Google Drive', path.join(home, 'Google Drive'));
+    add('OneDrive', path.join(home, 'OneDrive'));
+    return out;
+}
+
+/// `GoogleDrive-taketan@example.com` のような機械の名前を、人の言葉に。
+function cloudName(raw) {
+    const [head, ...rest] = raw.split('-');
+    const who = rest.join('-');
+    const known = {
+        GoogleDrive: 'Google Drive',
+        OneDrive: 'OneDrive',
+        Dropbox: 'Dropbox',
+        Box: 'Box',
+        pCloud: 'pCloud',
+    }[head] || head;
+    // `OneDrive-Personal` の「Personal」は、名前ではなく種類 ── 出さない。
+    if (!who || who === 'Personal') return known;
+    return known + '（' + who + '）';
+}
+
 /// 初めて開いたときの置き場所。
 ///
 /// **`~/Documents/cian` が既にあるならそれを使う。** 分ける前からノートは
@@ -304,6 +369,14 @@ app.whenReady().then(() => {
         return { put };
     });
     ipcMain.handle('amber:remember', (_e, patch) => remember(patch));
+    // **どのクラウドに置くかを、選べるようにする。**
+    //
+    // どのサービスも机の上では「ただのフォルダ」なので、amber は同期の
+    // 仕組みを一つも知らなくていい ── 知る必要があるのは**そのフォルダが
+    // どこにあるか**だけ。`~/Library/Mobile Documents/com~apple~CloudDocs`
+    // を覚えている人はいない。
+    ipcMain.handle('amber:clouds', () => clouds());
+
     ipcMain.handle('amber:pickFolder', async () => {
         const r = await dialog.showOpenDialog(win, {
             title: 'ノートの置き場所を選ぶ',

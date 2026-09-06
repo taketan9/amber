@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('amber', {
     remember: (patch) => ipcRenderer.invoke('amber:remember', patch),
     /// OS のダイアログ。描く側からは開けない。
     pickFolder: () => ipcRenderer.invoke('amber:pickFolder'),
+    clouds: () => ipcRenderer.invoke('amber:clouds'),
     pickFile: (filters) => ipcRenderer.invoke('amber:pickFile', filters),
     saveAs: (name) => ipcRenderer.invoke('amber:saveAs', name),
     /// 読める形の中のリンクを、外のブラウザへ。`http`/`https` だけ通る。
