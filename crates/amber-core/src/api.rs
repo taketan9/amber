@@ -270,6 +270,11 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 "wrap" => crate::markdown::marks::wrap(&text, &with),
                 "line" => crate::markdown::marks::prefix(&text, &with),
                 "heading" => crate::markdown::marks::deepen(&text),
+                // `with` は深さ（`"2"` で `##`、`"0"` で見出しをやめる）。
+                "head" => crate::markdown::marks::level(
+                    &text,
+                    with.parse::<usize>().unwrap_or(1),
+                ),
                 other => anyhow::bail!("知らない印です: {other}"),
             };
             Ok(serde_json::json!({ "text": out }))

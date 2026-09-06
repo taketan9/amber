@@ -28,7 +28,7 @@ try {
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'gui', 'renderer.js'), 'utf8');
 const from = src.indexOf('function richBlock(');
-const to = src.indexOf('/// 打ったら、落ち着いてから書き戻す。');
+const to = src.indexOf('/// この窓の「表示」の面を、上の五つに繋ぐ薄い包み。');
 if (from < 0 || to < 0 || to < from) {
     console.error('gui/renderer.js から「表示」の面を切り出せません'
         + '（`richBlock` から `inlineToMd` までの並びが変わりました）');

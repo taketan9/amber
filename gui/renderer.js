@@ -648,10 +648,6 @@ function richBlock(node) {
 ///
 /// **書いてあった字を、かたまりごとに持たせておく**（`data-md`）── 戻せない
 /// ものは、これをそのまま返す。行番号は `to_html` が差している。
-function armRead() {
-    armPaper(el('read'), whole(), !!state.open && view !== 'write');
-}
-
 /// **箱と字を受け取る形。** ここから下の五つ（`armPaper`・`paperToMd`・
 /// `blockToMd`・`inlineToMd`・`richBlock`）は、画面のどこにも触らない ──
 /// 渡された箱と字だけを見る。
@@ -686,10 +682,6 @@ function armPaper(box, text, open) {
 }
 
 /// DOM を Markdown に戻す。
-function readToMd() {
-    return paperToMd(el('read'), state.head);
-}
-
 function paperToMd(box, head) {
     const out = [];
     for (const node of box.children) {
@@ -845,6 +837,19 @@ function inlineToMd(node) {
     return out;
 }
 
+/// この窓の「表示」の面を、上の五つに繋ぐ薄い包み。
+///
+/// **切り出しの外に置く。** 電話が持っていくのは上の五つだけで、ここは
+/// `el('read')` も `state` も見る ── 中に混ぜると、電話の束ねに
+/// 「呼べば落ちる関数」が入る。
+function armRead() {
+    armPaper(el('read'), whole(), !!state.open && view !== 'write');
+}
+
+function readToMd() {
+    return paperToMd(el('read'), state.head);
+}
+
 /// 打ったら、落ち着いてから書き戻す。
 function readChanged() {
     if (syncing || view === 'write' || !state.open) return;
@@ -852,6 +857,49 @@ function readChanged() {
     el('state').textContent = '書きかけ';
     clearTimeout(readTimer);
     readTimer = setTimeout(syncRead, 700);
+}
+
+/// 表の中の Tab は、次の升へ。
+///
+/// **表を打つのは「升から升へ」で、行を打つのではない。** 既定の Tab は
+/// 焦点を面ごと出してしまい、打っている途中で表から追い出される ──
+/// 打ち込みの表計算でも文書でも、そこは次の升に決まっている。
+///
+/// 最後の升で押したら**行を一つ足す** ── 足し方を探しに行かせない。
+el('read').addEventListener('keydown', (e) => {
+    if (e.code !== 'Tab' || e.isComposing || e.keyCode === 229) return;
+    // caret の居場所は、字の節のことも升そのもののこともある ──
+    // 片方だけ見ると、升の終わりに置いたときだけ効かない。
+    let n = getSelection()?.anchorNode;
+    if (n && n.nodeType === 3) n = n.parentElement;
+    const cell = e.target.closest?.('td, th') || n?.closest?.('td, th');
+    if (!cell || !el('read').contains(cell)) return;
+    e.preventDefault();
+    const table = cell.closest('table');
+    const cells = [...table.querySelectorAll('th, td')];
+    const at = cells.indexOf(cell);
+    const to = cells[at + (e.shiftKey ? -1 : 1)];
+    if (to) { landInCell(to); return; }
+    if (e.shiftKey) return;
+    // 最後の升 ── 行を足して、その頭へ。
+    const body = table.tBodies[0] || table;
+    const wide = (table.tHead?.rows[0] || body.rows[0])?.cells.length || 1;
+    const row = body.insertRow();
+    for (let n = 0; n < wide; n++) {
+        // 空の升は、描く側によっては消える ── 全角空白で埋める（表の
+        // 道具（`tableDo`）と同じ埋め方）。
+        row.insertCell().textContent = '　';
+    }
+    landInCell(row.cells[0]);
+    readChanged();
+});
+
+function landInCell(cell) {
+    const r = document.createRange();
+    r.selectNodeContents(cell);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
 }
 
 /// DOM を字に戻して、いつもの保存を通す。
@@ -1206,12 +1254,15 @@ const MARKS = [
         ['取り消し線', '⌘⇧X', () => onRead() ? readDress('strikeThrough') : applyMark('wrap', '~~')],
         ['|'],
         ['リンク', '⌘K', () => onRead() ? readPut('[見せる字](https://)') : put('[](https://)', 1)],
-        ['表', '', () => onRead()
-            ? readPut('| 見出し | 見出し |\n| --- | --- |\n|  |  |')
-            : put('| 見出し | 見出し |\n| --- | --- |\n|  |  |\n', 2)],
+        // **升を空で出さない。** 空の表は「これで合っているのか」が
+        // 分からず、打つ前に一度立ち止まる ── 見本の字が入っていれば、
+        // 上から順に置き換えるだけになる。
+        ['表', '⌘⇧T', () => onRead()
+            ? readPut('| 見出し | 見出し |\n| --- | --- |\n| 項目 | 項目 |')
+            : put('| 見出し | 見出し |\n| --- | --- |\n| 項目 | 項目 |\n', 2)],
         ['水平線', '', () => onRead() ? readPut('---') : put('\n---\n\n')],
         ['|'],
-        ['引用', '', () => onRead() ? readBlockAs('blockquote') : applyMark('line', '> ')],
+        ['引用', "⌘'", () => onRead() ? readBlockAs('blockquote') : applyMark('line', '> ')],
         ['注記', '', cmdAlert],
     ],
 ];
@@ -3034,25 +3085,41 @@ document.addEventListener('keydown', (e) => {
     else if (e.code === 'Slash') { e.preventDefault(); el('find').focus(); el('find').select(); }
 });
 
-/// 修飾キー付きの一打を、書く道具の一押しに。
+/// 修飾キー付きの一打を、道具の一押しに。
+///
+/// **表は一つ（`MARKS`）。** 前はここに書く面用の写しがもう一組あって、
+/// 鍵盤から押したときだけ**読む面で効かなかった** ── ⌘B が帯からは効いて
+/// 一打からは効かない、という見分けの付かない差になっていた。帯に書いた
+/// 鍵をそのまま引く。
 ///
 /// **`e.code` で当てる。** JIS では `e.key` が `Process` になり、数字の
 /// 段は配列で別の字になる ── `Digit8` は「8 の位置のキー」なので動く。
-function markKey(e) {
+function keyName(e) {
     const c = e.code;
-    if (e.shiftKey) {
-        if (c === 'KeyX') return () => applyMark('wrap', '~~');
-        if (c === 'KeyC') return () => applyMark('wrap', '`');
-        if (c === 'Digit8') return () => applyMark('line', '- ');
-        if (c === 'Digit9') return () => applyMark('line', '- [ ] ');
-        if (c === 'Digit7') return () => applyMark('line', '1. ');
-        return null;
+    let base = '';
+    if (/^Key[A-Z]$/.test(c)) base = c.slice(3);
+    else if (/^Digit[0-9]$/.test(c)) base = c.slice(5);
+    else if (c === 'Quote') base = "'";
+    else return '';
+    return '⌘' + (e.shiftKey ? '⇧' : '') + base;
+}
+
+/// 見出しの深さは、鍵盤からは一打で。**帯の釦は押すたびに深くなる**まま
+/// ── 一つの考えに三つの名前を付けない、は釦の話で、鍵盤には当てはまらない
+/// （Inkdrop も `toggle-heading-1` … `-4` を別々に持っている）。
+const HEAD_KEYS = { '⌘1': 1, '⌘2': 2, '⌘3': 3, '⌘4': 4 };
+
+function markKey(e) {
+    const name = keyName(e);
+    if (!name) return null;
+    const n = HEAD_KEYS[name];
+    if (n !== undefined) {
+        return () => (onRead()
+            ? readBlockAs('h' + n)
+            : applyMark('head', String(n)));
     }
-    if (c === 'KeyB') return () => applyMark('wrap', '**');
-    if (c === 'KeyI') return () => applyMark('wrap', '*');
-    if (c === 'KeyK') return () => put('[](https://)', 1);
-    if (c === 'Digit1') return () => applyMark('heading');
-    return null;
+    const found = MARKS.flat().find((m) => m[1] === name && m[2]);
+    return found ? found[2] : null;
 }
 
 /// 貼り付けられたものが絵なら、ノートの隣に置いてリンクを打つ。

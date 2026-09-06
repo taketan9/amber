@@ -483,6 +483,27 @@ pub mod marks {
         t
     }
 
+    /// 見出しを、この深さにする。`0` なら見出しをやめる。
+    ///
+    /// **押すたびに深くなる（[`deepen`]）とは別の道。** 帯の釦は一つで
+    /// 済ませたいが、鍵盤からは `###` に一打で行きたい ── Inkdrop も
+    /// `toggle-heading-1` … `-4` を別々に持っている。
+    pub fn level(text: &str, n: usize) -> String {
+        text.split('\n')
+            .map(|l| {
+                let t = l.trim_start();
+                let indent = &l[..l.len() - t.len()];
+                let had = t.chars().take_while(|c| *c == '#').count();
+                let body = t[had..].trim_start();
+                if n == 0 {
+                    return format!("{indent}{body}");
+                }
+                format!("{indent}{} {body}", "#".repeat(n.min(6)))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// 見出し。**押すたびに深くなる** ── `#` → `##` → `###` → 無し。
     ///
     /// ボタンを三つ置くと、一つの考えに三つの名前が付く。
@@ -1106,6 +1127,21 @@ mod tests {
     fn relative_links_still_work() {
         let html = to_html(&lines("[readme](docs/README.md)"));
         assert!(html.contains(r#"<a href="docs/README.md">readme</a>"#), "{html}");
+    }
+
+    /// 見出しの深さを、一打で。
+    #[test]
+    fn 見出しの深さを_直に決められる() {
+        use super::marks::level;
+        assert_eq!(level("ためし", 1), "# ためし");
+        assert_eq!(level("# ためし", 3), "### ためし");
+        assert_eq!(level("### ためし", 1), "# ためし");
+        // 0 は見出しをやめる ── 何段目からでも。
+        assert_eq!(level("###### ためし", 0), "ためし");
+        // 字下げは残す（箇条書きの中の見出しを潰さない）。
+        assert_eq!(level("  ## 中", 1), "  # 中");
+        // 六より深い見出しは無い。
+        assert_eq!(level("あ", 9), "###### あ");
     }
 
     #[test]
