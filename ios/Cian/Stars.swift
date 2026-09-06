@@ -57,7 +57,7 @@ struct Stars: View {
             ForEach(store.starred(on: at)) { note in
                 Button { open(note) } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(note.title).font(.body.weight(.semibold)).lineLimit(1)
+                        Text(note.shown).font(.body.weight(.semibold)).lineLimit(1)
                         // Where it actually lives, which is the question a
                         // favourite makes you ask.
                         Label(note.book.isEmpty ? store.rootName : note.book, systemImage: "folder")

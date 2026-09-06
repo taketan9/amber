@@ -47,6 +47,17 @@ struct NoteView: View {
             if tab.reading {
                 ScrollView {
                     Reading(blocks: tab.blocks, base: folder, tick: tick, fix: { fixing = $0 })
+                        // **叩けば、そこで書ける。** 窓の「表示」はその場で
+                        // 打てる面なので、電話だけ読むだけだと同じ名前の面が
+                        // 二つの amber で別のものになる。電話に
+                        // `contenteditable` は無いので、代わりに**一叩きで
+                        // 書く面に入る** ── 面の切り替えを探しに行かせない。
+                        //
+                        // 空のノートでも効くよう、余白まで受ける。升や図の
+                        // 押しが先に取るので、そちらは奪わない。
+                        .frame(maxWidth: .infinity, minHeight: 420, alignment: .top)
+                        .contentShape(Rectangle())
+                        .onTapGesture { writing = true; tab.reading = false }
                 }
                 // **工房はここで開く。** 図は読む面の中にあり、直した字を
                 // 戻す先はこのノートの本文なので、間に人を挟まない。

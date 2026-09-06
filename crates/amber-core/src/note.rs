@@ -184,9 +184,16 @@ pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
         .or_else(|| heading(body))
         .or_else(|| first_line(body))
         .or_else(|| {
-            path.file_stem().map(|s| s.to_string_lossy().into_owned())
+            // **amber が付けた符号は、題ではない。** 名前を思いつけなかった
+            // ときの `2026-09-06 13-07-22` を題として出すと、書いた人が
+            // 一度も言っていない名前が画面に出る ── 依頼 174 で前書きから
+            // 追い出したものが、ファイル名から戻ってきていた。人が名づけた
+            // ファイル名（`買うもの.md`）は、中身が空でも題でいい。
+            path.file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .filter(|s| !made_up_name(s))
         })
-        .unwrap_or_else(|| "(no name)".to_string());
+        .unwrap_or_default();
     let updated = f
         .get("updated")
         .and_then(date_secs)
@@ -1347,6 +1354,26 @@ pub fn now_stamp() -> String {
 /// The body is front matter and nothing else. A `# title` heading under a
 /// `title:` field says the same thing twice, and the second copy is the one
 /// that goes stale when the note is renamed.
+/// その名前は、amber が付けた「作った時刻」か。
+///
+/// **人が付けた名前と区別が要る。** `買うもの.md` の中身が空でも、題は
+/// 「買うもの」でいい ── 人がそう名づけたのだから。`2026-09-06 13-07-22.md`
+/// は amber が名前を思いつけなかったときの符号なので、**題として出すと
+/// 「書いた人が一度も言っていない名前」になる**（依頼 174 で前書きから
+/// 追い出したものが、ファイル名から戻ってきていた）。
+pub fn made_up_name(stem: &str) -> bool {
+    let b = stem.as_bytes();
+    b.len() == 19
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[10] == b' '
+        && b[13] == b'-'
+        && b[16] == b'-'
+        && b.iter().enumerate().all(|(i, c)| {
+            matches!(i, 4 | 7 | 10 | 13 | 16) || c.is_ascii_digit()
+        })
+}
+
 pub fn new_note(title: &str, today: &str, now: &str) -> (String, String) {
     let title = title.trim();
     // An untitled note is named for the *moment* it was made — the day alone
@@ -1937,6 +1964,39 @@ mod tests {
         assert_eq!(f.fields.get("title").map(String::as_str), Some("段取り"));
         assert_eq!(f.fields.get("created").map(String::as_str), Some("2026-09-02"));
         assert!(f.tags.is_empty(), "an empty list is empty, not one empty tag: {:?}", f.tags);
+    }
+
+    /// **amber が付けた符号は、題として出さない。**
+    ///
+    /// 依頼 174 で前書きから追い出した「書いた人が一度も言っていない名前」
+    /// が、ファイル名から戻ってきていた ── 題を空のまま作ると、上に
+    /// `2026-09-06 13-07-22` と出る。人が名づけたファイル名は、中身が
+    /// 空でも題でいい（そこは人が言った名前だから）。
+    #[test]
+    fn 作った時刻のファイル名は_題にならない() {
+        let d = tempfile::tempdir().unwrap();
+
+        // amber が付けた符号 ── 中身が空なら、題は無い。
+        let made = d.path().join("2026-09-06 13-07-22.md");
+        std::fs::write(&made, "---\ncreated: 2026-09-06\n---\n\n").unwrap();
+        assert_eq!(read(&made, 60).unwrap().title, "");
+
+        // 一行書けば、それが題。
+        std::fs::write(&made, "---\ncreated: 2026-09-06\n---\n\n牛乳\n").unwrap();
+        assert_eq!(read(&made, 60).unwrap().title, "牛乳");
+
+        // 人が名づけたファイル名は、中身が空でも題。
+        let mine = d.path().join("買うもの.md");
+        std::fs::write(&mine, "").unwrap();
+        assert_eq!(read(&mine, 60).unwrap().title, "買うもの");
+
+        // 似ているが人の名前（秒が無い・字が混じる）は、題のまま。
+        for name in ["2026-09-06.md", "2026-09-06 13-07.md", "2026-09-06 会議.md"] {
+            let at = d.path().join(name);
+            std::fs::write(&at, "").unwrap();
+            assert_eq!(read(&at, 60).unwrap().title, name.trim_end_matches(".md"),
+                       "{name} は人が名づけた名前です");
+        }
     }
 
     #[test]

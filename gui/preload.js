@@ -57,5 +57,7 @@ contextBridge.exposeInMainWorld('amber', {
 
     /// ノートのフォルダを見張ってもらう／動いたら教えてもらう。
     watch: (root) => ipcRenderer.invoke('amber:watch', root),
+    /// 見本のノートを、言われた場所へ置いてもらう。
+    welcome: (root) => ipcRenderer.invoke('amber:welcome', root),
     onChanged: (fn) => ipcRenderer.on('amber:changed', () => fn()),
 });

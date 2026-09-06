@@ -29,7 +29,7 @@ struct Making: View {
                         // note: the note is made by the button that says so.
                         .submitLabel(.next)
                         .onSubmit { naming = false }
-                    Text("空のままなら今日の日付がタイトルになります")
+                    Text("空のままでかまいません。本文の1行目が、そのまま題になります")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("タグ") {
@@ -51,7 +51,7 @@ struct Making: View {
                         TextField("新しいタグ", text: $typed)
                             .autocorrectionDisabled()
                             .onSubmit { add(typed) }
-                        Button("足す") { add(typed) }.disabled(clean(typed).isEmpty)
+                        Button("作成") { add(typed) }.disabled(clean(typed).isEmpty)
                     }
                     ForEach(known.filter { !tags.contains($0) }, id: \.self) { t in
                         Button("#\(t)") { add(t) }

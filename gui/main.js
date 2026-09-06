@@ -289,6 +289,20 @@ app.whenReady().then(() => {
     ipcMain.handle('amber:appVersion', () => app.getVersion());
     // 描く側が置き場所を決めたら、そこを見張る。
     ipcMain.handle('amber:watch', (_e, root) => { watch(root); });
+    /// 見本のノートを、言われた場所へ。**上書きはしない。**
+    ipcMain.handle('amber:welcome', (_e, root) => {
+        const from = path.join(__dirname, '..', 'packaging', 'welcome');
+        if (!fs.existsSync(from)) throw new Error('見本が入っていません');
+        let put = 0;
+        for (const at of walk(from)) {
+            const to = path.join(root, path.relative(from, at));
+            if (fs.existsSync(to)) continue;
+            fs.mkdirSync(path.dirname(to), { recursive: true });
+            fs.copyFileSync(at, to);
+            put++;
+        }
+        return { put };
+    });
     ipcMain.handle('amber:remember', (_e, patch) => remember(patch));
     ipcMain.handle('amber:pickFolder', async () => {
         const r = await dialog.showOpenDialog(win, {

@@ -149,9 +149,13 @@ const RAIL_MARKS = {
 
 function dest(kind, what, name, n, isOn, depth, color) {
     const d = RAIL_MARKS[kind] || RAIL_MARKS.book;
+    // **色を付けたフォルダは、塗る。** 線にだけ色を載せていた頃は、
+    // 15px の輪郭の色を見分けることになって「色を付けた」と気づけなかった
+    // （電話は前から塗っている）。塗ると、離れて見ても色で拾える。
     const tint = color ? ' style="color:' + escapeAttr(color) + '"' : '';
+    const fill = color ? escapeAttr(color) : 'none';
     const mark = '<svg class="mk" viewBox="0 0 16 16" aria-hidden="true"' + tint + '>'
-        + '<g fill="none" stroke="currentColor" stroke-width="1.35"'
+        + '<g fill="' + fill + '" stroke="currentColor" stroke-width="1.35"'
         + ' stroke-linecap="round" stroke-linejoin="round">' + d + '</g></svg>';
     return '<div class="dest' + (isOn ? ' on' : '') + '" data-kind="' + escapeAttr(kind) + '"'
         + ' data-what="' + escapeAttr(what) + '" data-depth="' + (depth || 0) + '">'
@@ -316,7 +320,7 @@ function row(n) {
     const bar = done + todo ? '<span class="done">' + done + '/' + (done + todo) + '</span>' : '';
     return '<div class="row' + (open ? ' on' : '') + '" data-path="' + escapeAttr(n.path) + '">'
         + '<div class="t">' + (starred(n) ? '<span class="star">★</span> ' : '')
-        + escapeHtml(n.title || '(題なし)') + '</div>'
+        + escapeHtml(n.title || '（タイトルなし）') + '</div>'
         + '<div class="x">' + escapeHtml(n.excerpt || '') + '</div>'
         + '<div class="m"><span class="d">' + when(n.updated) + '</span>' + bar
         + '<span class="tags">' + tags + '</span></div></div>';
@@ -456,7 +460,7 @@ async function openNote(path, opts) {
     lastSaved = body;
     // 履歴に渡すのは「保存する前の姿」── 開いた時点の中身。
     state.was = head + body;
-    el('title').textContent = note.title || '(題なし)';
+    el('title').textContent = note.title || '（タイトルなし）';
     el('state').textContent = when(note.updated)
         + ((note.tags || []).length ? '  ' + note.tags.map((t) => '#' + t).join(' ') : '');
     drawCount();
@@ -2771,6 +2775,14 @@ const STEP_ICON = (back) => '<svg viewBox="0 0 16 16" aria-hidden="true">'
     + '" fill="none" stroke="currentColor" stroke-width="1.6"'
     + ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+/// 鐘。**画面の上から仕掛けたい** ── 通知は「このノートに」するもので、
+/// 献立の奥にあると、仕掛けたことも仕掛かっていることも見えない。
+const BELL_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true">'
+    + '<path d="M8 1.6a3.9 3.9 0 0 0-3.9 3.9c0 3.4-1.3 4.4-1.3 4.4h10.4'
+    + 's-1.3-1-1.3-4.4A3.9 3.9 0 0 0 8 1.6zM6.6 12.4a1.6 1.6 0 0 0 2.8 0"'
+    + ' fill="none" stroke="currentColor" stroke-width="1.35"'
+    + ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 function drawSteps() {
     const b = el('back');
     const f = el('fwd');
@@ -2780,7 +2792,14 @@ function drawSteps() {
         f.innerHTML = STEP_ICON(false);
         b.onclick = () => stepBack(false);
         f.onclick = () => stepBack(true);
+        const bell = el('bell');
+        bell.innerHTML = BELL_ICON;
+        bell.onclick = () => cmdRemind();
     }
+    const bell = el('bell');
+    bell.hidden = !state.open;
+    // 仕掛かっているかは、いま開いているノートの前書きが言う。
+    bell.classList.toggle('on', !!state.open && /(^|\n)remind:/.test(state.head || ''));
     const on = !!state.open;
     b.disabled = !on || !backs.length;
     f.disabled = !on || !forwards.length;
@@ -3099,6 +3118,7 @@ const CMDS = [
     { id: 'root', name: 'amber保存ディレクトリ変更', app: true, run: cmdRoot },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'amber について', app: true, run: cmdAbout },
+    { id: 'welcome', name: '見本のノートを入れる', app: true, run: cmdWelcome },
     { id: 'history', name: '前の姿（履歴）', need: 'note', menu: true, run: () => cmdHistory() },
     { id: 'keepnow', name: 'いまの姿を残す', key: '⌘S', need: 'note', menu: true, run: cmdKeepNow },
     { id: 'back', name: '一つ戻す', key: '⌘Z', need: 'note', run: () => stepBack(false) },
@@ -4109,6 +4129,24 @@ async function cmdAbout() {
 }
 
 /* ── 前の姿 ── */
+
+/// 見本のノートを、いまの置き場所に置く。
+///
+/// **初回に置けなかった人のための道。** 自動で置くのは、まだ一本も
+/// ノートが無いときの一度きり ── 既にノートがある人のフォルダに三枚
+/// 落とすと、それはただの散らかし。それでも「入れてくれ」と言える場所が
+/// 要る（電話の設定にも同じものがある）。
+async function cmdWelcome() {
+    const go = await askYes('見本のノートを、いまの置き場所に入れますか');
+    if (!go) return;
+    try {
+        const r = await window.amber.welcome(state.root);
+        await reload({});
+        say(r.put ? r.put + ' 枚置きました' : 'もう入っています（同じ名前は飛ばしました）');
+    } catch (e) {
+        say('置けません: ' + e.message);
+    }
+}
 
 /// ⌘S ── **保存ではなく「ここを残す」。**
 ///

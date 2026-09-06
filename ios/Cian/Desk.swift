@@ -235,7 +235,7 @@ struct DeskView: View {
     /// more than the Swift type-checker will sit through.
     private var wired: some View {
         pages
-            .navigationTitle(here?.note.title ?? "")
+            .navigationTitle(here?.note.shown ?? "")
             .navigationBarTitleDisplayMode(.inline)
             // **The chrome belongs to the desk, not to the page.** A
             // `TabView` keeps the neighbouring page alive and rebuilds pages
@@ -437,7 +437,7 @@ struct DeskView: View {
                 // decide to close something.
                 Circle().frame(width: 6, height: 6).foregroundStyle(.orange)
             }
-            Text(tab.note.title).lineLimit(1).font(.subheadline)
+            Text(tab.note.shown).lineLimit(1).font(.subheadline)
             Button {
                 desk.close(tab.id)
             } label: {

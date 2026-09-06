@@ -243,7 +243,10 @@ struct ContentView: View {
                 if let note = make(title, tags) {
                     // Straight into it, in the writing half — you asked for
                     // it in order to write in it.
-                    desk.open(note, writing: true)
+                    // **作ったノートも「表示」で開く。** 窓がそうなので
+                    // 電話も同じに ── 打ちたくなったら、面のどこを叩いても
+                    // その場で書く面に入る（`NoteView`）。
+                    desk.open(note)
                     showing = true
                 }
             }, known: store.allTags)
@@ -271,7 +274,7 @@ struct ContentView: View {
                                 Image(systemName: "star.fill")
                                     .font(.caption2).foregroundStyle(.orange)
                             }
-                            Text(note.title).font(.body.weight(.semibold)).lineLimit(1)
+                            Text(note.shown).font(.body.weight(.semibold)).lineLimit(1)
                         }
                         // The line the word was actually on, when there is one:
                         // showing the note's opening instead would be answering a
@@ -480,12 +483,21 @@ struct ContentView: View {
                 // 「よく使うもの」に見えてしまう（前はそうなっていた）。
                 if store.at.isEmpty {
                     HStack(spacing: 14) {
+                        // **フォルダを作るのは釦一つで。** 献立の中に畳んで
+                        // いたので、押しはじめる前に「どこにあるか」を
+                        // 探すことになっていた。
+                        Button { booking = true } label: {
+                            Label("フォルダ", systemImage: "folder.badge.plus")
+                                .font(.footnote)
+                        }
                         Menu {
                             Picker("並び", selection: $store.order) {
                                 ForEach(NotesStore.Order.allCases) { Text($0.label).tag($0) }
                             }
                         } label: {
-                            Text(store.order.label).font(.footnote)
+                            // 隣の「フィルタ」と同じ形に ── 中で選ぶものの
+                            // 名前ではなく、**何をする釦か**を書く。
+                            Text("並び順").font(.footnote)
                         }
                         Menu {
                             Toggle(isOn: $store.tree) {
@@ -541,8 +553,16 @@ struct ContentView: View {
             // A note that silently jumps to the top is a note that moved for
             // no reason you can see.
             let stuck = treeing2 ? [] : store.pinnedHere(needle)
-            if !stuck.isEmpty {
+            // **一つも無くても段は出す**（窓と同じ ── 依頼で「一つも無い
+            // ときに段ごと消えると、最初の一つを作る道がどこにも無くなる」）。
+            // 「実装されていないのか、まだ無いだけなのか」は使う人には
+            // 見分けられない。
+            if !stuck.isEmpty || (needle.isEmpty && store.at.isEmpty && !store.flat) {
                 Section {
+                    if stuck.isEmpty {
+                        Text("まだありません（ノートを長押し →「ブックマークに登録する」）")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                     ForEach(stuck) { row($0) }
                 } header: {
                     HStack {
@@ -640,14 +660,22 @@ struct ContentView: View {
                     // 中に入っているときは、上の帯が既にどこかを言っている。
                     if store.at.isEmpty { Text("フォルダ") }
                 }
+                if store.at.isEmpty, store.books.isEmpty {
+                    Text("まだありません（上の「フォルダ」から作れます）")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
 
             // タグ。**窓の左の列にあって、電話に無かった。** 探す欄の
             // 提案としてしか出ておらず、「どんなタグがあるか」を見るには
             // 一度打ちはじめる必要があった ── タグは思い出すものではなく、
             // 見て選ぶもの。押すと絞り、もう一度押すと外す。
-            if needle.isEmpty, store.at.isEmpty, !store.tagsHere.isEmpty, !store.flat {
+            if needle.isEmpty, store.at.isEmpty, !store.flat {
                 Section("タグ") {
+                    if store.tagsHere.isEmpty {
+                        Text("まだありません（ノートの前書きの `tags:` か、長押し →「タグ」から）")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                     ForEach(store.tagsHere.prefix(12), id: \.self) { t in
                         let on = store.only.contains(t)
                         Button {

@@ -48,7 +48,12 @@ enum Cian {
 /// unknown key would turn a new field on the Mac into a broken phone.
 struct Note: Identifiable, Hashable {
     let path: String
+    /// 題。**空のことがある** ── amber が付けた `2026-09-06 13-07-22` は
+    /// 書いた人が一度も言っていない名前なので、core は題として返さない。
+    /// 画面に出すときは `shown`（「（タイトルなし）」）を使う。
     let title: String
+    /// 画面に出す題。一行書けば、それが題になる。
+    var shown: String { title.isEmpty ? "（タイトルなし）" : title }
     let excerpt: String
     let tags: [String]
     let updated: UInt64
