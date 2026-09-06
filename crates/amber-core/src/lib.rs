@@ -14,6 +14,7 @@ pub mod markdown;
 pub mod note;
 pub mod notebook;
 pub mod stamp;
+pub mod sync;
 pub mod text;
 pub mod survey;
 pub mod zipbox;
