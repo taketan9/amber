@@ -354,6 +354,19 @@ app.whenReady().then(() => {
 
     /// 字をファイルに書き出す。**行き先は人が選ぶ** ── 描く側が道を
     /// 決められると、ノートの中身が好きなところへ書ける口になる。
+    /// 読むだけの一本を、その場に置く。
+    ///
+    /// **前の姿を「見てから決める」ために要る。** 保存の小窓を出すのは
+    /// 違う ── 見たいだけなのに、どこに置くかを訊かれる。ノートの外の
+    /// 一時置き場なので、索引にも見張りにも入らない。
+    ipcMain.handle('amber:scratch', async (_e, name, text) => {
+        const dir = path.join(os.tmpdir(), 'amber-peek-' + process.pid);
+        await fs.promises.mkdir(dir, { recursive: true });
+        const at = path.join(dir, String(name).replace(/[/\\:]/g, '-'));
+        await fs.promises.writeFile(at, String(text), 'utf8');
+        return at;
+    });
+
     ipcMain.handle('amber:saveText', async (_e, name, text) => {
         const r = await dialog.showSaveDialog(win, { defaultPath: String(name) });
         if (r.canceled || !r.filePath) return null;

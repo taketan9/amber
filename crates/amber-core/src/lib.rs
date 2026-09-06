@@ -8,6 +8,7 @@
 //! 二か所に書いたら、それは一度の編集で食い違う二つの答えになる。**
 
 pub mod api;
+pub mod history;
 pub mod markdown;
 pub mod note;
 pub mod notebook;

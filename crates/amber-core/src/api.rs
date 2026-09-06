@@ -386,6 +386,67 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
 
         // A backup, put back — `notebook::restore`, the same one the
         // window calls.
+        // ── 前の姿 ──────────────────────────────────────────────
+        //
+        // **判断はここ。** いつ一世代にするか、何世代残すか、いつ落とすかは
+        // 窓と電話で同じでなければならない ── 同じフォルダを二つの端末で
+        // 触るので、片方の決まりで消したものを、もう片方が残っていると思う。
+
+        /// いまの姿を一つ残す。`gap` 秒たっていなければ何もしない。
+        "keep" => {
+            let root = std::path::PathBuf::from(arg(p, "root"));
+            let note = std::path::PathBuf::from(arg(p, "path"));
+            let gap = p["gap"].as_u64().unwrap_or(300);
+            let force = p["force"].as_bool().unwrap_or(false);
+            let kept = p["kept"].as_bool().unwrap_or(false);
+            let text = match p["text"].as_str() {
+                Some(t) => t.to_string(),
+                None => std::fs::read_to_string(&note)?,
+            };
+            let stamp = crate::history::keep(&root, &note, &text, gap, force, kept)?;
+            Ok(serde_json::json!({ "stamp": stamp }))
+        }
+
+        /// 前の姿を、新しい順に。`path` はノートでもフォルダでもよい。
+        "history" => {
+            let root = std::path::PathBuf::from(arg(p, "root"));
+            let at = std::path::PathBuf::from(arg(p, "path"));
+            let rows: Vec<serde_json::Value> = crate::history::list(&root, &at)?
+                .into_iter()
+                .map(|v| {
+                    serde_json::json!({
+                        "stamp": v.stamp,
+                        "when": crate::history::spoken(&v.stamp),
+                        "note": v.note,
+                        "kept": v.kept,
+                        "bytes": v.bytes,
+                    })
+                })
+                .collect();
+            Ok(serde_json::json!({
+                "versions": rows,
+                "gens": crate::history::KEEP_GENS,
+                "days": crate::history::KEEP_DAYS,
+            }))
+        }
+
+        /// 一つの姿の中身。
+        "oldtext" => {
+            let root = std::path::PathBuf::from(arg(p, "root"));
+            let note = std::path::PathBuf::from(arg(p, "path"));
+            let text = crate::history::read(&root, &note, arg(p, "stamp").as_str())?;
+            Ok(serde_json::json!({ "text": text }))
+        }
+
+        /// 「残す」の印を付ける／外す。
+        "keepmark" => {
+            let root = std::path::PathBuf::from(arg(p, "root"));
+            let note = std::path::PathBuf::from(arg(p, "path"));
+            crate::history::mark(&root, &note, arg(p, "stamp").as_str(),
+                                 p["kept"].as_bool().unwrap_or(true))?;
+            Ok(serde_json::json!({ "ok": true }))
+        }
+
         "restore" => {
             let zip = std::path::PathBuf::from(arg(p, "zip"));
             let to = std::path::PathBuf::from(arg(p, "to"));
@@ -1342,6 +1403,137 @@ mod tests {
 
         // 札そのものは、ノート帳に置いていかない。
         assert!(!to2.join(crate::zipbox::LABEL).exists());
+    }
+
+    /// 一世代は「書いていた一区切り」か。
+    ///
+    /// **保存のたびに残すと、十分書けば数十世代になる** ── 五十世代が一回の
+    /// 執筆で埋まり、「昨日の姿」を訊いたときにはもう無い。
+    #[test]
+    fn 続けて打っているあいだは_一世代のまま() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().to_path_buf();
+        let note = root.join("a.md");
+        std::fs::write(&note, "一\n").unwrap();
+
+        let keep = |text: &str, gap: u64| {
+            call("keep", &serde_json::json!({
+                "root": root.display().to_string(), "path": note.display().to_string(),
+                "text": text, "gap": gap,
+            })).unwrap()["stamp"].as_str().map(str::to_string)
+        };
+        let count = || {
+            call("history", &serde_json::json!({
+                "root": root.display().to_string(), "path": note.display().to_string(),
+            })).unwrap()["versions"].as_array().unwrap().len()
+        };
+
+        assert!(keep("一\n", 300).is_some(), "はじめの一つは残る");
+        assert_eq!(count(), 1);
+        // 打鍵のたびに呼ばれても、間が空いていなければ増えない。
+        for n in 2..30 {
+            keep(&format!("{n}\n"), 300);
+        }
+        assert_eq!(count(), 1, "続けて打っているあいだは増えない");
+        // 間が空いたことにすれば、一段増える。
+        assert!(keep("あとで\n", 0).is_some());
+        assert_eq!(count(), 2);
+        // **同じ中身は二度置かない** ── 開いて閉じただけで増えると、履歴が
+        // 「触った回数」の記録になる。
+        assert!(keep("あとで\n", 0).is_none());
+        assert_eq!(count(), 2);
+    }
+
+    /// 古いものは落ちるか。**印を付けたものは残るか。**
+    #[test]
+    fn 五十を超えたら落ちる_ただし印のあるものは残る() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().to_path_buf();
+        let note = root.join("a.md");
+        std::fs::write(&note, "").unwrap();
+        let shelf = crate::history::shelf(&root, &note).unwrap();
+        std::fs::create_dir_all(&shelf).unwrap();
+
+        // 六十世代を、古い日付で置く（三十日より前）。
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 86_400);
+        for n in 0..60 {
+            let at = shelf.join(format!("2026-01-{:02}T00-00-{:02}.md", n / 24 + 1, n % 60));
+            std::fs::write(&at, format!("{n}")).unwrap();
+            let f = std::fs::File::options().write(true).open(&at).unwrap();
+            f.set_modified(old).unwrap();
+        }
+        // 一つだけ「残す」の印を付ける（いちばん古いもの）。
+        let oldest = "2026-01-01T00-00-00";
+        std::fs::rename(shelf.join(format!("{oldest}.md")),
+                        shelf.join(format!("{oldest}.keep.md"))).unwrap();
+
+        // ここで一つ足すと、掃除が走る。
+        call("keep", &serde_json::json!({
+            "root": root.display().to_string(), "path": note.display().to_string(),
+            "text": "あたらしい", "gap": 0,
+        })).unwrap();
+
+        let rows = call("history", &serde_json::json!({
+            "root": root.display().to_string(), "path": note.display().to_string(),
+        })).unwrap();
+        let v = rows["versions"].as_array().unwrap();
+        // 印の無いものは新しい五十まで（＋いま足した一つ）。
+        assert!(v.len() <= crate::history::KEEP_GENS + 2, "{} 件", v.len());
+        // **印のあるものは、どれだけ古くても残る。**
+        assert!(v.iter().any(|x| x["stamp"] == oldest && x["kept"] == true),
+                "印のいちばん古い姿が消えました");
+    }
+
+    /// フォルダを訊くと、その中のノートの姿が**まとめて**時系列で出るか。
+    #[test]
+    fn フォルダに訊くと_中のノートの姿がまとめて出る() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().to_path_buf();
+        std::fs::create_dir_all(root.join("仕事")).unwrap();
+        for (at, text) in [("仕事/a.md", "あ"), ("仕事/b.md", "い"), ("外.md", "そと")] {
+            let note = root.join(at);
+            std::fs::write(&note, text).unwrap();
+            call("keep", &serde_json::json!({
+                "root": root.display().to_string(), "path": note.display().to_string(),
+                "text": text, "gap": 0,
+            })).unwrap();
+        }
+        let rows = call("history", &serde_json::json!({
+            "root": root.display().to_string(),
+            "path": root.join("仕事").display().to_string(),
+        })).unwrap();
+        let v = rows["versions"].as_array().unwrap();
+        assert_eq!(v.len(), 2, "{v:?}");
+        // どのノートのものかを言う ── 言わないと、まとめた一覧が読めない。
+        let notes: Vec<&str> = v.iter().map(|x| x["note"].as_str().unwrap()).collect();
+        assert!(notes.contains(&"仕事/a.md"), "{notes:?}");
+        assert!(notes.contains(&"仕事/b.md"), "{notes:?}");
+    }
+
+    /// 前の姿を読み出せるか。**ノートの置き場所の外は触れないか。**
+    #[test]
+    fn 前の姿を読み出せる_外は触れない() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().to_path_buf();
+        let note = root.join("a.md");
+        std::fs::write(&note, "むかし\n").unwrap();
+        let stamp = call("keep", &serde_json::json!({
+            "root": root.display().to_string(), "path": note.display().to_string(),
+            "text": "むかし\n", "gap": 0,
+        })).unwrap()["stamp"].as_str().unwrap().to_string();
+
+        let got = call("oldtext", &serde_json::json!({
+            "root": root.display().to_string(), "path": note.display().to_string(),
+            "stamp": stamp,
+        })).unwrap();
+        assert_eq!(got["text"].as_str().unwrap(), "むかし\n");
+
+        // 置き場所の外のノートには、履歴を作らない。
+        let outside = d.path().parent().unwrap().join("よそ.md");
+        assert!(call("keep", &serde_json::json!({
+            "root": root.display().to_string(), "path": outside.display().to_string(),
+            "text": "よそ", "gap": 0,
+        })).is_err());
     }
 
     #[test]

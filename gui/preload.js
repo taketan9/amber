@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('amber', {
     trash: (at) => ipcRenderer.invoke('amber:trash', at),
     /// 書き出す。行き先は人が選ぶ。
     saveText: (name, text) => ipcRenderer.invoke('amber:saveText', name, text),
+    /// 読むだけの一本を、その場に置いて道を返す（前の姿を見るのに使う）。
+    scratch: (name, text) => ipcRenderer.invoke('amber:scratch', name, text),
     savePDF: (name, html) => ipcRenderer.invoke('amber:savePDF', name, html),
     /// 期日の来た通知（走っている間だけ）。
     ring: (title, body) => ipcRenderer.invoke('amber:ring', title, body),

@@ -173,7 +173,12 @@ body.mac #railtop { height: 34px; }
 .dest:hover { background: var(--hover); }
 .dest.on { background: var(--sel); color: var(--ink); font-weight: 600; }
 .dest .n { margin-left: auto; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.dest .sq { width: 9px; height: 9px; border-radius: 3px; flex: none; background: var(--amber); }
+/* 行き先の印。**形で分ける** ── 色を付けたフォルダにだけ四角が出ていた
+   頃は、色の無いフォルダとブックマークの棚が字の形しか違わなかった。
+   色は形の上に載せる（色だけで分けない）。 */
+.dest .mk { width: 15px; height: 15px; flex: none; color: var(--ink-3); }
+.dest.on .mk { color: var(--amber-deep); }
+.dest[data-kind="book"] .mk[style] { color: inherit; }
 .dest .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dest[data-depth="1"] { padding-left: 28px; }
 .dest[data-depth="2"] { padding-left: 42px; }

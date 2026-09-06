@@ -88,7 +88,7 @@ function drawRail() {
         // 最初の一つを作る道がどこにも無くなる ── 「実装されていないのか、
         // 見えないだけなのか」が使う人には見分けられない。
         rows.push(head('ブックマーク', 'star'));
-        rows.push(dest('star', '', '★ すべて', stars.length, on('star', '')));
+        rows.push(dest('star', '', 'すべて', stars.length, on('star', '')));
         for (const sh of state.stars) {
             const n = stars.filter((x) => x.star === sh || (x.star || '').startsWith(sh + '/')).length;
             rows.push(dest('star', sh, sh.split('/').pop(), n, on('star', sh), sh.split('/').length - 1));
@@ -109,7 +109,7 @@ function drawRail() {
         rows.push(head('タグ', 'tag'));
         // 30 で切る。**タグは増える一方**で、全部並べると行き先の列が
         // 「タグの一覧」になり、フォルダもブックマークも押し出される。
-        for (const [t, n] of tags.slice(0, 30)) rows.push(dest('tag', t, '#' + t, n, on('tag', t)));
+        for (const [t, n] of tags.slice(0, 30)) rows.push(dest('tag', t, t, n, on('tag', t)));
     }
     el('rail').innerHTML = rows.join('');
     el('new').onclick = newNote;
@@ -129,11 +129,33 @@ function drawRail() {
     }
 }
 
+/// 行き先の左の印。**フォルダと、しおりと、タグを、形で分ける。**
+///
+/// 前は色を付けたフォルダにだけ小さな四角が出て、それ以外は名前だけ ──
+/// 色を付けていないフォルダとブックマークの棚は、字の形しか違いが無かった。
+/// 列は上から下へ読むものなので、段の見出しを覚えていないと**いま何の
+/// 一覧を見ているのか分からない**。
+///
+/// 色は形の上に載せる（色だけで分けない）── 色の見分けにくい人にも、
+/// フォルダはフォルダの形をしている。
+const RAIL_MARKS = {
+    all: '<path d="M1.5 9.5h3.2l1 1.8h4.6l1-1.8h3.2M1.5 9.5 3.4 3.6h9.2l1.9 5.9'
+        + 'v3.4a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1z"/>',
+    star: '<path d="M8 1.9 10 6l4.5.6-3.3 3.1.8 4.4L8 12l-4 2.1.8-4.4L1.5 6.6 6 6z"/>',
+    book: '<path d="M1.6 12.6V4.2a1 1 0 0 1 1-1h3.3l1.5 1.8h6a1 1 0 0 1 1 1v6.6'
+        + 'a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/>',
+    tag: '<path d="M3 6.2h10M2.4 10.2h10M6.6 2.4 5 13.6M11.4 2.4 9.8 13.6"/>',
+};
+
 function dest(kind, what, name, n, isOn, depth, color) {
-    const sq = color ? '<span class="sq" style="background:' + escapeAttr(color) + '"></span>' : '';
+    const d = RAIL_MARKS[kind] || RAIL_MARKS.book;
+    const tint = color ? ' style="color:' + escapeAttr(color) + '"' : '';
+    const mark = '<svg class="mk" viewBox="0 0 16 16" aria-hidden="true"' + tint + '>'
+        + '<g fill="none" stroke="currentColor" stroke-width="1.35"'
+        + ' stroke-linecap="round" stroke-linejoin="round">' + d + '</g></svg>';
     return '<div class="dest' + (isOn ? ' on' : '') + '" data-kind="' + escapeAttr(kind) + '"'
         + ' data-what="' + escapeAttr(what) + '" data-depth="' + (depth || 0) + '">'
-        + sq + '<span class="nm">' + escapeHtml(name) + '</span><span class="n">' + n + '</span></div>';
+        + mark + '<span class="nm">' + escapeHtml(name) + '</span><span class="n">' + n + '</span></div>';
 }
 
 /* ── 一覧（中） ── */
@@ -432,6 +454,8 @@ async function openNote(path, opts) {
     editor.setValue(body);
     loading = false;
     lastSaved = body;
+    // 履歴に渡すのは「保存する前の姿」── 開いた時点の中身。
+    state.was = head + body;
     el('title').textContent = note.title || '(題なし)';
     el('state').textContent = when(note.updated)
         + ((note.tags || []).length ? '  ' + note.tags.map((t) => '#' + t).join(' ') : '');
@@ -2680,6 +2704,11 @@ function diagramAt(target) {
 ///
 /// **ノートを替えたら捨てる。** 別のノートの姿をここへ戻す道があると、
 /// 一度の押し間違いで二本まとめて壊れる。
+/// 一世代の区切り。**最後の打鍵から五分空いたら、その前の姿を一つ。**
+/// 保存のたびに残すと、十分書けば数十世代になり、五十世代が一回の執筆で
+/// 埋まる ── 「昨日の夕方の姿」を訊いたときには、もう無い。
+const KEEP_GAP = 300;
+
 let backs = [];
 let forwards = [];
 let lastSaved = '';
@@ -2761,6 +2790,15 @@ async function save() {
     const text = state.head + editor.getValue();
     // 書き込む直前の姿を積む ── 書いたあとだと、戻る先が「いまの姿」になる。
     keepStep(editor.getValue());
+    // **一世代にするかは core が決める。** 同じフォルダを二つの端末で
+    // 触るので、片方の決まりで消したものをもう片方が残っていると思う、が
+    // 起きてはいけない。ここは「保存する前の姿はこれです」と言うだけ。
+    if (!state.guest) {
+        try {
+            await ask('keep', { root: state.root, path, text: state.was ?? text, gap: KEEP_GAP });
+        } catch { /* 履歴が置けないことで、保存が止まる理由はない */ }
+    }
+    state.was = text;
     try {
         const r = await ask('write', { path, text, stamp: state.stamp });
         if (r && r.conflict) {
@@ -2851,6 +2889,15 @@ function moveCursor(delta) {
 /// **泡の段では届かないことがある** ── Monaco は自分の textarea で ⌘Z を
 /// 受けて、そこで止めることがある。捕捉の段なら、どこを打っていても先に
 /// 通る。小窓と工房の中だけは、あちらの受け口に譲る。
+/// ⌘S は「保存」ではなく「ここを残す」── 押した反射に、意味のある返事を。
+document.addEventListener('keydown', (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.code !== 'KeyS' || e.shiftKey) return;
+    if (!el('veil').hidden || !el('studio').hidden || !state.open) return;
+    e.preventDefault();
+    e.stopPropagation();
+    cmdKeepNow();
+}, true);
+
 document.addEventListener('keydown', (e) => {
     if (!(e.metaKey || e.ctrlKey) || e.code !== 'KeyZ') return;
     if (!el('veil').hidden || !el('studio').hidden) return;
@@ -3046,6 +3093,8 @@ const CMDS = [
     { id: 'root', name: 'amber保存ディレクトリ変更', app: true, run: cmdRoot },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'amber について', app: true, run: cmdAbout },
+    { id: 'history', name: '前の姿（履歴）', need: 'note', menu: true, run: () => cmdHistory() },
+    { id: 'keepnow', name: 'いまの姿を残す', key: '⌘S', need: 'note', menu: true, run: cmdKeepNow },
     { id: 'back', name: '一つ戻す', key: '⌘Z', need: 'note', run: () => stepBack(false) },
     { id: 'fwd', name: 'やり直す', key: '⌘⇧Z', need: 'note', run: () => stepBack(true) },
 
@@ -3273,6 +3322,10 @@ function railMenu(kind, what, at) {
     if (kind === 'book') {
         items.push({ name: 'この中にフォルダを作る', run: () => cmdMkBook(what) });
         items.push({ name: 'フォルダに色を付ける', run: () => cmdColor(what) });
+        // フォルダの履歴は、**中のノートの姿をまとめて時系列で** ──
+        // 「あのあたりで壊した」は、どのノートかを覚えていないほうが多い。
+        items.push({ name: '前の姿（履歴）', sub: 'この中のノートぜんぶ',
+                     run: () => cmdHistory(state.root + '/' + what, true) });
     }
     if (kind === 'star') {
         items.push({ name: 'この中に置き場所を作る', run: () => newShelf(what) });
@@ -4047,6 +4100,104 @@ async function cmdAbout() {
         { name: 'エンジン', sub: engine, value: null },
         { name: 'ノートの置き場所', sub: state.root || '（まだ決めていません）', value: null },
     ], '不具合を伝えるときは、この三つを添えてください');
+}
+
+/* ── 前の姿 ── */
+
+/// ⌘S ── **保存ではなく「ここを残す」。**
+///
+/// amber は打鍵の 0.9 秒後に書いているので、保存という操作が無い。それでも
+/// 人は反射で ⌘S を押す ── 何も起きないと「保存されたのか」と不安になり、
+/// 「自動保存です」と出すのは正直だが役に立たない。
+///
+/// 押すと、いまの姿に**消えない印**が付く。五十世代・三十日の勘定から
+/// 外れるので、「ここまでは効いている状態」を自分で刻める ── 自動保存では
+/// 作れない、人にしか分からない区切り。
+async function cmdKeepNow() {
+    if (!state.open) return;
+    if (state.dirty) await save();
+    try {
+        const r = await ask('keep', {
+            root: state.root, path: state.open.path, gap: 0, force: true, kept: true,
+        });
+        say(r.stamp ? 'いまの姿を残しました（この姿は消えません）' : 'この姿はもう残してあります');
+    } catch (e) {
+        say('残せません: ' + e.message);
+    }
+}
+
+/// 履歴を見る。ノートでもフォルダでもよい。
+///
+/// **戻すのは、いまを捨てることではない。** 戻す前にいまの姿を一世代
+/// 残すので、戻しすぎても戻れる ── これが無いと「戻す」は取り返しの
+/// つかない操作になり、押すのが怖くなる。
+async function cmdHistory(at, isBook) {
+    const path = at || (state.open && state.open.path);
+    if (!path) { say('ノートかフォルダを選んでください'); return; }
+    let r;
+    try {
+        r = await ask('history', { root: state.root, path });
+    } catch (e) {
+        say('履歴を読めません: ' + e.message);
+        return;
+    }
+    const rows = r.versions || [];
+    if (!rows.length) {
+        await askPick('前の姿', [{ name: 'まだありません', value: null }],
+            '書いて手を止めるたびに、一つずつ残ります（' + r.gens + ' 世代・'
+            + r.days + ' 日ぶん）');
+        return;
+    }
+    const items = rows.map((v) => ({
+        name: v.when + (v.kept ? '  ★' : ''),
+        // フォルダを訊いたときは、どのノートのものかを言う ── 言わないと
+        // まとめた一覧が読めない。
+        sub: (isBook ? v.note + '  ' : '') + Math.round(v.bytes / 10) / 100 + ' KB',
+        value: v,
+    }));
+    const pick = await askPick('前の姿', items,
+        '選ぶと中身を見られます（' + r.gens + ' 世代・' + r.days + ' 日ぶん残ります）');
+    if (!pick) return;
+    const note = isBook ? state.root + '/' + pick.note : path;
+    let old;
+    try {
+        old = (await ask('oldtext', { root: state.root, path: note, stamp: pick.stamp })).text;
+    } catch (e) {
+        say('読めません: ' + e.message);
+        return;
+    }
+    const go = await askPick(pick.when + ' の姿', [
+        { name: 'この姿を見る', sub: '読むだけ。いまのノートは動きません', value: 'peek' },
+        { name: 'この姿に戻す', sub: 'いまの姿も一世代として残ります', value: 'back' },
+        { name: pick.kept ? '「残す」の印を外す' : 'この姿に「残す」の印を付ける',
+          sub: '印の付いた姿は、古くなっても消えません', value: 'mark' },
+    ], shortPath(note) + '  ·  ' + old.length + ' 字');
+    if (go === null) return;
+    if (go === 'mark') {
+        await ask('keepmark', { root: state.root, path: note, stamp: pick.stamp, kept: !pick.kept });
+        say(pick.kept ? '印を外しました' : 'この姿は消えなくなりました');
+        return;
+    }
+    if (go === 'peek') {
+        await openGuestText(pick.when + ' の姿', old);
+        return;
+    }
+    // **戻す前に、いまを一世代残す。** 戻しすぎても戻れるように。
+    await ask('keep', { root: state.root, path: note, gap: 0, force: true });
+    await ask('write', { path: note, text: old, force: true });
+    await reload({});
+    if (state.open && state.open.path === note) await openNote(note);
+    say(pick.when + ' の姿に戻しました（いまの姿も残してあります）');
+}
+
+/// 前の姿を、読むだけの一本として開く。
+///
+/// **いまのノートを書き換えない。** 「見てから決める」ができないと、
+/// 戻すかどうかを名前と日付だけで決めることになる。
+async function openGuestText(title, text) {
+    const at = await window.amber.scratch(title + '.md', text);
+    if (!at) return;
+    await openGuest(at);
 }
 
 /* ── 小窓 ── */
