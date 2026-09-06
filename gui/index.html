@@ -224,9 +224,10 @@ body.mac #listhead { padding-top: 30px; }
 /* 段の見出しの ＋ */
 .head { display: flex; align-items: center; }
 .head .plus {
-  margin-left: auto; padding: 0 5px; border-radius: 5px; font-size: 13px;
-  color: var(--ink-3); line-height: 1.4;
+  margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 5px; color: var(--ink-3);
 }
+.head .plus svg { width: 13px; height: 13px; }
 .head .plus:hover { background: var(--hover); color: var(--ink); }
 #rows { flex: 1; overflow-y: auto; }
 .row {
@@ -529,12 +530,19 @@ body.vim #vim { display: block; }
   flex: none; border-top: 1px solid var(--line-2); background: var(--rail);
   -webkit-app-region: no-drag;
 }
-#marks .r { display: flex; gap: 4px; padding: 5px 8px; overflow-x: auto; }
+#marks .r { display: flex; gap: 4px; padding: 5px 8px; align-items: center; }
+/* 流れるのは記号だけ ── 「ほかの記号」の釦は端に残す。 */
+#marks .rs { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; }
 #marks .r + .r { border-top: 1px solid var(--line-2); }
 #marks button {
-  flex: none; padding: 3px 9px; border-radius: 7px; font-size: 12.5px;
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px 3px 6px; border-radius: 7px; font-size: 12.5px;
   color: var(--ink-2); white-space: nowrap; border: 1px solid transparent;
 }
+/* 絵は名前の左に、字と同じ高さで。**名前は消さない** ── 絵だけで当てられる
+   のは太字と斜体くらいで、「注記」や「フロー」は名前が答えになる。 */
+#marks button .ic { width: 14px; height: 14px; flex: none; opacity: .82; }
+#marks button:hover .ic, #marks button.on .ic { opacity: 1; }
 #marks button:hover { background: var(--hover); border-color: var(--line-2); }
 #marks button:active { background: var(--sel); }
 #marks button.on { background: var(--sel); color: var(--ink); }

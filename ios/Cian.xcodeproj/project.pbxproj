@@ -199,7 +199,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# 「表示」の面の組み方と書き戻し方を、窓から切り出して束ねに入れる。\n#\n# **写しを持たない。** 書き戻しをもう一組 Swift で書けば、同じノートが\n# 端末によって別の字に保存される ── 失うのはたいてい表と升と図で、\n# 気づくのは何回か保存したあと。`scripts/paper-test.js` が同じ切り出し方で\n# 往復を見ているので、電話が使うのは試験の通ったものそのもの。\nset -e\nfrom=\"$SRCROOT/../gui/renderer.js\"\nto=\"$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/paper.js\"\npython3 - \"$from\" \"$to\" <<'PY'\nimport io, sys\nsrc = io.open(sys.argv[1], encoding='utf-8').read()\na = src.index('function richBlock(')\nb = src.index('/// この窓の「表示」の面を、上の五つに繋ぐ薄い包み。')\nio.open(sys.argv[2], 'w', encoding='utf-8').write(src[a:b])\nPY\necho \"表示の面を入れました\"\n";
+			shellScript = "# 「表示」の面の組み方と書き戻し方を、窓から切り出して束ねに入れる。\n#\n# **写しを持たない。** 書き戻しをもう一組 Swift で書けば、同じノートが\n# 端末によって別の字に保存される ── 失うのはたいてい表と升と図で、\n# 気づくのは何回か保存したあと。`scripts/paper-test.js` が同じ切り出し方で\n# 往復を見ているので、電話が使うのは試験の通ったものそのもの。\nset -e\nfrom=\"$SRCROOT/../gui/renderer.js\"\nto=\"$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/paper.js\"\npython3 - \"$from\" \"$to\" <<'PY'\nimport io, sys\nsrc = io.open(sys.argv[1], encoding='utf-8').read()\na = src.index('function richBlock(')\nb = src.index('/// この窓の「表示」の面を、上の切り出しに繋ぐ薄い包み。')\nio.open(sys.argv[2], 'w', encoding='utf-8').write(src[a:b])\nPY\necho \"表示の面を入れました\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

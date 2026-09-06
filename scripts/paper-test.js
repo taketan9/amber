@@ -28,7 +28,7 @@ try {
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'gui', 'renderer.js'), 'utf8');
 const from = src.indexOf('function richBlock(');
-const to = src.indexOf('/// この窓の「表示」の面を、上の五つに繋ぐ薄い包み。');
+const to = src.indexOf('/// この窓の「表示」の面を、上の切り出しに繋ぐ薄い包み。');
 if (from < 0 || to < 0 || to < from) {
     console.error('gui/renderer.js から「表示」の面を切り出せません'
         + '（`richBlock` から `inlineToMd` までの並びが変わりました）');
@@ -39,6 +39,8 @@ const dom = new JSDOM('<!doctype html><body><div id="paper"></div></body>');
 global.window = dom.window;
 global.document = dom.window.document;
 global.Node = dom.window.Node;
+// caret の居場所を見る道具も渡す ── 升の行の改行はここを見て決める。
+global.getSelection = () => dom.window.getSelection();
 // eslint-disable-next-line no-eval
 (0, eval)(src.slice(from, to));
 
@@ -99,6 +101,61 @@ console.log('前書きのあるノート');
     // 前書きの後ろに一行空ける ── 詰めると、触っただけのノートが
     // 同期先で差分になる。
     ok(round('<p>本文</p>', 'title: あ\n') === '\n本文\n', '一行空ける');
+}
+
+console.log('升の行で改行すると');
+{
+    // **点・番号と同じ押し心地**（次も同じ、空ならそこで降りる）。
+    // 既定に任せると升の付かない `<li>` が出て、押した人は升を足した
+    // つもりで点が出る。
+    const task = (t, on) => '<li class="task"><button type="button" class="box"'
+        + ' aria-pressed="' + (on ? 'true' : 'false') + '"></button>' + t + '</li>';
+    const caret = (node, at) => {
+        const r = document.createRange();
+        r.setStart(node, at);
+        r.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+    };
+
+    box.innerHTML = '<ul>' + task('ひとつめ') + '</ul>';
+    let li = box.querySelector('li');
+    caret(li.lastChild, li.lastChild.length);
+    ok(checkEnter(li) === true, '字のある升で押すと、受ける');
+    ok(box.querySelectorAll('li > .box').length === 2, '次の行にも升が付く');
+    ok(paperToMd(box, '') === '- [ ] ひとつめ\n- [ ] \n', '字にすると升が二つ',
+       paperToMd(box, ''));
+
+    // 何も書かずにもう一度 ── 一覧から降りる。
+    li = box.querySelectorAll('li')[1];
+    caret(li, li.childNodes.length);
+    ok(checkEnter(li) === true, '空の升で押すと、受ける');
+    ok(box.querySelectorAll('li').length === 1, '空の行は消える');
+    ok(box.lastElementChild.tagName === 'P', '素の行に降りる',
+       box.lastElementChild.tagName);
+
+    // 真ん中で押したら、後ろの字は次の升へ ── 下の行は残る。
+    box.innerHTML = '<ul>' + task('あいうえお') + task('のこり') + '</ul>';
+    li = box.querySelector('li');
+    caret(li.lastChild, 2);
+    checkEnter(li);
+    ok(paperToMd(box, '') === '- [ ] あい\n- [ ] うえお\n- [ ] のこり\n',
+       '後ろの字は次の升へ', paperToMd(box, ''));
+
+    // 真ん中の空の升で降りても、下の行は失わない。
+    box.innerHTML = '<ul>' + task('あたま') + task('') + task('おしり') + '</ul>';
+    li = box.querySelectorAll('li')[1];
+    caret(li, li.childNodes.length);
+    checkEnter(li);
+    ok(paperToMd(box, '') === '- [ ] あたま\n\n- [ ] おしり\n',
+       '真ん中で降りても下は残る', paperToMd(box, ''));
+
+    // 点と番号は既定のまま ── 受けない。
+    box.innerHTML = '<ul><li>ただの点</li></ul>';
+    li = box.querySelector('li');
+    caret(li.firstChild, 3);
+    ok(checkEnter(li) === false, '升の無い行は、既定に任せる');
 }
 
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');

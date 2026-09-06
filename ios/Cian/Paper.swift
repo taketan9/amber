@@ -231,27 +231,21 @@ struct Paper: UIViewRepresentable {
       at.prepend(mark);
     }
 
-    /// **升の行で改行しても、箇条書きにしない。**
+    /// 升の行の Enter は、窓と同じ関数（`checkEnter`）に渡す。
     ///
-    /// `contenteditable` の既定は「同じ種類の次の行」だが、升は付いてこない
-    /// ので `- ` だけの行が生まれる ── 押した人は升を足したつもりで、
-    /// 出てきたのは点。何も無い行に降りる。
+    /// **押し心地を端末で分けない。** ここで別の答えを書けば、同じノートを
+    /// 窓で足すと升、電話で足すと点、になる ── 気づくのは何日か経ってから。
     box.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
-      const li = here()?.closest?.('li');
-      if (!li || !li.querySelector(':scope > .box')) return;
-      const list = li.closest('ul, ol');
-      if (!list) return;
+      if (e.shiftKey || e.metaKey || e.ctrlKey) return;
+      // `here()` は箱の直下まで登る（ここでは `<ul>`）ので、caret の
+      // 節から直に数える。
+      let n = getSelection()?.anchorNode;
+      if (n && n.nodeType === 3) n = n.parentElement;
+      const li = n?.closest?.('li');
+      if (!li || !box.contains(li)) return;
+      if (!checkEnter(li)) return;
       e.preventDefault();
-      const p = document.createElement('p');
-      p.append(document.createElement('br'));
-      list.after(p);
-      const r = document.createRange();
-      r.selectNodeContents(p);
-      r.collapse(true);
-      const sel = getSelection();
-      sel.removeAllRanges();
-      sel.addRange(r);
       box.dispatchEvent(new Event('input'));
     });
 
