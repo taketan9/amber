@@ -18,6 +18,8 @@ const state = {
     /// `from` / `to` は `YYYY-MM-DD` か null（片方だけでもよい ── 「この日
     /// から先ぜんぶ」「この日まで」を言えないと、範囲が使いものにならない）。
     when: null,
+    /// まだ落ちてきていないノート（クラウドが札だけ置いている）。
+    waiting: [],
     /// 押して選んだ絞り込み。**タグは全部・フォルダはどれか。**
     /// ノートは一つのフォルダにしか居ないので、フォルダを「全部」にすると
     /// 二つ選んだ瞬間に必ず 0 件になる。
@@ -371,6 +373,11 @@ function drawList() {
 
 function row(n) {
     const open = state.open && state.open.path === n.path;
+    // **控えは、消さずに札を貼る。** 一覧から外すと、中身を助け出す道が
+    // どこにも無くなる ── 並べたうえで、そういうものだと言う。
+    const clash = n.clash
+        ? '<span class="clashmark" title="クラウドが作った控えです">競合</span>'
+        : '';
     const tags = (n.tags || []).slice(0, 3)
         .map((t) => '<span class="tag">' + escapeHtml(t) + '</span>').join('');
     // チェックのあるノートは、いくつ済んだかを出す。**数えるだけで、
@@ -380,7 +387,7 @@ function row(n) {
     const bar = done + todo ? '<span class="done">' + done + '/' + (done + todo) + '</span>' : '';
     return '<div class="row' + (open ? ' on' : '') + '" data-path="' + escapeAttr(n.path) + '">'
         + '<div class="t">' + (starred(n) ? '<span class="star">★</span> ' : '')
-        + escapeHtml(n.title || '（タイトルなし）') + '</div>'
+        + escapeHtml(n.title || '（タイトルなし）') + clash + '</div>'
         + '<div class="x">' + escapeHtml(n.excerpt || '') + '</div>'
         + '<div class="m"><span class="d">' + when(n.updated) + '</span>' + bar
         + '<span class="tags">' + tags + '</span></div></div>';
@@ -3374,6 +3381,7 @@ async function reload(opts) {
         state.books = r.books || [];
         state.stars = r.stars || [];
         state.colors = r.colors || {};
+        state.waiting = r.waiting || [];
         // 開いていた行を新しいほうに繋ぎ直す（更新時刻が動くので）。
         if (state.open) {
             state.open = state.notes.find((n) => n.path === state.open.path) || state.open;
@@ -3387,6 +3395,7 @@ async function reload(opts) {
         drawRail();
         drawDrawers();
         drawDrawer();
+        drawCloud();
         drawList();
     } catch (e) {
         if (!opts || !opts.quiet) say('読めません: ' + e.message);
@@ -4360,6 +4369,45 @@ async function cmdTags() {
     if (await editNote((t) => ask('settags', { text: t, tags }).then((r) => r.text))) {
         say(tags.length ? '#' + tags.join(' #') : 'タグを外しました');
     }
+}
+
+/* ── クラウドの置き土産 ── */
+
+/// **黙って足りない一覧を見せない。**
+///
+/// クラウドは二種類のものをノートの隣に置いていく。どちらも amber の側では
+/// 直せないが、**言わないと「ノートが消えた」にしか見えない**。
+///
+/// * まだ落ちてきていない ── iCloud は中身を消して `.買い物リスト.md.icloud`
+///   という札を置く。名前が違うので一覧に出ない。待てば戻ってくる。
+/// * 同時に書いた控え ── クラウドが `買い物リスト (…競合コピー…).md` を作る。
+///   これは**ノートとして一覧に出す**（消すと中身を助け出す道が無くなる）。
+///   出したうえで、そういうものだと札を貼る。
+function drawCloud() {
+    const box = el('cloudsay');
+    const waiting = state.waiting || [];
+    const clash = state.notes.filter((n) => n.clash);
+    if (!waiting.length && !clash.length) { box.hidden = true; box.innerHTML = ''; return; }
+
+    const rows = [];
+    if (waiting.length) {
+        rows.push('<div class="c wait"><b>' + waiting.length
+            + ' 件、まだ落ちてきていません</b>'
+            + '<span>' + escapeHtml(waiting.slice(0, 3).map((w) => w.of).join('・'))
+            + (waiting.length > 3 ? ' ほか' : '')
+            + ' ── クラウドが中身をまだ持ってきていないだけで、消えてはいません</span></div>');
+    }
+    if (clash.length) {
+        rows.push('<div class="c clash"><b>' + clash.length
+            + ' 件、同時に書いた控えがあります</b>'
+            + '<span>'
+            + escapeHtml(clash.slice(0, 3).map((n) =>
+                n.clash.of + (n.clash.by ? '（' + n.clash.by + '）' : '')).join('・'))
+            + (clash.length > 3 ? ' ほか' : '')
+            + ' ── クラウドが作ったもの。中身を見比べて、要るほうを残してください</span></div>');
+    }
+    box.innerHTML = rows.join('');
+    box.hidden = false;
 }
 
 /* ── 絞り込みの帯 ── タグ・フォルダ・期間の引き出し ── */

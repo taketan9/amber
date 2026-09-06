@@ -83,6 +83,14 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         // window. Sent rather than derived on the far side:
                         // deriving it there is how the two answers drift.
                         "search": crate::note::haystack(n),
+                        // **クラウドが作った控えなら、そう言う。**
+                        // 一覧から消さない ── 消すと、中身を助け出す道が
+                        // どこにも無くなる。並べたうえで札を貼る。
+                        "clash": n.path.file_name()
+                            .and_then(|f| f.to_str())
+                            .and_then(crate::cloud::shape)
+                            .filter(|s| s.kind == crate::cloud::Kind::Clash)
+                            .map(|s| serde_json::json!({ "of": s.of, "by": s.by })),
                     })
                 })
                 .collect();
@@ -99,8 +107,24 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .map(|r| r.rel.clone())
                 .collect();
             books.sort();
+            // **まだ落ちてきていないノート。** iCloud は中身を消して
+            // `.買い物リスト.md.icloud` という札を置くので、名前が違って
+            // 一覧に出ない ── 黙っていると「ノートが消えた」にしか
+            // 見えないが、待てば戻ってくるだけ。
+            let waiting: Vec<serde_json::Value> = crate::cloud::waiting(&dir, &walk.rows)
+                .into_iter()
+                .map(|at| {
+                    serde_json::json!({
+                        "of": at.file_name().and_then(|f| f.to_str()).unwrap_or(""),
+                        // 本来の道 ── 電話はこれを iOS に渡して「落として
+                        // きて」と頼む。
+                        "at": at.to_string_lossy(),
+                    })
+                })
+                .collect();
             Ok(serde_json::json!({
                 "root": dir.display().to_string(),
+                "waiting": waiting,
                 "books": books,
                 "stars": shelves,
                 "colors": book.colors,
@@ -1564,6 +1588,39 @@ mod tests {
             "root": root.display().to_string(), "path": outside.display().to_string(),
             "text": "よそ", "gap": 0,
         })).is_err());
+    }
+
+    #[test]
+    fn クラウドの置き土産を_一覧が言う() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("買い物リスト.md"), "- [ ] 牛乳\n").unwrap();
+        // 落ちてきていない札（隠しファイル）。
+        std::fs::write(d.path().join(".週報.md.icloud"), "").unwrap();
+        // クラウドが作った控え ── **ノートとしては並ぶ**。
+        std::fs::write(
+            d.path().join("買い物リスト (Taketan の競合コピー 2026-09-06).md"),
+            "- [ ] 牛乳\n- [ ] パン\n",
+        )
+        .unwrap();
+
+        let out = call("notes", &serde_json::json!({ "path": d.path().to_string_lossy() })).unwrap();
+
+        let waiting = out["waiting"].as_array().unwrap();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0]["of"], "週報.md");
+
+        let notes = out["notes"].as_array().unwrap();
+        assert_eq!(notes.len(), 2, "控えも一覧に出る ── 消すと中身を助け出せない");
+        let clash: Vec<&serde_json::Value> =
+            notes.iter().filter(|n| !n["clash"].is_null()).collect();
+        assert_eq!(clash.len(), 1);
+        assert_eq!(clash[0]["clash"]["of"], "買い物リスト.md");
+        assert_eq!(clash[0]["clash"]["by"], "Taketan");
+
+        // ふつうのノートに札は付かない。
+        let plain: Vec<&serde_json::Value> =
+            notes.iter().filter(|n| n["clash"].is_null()).collect();
+        assert_eq!(plain.len(), 1);
     }
 
     #[test]

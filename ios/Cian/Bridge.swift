@@ -74,6 +74,15 @@ struct Note: Identifiable, Hashable {
     /// answer to "what does this note match"**, so a search here finds the
     /// same notes it finds in the window.
     let search: String
+    /// クラウドが同時に書いたときに作った控えなら、もとのノートの名前と
+    /// 誰のものか。**一覧からは消さない** ── 消すと、中身を助け出す道が
+    /// どこにも無くなる。並べたうえで札を貼る。
+    let clash: Clash?
+
+    struct Clash: Equatable, Hashable {
+        let of: String
+        let by: String
+    }
 
     var id: String { path }
 
@@ -88,5 +97,10 @@ struct Note: Identifiable, Hashable {
         book = o["book"] as? String ?? ""
         star = o["star"] as? String
         search = o["search"] as? String ?? ""
+        if let c = o["clash"] as? [String: Any] {
+            clash = Clash(of: c["of"] as? String ?? "", by: c["by"] as? String ?? "")
+        } else {
+            clash = nil
+        }
     }
 }

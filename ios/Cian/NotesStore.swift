@@ -296,9 +296,40 @@ final class NotesStore: ObservableObject {
             allBooks = answer["books"] as? [String] ?? []
             stars = answer["stars"] as? [String] ?? []
             colors = answer["colors"] as? [String: String] ?? [:]
+            waiting = (answer["waiting"] as? [[String: Any]] ?? [])
+                .compactMap { $0["of"] as? String }
+            fetch(answer["waiting"] as? [[String: Any]] ?? [])
+            clashes = notes.filter { $0.clash != nil }
             trouble = nil
         } catch {
             trouble = error.localizedDescription
+        }
+    }
+
+    /// まだ落ちてきていないノートの名前。**黙って足りない一覧を見せない。**
+    ///
+    /// iCloud は中身を消して `.買い物リスト.md.icloud` という札を置くので、
+    /// 名前が違って一覧に出ない ── 言わないと「ノートが消えた」にしか
+    /// 見えないが、待てば戻ってくるだけ。
+    @Published var waiting: [String] = []
+
+    /// クラウドが作った控え。ノートとしては一覧に出したまま、札を貼る。
+    @Published var clashes: [Note] = []
+
+    /// 落ちてきていないものを、**落としてきてもらう。**
+    ///
+    /// 待てば来るとはいえ、待つきっかけは要る ── iCloud は「誰かが要ると
+    /// 言った」ときに取りに行く。頼むだけで、返事は待たない（来たら
+    /// ファイルの見張りが一覧を描き直す）。
+    ///
+    /// 頼めなくても何も言わない ── iCloud に置いていないフォルダなら
+    /// そもそも札が出ないし、出たのに頼めないのは向こうの都合で、
+    /// 人にできることが何も無い。
+    private func fetch(_ rows: [[String: Any]]) {
+        for r in rows {
+            guard let at = r["at"] as? String else { continue }
+            try? FileManager.default
+                .startDownloadingUbiquitousItem(at: URL(fileURLWithPath: at))
         }
     }
 

@@ -317,6 +317,25 @@ body.mac #listhead { padding-top: 30px; }
 }
 .head .plus svg { width: 13px; height: 13px; }
 .head .plus:hover { background: var(--hover); color: var(--ink); }
+/* クラウドの置き土産。**黙って足りない一覧を見せない** ── 落ちてきていない
+   ノートも、同時に書いた控えも、amber の側では直せないが、言わないと
+   「ノートが消えた」にしか見えない。 */
+#cloudsay { flex: none; border-bottom: 1px solid var(--line-2); }
+#cloudsay[hidden] { display: none !important; }
+#cloudsay .c { padding: 8px 16px; font-size: 11.5px; line-height: 1.55; }
+#cloudsay .c + .c { border-top: 1px solid var(--line-2); }
+#cloudsay .c b { display: block; font-size: 12.5px; }
+#cloudsay .c span { color: var(--ink-2); }
+#cloudsay .wait { background: color-mix(in srgb, #3D7FA8 10%, var(--list)); }
+#cloudsay .wait b { color: #2c6183; }
+#cloudsay .clash { background: color-mix(in srgb, #D07A2E 12%, var(--list)); }
+#cloudsay .clash b { color: var(--amber-deep); }
+/* 控えの札。**行から消さずに貼る** ── 消すと中身を助け出す道が無くなる。 */
+.row .clashmark {
+  margin-left: 6px; font-size: 10px; font-weight: 700; padding: 1px 6px;
+  border-radius: 999px; background: color-mix(in srgb, #D07A2E 22%, transparent);
+  color: var(--amber-deep); vertical-align: 1px;
+}
 #rows { flex: 1; overflow-y: auto; }
 .row {
   padding: 10px 16px; border-bottom: 1px solid var(--line-2); cursor: pointer;
@@ -957,6 +976,7 @@ body.dropping::after {
       <div id="drawers"></div>
     </div>
     <div id="drawer" hidden></div>
+    <div id="cloudsay" hidden></div>
     <div id="rows"></div>
   </div>
   <div id="pane">

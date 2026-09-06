@@ -295,6 +295,12 @@ struct ContentView: View {
                                     .font(.caption2).foregroundStyle(.orange)
                             }
                             Text(note.shown).font(.body.weight(.semibold)).lineLimit(1)
+                            if note.clash != nil {
+                                Text("競合").font(.caption2.weight(.bold))
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Capsule().fill(.orange.opacity(0.22)))
+                                    .foregroundStyle(.orange)
+                            }
                         }
                         // The line the word was actually on, when there is one:
                         // showing the note's opening instead would be answering a
@@ -443,6 +449,21 @@ struct ContentView: View {
         }
     }
 
+    /// クラウドの置き土産を言う一段。
+    @ViewBuilder
+    private func band(_ tint: Color, _ head: String, _ body: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(head).font(.footnote.weight(.semibold)).foregroundStyle(tint)
+            Text(body).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(tint.opacity(0.12)))
+        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
     /// Move, and let it be seen moving.
     ///
     /// **A list that changes instantly reads as a list that did not change.**
@@ -554,6 +575,26 @@ struct ContentView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 2, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+
+                    // **クラウドの置き土産。** 黙って足りない一覧を見せない
+                    // ── 落ちてきていないノートも、同時に書いた控えも、
+                    // amber の側では直せないが、言わないと「ノートが消えた」
+                    // にしか見えない（窓と同じ言い方）。
+                    if !store.waiting.isEmpty {
+                        band(.blue, "\(store.waiting.count) 件、まだ落ちてきていません",
+                             store.waiting.prefix(3).joined(separator: "・")
+                             + (store.waiting.count > 3 ? " ほか" : "")
+                             + " ── クラウドが中身をまだ持ってきていないだけで、消えてはいません")
+                    }
+                    if !store.clashes.isEmpty {
+                        band(.orange, "\(store.clashes.count) 件、同時に書いた控えがあります",
+                             store.clashes.prefix(3).map {
+                                 ($0.clash?.of ?? "") + (($0.clash?.by.isEmpty == false)
+                                     ? "（\($0.clash!.by)）" : "")
+                             }.joined(separator: "・")
+                             + (store.clashes.count > 3 ? " ほか" : "")
+                             + " ── クラウドが作ったもの。中身を見比べて、要るほうを残してください")
+                    }
 
                     // 絞り込みの帯（窓と同じ三つの引き出し）。
                     Sifting(store: store, open: $sifting)
@@ -784,28 +825,7 @@ struct ContentView: View {
         // **畳んでおく。** 絞り込みの帯と並べて置きっぱなしにすると、一覧の
         // 頭が毎回二段ぶん要る ── 言葉で探すのは、絞るより回数が少ない
         // （窓も同じ形にした）。「ノートを探す」の釦から開く。
-        // `displayMode: .always` だと、開いているかどうかに関わらず場所を
-        // 取り続ける ── 畳めない。`.automatic` で `isPresented` に従わせる。
-        .searchable(text: $needle, isPresented: $seeking,
-                    placement: .navigationBarDrawer(displayMode: .automatic),
-                    prompt: "ノートを探す")
-        // 閉じたら空にする ── 見えない絞り込みが残ると、一覧が減っている
-        // 理由が画面のどこにも書いていないことになる。
-        .onChange(of: seeking) { _, now in
-            if !now, !needle.isEmpty { needle = "" }
-        }
-        // **The tags, offered where you are already typing.** They used to be
-        // a bar of chips above the list, which cost a row of the screen for
-        // ever so that they could be pressed occasionally. Suggestions appear
-        // when the field is, and are gone the rest of the time.
-        .searchSuggestions {
-            if needle.trimmingCharacters(in: .whitespaces).isEmpty {
-                ForEach(store.tagsHere.prefix(20), id: \.self) { t in
-                    Label("#\(t)", systemImage: "tag")
-                        .searchCompletion("#\(t)")
-                }
-            }
-        }
+        .modifier(Seeking(needle: $needle, on: $seeking, tags: store.tagsHere))
         .onChange(of: needle) { _, now in
             store.read(now)
             store.find(now)
@@ -829,4 +849,40 @@ struct ContentView: View {
 /// is the one place that needs it, and only for the sheet.
 extension String: @retroactive Identifiable {
     public var id: String { self }
+}
+
+/// 探す欄を、**押したときだけ**出す。
+///
+/// `isPresented:` だけでは畳めない ── あの糸が決めるのは「いま打っている
+/// か」であって、欄が場所を取るかどうかではない。`.navigationBarDrawer` は
+/// 一覧の頭に居座り、`displayMode: .automatic` にしても**上まで戻れば必ず
+/// 出てくる**。そこに自前の「ノートを探す」釦も並ぶと、同じことを頼む入口が
+/// 二つになる（この窓がいちばん嫌う形）。
+///
+/// なので `searchable` そのものを付け外しする。閉じるとき（取り消しを押した
+/// とき）は `on` が false になり、この修飾ごと消える。
+struct Seeking: ViewModifier {
+    @Binding var needle: String
+    @Binding var on: Bool
+    let tags: [String]
+
+    func body(content: Content) -> some View {
+        if on {
+            content
+                .searchable(text: $needle, isPresented: $on,
+                            placement: .navigationBarDrawer(displayMode: .always),
+                            prompt: "ノートを探す")
+                // **タグは、打っているところで差し出す。** 帯にすると一段を
+                // 永久に取るのに、押されるのは時々だけ。
+                .searchSuggestions {
+                    if needle.trimmingCharacters(in: .whitespaces).isEmpty {
+                        ForEach(tags.prefix(20), id: \.self) { t in
+                            Label("#\(t)", systemImage: "tag").searchCompletion("#\(t)")
+                        }
+                    }
+                }
+        } else {
+            content
+        }
+    }
 }
