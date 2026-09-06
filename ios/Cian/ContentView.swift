@@ -35,6 +35,10 @@ struct ContentView: View {
     @State private var into: String?
     @State private var outside = false
     @State private var needle = ""
+    /// 探す欄が出ているか。**ふだんは畳んでおく**（窓と同じ）。
+    @State private var seeking = false
+    /// いま開いている絞り込みの引き出し。
+    @State private var sifting: Sifting.Which?
     @State private var shelving: Note?
     @State private var colouring: String?
     @State private var renaming: String?
@@ -460,12 +464,12 @@ struct ContentView: View {
     /// the tree itself and the bands all have to agree, and four copies of
     /// the same condition is how three of them end up agreeing.
     private var treeing2: Bool {
-        store.tree && needle.isEmpty && store.only.isEmpty && !store.flat
+        store.tree && needle.isEmpty && !store.narrowing && !store.flat
     }
 
     private var list: some View {
         List {
-            if needle.isEmpty, store.only.isEmpty {
+            if needle.isEmpty {
                 Section {
                     if store.at.isEmpty {
                         // **一つだけの、押させたい釦。** 窓と同じ形 ── 塊に
@@ -506,6 +510,14 @@ struct ContentView: View {
                 // 「よく使うもの」に見えてしまう（前はそうなっていた）。
                 if store.at.isEmpty {
                     HStack(spacing: 14) {
+                        // **言葉で探すのは、押してから。** 帯と並べて置きっ
+                        // ぱなしにすると一覧の頭が二段ぶん要る。
+                        Button { seeking = true } label: {
+                            Label("ノートを探す", systemImage: "magnifyingglass")
+                                .font(.footnote)
+                                .labelStyle(.titleAndIcon)
+                        }
+                        .buttonStyle(.borderless)
                         // **フォルダのことは、この印一つに。** 印と「フォルダ」
                         // の札が並んでいて、同じことを二度置いていた。押すと
                         // フォルダの構成が出て、そこで**選ぶ／作る**（名前を
@@ -515,32 +527,24 @@ struct ContentView: View {
                         }
                         .buttonStyle(.borderless)
                         .accessibilityLabel("フォルダ")
+                        Spacer(minLength: 0)
+                        // **「フィルタ」の献立は無くなった。** 絞るのは下の
+                        // 帯（タグ・フォルダ・期間）がやる ── ここに残って
+                        // いたのは並べ方の話なので、「並び順」にまとめる。
                         Menu {
                             Picker("並び", selection: $store.order) {
                                 ForEach(NotesStore.Order.allCases) { Text($0.label).tag($0) }
                             }
-                        } label: {
-                            // 隣の「フィルタ」と同じ形に ── 中で選ぶものの
-                            // 名前ではなく、**何をする釦か**を書く。
-                            Text("並び順").font(.footnote)
-                        }
-                        Menu {
+                            Divider()
                             Toggle(isOn: $store.tree) {
                                 Label("フォルダごと（ツリー）", systemImage: "list.bullet.indent")
                             }
                             Toggle(isOn: $store.flat) {
                                 Label("全部まとめて見る", systemImage: "list.bullet")
                             }
-                            if !store.only.isEmpty {
-                                Divider()
-                                Button(role: .destructive) { store.only = [] } label: {
-                                    Label("タグの絞りを外す", systemImage: "xmark.circle")
-                                }
-                            }
                         } label: {
-                            Text("フィルタ").font(.footnote)
+                            Text("並び順").font(.footnote)
                         }
-                        Spacer(minLength: 0)
                     }
                     // **右の余白は、何でもない場所。** 段のどこを触っても
                     // 最初の釦が鳴っていて、右端を触るとフォルダを作る小窓が
@@ -550,6 +554,17 @@ struct ContentView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 2, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+
+                    // 絞り込みの帯（窓と同じ三つの引き出し）。
+                    Sifting(store: store, open: $sifting)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 4, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    if let which = sifting {
+                        Sifted(store: store, which: which)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                            .listRowSeparator(.hidden)
+                    }
                 }
 
                 // **窓の左の列と同じ順**（ノート → ブックマーク → フォルダ
@@ -689,33 +704,13 @@ struct ContentView: View {
                 }
             }
 
-            // タグ。**窓の左の列にあって、電話に無かった。** 探す欄の
-            // 提案としてしか出ておらず、「どんなタグがあるか」を見るには
-            // 一度打ちはじめる必要があった ── タグは思い出すものではなく、
-            // 見て選ぶもの。押すと絞り、もう一度押すと外す。
-            if needle.isEmpty, store.at.isEmpty, !store.flat {
-                Section("タグ") {
-                    if store.tagsHere.isEmpty {
-                        Text("まだありません（ノートの前書きの `tags:` か、長押し →「タグ」から）")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    ForEach(store.tagsHere.prefix(12), id: \.self) { t in
-                        let on = store.only.contains(t)
-                        Button {
-                            if on { store.only.remove(t) } else { store.only.insert(t) }
-                        } label: {
-                            HStack {
-                                Label("#" + t, systemImage: on ? "number.circle.fill" : "number")
-                                Spacer()
-                                Text("\(store.notes.filter { $0.tags.contains(t) }.count)")
-                                    .foregroundStyle(.secondary).monospacedDigit()
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                    }
-                }
-            }
+            // **タグの段は、絞り込みの帯へ移した。**
+            //
+            // 一覧の中にタグの段があり、その上に「タグ ▾」の引き出しもある
+            // ── 同じことを頼む道が二つあると、片方を直した日にもう片方が
+            // 古いまま残る。段のほうを畳んだのは、**押すと一覧じゅうが
+            // 動く**からでもある（絞った瞬間に段が消え、次に押した指が
+            // 別の行に当たった）。
             // **The tree, unless you are looking for something.** A tree of
             // search results is not a shape anybody reads — when you are
             // narrowing, what you want is the shortest list of answers, and
@@ -786,11 +781,19 @@ struct ContentView: View {
         // from a note. The slide is for moves you made; this keeps the two
         // in step when it was not one.
         .onChange(of: store.at, initial: true) { _, now in if walked != now { walked = now } }
-        // Always shown, not hidden until you pull down: with the bar set
-        // to `.inline` so the wordmark can have the top of the list, the
-        // search field would otherwise be somewhere you have to know about.
-        .searchable(text: $needle, placement: .navigationBarDrawer(displayMode: .always),
+        // **畳んでおく。** 絞り込みの帯と並べて置きっぱなしにすると、一覧の
+        // 頭が毎回二段ぶん要る ── 言葉で探すのは、絞るより回数が少ない
+        // （窓も同じ形にした）。「ノートを探す」の釦から開く。
+        // `displayMode: .always` だと、開いているかどうかに関わらず場所を
+        // 取り続ける ── 畳めない。`.automatic` で `isPresented` に従わせる。
+        .searchable(text: $needle, isPresented: $seeking,
+                    placement: .navigationBarDrawer(displayMode: .automatic),
                     prompt: "ノートを探す")
+        // 閉じたら空にする ── 見えない絞り込みが残ると、一覧が減っている
+        // 理由が画面のどこにも書いていないことになる。
+        .onChange(of: seeking) { _, now in
+            if !now, !needle.isEmpty { needle = "" }
+        }
         // **The tags, offered where you are already typing.** They used to be
         // a bar of chips above the list, which cost a row of the screen for
         // ever so that they could be pressed occasionally. Suggestions appear

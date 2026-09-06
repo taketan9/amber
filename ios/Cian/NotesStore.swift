@@ -363,6 +363,49 @@ final class NotesStore: ObservableObject {
     /// what pressing a filter is for.
     @Published var only: Set<String> = []
 
+    /// 絞り込んでいるフォルダ。**タグとは重なり方が違う** ── ノートは一つの
+    /// フォルダにしか居ないので、フォルダを「全部」にすると二つ選んだ瞬間に
+    /// 必ず 0 件になる。どれかに入っていれば通す（窓と同じ）。
+    @Published var onlyBooks: Set<String> = []
+
+    /// 期間の絞り込み。`from` / `to` は `YYYY-MM-DD`（片方だけでもよい）。
+    ///
+    /// **日で比べる。** 秒で比べると「9月6日まで」が 9月6日 0時 までになり、
+    /// その日に書いたものが軒並み落ちる ── 人の言う「まで」はその日を含む。
+    struct Span: Equatable {
+        var created = false
+        var from: String?
+        var to: String?
+    }
+    @Published var span: Span?
+
+    /// 何か絞っているか（言葉で探しているぶんは含めない）。
+    var narrowing: Bool { !only.isEmpty || !onlyBooks.isEmpty || span != nil }
+
+    /// その日付が、選んだ範囲の中にあるか。
+    func inSpan(_ note: Note) -> Bool {
+        guard let s = span else { return true }
+        let at = s.created ? note.created : note.updated
+        let day = Self.day(at)
+        if let from = s.from, day < from { return false }
+        if let to = s.to, day > to { return false }
+        return true
+    }
+
+    /// 秒を `YYYY-MM-DD` に（その土地の日付で）。
+    static func day(_ secs: UInt64) -> String {
+        stamper.string(from: Date(timeIntervalSince1970: TimeInterval(secs)))
+    }
+
+    /// 作り直さない ── 一覧を絞るたびに数十回呼ばれる。
+    private static let stamper: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar.current
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     /// The tags on the notes you can see from here, most used first.
     ///
     /// From what is in front of you and not from the whole folder: a bar of
@@ -635,7 +678,7 @@ final class NotesStore: ObservableObject {
         // A tag narrows like a search does — everywhere, not just here.
         // Pressing 「#仕事」 while standing in one folder and being shown only
         // that folder's 仕事 notes is the answer to a question nobody asked.
-        if !flat && n.isEmpty && only.isEmpty { out = out.filter { $0.book == at } }
+        if !flat && n.isEmpty && !narrowing { out = out.filter { $0.book == at } }
         if !n.isEmpty {
             // Either half: what the listing knows, or what was found inside.
             // Every word of one group has to be there; any group will do.
@@ -646,6 +689,14 @@ final class NotesStore: ObservableObject {
             }
         }
         if !only.isEmpty { out = out.filter { only.isSubset(of: Set($0.tags)) } }
+        // フォルダは「どれか」、タグは「全部」── 重なり方が違うことは
+        // 引き出しの中に書いてある（窓と同じ）。
+        if !onlyBooks.isEmpty {
+            out = out.filter { note in
+                onlyBooks.contains { note.book == $0 || note.book.hasPrefix($0 + "/") }
+            }
+        }
+        if span != nil { out = out.filter(inSpan) }
         // The favourites are drawn in their own section above this, so they
         // come out here rather than being sorted to the front: a note in two
         // places at once is a note somebody deletes twice.
@@ -660,7 +711,7 @@ final class NotesStore: ObservableObject {
     /// reach without going to find it. Inside a folder, only that folder's,
     /// because there you are looking at one place on purpose.
     func pinnedHere(_ needle: String) -> [Note] {
-        guard needle.trimmingCharacters(in: .whitespaces).isEmpty, !flat, only.isEmpty else { return [] }
+        guard needle.trimmingCharacters(in: .whitespaces).isEmpty, !flat, !narrowing else { return [] }
         let all = notes.filter { $0.star != nil }
         return sorted(at.isEmpty ? all : all.filter { $0.book == at })
     }
