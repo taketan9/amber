@@ -71,7 +71,13 @@ function drawRail() {
     const on = (kind, what) => state.dest.kind === kind && state.dest.what === what;
     const rows = [];
     rows.push('<div id="railtop"></div>');
-    rows.push('<button id="new">＋　新しいノート</button>');
+    // 「＋」は全角の空白で離していた ── 字と記号のあいだが不揃いになる。
+    // 印は札の中に描く（同じ太さ・同じ大きさで、字と揃う）。
+    rows.push('<button id="new">'
+        + '<svg viewBox="0 0 16 16" aria-hidden="true">'
+        + '<path d="M8 3.2v9.6M3.2 8h9.6" stroke="currentColor" stroke-width="1.9"'
+        + ' stroke-linecap="round"/></svg>'
+        + '<span>新しいノート</span></button>');
 
     rows.push('<div class="head">ノート</div>');
     rows.push(dest('all', '', 'すべてのノート', state.notes.length, on('all', '')));
@@ -341,7 +347,7 @@ function makeEditor() {
                 theme: dark ? 'vs-dark' : 'vs',
                 automaticLayout: true,
                 wordWrap: 'on',
-                lineNumbers: 'off',
+                lineNumbers: lineNo ? 'on' : 'off',
                 minimap: { enabled: false },
                 renderLineHighlight: 'none',
                 scrollBeyondLastLine: false,
@@ -622,7 +628,9 @@ function armRead() {
         if (!Number.isNaN(at)) node.dataset.md = src.slice(at, at + span).join('\n');
         if (richBlock(node)) {
             node.contentEditable = 'false';
-            node.title = '押すと、書く面のその行へ';
+            node.title = node.classList.contains('mermaid') || node.querySelector('code.language-mermaid')
+                ? '押すと、図を見ながら直せます'
+                : '押すと、書く面のその行へ';
         }
     }
     // 升は字ではなく操作 ── 中に caret が入ると、押せるものが打てるものに見える。
@@ -1011,9 +1019,11 @@ function readHeading() {
 /// **いったん全部を字に戻してから直し、組み直す。** 見た目の上でやろうと
 /// すると、升や表のような「札の形が決まっているもの」を DOM の上で組み立て
 /// 直すことになり、そこだけ別の作り方が生える。
-async function readSourceEdit(change) {
+async function readSourceEdit(change, node) {
     const box = el('read');
-    const at = [...box.children].indexOf(caretBlock());
+    // 直すところは、たいてい caret のあるかたまり。**押して開く工房だけは
+    // 別** ── 右押しは caret を動かさないので、押されたものを名指しで渡す。
+    const at = [...box.children].indexOf(node || caretBlock());
     if (at < 0) return;
     const blocks = [...box.children].map((n) =>
         richBlock(n) ? n.dataset.md : (blockToMd(n) ?? ''));
@@ -1029,7 +1039,9 @@ async function readSourceEdit(change) {
     }
     const body = blocks.filter((s) => s !== '').join('\n\n') + '\n';
     loading = true;
-    editor.setValue(body);
+    // 前書きの後ろの一行空きを、ここでも戻す ── `readToMd` はそうしていて、
+    // ここだけ詰めると、道具で一つ直しただけのノートが**同期先で差分**になる。
+    editor.setValue(state.head ? '\n' + body : body);
     loading = false;
     state.dirty = true;
     await save();
@@ -1073,6 +1085,16 @@ async function cmdVim() {
     ], vimOn ? 'いま: vim' : 'いま: 素のメモ帳');
     if (to === null || to === vimOn) return;
     setVim(to);
+}
+
+/// 行番号の入切。**「コード」の面だけの話。**
+async function cmdLineNo() {
+    const to = await askPick('行番号', [
+        { name: '出す', sub: '「コード」の面の左に', value: true },
+        { name: '出さない', value: false },
+    ], lineNo ? 'いま: 出している' : 'いま: 出していない');
+    if (to === null || to === lineNo) return;
+    setLineNo(to);
 }
 
 async function cmdSyntax() {
@@ -1362,6 +1384,16 @@ el('dots').onclick = (e) => {
 
 /// 字の大きさ。**書く面と読む面を一緒に動かす** ── 片方だけ動くと、
 /// 並べたときに同じノートが二つの大きさで出る。
+/// 「コード」の面に行番号を出すか。**既定は出さない** ── ノートは
+/// 行で指す文書ではないので、ふだんは数字が一列ぶん余計。
+let lineNo = false;
+
+function setLineNo(on) {
+    lineNo = !!on;
+    window.amber.remember({ lineNo });
+    if (editor) editor.updateOptions({ lineNumbers: lineNo ? 'on' : 'off' });
+}
+
 let fontStep = 0;
 const FONT_BASE = 15;
 
@@ -1458,6 +1490,14 @@ function headLines() {
 let Mermaid = null;
 let mermaidSeq = 0;
 
+/// 図に使う色。**アプリのどこを見ても同じ色の家族にする** ── フォルダの
+/// 色も、字の色も、円グラフの切れ端も、マインドマップの枝もこの十一色。
+/// 図ごとに別の並びを持つと、同じノートの中で色の意味が変わる。
+const FAMILY = [
+    '#D07A2E', '#3D7FA8', '#5E8C42', '#9A6FB5', '#C2649A', '#2AA79B',
+    '#B08A2E', '#6E7BC4', '#C4564E', '#0E93A8', '#7A7A7A',
+];
+
 /// 図の設定。**地の明暗に合わせる** ── 図だけ白いと、暗い画面で目を焼く。
 function mermaidOpts() {
     // 既定の図は**紫と水色**で、ノートの地とも琥珀とも合わない ── 図だけ
@@ -1483,9 +1523,7 @@ function mermaidOpts() {
             clusterBkg: v('--list', '#f8f3e8'),
             clusterBorder: v('--line', '#e4d9c4'),
             edgeLabelBackground: v('--paper', '#fffdf8'),
-            pie1: '#D07A2E', pie2: '#3D7FA8', pie3: '#5E8C42', pie4: '#9A6FB5',
-            pie5: '#C2649A', pie6: '#2AA79B', pie7: '#B08A2E', pie8: '#6E7BC4',
-            pie9: '#C4564E', pie10: '#0E93A8', pie11: '#7A7A7A',
+            ...Object.fromEntries(FAMILY.map((c, n) => ['pie' + (n + 1), c])),
             pieStrokeColor: v('--paper', '#fffdf8'),
             pieOuterStrokeColor: v('--line', '#e4d9c4'),
             pieTitleTextColor: v('--ink', '#2a2011'),
@@ -1504,10 +1542,32 @@ function mermaidOpts() {
             + '.slice{font-size:13px;font-weight:600}'
             + '.pieCircle{stroke:' + v('--paper', '#fffdf8') + ';stroke-width:2px}'
             + '.pieOuterCircle{stroke:' + v('--line', '#e4d9c4') + '}'
-            + '.legend text{font-size:13px}',
+            + '.legend text{font-size:13px}'
+            // マインドマップだけは `themeVariables` を見ない ── 灰と藤色で
+            // 描かれて、琥珀のノートの上で**そこだけ別のアプリ**に見える。
+            // 枝は円グラフと同じ十一色にして、まん中は琥珀そのものに。
+            + '.mindmap-node.section--1 circle.basic{fill:' + v('--amber', '#f0a52b')
+                + ';stroke:' + v('--amber', '#f0a52b') + '}'
+            + '.mindmap-node.section--1 .nodeLabel{color:#3a2408;font-weight:700}'
+            + FAMILY.map((c, n) =>
+                '.mindmap-node.section-' + n + ' .node-bkg{fill:color-mix(in srgb,' + c
+                    + ' 14%,' + v('--paper', '#fffdf8') + ');stroke:' + c + '}'
+                + '.mindmap-node.section-' + n + ' line{stroke:' + c + ';stroke-width:2px}'
+                + '.edge.section-edge-' + n + '{stroke:' + c + ';stroke-width:2.5px}').join(''),
         flowchart: { curve: 'basis', padding: 14, nodeSpacing: 44, rankSpacing: 46, htmlLabels: true },
         pie: { textPosition: 0.62, useMaxWidth: true },
         sequence: { actorMargin: 44, mirrorActors: false },
+        // 予定表は、既定だと細い帯に目盛りが詰まって日付が重なる（読めない）。
+        // 横幅いっぱいまで伸ばし、棒と余白を広げて、目盛りの字を離す。
+        gantt: {
+            // **広く描いてから、入るところまで縮める。** 既定の幅だと目盛りが
+            // 重なって日付が読めない（`09/1009/12…` になる）。広い紙に描けば
+            // 字は離れ、`useMaxWidth` が枠に合わせて全体を縮めてくれる。
+            useWidth: 980, useMaxWidth: true,
+            barHeight: 22, barGap: 7,
+            topPadding: 48, leftPadding: 88, gridLineStartPadding: 32,
+            fontSize: 12, sectionFontSize: 12, numberSectionStyles: 4,
+        },
         // ノートは人が書いたもの。図の札に書いた HTML を効かせない。
         securityLevel: 'strict',
         fontFamily: '-apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif',
@@ -1695,6 +1755,640 @@ async function drawDiagrams() {
     if (seq === readSeq) armRead();
 }
 
+/* ── 図の工房 ── 図を見ながら、表で直す ── */
+
+/// **書き方を覚えなくても、作った図を直せるようにする。**
+///
+/// 作るところ（`cmdDiagram`）は選ぶだけで済むのに、**直すところが字だけ**
+/// だった。`flowchart LR` も `A -->|はい| B` も覚えていない人にとって、一度
+/// 作った図は「作り直すしか手が無いもの」で、それは作れると言えない。
+///
+/// ここは図を押すと工房が開く。左に表、右に図。表を直すとその場で描き直る
+/// ので、**当たっているかを、保存する前に目で確かめられる**。
+///
+/// **読み戻せない図でも閉め出さない。** 手で書いた凝った図は表にならない
+/// が、そのときは字の面が出る ── 字で直しながら、右で図を見られる。工房を
+/// 開けない図は無い。
+
+/// 図の種類を見分ける。
+function mmdKind(src) {
+    const head = src.split('\n').map((l) => l.trim())
+        .find((l) => l && !l.startsWith('%%')) || '';
+    if (/^(flowchart|graph)\b/.test(head)) return 'flow';
+    if (/^pie\b/.test(head)) return 'pie';
+    if (/^mindmap\b/.test(head)) return 'mind';
+    if (/^timeline\b/.test(head)) return 'time';
+    if (/^gantt\b/.test(head)) return 'gantt';
+    if (/^quadrantChart\b/.test(head)) return 'quad';
+    if (/^sequenceDiagram\b/.test(head)) return 'seq';
+    return null;
+}
+
+/// 図の字を、表に読み戻す。読めなければ `null`（そのときは字で直す面になる）。
+///
+/// **読めなかった行を、黙って落とさない。** 半分だけ読めた表を出すと、直して
+/// 保存した瞬間に読めなかった行が消える ── 消えたことに気づくのは何日も後に
+/// なる。だから一行でも読めなければ、表そのものを諦める。
+///
+/// 表にしない行（`dateFormat`、`x-axis`、注釈…）は **`head` にそのまま
+/// 取っておいて、書き戻すときに戻す**。読めた行だけ組み直して、あとは元の字。
+function mmdParse(src) {
+    const kind = mmdKind(src);
+    if (!kind) return null;
+    const live = src.split('\n').filter((l) => l.trim() !== '');
+    if (!live.length) return null;
+
+    // マインドマップだけは、**字下げが中身**（枝の深さ）なので別に読む。
+    if (kind === 'mind') {
+        const lines = live.slice(1).filter((l) => !l.trim().startsWith('%%'));
+        const rootAt = lines.findIndex((l) => /^\s*root\(\(/.test(l));
+        if (rootAt < 0) return null;
+        const kids = lines.filter((_, i) => i !== rootAt);
+        // 枝の枝と、凝った形（`枝[四角]`）は表にできない ── 平らに直すと
+        // 形が変わってしまうので、そういう図は字で直してもらう。
+        if (kids.some((l) => /[[({]/.test(l.trim()))) return null;
+        const deep = (l) => /^\s*/.exec(l)[0].length;
+        if (kids.length && kids.some((l) => deep(l) !== deep(kids[0]))) return null;
+        return {
+            kind, first: 'mindmap', head: [], edges: [],
+            title: (/root\(\((.*)\)\)/.exec(lines[rootAt]) || ['', ''])[1],
+            rows: kids.map((l) => ({ a: l.trim() })),
+        };
+    }
+
+    const first = live[0].trim();
+    const head = [];
+    const rows = [];
+    const edges = [];
+    let title = '';
+    // 題を表に出す種類だけ、題の行を抜き取る。出さない種類のものは
+    // `head` に残す ── 触らないものを触ったことにしない。
+    const wantsTitle = !!(DIAGRAM_FORM[kind] || {}).title;
+
+    for (const line of live.slice(1)) {
+        const l = line.trim();
+        if (l.startsWith('%%')) { head.push('  ' + l); continue; }
+        if (wantsTitle && /^title\b/.test(l)) { title = l.replace(/^title\s*/, ''); continue; }
+
+        if (kind === 'pie') {
+            const m = /^"(.*)"\s*:\s*([\d.]+)$/.exec(l);
+            if (m) { rows.push({ a: m[1], b: m[2] }); continue; }
+        } else if (kind === 'quad') {
+            const m = /^"(.*)"\s*:\s*\[\s*([\d.]+)\s*,\s*([\d.]+)\s*\]$/.exec(l);
+            if (m) { rows.push({ a: m[1], b: m[3], c: m[2] }); continue; }
+            if (/^(x-axis|y-axis|quadrant-)/.test(l)) { head.push('  ' + l); continue; }
+        } else if (kind === 'time') {
+            const m = /^(.*?)\s*:\s*(.*)$/.exec(l);
+            if (m) { rows.push({ a: m[1], b: m[2] }); continue; }
+        } else if (kind === 'gantt') {
+            if (/^(dateFormat|axisFormat|excludes|todayMarker|tickInterval|weekday)\b/.test(l)) {
+                head.push('  ' + l);
+                continue;
+            }
+            // **区切りは一つまで。** 二つある予定表を平らに読むと、書き戻し
+            // たときに全部が一つの区切りへ移る ── 表には出ない引っ越し。
+            if (/^section\b/.test(l)) {
+                if (head.some((h) => /^\s*section\b/.test(h))) return null;
+                head.push('  ' + l);
+                continue;
+            }
+            const m = /^(.*?)\s*:\s*(?:[^,]*,\s*)?(\d{4}-\d{2}-\d{2})\s*,\s*(.+)$/.exec(l);
+            if (m) { rows.push({ a: m[1], b: m[2], c: m[3] }); continue; }
+        } else if (kind === 'seq') {
+            // 出てくる人は行から組み直すので、名乗りの行は取っておかない
+            // ── 残すと、名前を直したときに古い柱がもう一本立つ。
+            if (/^participant\b/.test(l)) continue;
+            const m = /^(\S+?)\s*(-->>|->>|-->|->)\s*(\S+?)\s*:\s*(.*)$/.exec(l);
+            if (m) { rows.push({ a: m[1], b: m[3], c: m[4], dashed: m[2].startsWith('--') }); continue; }
+        } else {
+            const n = /^([A-Za-z_]\w*)\s*([[({])(.*?)[\])}]$/.exec(l);
+            if (n) {
+                rows.push({ id: n[1], a: n[3], shape: { '{': 'diamond', '(': 'round' }[n[2]] || 'box' });
+                continue;
+            }
+            const e = /^([A-Za-z_]\w*)\s*-->\s*(?:\|(.*?)\|\s*)?([A-Za-z_]\w*)$/.exec(l);
+            if (e) { edges.push({ from: e[1], b: e[2] || '', to: e[3] }); continue; }
+        }
+        return null;    // 読めない行が一つでもあれば、表にしない
+    }
+    if (!rows.length) return null;
+    const dir = (/^(?:flowchart|graph)\s+(\w+)/.exec(first) || [])[1] || 'LR';
+    return { kind, first, head, title, rows, edges, dir };
+}
+
+/// 表を、図の字に書き戻す。
+function mmdBuild(d) {
+    const q = (t) => String(t ?? '').trim().replace(/"/g, '”');
+    // 節の名前に括弧や縦棒が混ざると、そこで形が終わったことになって
+    // 図が壊れる ── 打てる場所なので、通り道で落としておく。
+    const plain = (t) => String(t ?? '').trim().replace(/[[\]{}()|]/g, '');
+    const live = d.rows.filter((r) => Object.values(r).some((v) => String(v ?? '').trim()));
+    const head = d.head.join('\n');
+    const body = (first, rows) =>
+        [first, d.title ? '  title ' + d.title : '', head, rows.join('\n')]
+            .filter((s) => s !== '').join('\n');
+
+    if (d.kind === 'mind') {
+        return 'mindmap\n  root((' + (plain(d.title) || 'まん中') + '))\n'
+            + live.map((r) => '    ' + plain(r.a)).join('\n');
+    }
+    if (d.kind === 'pie') {
+        return body(d.first, live.map((r) => '  "' + q(r.a) + '" : ' + (Number(r.b) || 0)));
+    }
+    if (d.kind === 'quad') {
+        return body(d.first, live.map((r) =>
+            '  "' + q(r.a) + '": [' + num(r.c) + ', ' + num(r.b) + ']'));
+    }
+    if (d.kind === 'time') {
+        return body(d.first, live.map((r) => '  ' + (q(r.a) || '　') + ' : ' + q(r.b)));
+    }
+    if (d.kind === 'gantt') {
+        return body(d.first, live.map((r, n) =>
+            '  ' + q(r.a) + ' :t' + n + ', ' + (q(r.b) || '2026-01-01') + ', ' + (q(r.c) || '1d')));
+    }
+    if (d.kind === 'seq') {
+        const who = [...new Set(live.flatMap((r) => [r.a, r.b]).map(plain).filter(Boolean))];
+        return body(d.first, [
+            ...who.map((w) => '  participant ' + w),
+            ...live.filter((r) => r.a && r.b).map((r) =>
+                '  ' + plain(r.a) + (r.dashed ? '-->>' : '->>') + plain(r.b) + ': ' + q(r.c)),
+        ]);
+    }
+    const wrap = { box: ['[', ']'], round: ['(', ')'], diamond: ['{', '}'] };
+    const seen = new Set(live.map((r) => r.id));
+    return body('flowchart ' + (d.dir || 'LR'), [
+        ...live.map((r) => {
+            const [o, c] = wrap[r.shape] || wrap.box;
+            return '  ' + r.id + o + (plain(r.a) || r.id) + c;
+        }),
+        // 消した節を指したままの線は、書き戻さない ── 残すと mermaid が
+        // 名前だけの箱を勝手に立てて、消したはずのものが図に戻る。
+        ...d.edges.filter((e) => seen.has(e.from) && seen.has(e.to)).map((e) =>
+            '  ' + e.from + ' -->' + (e.b.trim() ? '|' + plain(e.b) + '|' : '') + ' ' + e.to),
+    ]);
+}
+
+/// 0〜1 に収める。**打ち間違いで図が壊れないように** ── 四象限は枠の外に
+/// 置かれると、点が消えたようにしか見えない。
+function num(v) {
+    const n = Number(String(v ?? '').trim());
+    return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : 0.5;
+}
+
+/// 種類ごとの、表の形。**列の名前がそのまま説明になる** ── 「なに」「いつ」
+/// と書いてあれば、何を打てばいいかを別に書かなくていい。
+const DIAGRAM_FORM = {
+    flow: { name: '流れ図', add: '箱を足す' },
+    pie: {
+        name: '円グラフ', title: '題', add: '割合を足す',
+        cols: [{ k: 'a', label: '名前', w: 3, ph: '仕事' },
+               { k: 'b', label: '数', w: 1, ph: '5' }],
+    },
+    quad: {
+        name: '四象限', title: '題', add: 'やることを足す',
+        cols: [{ k: 'a', label: 'やること', w: 3, ph: '週報' },
+               { k: 'b', label: '大事さ', w: 1, ph: '0.8', slide: true },
+               { k: 'c', label: '急ぎ', w: 1, ph: '0.9', slide: true }],
+    },
+    time: {
+        name: '年表', title: '題', add: 'できごとを足す',
+        cols: [{ k: 'a', label: 'いつ', w: 1, ph: '4月' },
+               { k: 'b', label: 'なに', w: 3, ph: '引っ越し' }],
+    },
+    gantt: {
+        name: '予定表', title: '題', add: 'やることを足す',
+        cols: [{ k: 'a', label: 'やること', w: 3, ph: '下ごしらえ' },
+               { k: 'b', label: '始まり', w: 1, ph: '2026-09-10', date: true },
+               { k: 'c', label: '長さ', w: 1, ph: '3d' }],
+    },
+    mind: {
+        name: 'マインドマップ', title: 'まん中', add: '枝を足す',
+        cols: [{ k: 'a', label: '枝', w: 1, ph: '仕事' }],
+    },
+    seq: {
+        name: 'やりとり', title: '題', add: 'やりとりを足す',
+        cols: [{ k: 'a', label: 'だれが', w: 2, ph: '私' },
+               { k: 'b', label: 'だれに', w: 2, ph: '相手' },
+               { k: 'c', label: 'なにを', w: 3, ph: 'お願いする' },
+               { k: 'dashed', label: '返事', w: 0, check: true }],
+    },
+};
+
+const FLOW_SHAPE = [['box', '四角'], ['round', '丸み'], ['diamond', 'ひし形']];
+const FLOW_DIR = [['LR', '左から右'], ['TD', '上から下'], ['RL', '右から左'], ['BT', '下から上']];
+
+let studio = null;
+let studioTimer = 0;
+
+/// 工房を開く。`node` は読む面の図（`.mermaid`）か、描けなかった枠。
+async function studioOpen(node) {
+    const md = node && node.dataset ? node.dataset.md : undefined;
+    if (md === undefined) { say('この図の元の字が取れません'); return; }
+    const src = fenceBody(md);
+    if (src === null) { say('図ではありません'); return; }
+    const data = mmdParse(src);
+    studio = { node, data, text: src, raw: !data, good: '' };
+    el('studio').hidden = false;
+    studioDraw();
+    studioShow();
+}
+
+/// ` ```mermaid ` の中身を取り出す。図でなければ `null`。
+function fenceBody(md) {
+    const m = /^`{3,}\s*mermaid\s*\n([\s\S]*?)\n?`{3,}\s*$/.exec(String(md).trim());
+    return m ? m[1] : null;
+}
+
+/// いまの表（か字）から、図の字を作る。
+function studioText() {
+    return studio.raw ? studio.text : mmdBuild(studio.data);
+}
+
+function studioClose() {
+    el('studio').hidden = true;
+    clearTimeout(studioTimer);
+    studio = null;
+    el('read').focus();
+}
+
+/// 直したものを、ノートへ返す。
+async function studioOk() {
+    const md = '```mermaid\n' + studioText().trim() + '\n```';
+    const node = studio.node;
+    studioClose();
+    await readSourceEdit(() => md, node);
+}
+
+/* ── 表を描く ── */
+
+function studioDraw() {
+    const box = el('studio');
+    const spec = studio.data ? DIAGRAM_FORM[studio.data.kind] : null;
+    box.querySelector('.kind').textContent = spec ? spec.name : '図';
+    const swap = box.querySelector('#studioswap');
+    swap.textContent = studio.raw ? '表で直す' : '字で直す';
+    // 読み戻せなかった図は、表に戻れない ── 押せる顔をしておいて何も
+    // 起きないより、押せないと見えているほうがいい。
+    swap.disabled = studio.raw && !studio.data;
+    swap.title = swap.disabled
+        ? 'この図は表にできません（手で書いた形）。字で直してください'
+        : '';
+
+    const form = box.querySelector('.form');
+    form.textContent = '';
+    if (studio.raw) { form.append(studioRaw()); return; }
+    const d = studio.data;
+
+    if (spec.title !== undefined) {
+        form.append(studioField(spec.title, d.title, (v) => { d.title = v; studioShow(); }));
+    }
+    if (d.kind === 'flow') {
+        form.append(studioPick('向き', FLOW_DIR, d.dir, (v) => { d.dir = v; studioShow(); }));
+        form.append(studioFlow());
+        return;
+    }
+    form.append(studioRows(spec.cols, d.rows, spec.add, () =>
+        Object.fromEntries(spec.cols.map((c) => [c.k, c.check ? false : '']))));
+}
+
+/// 題のような、一つきりの欄。
+function studioField(label, value, set) {
+    const wrap = tag('div', 'grp');
+    wrap.append(tag('label', '', label));
+    const i = document.createElement('input');
+    i.type = 'text';
+    i.value = value || '';
+    i.oninput = () => set(i.value);
+    wrap.append(i);
+    return wrap;
+}
+
+/// 選ぶ欄（向き・形）。
+function studioPick(label, opts, value, set) {
+    const wrap = tag('div', 'grp');
+    if (label) wrap.append(tag('label', '', label));
+    const s = document.createElement('select');
+    for (const [v, name] of opts) {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = name;
+        o.selected = v === value;
+        s.append(o);
+    }
+    s.onchange = () => set(s.value);
+    wrap.append(s);
+    return wrap;
+}
+
+/// 行の並んだ表。上下に動かせて、消せて、足せる。
+///
+/// **並べ替えを引きずりで作らない。** 引きずりは掴む場所を探すところから
+/// 始まって、外した時にどこへ落ちたか分からない ── ↑↓ なら一段ずつ、
+/// 見ながら動かせる。
+function studioRows(cols, rows, addName, blank) {
+    const box = tag('div', 'rows');
+    const head = tag('div', 'row hd');
+    for (const c of cols) {
+        const h = tag('span', '', c.label);
+        h.style.flex = c.w ? c.w + ' 1 0' : '0 0 auto';
+        head.append(h);
+    }
+    head.append(tag('span', 'sp'));
+    box.append(head);
+
+    rows.forEach((r, n) => {
+        const line = tag('div', 'row');
+        for (const c of cols) {
+            const cell = studioCell(c, r);
+            cell.style.flex = c.w ? c.w + ' 1 0' : '0 0 auto';
+            line.append(cell);
+        }
+        const move = (to) => {
+            if (to < 0 || to >= rows.length) return;
+            rows.splice(to, 0, rows.splice(n, 1)[0]);
+            studioDraw();
+            studioShow();
+        };
+        line.append(studioBtn('↑', '一つ上へ', () => move(n - 1)));
+        line.append(studioBtn('↓', '一つ下へ', () => move(n + 1)));
+        line.append(studioBtn('✕', 'この行を消す', () => {
+            rows.splice(n, 1);
+            studioDraw();
+            studioShow();
+        }));
+        box.append(line);
+    });
+
+    const add = tag('button', 'add', '＋ ' + addName);
+    add.onclick = () => {
+        rows.push(blank());
+        studioDraw();
+        studioShow();
+        // 足した行の、最初の欄へ ── 足してから掴みに行かせない。
+        [...el('studio').querySelectorAll('.rows .row:not(.hd)')].pop()
+            ?.querySelector('input')?.focus();
+    };
+    const wrap = tag('div', 'grp rowsgrp');
+    wrap.append(box, add);
+    return wrap;
+}
+
+/// 一つの欄。数は 0〜1 のつまみ、日付は日付、あとは字。
+function studioCell(c, r) {
+    if (c.check) {
+        const w = tag('label', 'chk');
+        const i = document.createElement('input');
+        i.type = 'checkbox';
+        i.checked = !!r[c.k];
+        i.onchange = () => { r[c.k] = i.checked; studioShow(); };
+        w.append(i, tag('span', '', '点線'));
+        w.title = '返事のような、点線の矢印にする';
+        return w;
+    }
+    if (c.slide) {
+        const w = tag('div', 'slide');
+        const i = document.createElement('input');
+        i.type = 'range';
+        i.min = '0'; i.max = '1'; i.step = '0.05';
+        i.value = String(num(r[c.k]));
+        const n = tag('span', 'n', i.value);
+        i.oninput = () => { r[c.k] = i.value; n.textContent = i.value; studioShow(); };
+        w.append(i, n);
+        return w;
+    }
+    const i = document.createElement('input');
+    i.type = c.date ? 'date' : 'text';
+    i.value = r[c.k] || '';
+    i.placeholder = c.ph || '';
+    i.oninput = () => { r[c.k] = i.value; studioShow(); };
+    return i;
+}
+
+/// 流れ図。**箱の表と、線の表**の二つ。
+///
+/// 線の行き先は、箱の名前から選ぶ ── `A`、`B` のような合言葉を人に
+/// 打たせない（打たせると、消した箱を指したままの線が残る）。
+function studioFlow() {
+    const d = studio.data;
+    const wrap = document.createDocumentFragment();
+    const box = tag('div', 'rows');
+    const head = tag('div', 'row hd');
+    head.append(tag('span', '', '箱の中の言葉'));
+    head.querySelector('span').style.flex = '3 1 0';
+    const sh = tag('span', '', '形');
+    sh.style.flex = '0 0 92px';
+    head.append(sh, tag('span', 'sp'));
+    box.append(head);
+
+    d.rows.forEach((r, n) => {
+        const line = tag('div', 'row');
+        const i = document.createElement('input');
+        i.type = 'text';
+        i.value = r.a || '';
+        i.placeholder = '書く';
+        i.style.flex = '3 1 0';
+        i.oninput = () => { r.a = i.value; studioRelabel(); studioShow(); };
+        line.append(i);
+        const pick = studioPick('', FLOW_SHAPE, r.shape, (v) => { r.shape = v; studioShow(); });
+        pick.classList.add('bare');
+        pick.style.flex = '0 0 92px';
+        line.append(pick);
+        const move = (to) => {
+            if (to < 0 || to >= d.rows.length) return;
+            d.rows.splice(to, 0, d.rows.splice(n, 1)[0]);
+            studioDraw(); studioShow();
+        };
+        line.append(studioBtn('↑', '一つ上へ', () => move(n - 1)));
+        line.append(studioBtn('↓', '一つ下へ', () => move(n + 1)));
+        line.append(studioBtn('✕', 'この箱を消す', () => {
+            const gone = d.rows.splice(n, 1)[0];
+            d.edges = d.edges.filter((e) => e.from !== gone.id && e.to !== gone.id);
+            studioDraw(); studioShow();
+        }));
+        box.append(line);
+    });
+    const addNode = tag('button', 'add', '＋ 箱を足す');
+    addNode.onclick = () => {
+        const id = freshId(d.rows.map((r) => r.id));
+        d.rows.push({ id, a: '', shape: 'box' });
+        // 足した箱を、いま最後の箱につないでおく ── 置いただけの箱は
+        // 図の隅に浮くので、たいてい「つなぐ」まで込みで一つの用事。
+        const prev = d.rows[d.rows.length - 2];
+        if (prev) d.edges.push({ from: prev.id, b: '', to: id });
+        studioDraw(); studioShow();
+        // 足した箱へ、そのまま打てるように ── 足してから掴みに行かせない。
+        [...el('studio').querySelectorAll('.rowsgrp')][0]
+            ?.querySelector('.row:last-of-type input')?.focus();
+    };
+    const g1 = tag('div', 'grp rowsgrp');
+    g1.append(tag('label', '', '箱'), box, addNode);
+
+    const ebox = tag('div', 'rows');
+    const ehead = tag('div', 'row hd');
+    for (const [t, w] of [['ここから', '2 1 0'], ['線の言葉', '2 1 0'], ['ここへ', '2 1 0']]) {
+        const s = tag('span', '', t);
+        s.style.flex = w;
+        ehead.append(s);
+    }
+    ehead.append(tag('span', 'sp'));
+    ebox.append(ehead);
+
+    const pickable = () => d.rows.map((r) => [r.id, (r.a || '').trim() || r.id]);
+    d.edges.forEach((e, n) => {
+        const line = tag('div', 'row');
+        const from = studioPick('', pickable(), e.from, (v) => { e.from = v; studioShow(); });
+        from.classList.add('bare', 'nodepick'); from.style.flex = '2 1 0';
+        const label = document.createElement('input');
+        label.type = 'text';
+        label.value = e.b || '';
+        label.placeholder = '（なくてもいい）';
+        label.style.flex = '2 1 0';
+        label.oninput = () => { e.b = label.value; studioShow(); };
+        const to = studioPick('', pickable(), e.to, (v) => { e.to = v; studioShow(); });
+        to.classList.add('bare', 'nodepick'); to.style.flex = '2 1 0';
+        line.append(from, label, to);
+        line.append(studioBtn('✕', 'この線を消す', () => {
+            d.edges.splice(n, 1);
+            studioDraw(); studioShow();
+        }));
+        ebox.append(line);
+    });
+    const addEdge = tag('button', 'add', '＋ 線を足す');
+    addEdge.onclick = () => {
+        if (d.rows.length < 2) { say('線を引くには、箱が二つ要ります'); return; }
+        d.edges.push({ from: d.rows[0].id, b: '', to: d.rows[1].id });
+        studioDraw(); studioShow();
+    };
+    const g2 = tag('div', 'grp rowsgrp');
+    g2.append(tag('label', '', '線'), ebox, addEdge);
+
+    wrap.append(g1, g2);
+    return wrap;
+}
+
+/// 箱の名前を変えたら、線の「ここから／ここへ」の見え方も変える。
+///
+/// **全部を描き直さない。** 描き直すと、いま打っている欄から caret が飛ぶ
+/// ── 一文字ごとに欄を掴み直すことになる。動くのは名札だけなので、
+/// 名札だけ書き換える。
+function studioRelabel() {
+    for (const pick of el('studio').querySelectorAll('.nodepick select')) {
+        for (const o of pick.options) {
+            const r = studio.data.rows.find((x) => x.id === o.value);
+            if (r) o.textContent = (r.a || '').trim() || r.id;
+        }
+    }
+}
+
+/// まだ使っていない合言葉を一つ。`A`…`Z`、尽きたら `N1`、`N2`…
+function freshId(used) {
+    for (let n = 0; n < 26; n++) {
+        const id = String.fromCharCode(65 + n);
+        if (!used.includes(id)) return id;
+    }
+    for (let n = 1; ; n++) if (!used.includes('N' + n)) return 'N' + n;
+}
+
+/// 字で直す面。**表にできない図の逃げ道**であり、書き方を覚えた人の近道。
+function studioRaw() {
+    const wrap = tag('div', 'grp rawgrp');
+    wrap.append(tag('label', '', 'mermaid の字'));
+    const t = document.createElement('textarea');
+    t.value = studio.text;
+    t.spellcheck = false;
+    t.oninput = () => { studio.text = t.value; studioShow(); };
+    wrap.append(t);
+    if (!studio.data) {
+        wrap.append(tag('div', 'note',
+            'この図は表にできない形（手で書いたか、amber の知らない書き方）です。'
+            + '右の絵を見ながら、ここで直してください。'));
+    }
+    return wrap;
+}
+
+function studioBtn(text, title, go) {
+    const b = tag('button', 'mini', text);
+    b.title = title;
+    b.onclick = go;
+    return b;
+}
+
+function tag(name, cls, text) {
+    const n = document.createElement(name);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+}
+
+/* ── 図を描く ── */
+
+/// 打つたびに描き直す。**待たせない程度に間を置く** ── 一文字ごとに
+/// 描くと、打っている最中の壊れた字で「図にできません」が点滅する。
+function studioShow() {
+    clearTimeout(studioTimer);
+    studioTimer = setTimeout(studioRender, 170);
+}
+
+async function studioRender() {
+    if (!studio) return;
+    const src = studioText().trim();
+    const view = el('studio').querySelector('.view');
+    const err = el('studio').querySelector('.err');
+    let lib;
+    try {
+        lib = await loadMermaid();
+    } catch (e) {
+        err.hidden = false;
+        err.textContent = '図を読めません: ' + (e && e.message ? e.message : e);
+        return;
+    }
+    if (!studio) return;
+    try {
+        const { svg } = await lib.render('studio' + (++mermaidSeq), src);
+        if (!studio) return;
+        view.innerHTML = svg;
+        studio.good = svg;
+        err.hidden = true;
+    } catch (e) {
+        if (!studio) return;
+        // **直前の図を残したまま、言う。** 消してしまうと、打ち間違えた
+        // 一文字のあいだ図が消えて、何を直していたのか分からなくなる。
+        if (studio.good) view.innerHTML = studio.good;
+        err.hidden = false;
+        err.textContent = 'いまの字では図になりません: ' + (e && e.message ? e.message : e);
+    }
+}
+
+/* ── 工房の受け口 ── */
+
+el('studio').addEventListener('keydown', (e) => {
+    // 中で打った字を、外の近道に取られない（`b` で太字、`e` で面替え…）。
+    e.stopPropagation();
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.code === 'Escape') { e.preventDefault(); studioClose(); return; }
+    if (e.code === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); studioOk(); }
+});
+el('studio').addEventListener('mousedown', (e) => {
+    if (e.target.id === 'studio') studioClose();
+});
+el('studioswap').onclick = () => {
+    if (studio.raw) {
+        // 字 → 表。読めなければ、表にせず言う ── 読めない字を無理に
+        // 表へ入れると、読めなかったところが消える。
+        const back = mmdParse(studio.text);
+        if (!back) { say('いまの字は表にできません。字のまま直してください'); return; }
+        studio.data = back;
+        studio.raw = false;
+    } else {
+        studio.text = studioText();
+        studio.raw = true;
+    }
+    studioDraw();
+    studioShow();
+};
+el('studiocancel').onclick = () => studioClose();
+el('studiook').onclick = () => studioOk();
+
 /// コード枠に色を付ける。
 ///
 /// **Monaco の色付けをそのまま借りる。** ハイライタを別に持ってこない ──
@@ -1775,6 +2469,11 @@ el('read').addEventListener('click', async (e) => {
         }
         return;
     }
+    // 図は、押すと工房が開く ── 書く面へ送っても、そこにあるのは
+    // `flowchart LR` で、直せる人はもう工房を要らない。描けなかった枠
+    // （`pre.bad`）も同じ扉から ── **直したいのは、まさに壊れた図**。
+    const art = diagramAt(e.target);
+    if (art) { e.preventDefault(); studioOpen(art); return; }
     const a = e.target.closest('a');
     if (!a) {
         // **触れないかたまりは、書く面のその行へ送る。**
@@ -1807,6 +2506,25 @@ el('read').addEventListener('click', async (e) => {
     }
     if (!(await window.amber.openLink(href))) say('この行き先は開けません: ' + href);
 });
+
+// 右押しでも同じ扉。**押しても右押しでも開く** ── どちらだったかを
+// 覚えている人はいないので、両方に置く。
+el('read').addEventListener('contextmenu', (e) => {
+    const art = diagramAt(e.target);
+    if (!art) return;
+    e.preventDefault();
+    studioOpen(art);
+});
+
+/// 押されたところの図。描けた図（`.mermaid`）と、描けなかった枠のどちらも。
+function diagramAt(target) {
+    const box = el('read');
+    const done = target.closest('.mermaid');
+    if (done && box.contains(done)) return done;
+    const pre = target.closest('pre');
+    if (pre && box.contains(pre) && pre.querySelector('code.language-mermaid')) return pre;
+    return null;
+}
 
 /// 保存。**誰かが先に書いていたら上書きしない。**
 ///
@@ -2079,6 +2797,7 @@ const CMDS = [
     { id: 'syntax', name: 'マークダウンの書き方', key: '⌘⇧/', app: true, run: cmdSyntax },
     { id: 'theme', name: 'テーマ', app: true, run: cmdTheme },
     { id: 'vim', name: 'vimモード', app: true, run: cmdVim },
+    { id: 'lineno', name: '行番号', app: true, run: cmdLineNo },
     { id: 'backup', name: '一括バックアップ', app: true, sep: true, run: cmdBackup },
     { id: 'root', name: 'amber保存ディレクトリ変更', app: true, run: cmdRoot },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
@@ -2116,6 +2835,7 @@ function openMenu(at, which) {
         // **いまどうなっているかを、押す前に見せる。**
         if (c.id === 'theme') return { ...c, sub: 'いま: ' + themeName() };
         if (c.id === 'vim') return { ...c, sub: vimOn ? 'いま: vim' : 'いま: 素のメモ帳' };
+        if (c.id === 'lineno') return { ...c, sub: lineNo ? 'いま: 出している' : 'いま: 出していない' };
         if (c.id === 'root') return { ...c, sub: shortPath(state.root) };
         return c;
     });
@@ -3109,6 +3829,7 @@ const escapeAttr = escapeHtml;
     if (saved.order) order = saved.order;
     if (saved.tocOn) tocOn = true;
     if (saved.theme) setTheme(saved.theme);
+    if (saved.lineNo) lineNo = true;
     drawOrder();
     booted = true;
     if (pendingGuest) { const at = pendingGuest; pendingGuest = null; openGuest(at); }

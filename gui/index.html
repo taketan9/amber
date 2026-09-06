@@ -137,12 +137,30 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
    mac の信号機のぶんだけ、列の上を空ける。 */
 #railtop { height: 14px; flex: none; -webkit-app-region: drag; }
 body.mac #railtop { height: 34px; }
+/* **一つだけの、押させたい釦。**
+   琥珀の面に濃い字を置き、影で一段持ち上げる。押した瞬間だけ沈める ──
+   「押せた」が指に返らないと、押したかどうかを画面で確かめることになる。 */
 #new {
-  margin: 2px 12px 14px; padding: 8px 12px; border-radius: 9px;
-  background: var(--amber); color: #3a2408; font-weight: 700;
-  display: flex; align-items: center; gap: 8px;
+  margin: 2px 12px 16px; padding: 9px 13px; border-radius: 10px;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--amber) 88%, white),
+    var(--amber));
+  color: #3a2408; font-weight: 700; font-size: 13.5px; letter-spacing: .01em;
+  display: flex; align-items: center; gap: 9px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.14), 0 2px 8px color-mix(in srgb, var(--amber) 38%, transparent);
+  transition: transform .08s, box-shadow .12s, filter .12s;
 }
-#new:hover { filter: brightness(1.06); }
+#new svg { width: 15px; height: 15px; flex: none; opacity: .85; }
+#new span { flex: 1; text-align: left; }
+#new:hover {
+  filter: brightness(1.04);
+  box-shadow: 0 2px 4px rgba(0,0,0,.16), 0 4px 14px color-mix(in srgb, var(--amber) 46%, transparent);
+}
+#new:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 1px rgba(0,0,0,.18);
+  filter: brightness(.97);
+}
 .head {
   font-size: 10.5px; letter-spacing: .13em; color: var(--ink-3);
   padding: 12px 15px 4px; text-transform: uppercase;
@@ -496,6 +514,9 @@ body.vim #vim { display: block; }
   position: fixed; inset: 0; z-index: 30; display: flex;
   justify-content: center; align-items: flex-start; padding-top: 12vh;
   background: rgba(0,0,0,.28);
+  /* 小窓は帯より下に出るので今は当たっていないが、上げた日に黙って
+     押せなくなる ── 切っておく（理由は `#studio` に書いた）。 */
+  -webkit-app-region: no-drag;
 }
 #veil[hidden] { display: none !important; }
 #sheet {
@@ -521,6 +542,127 @@ body.vim #vim { display: block; }
 #sheet .it.on { background: var(--sel); }
 #sheet .foot { padding: 8px 15px; font-size: 11.5px; color: var(--ink-3);
   border-top: 1px solid var(--line-2); }
+
+/* ── 図の工房 ── 左に表、右に図。**直したそばから見える** ──
+   見えないまま字を直させるのが、mermaid をいちばん難しくしていた。 */
+#studio {
+  position: fixed; inset: 0; z-index: 32; display: flex;
+  align-items: center; justify-content: center; padding: 4vh 4vw;
+  background: rgba(0,0,0,.34);
+  /* **窓を掴む場所を、ここでは切る。** `#top` は窓ごと引きずるための帯
+     （`-webkit-app-region: drag`）で、上に重ねたものより先に押しを取る ──
+     重ね順は効かない。工房は上から 4vh に出るので帯とちょうど重なり、
+     切らないと「この形にする」も「やめる」も押せない（実際に押せなかった）。 */
+  -webkit-app-region: no-drag;
+}
+#studio[hidden] { display: none !important; }
+#studiobox {
+  width: min(1080px, 100%); height: 100%; display: flex; flex-direction: column;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 22px 60px rgba(0,0,0,.34); overflow: hidden;
+}
+#studiobox > .hd {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line-2); background: var(--rail);
+}
+#studiobox .what { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+#studiobox .kind {
+  font-size: 11.5px; color: var(--ink-2); padding: 2px 9px; border-radius: 999px;
+  background: var(--sel); border: 1px solid var(--line-2);
+}
+#studiobox .grow { flex: 1; }
+#studiobox .hd button {
+  padding: 5px 13px; border-radius: 8px; font-size: 12.5px;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+}
+#studiobox .hd button:hover:not(:disabled) { background: var(--hover); }
+#studiobox .hd button:disabled { opacity: .45; }
+#studiook {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--amber) 88%, white), var(--amber)) !important;
+  border-color: color-mix(in srgb, var(--amber) 70%, black) !important;
+  color: #3a2408 !important; font-weight: 700;
+}
+#studiook:active { transform: translateY(1px); }
+#studiobox > .body { flex: 1; display: flex; min-height: 0; }
+#studiobox .form {
+  flex: 0 0 46%; min-width: 0; overflow-y: auto; padding: 14px;
+  border-right: 1px solid var(--line-2); background: var(--bg);
+}
+#studiobox .grp { margin-bottom: 15px; }
+#studiobox .grp > label {
+  display: block; margin-bottom: 5px; font-size: 11.5px; font-weight: 700;
+  color: var(--ink-3); letter-spacing: .04em;
+}
+#studiobox .grp > input, #studiobox .grp > select {
+  width: 100%; padding: 7px 10px; border-radius: 8px; font: inherit; font-size: 13.5px;
+  background: var(--paper); border: 1px solid var(--line); color: var(--ink); outline: none;
+}
+#studiobox .grp.bare { margin: 0; }
+#studiobox .grp.bare > select { padding: 6px 7px; font-size: 12.5px; }
+#studiobox input:focus, #studiobox select:focus, #studiobox textarea:focus {
+  border-color: var(--amber); box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 26%, transparent);
+}
+#studiobox .rows {
+  border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--paper);
+}
+#studiobox .row {
+  display: flex; align-items: center; gap: 6px; padding: 5px 7px;
+  border-top: 1px solid var(--line-2);
+}
+#studiobox .row:first-child { border-top: 0; }
+#studiobox .row.hd {
+  background: var(--rail); font-size: 11px; color: var(--ink-3);
+  font-weight: 700; letter-spacing: .04em; padding: 4px 7px;
+}
+#studiobox .row.hd .sp { flex: 0 0 84px; }
+#studiobox .row > input, #studiobox .row select {
+  min-width: 0; padding: 5px 8px; border-radius: 7px; font: inherit; font-size: 13px;
+  background: var(--bg); border: 1px solid var(--line-2); color: var(--ink); outline: none;
+}
+/* 日付の欄は、狭めると「2026/(」で切れて何日か読めなくなる ── 縮めない。 */
+#studiobox .row > input[type="date"] { flex: 0 0 132px !important; }
+#studiobox .row .slide { display: flex; align-items: center; gap: 5px; min-width: 0; }
+#studiobox .row .slide input { flex: 1; min-width: 0; accent-color: var(--amber); }
+#studiobox .row .slide .n {
+  flex: none; width: 27px; font-size: 11px; color: var(--ink-3);
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+#studiobox .row .chk {
+  display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-3);
+  white-space: nowrap;
+}
+#studiobox .row .chk input { accent-color: var(--amber); }
+#studiobox .mini {
+  flex: none; width: 24px; height: 24px; border-radius: 6px; font-size: 12px;
+  color: var(--ink-3); line-height: 1;
+}
+#studiobox .mini:hover { background: var(--hover); color: var(--ink); }
+#studiobox .add {
+  margin-top: 7px; padding: 5px 12px; border-radius: 8px; font-size: 12.5px;
+  color: var(--ink-2); background: var(--paper); border: 1px dashed var(--line);
+}
+#studiobox .add:hover { background: var(--hover); color: var(--ink); border-style: solid; }
+#studiobox textarea {
+  width: 100%; height: 46vh; padding: 9px 11px; border-radius: 9px; resize: vertical;
+  font: 12.5px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--paper); border: 1px solid var(--line); color: var(--ink); outline: none;
+}
+#studiobox .note {
+  margin-top: 8px; padding: 8px 11px; border-radius: 8px; font-size: 12px;
+  line-height: 1.6; color: var(--ink-2); background: var(--sel);
+  border-left: 3px solid var(--amber);
+}
+#studiobox .see { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#studiobox .view {
+  flex: 1; min-height: 0; overflow: auto; display: flex;
+  align-items: center; justify-content: center; padding: 18px;
+}
+#studiobox .view svg { max-width: 100%; height: auto; }
+#studiobox .err {
+  flex: none; padding: 8px 14px; font-size: 12px; line-height: 1.55;
+  color: var(--ink-2); background: var(--sel); border-top: 1px solid var(--line-2);
+}
+#studiobox .err[hidden] { display: none !important; }
 
 /* ── ⋯ の献立 ── */
 #more {
@@ -677,6 +819,23 @@ body.dropping::after {
     <div class="foot"></div>
   </div></div>
   <div id="more" hidden></div>
+  <div id="studio" hidden><div id="studiobox">
+    <div class="hd">
+      <span class="what">図を直す</span>
+      <span class="kind"></span>
+      <span class="grow"></span>
+      <button id="studioswap">字で直す</button>
+      <button id="studiocancel">やめる</button>
+      <button id="studiook" title="⌘Enter">この形にする</button>
+    </div>
+    <div class="body">
+      <div class="form"></div>
+      <div class="see">
+        <div class="view"></div>
+        <div class="err" hidden></div>
+      </div>
+    </div>
+  </div></div>
   <div id="tablebar" hidden>
     <button data-do="row+">行を足す</button>
     <button data-do="row-">行を消す</button>

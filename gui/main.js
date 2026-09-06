@@ -153,6 +153,15 @@ function makeWindow() {
         win.webContents.once('did-finish-load', () => {
             setTimeout(async () => {
                 try {
+                    // **撮る前に、一手だけ打てる**（`AMBER_DO`）。開いた姿は
+                    // 一枚で分かるが、押して出るもの（工房や小窓）は押さないと
+                    // 写らない ── 押す道が無いせいで、目で確かめないまま
+                    // 出すことになるのがいちばん惜しい。
+                    if (process.env.AMBER_DO) {
+                        await win.webContents.executeJavaScript(process.env.AMBER_DO, true);
+                        await new Promise((go) =>
+                            setTimeout(go, Number(process.env.AMBER_DO_WAIT || 900)));
+                    }
                     const img = await win.webContents.capturePage();
                     fs.writeFileSync(process.env.AMBER_SHOT, img.toPNG());
                     console.log('撮りました:', process.env.AMBER_SHOT);
