@@ -296,6 +296,7 @@ final class NotesStore: ObservableObject {
             allBooks = answer["books"] as? [String] ?? []
             stars = answer["stars"] as? [String] ?? []
             colors = answer["colors"] as? [String: String] ?? [:]
+            share = answer["share"] as? String ?? ""
             waiting = (answer["waiting"] as? [[String: Any]] ?? [])
                 .compactMap { $0["of"] as? String }
             fetch(answer["waiting"] as? [[String: Any]] ?? [])
@@ -304,6 +305,19 @@ final class NotesStore: ObservableObject {
         } catch {
             trouble = error.localizedDescription
         }
+    }
+
+    /// 家族と分けてあるフォルダ（ルートからの道）。無ければ空。
+    ///
+    /// **共有そのものは amber の仕事ではない** ── 分けるのはクラウドで、
+    /// amber が持つのは「どれが分けてあるか」の一言だけ。
+    @Published var share: String = ""
+
+    /// 家族と分けるフォルダを決める（空でやめる）。
+    func setShare(_ folder: String) throws {
+        guard let root else { return }
+        _ = try Cian.call("share", ["path": root.path, "folder": folder])
+        reload()
     }
 
     /// まだ落ちてきていないノートの名前。**黙って足りない一覧を見せない。**

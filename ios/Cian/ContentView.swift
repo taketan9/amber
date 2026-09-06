@@ -295,6 +295,12 @@ struct ContentView: View {
                                     .font(.caption2).foregroundStyle(.orange)
                             }
                             Text(note.shown).font(.body.weight(.semibold)).lineLimit(1)
+                            if note.shared {
+                                Text("共有").font(.caption2.weight(.bold))
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Capsule().fill(.green.opacity(0.2)))
+                                    .foregroundStyle(.green)
+                            }
                             if note.clash != nil {
                                 Text("競合").font(.caption2.weight(.bold))
                                     .padding(.horizontal, 5).padding(.vertical, 1)
@@ -388,6 +394,17 @@ struct ContentView: View {
                     ShareLink(item: URL(fileURLWithPath: note.path)) {
                         Label("エクスポート", systemImage: "square.and.arrow.up")
                     }
+                    // 共有のフォルダへ出し入れする。**移すこと以上のことは
+                    // しない** ── 前書きに書くと、共有をやめた日に全部の
+                    // ノートを書き換えることになる（同期先で全部が差分）。
+                    if !store.share.isEmpty {
+                        Button {
+                            moveTo(note, note.shared ? nil : store.share)
+                        } label: {
+                            Label(note.shared ? "家族との共有をやめる" : "家族と共有する",
+                                  systemImage: "person.2")
+                        }
+                    }
                     // **長押しから履歴へ。** 窓は右押しで開く ── 電話に
                     // 右押しは無いので、同じ意味の手ぶりに割り当てる。
                     Button { past = .init(at: note.path, book: false) } label: {
@@ -477,6 +494,18 @@ struct ContentView: View {
         guard store.at != was else { return }
         deeper = store.at.count > was.count
         withAnimation(.easeOut(duration: 0.24)) { walked = store.at }
+    }
+
+    /// 共有のフォルダを除いた、自分だけのフォルダ。
+    ///
+    /// **二つの場所に同じものを出さない** ── 共有のぶんは上の「共有」の段に
+    /// 並ぶ（ブックマークを別枠にしたのと同じ理由）。一か所で数えないと、
+    /// 段が空なのに見出しだけ残る（実際に残った）。
+    private var ownBooks: [(name: String, path: String, count: Int)] {
+        store.books.filter {
+            store.share.isEmpty
+                || !($0.path == store.share || $0.path.hasPrefix(store.share + "/"))
+        }
     }
 
     /// Whether the tree is what is being drawn right now.
@@ -662,6 +691,29 @@ struct ContentView: View {
                     }
                 }
             }
+            // **共有は、行き先の一つ。** 分けるのはクラウドの仕事で、amber が
+            // 持つのは「どれが分けてあるか」だけ ── 新しい仕組みではなく、
+            // フォルダの一つを別の名前で呼んでいるだけ。
+            //
+            // **決めていないうちは出さない** ── 空の「共有」が並ぶと、共有が
+            // 壊れているのか、まだ何も分けていないのかが見分けられない。
+            if needle.isEmpty, store.at.isEmpty, !store.flat, !store.share.isEmpty {
+                Section("共有") {
+                    Button { go { store.into(store.share) } } label: {
+                        HStack {
+                            Label(store.share.split(separator: "/").last.map(String.init)
+                                  ?? store.share, systemImage: "person.2")
+                            Spacer()
+                            Text("\(store.notes.filter(\.shared).count)")
+                                .foregroundStyle(.secondary).monospacedDigit()
+                            Image(systemName: "chevron.right")
+                                .font(.caption).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
             // The notebooks first, then the notes in this one. Folders above
             // files is what every file manager since the first one has done,
             // and this is the same gesture: go in, come back.
@@ -686,7 +738,7 @@ struct ContentView: View {
                     .listRowBackground(outside ? Color.accentColor.opacity(0.15) : nil)
                 }
                 Section {
-                  ForEach(store.books, id: \.path) { b in
+                  ForEach(ownBooks, id: \.path) { b in
                     Button {
                         go { store.into(b.path) }
                     } label: {
@@ -716,6 +768,16 @@ struct ContentView: View {
                         Button { colouring = b.path } label: {
                             Label("色をつける", systemImage: "paintpalette")
                         }
+                        // **分けるのはクラウドの仕事。** amber が憶えるのは
+                        // 「どれが分けてあるか」の一言だけ ── そのうえで
+                        // このフォルダを、クラウド側で家族に共有してもらう。
+                        Button {
+                            do { try store.setShare(store.share == b.path ? "" : b.path) }
+                            catch { store.trouble = error.localizedDescription }
+                        } label: {
+                            Label(store.share == b.path ? "家族との共有をやめる"
+                                  : "家族と共有するフォルダにする", systemImage: "person.2")
+                        }
                         // フォルダの履歴は、**中のノートの姿をまとめて** ──
                         // 「あのあたりで壊した」は、どのノートかを覚えて
                         // いないほうが多い。
@@ -739,7 +801,7 @@ struct ContentView: View {
                     // 中に入っているときは、上の帯が既にどこかを言っている。
                     if store.at.isEmpty { Text("フォルダ") }
                 }
-                if store.at.isEmpty, store.books.isEmpty {
+                if store.at.isEmpty, ownBooks.isEmpty {
                     Text("まだありません（上の「フォルダ」から作れます）")
                         .font(.footnote).foregroundStyle(.secondary)
                 }

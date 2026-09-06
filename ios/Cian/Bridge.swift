@@ -78,6 +78,9 @@ struct Note: Identifiable, Hashable {
     /// 誰のものか。**一覧からは消さない** ── 消すと、中身を助け出す道が
     /// どこにも無くなる。並べたうえで札を貼る。
     let clash: Clash?
+    /// 家族と分けてあるフォルダの中か。**判断は core に一つ** ── 窓と電話で
+    /// 二度書くと、片方だけ「共有」の印が出るノートができる。
+    let shared: Bool
 
     struct Clash: Equatable, Hashable {
         let of: String
@@ -97,6 +100,7 @@ struct Note: Identifiable, Hashable {
         book = o["book"] as? String ?? ""
         star = o["star"] as? String
         search = o["search"] as? String ?? ""
+        shared = o["shared"] as? Bool ?? false
         if let c = o["clash"] as? [String: Any] {
             clash = Clash(of: c["of"] as? String ?? "", by: c["by"] as? String ?? "")
         } else {

@@ -83,6 +83,13 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         // window. Sent rather than derived on the far side:
                         // deriving it there is how the two answers drift.
                         "search": crate::note::haystack(n),
+                        // **家族と分けてあるか。** 判断は core に一つ ──
+                        // 窓と電話で二度書くと、片方だけ「共有」の印が
+                        // 出るノートができる。
+                        "shared": crate::notebook::shared(
+                            &book.share,
+                            f.rel.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
+                        ),
                         // **クラウドが作った控えなら、そう言う。**
                         // 一覧から消さない ── 消すと、中身を助け出す道が
                         // どこにも無くなる。並べたうえで札を貼る。
@@ -124,6 +131,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .collect();
             Ok(serde_json::json!({
                 "root": dir.display().to_string(),
+                "share": book.share,
                 "waiting": waiting,
                 "books": books,
                 "stars": shelves,
@@ -385,6 +393,19 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 crate::notebook::add_star(&root, &name)?;
             }
             Ok(serde_json::json!({ "stars": crate::notebook::read(&root).stars }))
+        }
+
+        // 家族と分けるフォルダを決める（空でやめる）。
+        //
+        // **分けるのはクラウドの仕事。** amber がするのは「どれが分けて
+        // あるか」を憶えることだけ ── それだけで「このノートを共有する」が
+        // そのフォルダへ移すことになり、いまあるフォルダの仕組みが
+        // そのまま効く。
+        "share" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let folder = p["folder"].as_str().unwrap_or("");
+            crate::notebook::set_share(&root, folder)?;
+            Ok(serde_json::json!({ "share": crate::notebook::read(&root).share }))
         }
 
         // What colour a folder is. His to choose — cian offers a palette and
@@ -1588,6 +1609,51 @@ mod tests {
             "root": root.display().to_string(), "path": outside.display().to_string(),
             "text": "よそ", "gap": 0,
         })).is_err());
+    }
+
+    #[test]
+    fn 家族と分けるフォルダを_一つ憶える() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("共有").join("買い物")).unwrap();
+        std::fs::create_dir_all(d.path().join("仕事")).unwrap();
+        std::fs::write(d.path().join("共有").join("リスト.md"), "- [ ] 牛乳\n").unwrap();
+        std::fs::write(d.path().join("共有").join("買い物").join("週末.md"), "本文\n").unwrap();
+        std::fs::write(d.path().join("仕事").join("週報.md"), "本文\n").unwrap();
+        std::fs::write(d.path().join("ひとりごと.md"), "本文\n").unwrap();
+        let root = serde_json::json!({ "path": d.path().to_string_lossy() });
+
+        // 決めるまでは、何も共有していない ── **空を「全部」と読まない。**
+        let out = call("notes", &root).unwrap();
+        assert_eq!(out["share"], "");
+        assert!(out["notes"].as_array().unwrap().iter().all(|n| n["shared"] == false));
+
+        call("share", &serde_json::json!({
+            "path": d.path().to_string_lossy(), "folder": "共有",
+        }))
+        .unwrap();
+
+        let out = call("notes", &root).unwrap();
+        assert_eq!(out["share"], "共有");
+        // **題ではなく道で確かめる** ── 題は一行目から決まるので、
+        // `- [ ] 牛乳` で始まるノートの題は「牛乳」になる（そこはこの
+        // 試験の話ではない）。
+        let shared: Vec<&str> = out["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|n| n["shared"] == true)
+            .map(|n| n["rel"].as_str().unwrap_or(""))
+            .collect();
+        // フォルダそのものと、その下ぜんぶ。
+        assert_eq!(shared.len(), 2, "共有/ の下は全部: {shared:?}");
+        assert!(shared.contains(&"共有/リスト.md"));
+        assert!(shared.contains(&"共有/買い物/週末.md"));
+
+        // やめれば、誰も共有していない ── ノートは一本も書き換えない。
+        call("share", &serde_json::json!({ "path": d.path().to_string_lossy() })).unwrap();
+        let out = call("notes", &root).unwrap();
+        assert_eq!(out["share"], "");
+        assert!(out["notes"].as_array().unwrap().iter().all(|n| n["shared"] == false));
     }
 
     #[test]

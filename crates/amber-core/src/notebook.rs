@@ -24,6 +24,17 @@ pub struct Book {
     pub colors: BTreeMap<String, String>,
     /// Favourite folders, including the ones nothing is in yet.
     pub stars: Vec<String>,
+    /// 家族と分ける一つのフォルダ（ルートからの道）。無ければ空。
+    ///
+    /// **共有そのものは amber の仕事ではない。** 分けるのはクラウドで、
+    /// amber が持つのは「どれが分けてあるか」の一言だけ ── それだけで
+    /// 「このノートを共有する」が**そのフォルダへ移すこと**になり、
+    /// フォルダ移動もタグも履歴も、既にあるものが全部そのまま効く。
+    ///
+    /// **置き場所は増やさない。** 二つ目のルートを持つ道もあったが、
+    /// 「置き場所は一つにしたい」は本人が決めたこと（電話をそちらに
+    /// 合わせた経緯がある）。共有はルートの中の一段に住む。
+    pub share: String,
 }
 
 /// フォルダに付けられる十一色。
@@ -74,6 +85,9 @@ pub fn read(root: &Path) -> Book {
     if let Some(a) = v.get("stars").and_then(|s| s.as_array()) {
         b.stars = a.iter().filter_map(|s| s.as_str()).map(str::to_string).collect();
     }
+    if let Some(s) = v.get("share").and_then(|s| s.as_str()) {
+        b.share = s.to_string();
+    }
     b
 }
 
@@ -83,9 +97,28 @@ pub fn write(root: &Path, b: &Book) -> anyhow::Result<()> {
     if let Some(dir) = at.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let v = serde_json::json!({ "colors": b.colors, "stars": b.stars });
+    let v = serde_json::json!({ "colors": b.colors, "stars": b.stars, "share": b.share });
     std::fs::write(at, serde_json::to_string_pretty(&v)?)?;
     Ok(())
+}
+
+/// 家族と分けるフォルダを決める。空で、やめる。
+///
+/// **ノートには書かない。** どれを分けているかは、この機械の見方であって
+/// ノートの中身ではない ── 前書きに `share:` と書くと、共有をやめた日に
+/// 全部のノートを書き換えることになる（そして同期先で全部が差分になる）。
+pub fn set_share(root: &Path, folder: &str) -> anyhow::Result<()> {
+    let mut b = read(root);
+    b.share = folder.trim().trim_matches('/').to_string();
+    write(root, &b)
+}
+
+/// この道は、分けてあるフォルダの中か。
+///
+/// フォルダそのものと、その下ぜんぶ。**空なら何も分けていない** ── ここで
+/// 空を「全部が共有」と読むと、決めていない人のノートが全部共有の顔をする。
+pub fn shared(share: &str, book: &str) -> bool {
+    !share.is_empty() && (book == share || book.starts_with(&format!("{share}/")))
 }
 
 /// Give a folder a colour, or take it away.
