@@ -2303,6 +2303,8 @@ function mmdParse(src) {
     const head = [];
     const rows = [];
     const edges = [];
+    /// 箱ごとの色（流れ図だけ）。`{ 合言葉: '#RRGGBB' }`
+    const paint = {};
     let title = '';
     // 題を表に出す種類だけ、題の行を抜き取る。出さない種類のものは
     // `head` に残す ── 触らないものを触ったことにしない。
@@ -2351,10 +2353,18 @@ function mmdParse(src) {
             }
             const e = /^([A-Za-z_]\w*)\s*-->\s*(?:\|(.*?)\|\s*)?([A-Za-z_]\w*)$/.exec(l);
             if (e) { edges.push({ from: e[1], b: e[2] || '', to: e[3] }); continue; }
+            // 箱の色。**こちらが書いた形だけ読む** ── 手で書いた凝った
+            // `style`（線の太さや破線）を色だけの表に押し込むと、書き戻した
+            // ときに残りが消える。読めない形なら表にせず、字の面で直す。
+            const c = NODE_STYLE.exec(l);
+            if (c) { paint[c[1]] = c[3]; continue; }
         }
         return null;    // 読めない行が一つでもあれば、表にしない
     }
     if (!rows.length) return null;
+    // 色は箱に付けて持つ ── 表の行と色の行が別々にあると、箱を消したときに
+    // 色の行だけが残る（消したはずの箱が図に戻る、と同じ形の間違い）。
+    for (const r of rows) if (paint[r.id]) r.color = paint[r.id];
     const dir = (/^(?:flowchart|graph)\s+(\w+)/.exec(first) || [])[1] || 'LR';
     return { kind, first, head, title, rows, edges, dir };
 }
@@ -2409,7 +2419,39 @@ function mmdBuild(d) {
         // 名前だけの箱を勝手に立てて、消したはずのものが図に戻る。
         ...d.edges.filter((e) => seen.has(e.from) && seen.has(e.to)).map((e) =>
             '  ' + e.from + ' -->' + (e.b.trim() ? '|' + plain(e.b) + '|' : '') + ' ' + e.to),
+        // 色は最後にまとめて ── 箱と線を読んでから見るほうが、字のままでも
+        // 図の形が先に読める。
+        ...live.filter((r) => r.color).map((r) => nodeStyle(r.id, r.color)),
     ]);
+}
+
+/* ── 箱の色 ── */
+
+/// 図の箱の色。**名前は amber のどこでも同じ十一色**（フォルダと同じ）──
+/// 覚える色の名前を、画面ごとに増やさない。
+///
+/// 紙の上では**淡く塗って、濃い線で囲む**。濃いまま塗ると箱の中の字が沈み、
+/// 読ませるには白い字に替えることになる ── そうすると「どの色なら白か」を
+/// 人が考える羽目になる。淡い地なら、字はいつも同じ濃い墨でいい。
+const NODE_INK = '#3a2408';
+
+/// こちらが書く `style` の形。**この形だけ読み戻す**（`mmdParse`）。
+const NODE_STYLE =
+    /^style\s+([A-Za-z_]\w*)\s+fill:(#[0-9A-Fa-f]{6}),stroke:(#[0-9A-Fa-f]{6}),color:(#[0-9A-Fa-f]{6})$/;
+
+/// 白と混ぜて淡くする。`keep` はもとの色の割合。
+function soften(hex, keep) {
+    const n = parseInt(String(hex).slice(1), 16);
+    if (!Number.isFinite(n)) return hex;
+    const mix = (v) => Math.round(v * keep + 255 * (1 - keep));
+    return '#' + [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+        .map((v) => mix(v).toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+/// 一つの箱の `style` の行。
+function nodeStyle(id, hex) {
+    return '  style ' + id + ' fill:' + soften(hex, 0.22)
+        + ',stroke:' + String(hex).toUpperCase() + ',color:' + NODE_INK;
 }
 
 /// 0〜1 に収める。**打ち間違いで図が壊れないように** ── 四象限は枠の外に
@@ -2724,7 +2766,9 @@ function studioFlow() {
     head.querySelector('span').style.flex = '3 1 0';
     const sh = tag('span', '', '形');
     sh.style.flex = '0 0 92px';
-    head.append(sh, tag('span', 'sp'));
+    const ch = tag('span', '', '色');
+    ch.style.flex = '0 0 104px';
+    head.append(sh, ch, tag('span', 'sp'));
     box.append(head);
 
     d.rows.forEach((r, n) => {
@@ -2740,6 +2784,19 @@ function studioFlow() {
         pick.classList.add('bare');
         pick.style.flex = '0 0 92px';
         line.append(pick);
+        // **色は、形の隣。** 箱ごとに決められないと、流れ図は「どれが
+        // 通る道でどれが行き止まりか」を形だけで言うことになる。名前は
+        // フォルダと同じ十一色 ── 覚える色の名前を画面ごとに増やさない。
+        const paint = studioPick('', [['', '色なし'], ...PALETTE.map(([h, name]) => [h, name])],
+                                 r.color || '', (v) => {
+                                     r.color = v || undefined;
+                                     studioPaint(paint, v);
+                                     studioShow();
+                                 });
+        paint.classList.add('bare', 'paint');
+        paint.style.flex = '0 0 104px';
+        studioPaint(paint, r.color || '');
+        line.append(paint);
         const move = (to) => {
             if (to < 0 || to >= d.rows.length) return;
             d.rows.splice(to, 0, d.rows.splice(n, 1)[0]);
@@ -2811,6 +2868,17 @@ function studioFlow() {
 
     wrap.append(g1, g2);
     return wrap;
+}
+
+/// 色の選び口そのものを、選んだ色で塗る。**名前だけでは色が分からない**
+/// ── 「ベルガモット」がどれかを覚えている人はいない。
+function studioPaint(pick, hex) {
+    const s = pick.querySelector('select');
+    if (!s) return;
+    s.style.color = hex || '';
+    s.style.fontWeight = hex ? '700' : '';
+    pick.style.background = hex ? soften(hex, 0.18) : '';
+    pick.style.borderRadius = hex ? '7px' : '';
 }
 
 /// 箱の名前を変えたら、線の「ここから／ここへ」の見え方も変える。
@@ -3056,14 +3124,66 @@ el('read').addEventListener('click', async (e) => {
 
 // 右押しでも同じ扉。**押しても右押しでも開く** ── どちらだったかを
 // 覚えている人はいないので、両方に置く。
+//
+// ただし**箱そのものを右押ししたときは、色の献立**（`paintNode`）。
+// 図の余白を右押しすれば、これまでどおり工房が開く。
 el('read').addEventListener('contextmenu', (e) => {
     const art = diagramAt(e.target);
     if (!art) return;
     e.preventDefault();
+    if (paintNode(art, e)) return;
     studioOpen(art);
 });
 
 /// 押されたところの図。描けた図（`.mermaid`）と、描けなかった枠のどちらも。
+/// 描かれた図の、箱そのものを右押しして色を変える。受けたら `true`。
+///
+/// **工房を開かずに、一つだけ直せる道。** 色を一つ変えるためだけに工房を
+/// 開いて、表を見つけて、閉じるのは遠い ── フォルダの色を右押しで変える
+/// のと同じ手ぶりにする（この窓で「色を変える」は右押し、と一つに決まる）。
+///
+/// mermaid は箱に `id="<図の番号>-flowchart-<合言葉>-<番号>"` を差すので、
+/// そこから合言葉を取り戻す（**頭に図ごとの番号が付く** ── `^` で当てると
+/// 一つも当たらない）。取れなければ `false` ── 箱でないところの右押しは、
+/// これまでどおり工房。
+function paintNode(art, e) {
+    if (!art.classList.contains('mermaid')) return false;
+    const g = e.target.closest('g.node');
+    const id = g && /flowchart-(\w+)-\d+$/.exec(g.id || '');
+    if (!id) return false;
+    const src = fenceBody(art.dataset.md);
+    const data = src === null ? null : mmdParse(src);
+    if (!data || data.kind !== 'flow') return false;
+    const row = data.rows.find((r) => r.id === id[1]);
+    if (!row) return false;
+    paintMenu({ x: e.clientX, y: e.clientY }, row.color, (hex) => {
+        row.color = hex || undefined;
+        readSourceEdit(() => '```mermaid\n' + mmdBuild(data).trim() + '\n```', art);
+    });
+    return true;
+}
+
+/// 色の献立。**名前と、その色そのものを並べる** ── 「ベルガモット」が
+/// どれかを覚えている人はいない。
+function paintMenu(at, now, set) {
+    const box = el('more');
+    const rows = [['', '色なし'], ...PALETTE];
+    box.innerHTML = rows.map(([hex, name], n) =>
+        '<button data-n="' + n + '">'
+        + '<span class="dot" style="background:' + (hex ? escapeAttr(soften(hex, 0.3)) : 'transparent')
+        + ';border-color:' + (hex ? escapeAttr(hex) : 'var(--line)') + '"></span>'
+        + escapeHtml(name)
+        + (hex === (now || '') ? '<span class="k">いま</span>' : '') + '</button>').join('');
+    for (const b of box.querySelectorAll('button')) {
+        b.onclick = () => { closeMenu(); set(rows[Number(b.dataset.n)][0]); };
+    }
+    box.hidden = false;
+    const w = box.offsetWidth;
+    box.style.left = Math.max(8, Math.min(at.x, innerWidth - w - 8)) + 'px';
+    box.style.top = (at.y + 4) + 'px';
+    setTimeout(() => document.addEventListener('mousedown', closeMenuOnce, { once: true }), 0);
+}
+
 function diagramAt(target) {
     const box = el('read');
     const done = target.closest('.mermaid');

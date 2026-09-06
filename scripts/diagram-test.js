@@ -116,5 +116,37 @@ console.log('打ち間違いで図を壊さないか');
     ok(/A\[一二三\]/.test(mmdBuild(f)), '括弧と縦棒を落とす');
 }
 
+console.log('箱ごとの色');
+{
+    const painted = 'flowchart LR\n  A[一]\n  B[二]\n  A --> B\n'
+        + '  style A fill:#F2DAD8,stroke:#C4564E,color:#3a2408';
+    const d = mmdParse(painted);
+    ok(!!d, '色の付いた図も、表になる');
+    ok(d.rows[0].color === '#C4564E', '色は箱に付いて読み戻る', d.rows[0].color);
+    ok(d.rows[1].color === undefined, '色の無い箱には付かない');
+    // **往復して同じ字に戻る。** ここがずれると、開いて閉じただけで
+    // ノートが同期先の差分になる。
+    ok(mmdBuild(d).trim() === painted.trim(), '往復しても同じ字', mmdBuild(d));
+
+    // 色を外したら、style の行ごと消える ── 色なしの style が残ると、
+    // mermaid はそれを「透明に塗れ」と読む。
+    d.rows[0].color = undefined;
+    ok(!/style/.test(mmdBuild(d)), '色を外すと、行ごと消える', mmdBuild(d));
+
+    // 箱を消したら、その箱の色も出さない（線と同じ扱い）。
+    const e = mmdParse(painted);
+    e.rows.splice(0, 1);
+    ok(!/style A/.test(mmdBuild(e)), '消した箱の色は残さない', mmdBuild(e));
+
+    // **こちらが書いた形だけ読む。** 手で書いた凝った `style` を色だけの
+    // 表に押し込むと、書き戻したときに残りが消える。
+    ok(mmdParse('flowchart LR\n  A[一]\n  style A fill:red,stroke-width:4px') === null,
+       '知らない形の style は、表にしない');
+
+    // 淡くする計算そのもの。
+    ok(soften('#C4564E', 0.22) === '#F2DAD8', '白と混ぜて淡くする', soften('#C4564E', 0.22));
+    ok(soften('#000000', 0) === '#FFFFFF', '混ぜきると白');
+}
+
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');
 process.exit(bad ? 1 : 0);

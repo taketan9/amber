@@ -190,6 +190,25 @@ struct Studio: View {
                     Text("四角").tag("box"); Text("丸み").tag("round"); Text("ひし形").tag("diamond")
                 }
                 .labelsHidden().pickerStyle(.menu)
+                // **箱の色も、電話から。** 窓は右押しと工房の両方から
+                // 変えられる ── 色を付けられるのが片方だけだと、電話で
+                // 直したノートから色が消えたように見える（消えはしないが、
+                // 「電話では変えられない」に気づけない）。
+                Menu {
+                    Button("色なし") { paint(n, nil) }
+                    ForEach(Colouring.palette, id: \.0) { hex, name in
+                        Button { paint(n, hex) } label: {
+                            // **`systemImage:` では十一個とも同じ色になる** ──
+                            // 献立は記号を accent で塗る（`Colouring.dot` の註）。
+                            Label { Text(name) } icon: { Image(uiImage: Colouring.dot(hex)) }
+                        }
+                    }
+                } label: {
+                    Image(systemName: (rows[n]["color"] as? String) == nil
+                          ? "paintpalette" : "paintpalette.fill")
+                        .foregroundStyle(colorOf(n).map { AnyShapeStyle($0) } ?? AnyShapeStyle(.tint))
+                }
+                .accessibilityLabel("箱の色")
             }
             if deep {
                 Button { shift(n, -1) } label: { Image(systemName: "arrow.left") }
@@ -264,6 +283,17 @@ struct Studio: View {
         Binding(get: { String(describing: edges[n][k] ?? "") },
                 set: { edges[n][k] = $0; redraw() })
     }
+    /// 箱の色を決める。`nil` で外す ── **キーごと外す**（空の字を入れると、
+    /// 書き戻しで `style` の行が色なしで出る）。
+    private func paint(_ n: Int, _ hex: String?) {
+        if let hex { rows[n]["color"] = hex } else { rows[n].removeValue(forKey: "color") }
+        redraw()
+    }
+
+    private func colorOf(_ n: Int) -> Color? {
+        (rows[n]["color"] as? String).flatMap { Color(hex: $0) }
+    }
+
     private func shapeOf(_ n: Int) -> Binding<String> {
         Binding(get: { String(describing: rows[n]["shape"] ?? "box") },
                 set: { rows[n]["shape"] = $0; redraw() })
