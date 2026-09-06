@@ -167,28 +167,64 @@ pub fn migrate(from: &Path, to: &Path) -> anyhow::Result<usize> {
 ///
 /// **Into the notes folder, never over a note.** A restore that overwrote
 /// would be a restore that could lose today's work to last week's copy.
+/// zip の中の札から、何の範囲のバックアップかを読む。無ければ `None`。
+fn read_label(zip: &Path) -> Option<String> {
+    let mut z = zip::ZipArchive::new(std::fs::File::open(zip).ok()?).ok()?;
+    let mut f = z.by_name(crate::zipbox::LABEL).ok()?;
+    let mut body = String::new();
+    use std::io::Read;
+    f.read_to_string(&mut body).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&body).ok()?;
+    v["scope"].as_str().map(str::to_string)
+}
+
 pub fn restore(zip: &Path, to: &Path) -> anyhow::Result<(usize, usize)> {
     std::fs::create_dir_all(to)?;
 
     // Into a room of its own first, so a half-unpacked archive never stands
     // among the notes.
-    let hold = std::env::temp_dir().join(format!("amber-restore-{}", std::process::id()));
+    //
+    // **A room per call, not per process.** Named by the pid alone, two
+    // restores at once unpack into the same room and each counts the other's
+    // files — and the second one's `remove_dir_all` can take the first one's
+    // half-unpacked archive out from under it. Found by a test that restored
+    // twice in one process and was told two files went in when one had.
+    // A leftover room from a run that died also stops being somebody else's
+    // problem this way.
+    static ROOM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nth = ROOM.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let hold = std::env::temp_dir().join(format!(
+        "amber-restore-{}-{nth}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&hold);
     std::fs::create_dir_all(&hold)?;
 
     let members = crate::zipbox::list(zip)?;
-    // **The folder's own name comes off.** A backup of the notes folder is a
-    // zip *of that folder*, so every member is `ノート/…` — put back as-is it
-    // makes a `ノート` inside the notes, and every note in it looks new.
-    // Stripped only when the whole archive is under one name.
+    // **The folder's own name comes off — but only for a whole notebook.**
+    //
+    // A backup of the notes folder is a zip *of that folder*, so every member
+    // is `ノート/…`; put back as-is it makes a `ノート` inside the notes and
+    // every note in it looks new. A backup of **one folder** has exactly the
+    // same shape (`仕事/…`) and must keep its head — strip it and 週報 comes
+    // back to the root instead of to 仕事, which is not "back".
+    //
+    // The shape cannot tell them apart, so the zip says which it is
+    // (`zipbox::LABEL`, written when it was made). Archives from before that
+    // label fall back to the old guess — it is right for the whole-notebook
+    // case, which is the one people take most.
+    let scope = read_label(zip);
     let top = members
         .iter()
+        .filter(|m| m.as_str() != crate::zipbox::LABEL)
         .filter_map(|m| m.split('/').next())
         .collect::<std::collections::BTreeSet<_>>();
-    let strip = if top.len() == 1 && members.iter().any(|m| m.contains('/')) {
-        top.into_iter().next().unwrap_or("").to_string()
-    } else {
-        String::new()
+    let one_head = top.len() == 1 && members.iter().any(|m| m.contains('/'));
+    let strip = match scope.as_deref() {
+        Some("all") if one_head => top.into_iter().next().unwrap_or("").to_string(),
+        Some(_) => String::new(),
+        None if one_head => top.into_iter().next().unwrap_or("").to_string(),
+        None => String::new(),
     };
     if let Err(e) = crate::zipbox::extract(zip, &hold, &strip) {
         let _ = std::fs::remove_dir_all(&hold);
@@ -206,6 +242,8 @@ pub fn restore(zip: &Path, to: &Path) -> anyhow::Result<(usize, usize)> {
             if at.is_dir() {
                 walk.push(at);
                 std::fs::create_dir_all(&dest)?;
+            } else if at.file_name().is_some_and(|n| n == crate::zipbox::LABEL) {
+                // 札はノートではないので、ノート帳には置いていかない。
             } else if dest.exists() {
                 kept += 1;
             } else {

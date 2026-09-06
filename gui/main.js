@@ -238,6 +238,48 @@ function makeWindow() {
     }
 }
 
+/// ノートのフォルダを見張る。
+///
+/// **同じフォルダを二つの端末で触るのがこのアプリの前提**なのに、外から
+/// 書き換えたものは窓を開き直すまで出てこなかった ── iPhone で書いた一行が
+/// Mac に現れず、「同期していない」ように見える（同期はしていて、見ていな
+/// かっただけ）。
+///
+/// 細かく数えない。**「何か動いた」だけを伝えて、数え直すのは描く側**の
+/// 仕事にする ── どのファイルがどう変わったかを OS ごとに読み解くのは、
+/// 出来事の抜けと重複を両方引き受けることになる。
+///
+/// まとめて一度だけ送る。保存の一回は数十の出来事になる（書いて、名前を
+/// 変えて、属性を触って）ので、そのたびに数え直すと打っている最中に一覧が
+/// 何度も跳ねる。
+let eyes = null;
+let eyesAt = '';
+
+function watch(root) {
+    if (eyesAt === root && eyes) return;
+    if (eyes) { eyes.close(); eyes = null; }
+    eyesAt = root;
+    if (!root || !fs.existsSync(root)) return;
+    let hold = null;
+    try {
+        // `recursive` は mac と Windows にはあり、Linux には無い ──
+        // 無いところでは根の一段だけになる（それでも無いよりよい）。
+        eyes = fs.watch(root, { recursive: true, persistent: false }, (_kind, name) => {
+            // 自分の一時ファイルで起こさない。
+            if (name && /(^|[\\/])\.|\.tmp$|~$/.test(name)) return;
+            clearTimeout(hold);
+            hold = setTimeout(() => {
+                if (win && !win.isDestroyed()) win.webContents.send('amber:changed');
+            }, 400);
+        });
+        eyes.on('error', () => { eyes = null; });
+    } catch (e) {
+        // 見張れないフォルダ（ネットワーク越しなど）はある。**開かない
+        // 理由にはならない** ── 開き直せば読める、という前の姿に戻るだけ。
+        console.error('見張れません:', e.message);
+    }
+}
+
 app.whenReady().then(() => {
     // 一覧を訊かれる前に置く ── あとから置くと、最初の一覧が空のまま出る。
     seedWelcome();
@@ -245,6 +287,8 @@ app.whenReady().then(() => {
     ipcMain.handle('amber:call', async (_e, method, params) => engine.call(method, params));
     ipcMain.handle('amber:recall', () => ({ root: firstRoot(), ...recall() }));
     ipcMain.handle('amber:appVersion', () => app.getVersion());
+    // 描く側が置き場所を決めたら、そこを見張る。
+    ipcMain.handle('amber:watch', (_e, root) => { watch(root); });
     ipcMain.handle('amber:remember', (_e, patch) => remember(patch));
     ipcMain.handle('amber:pickFolder', async () => {
         const r = await dialog.showOpenDialog(win, {

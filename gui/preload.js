@@ -52,4 +52,8 @@ contextBridge.exposeInMainWorld('amber', {
     /// ファイルを読もうとすると preload ごと落ち、`window.amber` が
     /// まるごと消える（実際に消えた）。
     appVersion: () => ipcRenderer.invoke('amber:appVersion'),
+
+    /// ノートのフォルダを見張ってもらう／動いたら教えてもらう。
+    watch: (root) => ipcRenderer.invoke('amber:watch', root),
+    onChanged: (fn) => ipcRenderer.on('amber:changed', () => fn()),
 });

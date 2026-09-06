@@ -2928,7 +2928,8 @@ const CMDS = [
     { id: 'theme', name: 'テーマ', app: true, run: cmdTheme },
     { id: 'vim', name: 'vimモード', app: true, run: cmdVim },
     { id: 'lineno', name: '行番号', app: true, run: cmdLineNo },
-    { id: 'backup', name: '一括バックアップ', app: true, sep: true, run: cmdBackup },
+    { id: 'backup', name: 'バックアップ', app: true, sep: true, run: cmdBackup },
+    { id: 'restore', name: 'バックアップから戻す', app: true, run: cmdRestore },
     { id: 'root', name: 'amber保存ディレクトリ変更', app: true, run: cmdRoot },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'amber について', app: true, run: cmdAbout },
@@ -3363,6 +3364,31 @@ document.addEventListener('drop', async (e) => {
         if (known) { await openNote(at); return; }
     }
     await openGuest(at);
+});
+
+/// フォルダの中身が外から動いたら、数え直す。
+///
+/// **同じフォルダを二つの端末で触るのがこのアプリの前提。** それなのに、
+/// iPhone で書いた一行は窓を開き直すまで出てこなかった ── 同期はしていて、
+/// 見ていなかっただけなのに「同期していない」ように見える。
+///
+/// 開いているノートは、**打っている途中なら触らない** ── いま書いている
+/// ものを、向こうの版で黙って置き換えるのが一番悪い。打っていなければ
+/// 静かに読み直す（保存のときの衝突検査は、そのまま残っている）。
+let churn = null;
+window.amber.onChanged(() => {
+    clearTimeout(churn);
+    churn = setTimeout(async () => {
+        if (state.guest) return;                 // 単発で開いている一本は索引の外
+        await reload({});
+        if (state.open && !state.dirty) {
+            const now = state.notes.find((n) => n.path === state.open.path);
+            // 消えていたら、開いたままにしない ── 無いノートを見せ続けると、
+            // 次の保存で作り直してしまう。
+            if (!now) { state.open = null; applyView(); return; }
+            if (now.updated !== state.open.updated) await openNote(now.path, { quiet: true });
+        }
+    }, 250);
 });
 
 /// 外から渡された一本を受け取る。**起動の途中でも来る**ので、
@@ -3803,14 +3829,63 @@ async function cmdColor(folder) {
     }
 }
 
+/// バックアップ。**範囲を訊く。**
+///
+/// 長いあいだ「すべて」を決め打ちで渡していて、四つあることはエンジンしか
+/// 知らなかった ── 電話には四つとも出ていたので、**同じアプリで電話に
+/// できて窓にできない**ことが一つあった。
+///
+/// 四つ ── すべて／フォルダ一つ／タグの付いたもの／このノート一枚。
+/// zip の名前は何が入っているかを言う（`仕事-2026-09-06.zip`）── 名前が
+/// `backup.zip` ばかりのフォルダは、「どれがどれか」という一つの問いになる。
 async function cmdBackup() {
+    const here = state.dest.kind === 'book' ? state.dest.what : '';
+    const items = [
+        { name: 'すべて', sub: 'ノートも絵も、まるごと一つに', value: ['all', ''] },
+    ];
+    for (const b of state.books || []) {
+        items.push({ name: 'フォルダ: ' + b, sub: b === here ? 'いま見ているところ' : '', value: ['book', b] });
+    }
+    // タグは使われている順（`tagsOf`）。多いものから並ぶので、
+    // 取っておきたいまとまりはたいてい上のほうに居る。
+    for (const [t, n] of tagsOf(state.notes).slice(0, 20)) {
+        items.push({ name: 'タグ: #' + t, sub: n + ' 件・フォルダをまたいで集めます', value: ['tag', t] });
+    }
+    if (state.open) {
+        items.push({ name: 'このノート一枚', sub: shortPath(state.open.path), value: ['note', state.open.path] });
+    }
+    const pick = await askPick('どこまで取っておきますか', items,
+        '一つの zip にまとめます。いまあるノートは動きません');
+    if (pick === null) return;
+    const [scope, what] = pick;
     const into = await window.amber.pickFolder();
     if (!into) return;
     try {
-        const r = await ask('backup', { path: state.root, scope: 'all', what: '', into });
-        say('保存しました: ' + (r.zip || into));
+        const r = await ask('backup', { path: state.root, scope, what, into });
+        say(r.files + ' 件を保存しました: ' + shortPath(r.path || into));
     } catch (e) {
         say('保存できません: ' + e.message);
+    }
+}
+
+/// バックアップから戻す。
+///
+/// **いまあるものは消さない。** 戻すのは「消えたものを取り返す」ためで、
+/// いま書いているものを捨てていいという意味ではない ── 同じ名前のものが
+/// あれば**いまのほうを残し**、何枚避けたかを言う。言わないと「戻した
+/// つもりで戻っていない」に見える。
+async function cmdRestore() {
+    const zip = await window.amber.pickFile([{ name: 'バックアップ', extensions: ['zip'] }]);
+    if (!zip) return;
+    const go = await askYes('「' + shortPath(zip) + '」から戻しますか');
+    if (!go) return;
+    try {
+        const r = await ask('restore', { zip, to: state.root });
+        await reload({});
+        const kept = r.kept ? '（' + r.kept + ' 件は、いまのを残しました）' : '';
+        say(r.put + ' 件を戻しました' + kept);
+    } catch (e) {
+        say('戻せません: ' + e.message);
     }
 }
 
@@ -3826,6 +3901,7 @@ async function cmdRoot() {
     if (!dir) return;
     state.root = dir;
     window.amber.remember({ root: dir });
+    window.amber.watch(dir);
     state.open = null;
     applyView();
     await reload({});
@@ -3974,6 +4050,9 @@ const escapeAttr = escapeHtml;
     el('blankmark').innerHTML = mark(54);
     const saved = await window.amber.recall();
     state.root = saved.root;
+    // 外から動いたら教えてもらう ── 同じフォルダを二つの端末で触るのが
+    // このアプリの前提なのに、開き直すまで出てこなかった。
+    window.amber.watch(saved.root);
     if (saved.view === 'read' || saved.view === 'split' || saved.view === 'write') {
         view = saved.view;
     }

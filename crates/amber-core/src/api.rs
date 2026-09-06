@@ -591,7 +591,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let scope = arg(p, "scope");
             let what = arg(p, "what");
             let mut sources: Vec<std::path::PathBuf> = Vec::new();
-            let mut name = String::from("cian");
+            // 名前は「何が入っているか」＋日付。既定は `amber` ──
+            // ここが `cian` のまま残っていて、amber の全体バックアップが
+            // `cian-2026-09-06.zip` として出ていた。
+            let mut name = String::from("amber");
             match scope.as_str() {
                 "all" => sources.push(root.clone()),
                 "book" => {
@@ -639,7 +642,13 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let cancel = std::sync::atomic::AtomicBool::new(false);
             let mut nothing = |_: usize, _: usize| {};
             let mut ctl = crate::Ctl { cancel: &cancel, on_progress: &mut nothing };
-            let files = crate::zipbox::create(&sources, &at, &mut ctl)?;
+            // 何の zip かを中に書いておく ── 戻すときに、頭を外すかどうかが
+            // これで決まる（`zipbox::LABEL` を見よ）。
+            let label = serde_json::json!({
+                "scope": scope, "what": what, "made": crate::note::today(),
+            })
+            .to_string();
+            let files = crate::zipbox::create_labelled(&sources, &at, Some(&label), &mut ctl)?;
             Ok(serde_json::json!({
                 "path": at.display().to_string(),
                 "files": files,
@@ -1195,6 +1204,144 @@ mod tests {
         })).unwrap();
         assert_eq!(back["kept"].as_u64().unwrap_or(0), 1, "{back}");
         assert_eq!(std::fs::read_to_string(root.join("a.md")).unwrap(), "きょうの\n");
+    }
+
+    /// 四つの範囲が、**それぞれ違うものを包む**か。
+    ///
+    /// 窓は長いあいだ `scope: "all"` を決め打ちで渡していて、四つあることは
+    /// エンジンしか知らなかった ── 電話にできて窓にできない、が起きていた。
+    #[test]
+    fn 範囲の四つは_それぞれ違うものを包む() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("ノート");
+        std::fs::create_dir_all(root.join("仕事")).unwrap();
+        std::fs::create_dir_all(root.join("日記")).unwrap();
+        std::fs::write(root.join("上.md"), "---\ntags: [雑]\n---\n根っこ\n").unwrap();
+        std::fs::write(root.join("仕事/週報.md"), "---\ntags: [仕事]\n---\n今週\n").unwrap();
+        std::fs::write(root.join("仕事/議事.md"), "---\ntags: [仕事, 雑]\n---\n打合せ\n").unwrap();
+        std::fs::write(root.join("日記/9月.md"), "---\ntags: [日記]\n---\n晴れ\n").unwrap();
+
+        let take = |scope: &str, what: &str| -> (String, u64) {
+            let out = call("backup", &serde_json::json!({
+                "path": root.display().to_string(), "scope": scope, "what": what,
+                "into": d.path().display().to_string(),
+            })).unwrap();
+            (out["path"].as_str().unwrap().to_string(), out["files"].as_u64().unwrap())
+        };
+
+        let (all, n) = take("all", "");
+        assert_eq!(n, 4, "すべて: {all}");
+        // 名前は何が入っているかを言う ── `backup.zip` の並んだフォルダは
+        // 「どれがどれか」という一つの問いになる。
+        assert!(all.contains("amber-"), "全体の zip の名前: {all}");
+
+        let (book, n) = take("book", "仕事");
+        assert_eq!(n, 2, "フォルダ: {book}");
+        assert!(book.contains("仕事-"), "{book}");
+
+        // タグは**フォルダをまたぐ** ── 「雑」は根っこと仕事の両方にある。
+        let (tag, n) = take("tag", "雑");
+        assert_eq!(n, 2, "タグ: {tag}");
+        assert!(tag.contains("tag-雑"), "{tag}");
+
+        let (note, n) = take("note", &root.join("日記/9月.md").display().to_string());
+        assert_eq!(n, 1, "ノート一つ: {note}");
+        assert!(note.contains("9月-"), "{note}");
+
+        // 空振りは、空の zip ではなく断り ── 中身の無い zip は
+        // 「取れた」に見えて、戻したときに何も戻らない。
+        assert!(call("backup", &serde_json::json!({
+            "path": root.display().to_string(), "scope": "tag", "what": "存在しない",
+            "into": d.path().display().to_string(),
+        })).is_err());
+        assert!(call("backup", &serde_json::json!({
+            "path": root.display().to_string(), "scope": "book", "what": "無いフォルダ",
+            "into": d.path().display().to_string(),
+        })).is_err());
+    }
+
+    /// **別のノートが入っている場所へ戻したら、どうなるか。**
+    ///
+    /// 戻すのは「消えたものを取り返す」ためで、いま書いているものを消して
+    /// いいという意味ではない。三つとも確かめる ──
+    /// 知らないノートは残る／同じ名前は今のが勝つ／構造が違っても入る。
+    #[test]
+    fn 戻すとき_いまあるものを消さない() {
+        let d = tempfile::tempdir().unwrap();
+        let from = d.path().join("むかし");
+        std::fs::create_dir_all(from.join("仕事")).unwrap();
+        std::fs::write(from.join("a.md"), "むかしの a\n").unwrap();
+        std::fs::write(from.join("仕事/b.md"), "むかしの b\n").unwrap();
+        let zip = call("backup", &serde_json::json!({
+            "path": from.display().to_string(), "scope": "all", "what": "",
+            "into": d.path().display().to_string(),
+        })).unwrap()["path"].as_str().unwrap().to_string();
+
+        // 戻す先は**別のノート帳**。中身も構造も違う。
+        let to = d.path().join("いま");
+        std::fs::create_dir_all(to.join("日記")).unwrap();
+        std::fs::write(to.join("a.md"), "いまの a\n").unwrap();          // 同じ名前
+        std::fs::write(to.join("知らない.md"), "触るな\n").unwrap();     // 向こうに無い
+        std::fs::create_dir_all(to.join("仕事")).unwrap();
+        std::fs::write(to.join("仕事/c.md"), "いまの c\n").unwrap();     // 同じ棚の別の紙
+        std::fs::write(to.join("日記/9月.md"), "晴れ\n").unwrap();       // 向こうに無い棚
+
+        let back = call("restore", &serde_json::json!({
+            "zip": zip, "to": to.display().to_string(),
+        })).unwrap();
+        assert_eq!(back["put"].as_u64().unwrap(), 1, "入ったのは b だけ: {back}");
+        assert_eq!(back["kept"].as_u64().unwrap(), 1, "避けたのは a だけ: {back}");
+
+        // 同じ名前は**いまのが勝つ**。
+        assert_eq!(std::fs::read_to_string(to.join("a.md")).unwrap(), "いまの a\n");
+        // 向こうに無かったものは、そのまま。
+        assert_eq!(std::fs::read_to_string(to.join("知らない.md")).unwrap(), "触るな\n");
+        assert_eq!(std::fs::read_to_string(to.join("日記/9月.md")).unwrap(), "晴れ\n");
+        // 同じ棚の別の紙も、そのまま。
+        assert_eq!(std::fs::read_to_string(to.join("仕事/c.md")).unwrap(), "いまの c\n");
+        // 向こうにしか無かったものは、構造ごと入る。
+        assert_eq!(std::fs::read_to_string(to.join("仕事/b.md")).unwrap(), "むかしの b\n");
+    }
+
+    /// 一枚だけの zip も、フォルダだけの zip も、同じ場所へ戻せるか。
+    ///
+    /// 全体の zip は `ノート/…` という一つの山の下にあるので頭を外すが、
+    /// **一枚だけの zip は山になっていない** ── そこで同じ外し方をすると
+    /// ファイル名そのものが外れて、何も戻らない。
+    #[test]
+    fn 一枚だけの_zip_も戻せる() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("ノート");
+        std::fs::create_dir_all(root.join("仕事")).unwrap();
+        std::fs::write(root.join("仕事/週報.md"), "今週の\n").unwrap();
+
+        let one = call("backup", &serde_json::json!({
+            "path": root.display().to_string(), "scope": "note",
+            "what": root.join("仕事/週報.md").display().to_string(),
+            "into": d.path().display().to_string(),
+        })).unwrap()["path"].as_str().unwrap().to_string();
+
+        let to = d.path().join("さら");
+        let back = call("restore", &serde_json::json!({
+            "zip": one, "to": to.display().to_string(),
+        })).unwrap();
+        assert_eq!(back["put"].as_u64().unwrap(), 1, "{back}");
+        assert_eq!(std::fs::read_to_string(to.join("週報.md")).unwrap(), "今週の\n");
+
+        // **フォルダの zip は、そのフォルダごと戻る。** 中身だけ根に散ると、
+        // 戻したのに元の場所に戻っていない ── そうなっていた。
+        let book = call("backup", &serde_json::json!({
+            "path": root.display().to_string(), "scope": "book", "what": "仕事",
+            "into": d.path().display().to_string(),
+        })).unwrap()["path"].as_str().unwrap().to_string();
+        let to2 = d.path().join("さら2");
+        call("restore", &serde_json::json!({
+            "zip": book, "to": to2.display().to_string(),
+        })).unwrap();
+        assert_eq!(std::fs::read_to_string(to2.join("仕事/週報.md")).unwrap(), "今週の\n");
+
+        // 札そのものは、ノート帳に置いていかない。
+        assert!(!to2.join(crate::zipbox::LABEL).exists());
     }
 
     #[test]

@@ -78,7 +78,26 @@ fn under(root: &Path, rest: &str) -> Option<PathBuf> {
 /// 頭を付けるのは、戻すときに「何の zip か」が名前から分かるため
 /// （`extract` の `strip` が、全部が一つの山の下にあるときだけ外す）。
 /// 付けないと、展開した人の作業ディレクトリにノートが散らばる。
+/// 中に入れる「これは何の zip か」の札。
+///
+/// **戻すときに、頭を外すかどうかがこれで決まる。** ノート帳ぜんぶの zip は
+/// `ノート/…` という一つの山の下にあるので頭を外す（外さないと、ノートの中に
+/// `ノート` という棚がもう一つできる）。**フォルダ一つの zip も見た目は同じ
+/// 形**なので、同じ規則で外すと `仕事/週報.md` が `週報.md` になって根に散る
+/// ── 戻したのに元の場所に戻っていない。形からは見分けられないので、
+/// 作るときに書いておく。
+pub const LABEL: &str = ".amber-backup.json";
+
 pub fn create(sources: &[PathBuf], dest: &Path, ctl: &mut crate::Ctl) -> Result<usize> {
+    create_labelled(sources, dest, None, ctl)
+}
+
+pub fn create_labelled(
+    sources: &[PathBuf],
+    dest: &Path,
+    label: Option<&str>,
+    ctl: &mut crate::Ctl,
+) -> Result<usize> {
     let mut jobs: Vec<(PathBuf, String)> = Vec::new();
     for src in sources {
         let head = src
@@ -97,6 +116,10 @@ pub fn create(sources: &[PathBuf], dest: &Path, ctl: &mut crate::Ctl) -> Result<
     let mut w = zip::ZipWriter::new(std::fs::File::create(dest)?);
     let opts: zip::write::FileOptions<()> =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    if let Some(label) = label {
+        w.start_file(LABEL, opts)?;
+        w.write_all(label.as_bytes())?;
+    }
     let mut done = 0usize;
     for (at, name) in &jobs {
         if ctl.stopped() {

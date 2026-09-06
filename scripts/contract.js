@@ -35,7 +35,7 @@ console.log('描く側に見せている口');
     const WANT = [
         'call', 'recall', 'remember', 'pickFolder', 'pickFile', 'saveAs',
         'openLink', 'fileBytes', 'onGuest', 'pathOf', 'trash', 'saveText',
-        'savePDF', 'ring', 'clipboardImage', 'appVersion',
+        'savePDF', 'ring', 'clipboardImage', 'appVersion', 'watch', 'onChanged',
     ];
     // `exposeInMainWorld('amber', { … })` の中の、頭に来る名前だけ。
     const body = src.slice(src.indexOf("exposeInMainWorld('amber'"));

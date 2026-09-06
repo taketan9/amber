@@ -47,6 +47,15 @@ struct Where: View {
                             .lineLimit(4)
                     }
                     LabeledContent("ノート", value: "\(store.notes.count) 本")
+                    // **置き場所は一つ。** 窓がそうなので、電話も同じに
+                    // した ── 前はここに「開いてきた場所」が八つ並んでいて、
+                    // 二つの amber で「いまどこに書いているか」の答えが違う
+                    // 形をしていた。戻る道だけ、いまの場所の隣に置く。
+                    if !store.own {
+                        Button { store.useOwn() } label: {
+                            Label("この iPhone の中に戻す", systemImage: "iphone")
+                        }
+                    }
                 }
 
                 Section {
@@ -68,63 +77,7 @@ struct Where: View {
                     // is a thing cian cannot do for him — the sidebar is the
                     // Files app's own setting — so the least it can do is say
                     // exactly where it is.
-                    Text("選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。\n\n・iCloud Drive → そのまま一覧にあります\n・Google Drive / Dropbox → 「場所」の下に並びます\n\n出てこないときは、その並びの下の「…」→「サイドバーを編集」で、使いたいものをオンにしてください（「ファイル」アプリ側の設定なので、amber からは変えられません）。\n\n灰色で選べないものがあります。フォルダを丸ごと他のアプリに渡せるかどうかは、そのアプリ側の作りによるもので、amber からは変えられません（2026-09 現在、「ドライブ」は灰色、iCloud Drive と Dropbox は選べます）。\n\nMac の cian の amber モードに同じフォルダを指定すれば、両方から同じノートを触れます。")
-                }
-
-                // Once found, never looked for again.
-                Section {
-                    // **This app's own folder is one of the places.** It used
-                    // to be a button saying 「この iPhone の中に戻す」, which
-                    // says nothing about where that is or why you would.
-                    // 2026-09-05: 「元々開いてきたディレクトリの履歴っていう
-                    // 表現にしてほしい」 ── so: everywhere the notes have
-                    // been, this one included, newest first.
-                    if let own = store.ownPlace {
-                        Button {
-                            store.useOwn()
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(own.name)
-                                    Text(own.trail).font(.caption2).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if store.own {
-                                    Image(systemName: "checkmark").foregroundStyle(.tint)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    ForEach(store.places) { place in
-                            Button {
-                                store.revisit(place)
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(place.name)
-                                        Text(place.trail)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                    Spacer()
-                                    if place.name == store.rootName {
-                                        Image(systemName: "checkmark").foregroundStyle(.tint)
-                                    }
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .swipeActions {
-                                Button("忘れる", role: .destructive) { store.forget(place) }
-                            }
-                    }
-                } header: {
-                    Text("開いてきた場所")
-                } footer: {
-                    Text("一度見つければ、次からはここから1回で戻れます。左スワイプで履歴から消せます。")
+                    Text("選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。\n\n・iCloud Drive → そのまま一覧にあります\n・Google Drive / Dropbox → 「場所」の下に並びます\n\n出てこないときは、その並びの下の「…」→「サイドバーを編集」で、使いたいものをオンにしてください（「ファイル」アプリ側の設定なので、amber からは変えられません）。\n\n灰色で選べないものがあります。フォルダを丸ごと他のアプリに渡せるかどうかは、そのアプリ側の作りによるもので、amber からは変えられません（2026-09 現在、「ドライブ」は灰色、iCloud Drive と Dropbox は選べます）。\n\n窓版の amber に同じフォルダを指定すれば、両方から同じノートを触れます。")
                 }
 
                 Section {
@@ -132,7 +85,7 @@ struct Where: View {
                         dismiss()
                         bringIn()
                     } label: {
-                        Label("インポート…", systemImage: "square.and.arrow.down")
+                        Label("インポート", systemImage: "square.and.arrow.down")
                     }
                     // The other half of 「バックアップ」. Without it a zip is
                     // a thing you can make and never use, which is not a
@@ -141,7 +94,7 @@ struct Where: View {
                         dismiss()
                         restore()
                     } label: {
-                        Label("バックアップから戻す…", systemImage: "clock.arrow.circlepath")
+                        Label("バックアップから戻す", systemImage: "clock.arrow.circlepath")
                     }
                     // The scope is a choice because backing up is
                     // something people do *before* something — before a
@@ -164,12 +117,23 @@ struct Where: View {
                             }
                         }
                     } label: {
-                        Label("バックアップ…", systemImage: "square.and.arrow.up")
+                        Label("バックアップ", systemImage: "square.and.arrow.up")
                     }
                 } header: {
                     Text("バックアップとインポート")
                 } footer: {
                     Text("インポートした .md はこのフォルダにコピーされます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。")
+                }
+
+                Section {
+                    Button {
+                        let n = store.addWelcome()
+                        added = n
+                    } label: {
+                        Label("見本のノートを入れる", systemImage: "sparkles")
+                    }
+                } footer: {
+                    Text("Markdown の書き方・『覚悟の磨き方』・ストラテジーパターンの三枚を、いま見ているフォルダに置きます。同じ名前があるものは飛ばすので、二度押しても増えません。")
                 }
 
                 Section {

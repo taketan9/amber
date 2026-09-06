@@ -17,7 +17,6 @@ final class NotesStore: ObservableObject {
 
     private var root: URL?
     private static let bookmarkKey = "cian.notes.root"
-    private static let placesKey = "cian.notes.places"
     private static let seededKey = "amber.notes.seeded"
 
     /// The app's own folder, which is where notes go when nothing else is
@@ -90,7 +89,6 @@ final class NotesStore: ObservableObject {
 
     /// The folder from last time, or this app's own.
     func restore() {
-        loadPlaces()
         seedWelcome()
         guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else {
             if let ownFolder { adopt(ownFolder, remember: false, scoped: false, named: "amber") }
@@ -210,7 +208,6 @@ final class NotesStore: ObservableObject {
     }
 
     func choose(_ url: URL) {
-        remember(url)
         adopt(url, remember: true, scoped: true)
     }
 
@@ -248,83 +245,14 @@ final class NotesStore: ObservableObject {
         return (out["notes"] as? [[String: Any]])?.count ?? 0
     }
 
-    /// This app's own folder, as one of the places — so the history is the
-    /// whole answer to 「どこを開いてきたか」 and there is no separate button
-    /// saying something nobody could parse.
-    var ownPlace: Place? {
-        guard let at = ownFolder, let data = try? at.bookmarkData() else { return nil }
-        return Place(name: "この iPhone の中（amber）", trail: "ファイル → この iPhone 内 → amber", data: data)
-    }
-
-    /// Somewhere notes have been kept, and the way back to it.
-    struct Place: Identifiable, Equatable {
-        let name: String
-        /// The trail, for saying *which* Drive folder this is.
-        let trail: String
-        let data: Data
-        var id: String { trail }
-    }
-
-    /// The folders that have been chosen before.
+    /// アプリ自身のフォルダ。**「この iPhone の中に戻す」ための一つ。**
     ///
-    /// **Because finding it is the hard part.** 2026-09-05: 「どこのディレクト
-    /// リなのかが単純にわからないんだ。探せなくて困っている」. iCloud Drive,
-    /// Google Drive and Dropbox are all in the Files picker and all several
-    /// taps down inside it — so the answer is not a better picker, it is
-    /// never having to use it twice. Found once, listed for ever.
-    ///
-    /// A bookmark rather than a path: a provider's folder moves, and a path
-    /// written down is a path that stops working without saying so.
-    @Published var places: [Place] = []
-
-    private func remember(_ url: URL) {
-        guard let data = try? url.bookmarkData() else { return }
-        let place = Place(name: url.lastPathComponent, trail: trail(of: url), data: data)
-        places.removeAll { $0.trail == place.trail }
-        // Newest first: the one you just chose is the one you are most likely
-        // to want back.
-        places.insert(place, at: 0)
-        if places.count > 8 { places.removeLast(places.count - 8) }
-        save()
-    }
-
-    /// Go back to one. `false` if the folder is gone — signed out of, moved,
-    /// or on a provider that is no longer installed.
-    @discardableResult
-    func revisit(_ place: Place) -> Bool {
-        var stale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: place.data,
-            options: [],
-            relativeTo: nil,
-            bookmarkDataIsStale: &stale
-        ) else {
-            trouble = "「\(place.name)」を開けません。そのアプリが iPhone から外れているかもしれません。"
-            return false
-        }
-        adopt(url, remember: true, scoped: true)
-        return true
-    }
-
-    func forget(_ place: Place) {
-        places.removeAll { $0.id == place.id }
-        save()
-    }
-
-    private func save() {
-        let rows = places.map { ["name": $0.name, "trail": $0.trail, "data": $0.data] as [String: Any] }
-        UserDefaults.standard.set(rows, forKey: Self.placesKey)
-    }
-
-    private func loadPlaces() {
-        let rows = UserDefaults.standard.array(forKey: Self.placesKey) as? [[String: Any]] ?? []
-        places = rows.compactMap { r in
-            guard let name = r["name"] as? String,
-                  let trail = r["trail"] as? String,
-                  let data = r["data"] as? Data else { return nil }
-            return Place(name: name, trail: trail, data: data)
-        }
-    }
+    /// 前はここに「開いてきた場所」の履歴が並んでいた。窓は置き場所を一つ
+    /// しか持たないので、電話も一つにした ── 二つの amber で「いまどこに
+    /// 書いているか」の答えが違う形をしているのが、いちばん分かりにくい。
+    /// 探すのが大変なのは変わらないが、それは選ぶ画面の話で、選んだあとに
+    /// 八つ並べておく話ではない。
+    var ownName: String { "この iPhone の中（amber）" }
 
     /// The path as a trail of names, for a URL that is not the current one.
     ///
