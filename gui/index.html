@@ -137,30 +137,30 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
    mac の信号機のぶんだけ、列の上を空ける。 */
 #railtop { height: 14px; flex: none; -webkit-app-region: drag; }
 body.mac #railtop { height: 34px; }
-/* **一つだけの、押させたい釦。**
-   琥珀の面に濃い字を置き、影で一段持ち上げる。押した瞬間だけ沈める ──
-   「押せた」が指に返らないと、押したかどうかを画面で確かめることになる。 */
+/* **一つだけの、押させたい釦 ── ただし塊にはしない。**
+   前は琥珀のべた塗りに階調と、琥珀色に光る影を二枚。古く見えていたのは
+   色ではなく**塊であること**で、階調と影はその塊を立体に見せるための飾り
+   だった。塊をやめ、琥珀は 22px の丸だけに残す ── 面積が小さいぶん色は
+   強く効き、字も高さも列の他の行と揃うので、左の列が一本の並びとして
+   読める。押せることは丸の形が言うので、地も枠も要らない。 */
 #new {
-  margin: 2px 12px 16px; padding: 9px 13px; border-radius: 10px;
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--amber) 88%, white),
-    var(--amber));
-  color: #3a2408; font-weight: 700; font-size: 13.5px; letter-spacing: .01em;
-  display: flex; align-items: center; gap: 9px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.14), 0 2px 8px color-mix(in srgb, var(--amber) 38%, transparent);
-  transition: transform .08s, box-shadow .12s, filter .12s;
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  margin: 2px 0 4px; padding: 7px 14px;
+  color: var(--ink); font-weight: 600; font-size: 13.5px;
+  transition: background .12s;
 }
-#new svg { width: 15px; height: 15px; flex: none; opacity: .85; }
-#new span { flex: 1; text-align: left; }
-#new:hover {
-  filter: brightness(1.04);
-  box-shadow: 0 2px 4px rgba(0,0,0,.16), 0 4px 14px color-mix(in srgb, var(--amber) 46%, transparent);
+#new .ring {
+  width: 22px; height: 22px; border-radius: 50%; flex: none;
+  background: var(--amber); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--amber) 50%, transparent);
+  transition: transform .08s;
 }
-#new:active {
-  transform: translateY(1px);
-  box-shadow: 0 1px 1px rgba(0,0,0,.18);
-  filter: brightness(.97);
-}
+#new .ring svg { width: 12px; height: 12px; }
+/* 他の行と同じ光り方をする ── ここだけ別の反応をすると、列の中で
+   この一行だけ別の作りに見える。 */
+#new:hover { background: var(--hover); }
+#new:active .ring { transform: scale(.9); }
 .head {
   font-size: 10.5px; letter-spacing: .13em; color: var(--ink-3);
   padding: 12px 15px 4px; text-transform: uppercase;
@@ -260,13 +260,21 @@ body.mac #listhead { padding-top: 30px; }
   -webkit-app-region: drag;
 }
 body.mac #top { padding-top: 30px; }
+/* **題は、一文字まで縮まない。** 帯には面の札も字数もタグも並ぶので、
+   題だけが `min-width: 0` だと、そこが全部のしわ寄せを引き受けて
+   「amber へようこそ」が「a」になる（実際になった）。題に床を敷き、
+   縮むのは右端の meta のほうにする。 */
 #title {
-  font-size: 17px; font-weight: 700; flex: 1; min-width: 0;
+  font-size: 17px; font-weight: 700; flex: 1 1 auto; min-width: 9ch;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* ノートを開いていないときは、帯に ⚙ だけが残る ── 右端に寄せる。 */
 #title[hidden] ~ #gear { margin-left: auto; }
-#state { font-size: 11.5px; color: var(--ink-3); flex: none; -webkit-app-region: no-drag; }
+#state {
+  font-size: 11.5px; color: var(--ink-3); -webkit-app-region: no-drag;
+  flex: 0 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 /* いま何字か。**題の隣ではなく右端** ── 書いている間ずっと動く数字が
    題のとなりにあると、視線が題に戻るたびに数字を読んでしまう。 */
 /* **⋯ と ⚙ の区別を、形ではなく言葉で付ける。**
@@ -677,7 +685,9 @@ body.vim #vim { display: block; }
 }
 #more button:hover { background: var(--hover); }
 #more button .k { margin-left: auto; font-size: 11px; color: var(--ink-3); }
-#more button .sub { font-size: 11.5px; color: var(--ink-3); }
+/* いまどうなっているかは**右端に揃える** ── 名前のすぐ後ろに置くと、
+   命令ごとに違う位置で始まって、目が毎回探しに行く。 */
+#more button .sub { margin-left: auto; font-size: 11.5px; color: var(--ink-3); }
 #more .sep { height: 1px; background: var(--line-2); margin: 4px 6px; }
 
 /* 表の道具。**縦棒を数えさせない** ── 打ち込む表は縦棒を数え続ける表で、

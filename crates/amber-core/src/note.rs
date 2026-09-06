@@ -341,6 +341,25 @@ fn excerpt(body: &[String]) -> String {
         // you what the note is about — and it is the line the search runs
         // against, so a coloured word would stop being findable.
         let t = plain(&t);
+        // **Nor is the notation.** `**ここにあるのは、ただの Markdown ファイル
+        // です。**` puts four asterisks in the one line meant to remind you
+        // what the note is about, and `**大事**` stops being findable by
+        // searching for 大事. The title already goes through `inline` for
+        // exactly this reason (依頼 174); the second line was left behind.
+        // The `>` and the bullet come off too — a quote and a list item are
+        // still sentences, and their marks are drawing, not words.
+        let t = match crate::markdown::list_item(t.trim()) {
+            Some((_, rest, _)) => match crate::markdown::task_item(&rest) {
+                Some((_, r)) => r,
+                None => rest,
+            },
+            None => t
+                .trim()
+                .strip_prefix('>')
+                .map(|r| r.trim_start().to_string())
+                .unwrap_or_else(|| t.trim().to_string()),
+        };
+        let t: String = crate::markdown::inline(&t).iter().map(|i| i.text()).collect();
         let t = t.trim();
         if t.is_empty() {
             continue;
@@ -626,6 +645,24 @@ pub enum Block {
     /// `![alt](link)` on a line of its own — the only image that gets a block.
     /// One inside a sentence stays in the sentence, where it was written.
     Image { alt: String, link: String },
+    /// A table. `align` has one entry per column of the header.
+    ///
+    /// **Here rather than on the phone.** Without it the phone joined the
+    /// rows into one paragraph and drew `| 面 | 何が見えるか | …` as a
+    /// sentence — which is what a table looks like when nobody parsed it.
+    /// A row may be shorter or longer than the header; the drawer decides
+    /// what to do about that, but it is handed the truth.
+    Table {
+        head: Vec<String>,
+        align: Vec<crate::markdown::Align>,
+        rows: Vec<Vec<String>>,
+    },
+    /// `> [!NOTE]` — GitHub's five kinds, and nothing else.
+    ///
+    /// The body is **paragraphs**, not blocks. A note's alert holds sentences
+    /// in practice, and a nested block tree would have to be understood by
+    /// every drawer that exists — the window builds its own from the HTML.
+    Alert { kind: String, body: Vec<String> },
     Rule,
 }
 
@@ -706,6 +743,56 @@ pub fn blocks(text: &str) -> Vec<Block> {
             flush(&mut para, &mut out);
             out.push(img);
             i += 1;
+            continue;
+        }
+
+        // A table: a header row, the separator under it, then rows until
+        // they stop. The separator is what makes it a table — a lone line
+        // with pipes in it is a sentence somebody wrote.
+        if t.starts_with('|')
+            && i + 1 < lines.len()
+            && crate::markdown::is_table_separator(&lines[i + 1])
+        {
+            flush(&mut para, &mut out);
+            let head = crate::markdown::split_cells(t);
+            let align = crate::markdown::split_cells(&lines[i + 1])
+                .iter()
+                .map(|c| crate::markdown::cell_align(c))
+                .collect();
+            i += 2;
+            let mut rows = Vec::new();
+            while i < lines.len() && lines[i].trim_start().starts_with('|') {
+                rows.push(crate::markdown::split_cells(lines[i].trim()));
+                i += 1;
+            }
+            out.push(Block::Table { head, align, rows });
+            continue;
+        }
+
+        // `> [!NOTE]` and the quoted lines under it.
+        if let Some(kind) = crate::markdown::alert_kind(t) {
+            flush(&mut para, &mut out);
+            i += 1;
+            let mut body = Vec::new();
+            let mut piece: Vec<String> = Vec::new();
+            while i < lines.len() {
+                let q = lines[i].trim();
+                let Some(rest) = q.strip_prefix('>') else { break };
+                let rest = rest.trim();
+                if rest.is_empty() {
+                    if !piece.is_empty() {
+                        body.push(piece.join(" "));
+                        piece.clear();
+                    }
+                } else {
+                    piece.push(rest.to_string());
+                }
+                i += 1;
+            }
+            if !piece.is_empty() {
+                body.push(piece.join(" "));
+            }
+            out.push(Block::Alert { kind, body });
             continue;
         }
 
@@ -1499,6 +1586,47 @@ mod tests {
         assert!(h.contains("本文です"), "and the start of it: {h}");
     }
 
+    /// **表は、文ではない。**
+    ///
+    /// 升に切らずに渡していた頃、電話は行を空白で繋いで
+    /// `| 面 | 何が見えるか | …` を一つの段落として描いた ── 表を誰も
+    /// 読まなかったときの見た目そのもの。窓は `to_html` で読めていたので、
+    /// **同じノートが二つの amber で別のものに見えていた。**
+    #[test]
+    fn 表は升に切って渡す() {
+        let b = blocks("| 面 | いつ |\n|---|:---:|\n| **表示** | ふだん |\n| コード | 直すとき |\n");
+        let Block::Table { head, align, rows } = &b[0] else {
+            panic!("表になっていません: {:?}", b)
+        };
+        assert_eq!(head, &["面".to_string(), "いつ".to_string()]);
+        assert_eq!(align[0], crate::markdown::Align::Left);
+        assert_eq!(align[1], crate::markdown::Align::Center);
+        assert_eq!(rows.len(), 2);
+        // 升の中の飾りは剥がさない ── 剥がす側を二つ持たない。
+        assert_eq!(rows[0][0], "**表示**");
+        assert_eq!(rows[1][1], "直すとき");
+
+        // 区切りの無い縦棒は、人が書いた文。
+        let b = blocks("| これは | 表ではない\n");
+        assert!(matches!(b[0], Block::Paragraph(_)), "{:?}", b);
+    }
+
+    /// 注記は、引用と別のもの ── `[!TIP]` を字として出さない。
+    #[test]
+    fn 注記は種類と中身に分かれる() {
+        let b = blocks("> [!TIP]\n> ここで打てます。\n> 手順はありません。\n>\n> 二つめの段。\n");
+        let Block::Alert { kind, body } = &b[0] else { panic!("注記になっていません: {:?}", b) };
+        assert_eq!(kind, "tip");
+        // 続く行は一つの段にまとまり、空の `>` で段が変わる。
+        assert_eq!(body, &["ここで打てます。 手順はありません。".to_string(),
+                           "二つめの段。".to_string()]);
+
+        // GitHub が知らない種類は、ただの引用のまま ── ここでだけ見える
+        // 記法を増やすと、同じノートが GitHub で壊れる。
+        let b = blocks("> [!HINT]\n> ふつうの引用です。\n");
+        assert!(matches!(b[0], Block::Quote(_)), "{:?}", b);
+    }
+
     #[test]
     fn a_picture_does_not_fill_the_line_that_says_what_the_note_is_about() {
         let d = tempfile::tempdir().unwrap();
@@ -1515,9 +1643,21 @@ mod tests {
         std::fs::write(&p, "# 題\n![現場の写真](a.jpg) のとおり。\n").unwrap();
         assert_eq!(read(&p, 60).unwrap().excerpt, "現場の写真 のとおり。");
 
-        // An ordinary link is words too, and is left alone.
+        // An ordinary link keeps its words and loses its notation — the
+        // same as the title does. `[手順](x.md)` in a one-line reminder is
+        // six characters of destination nobody reads at that size, and the
+        // title next to it already says just 手順.
         std::fs::write(&p, "# 題\n[手順](x.md) を見て。\n").unwrap();
-        assert_eq!(read(&p, 60).unwrap().excerpt, "[手順](x.md) を見て。");
+        assert_eq!(read(&p, 60).unwrap().excerpt, "手順 を見て。");
+
+        // Emphasis is drawing, not words. Left in, `**大事**` puts four
+        // asterisks in the line and stops being findable by 大事.
+        std::fs::write(&p, "# 題\n> **大事**なのは `ここ`。\n").unwrap();
+        assert_eq!(read(&p, 60).unwrap().excerpt, "大事なのは ここ。");
+
+        // A bullet is still a sentence; its mark is not part of it.
+        std::fs::write(&p, "# 題\n- [ ] 牛乳を買う\n").unwrap();
+        assert_eq!(read(&p, 60).unwrap().excerpt, "牛乳を買う");
 
         // A note that is only a picture has no excerpt, rather than an
         // excerpt made of a filename.

@@ -63,6 +63,7 @@
 				1A0000000000000000000005 /* Sources */,
 				1A0000000000000000000006 /* Frameworks */,
 				1A0000000000000000000007 /* Resources */,
+				1A0000000000000000000032 /* 見本のノート */,
 			);
 			buildRules = (
 			);
@@ -136,6 +137,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"$SRCROOT/../scripts/ios-fresh.sh\"\n";
+		};
+		1A0000000000000000000032 /* 見本のノート */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "見本のノート";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# 初めて開いた人に見せる見本を、束ねの中へ運ぶ。\n# **窓と同じ一組を使う**（`packaging/welcome`）── iPhone 用に写しを\n# 置くと、片方だけ直った日に二つの amber が別のことを言う。\nset -e\nfrom=\"$SRCROOT/../packaging/welcome\"\nto=\"$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/welcome\"\n[ -d \"$from\" ] || { echo \"warning: 見本がありません: $from\"; exit 0; }\nrm -rf \"$to\"\nmkdir -p \"$to\"\ncp -R \"$from/\" \"$to/\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

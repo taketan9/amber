@@ -20,6 +20,13 @@ struct Block: Identifiable {
     /// The line cut into coloured and uncoloured pieces — worked out by
     /// `cian_core::note::spans`, so the window draws the same pieces.
     let runs: [(String, String?)]
+    /// A table: the header, how each column lines up, and the rows.
+    let head: [String]
+    let align: [String]
+    let rows: [[String]]
+    /// `> [!NOTE]` — which of GitHub's five, and the paragraphs under it.
+    let alert: String
+    let body: [String]
 
     init(_ o: [String: Any]) {
         kind = o["kind"] as? String ?? "paragraph"
@@ -34,6 +41,14 @@ struct Block: Identifiable {
         runs = (o["runs"] as? [[String: Any]] ?? []).map {
             ($0["text"] as? String ?? "", $0["color"] as? String)
         }
+        // 升の中の飾りは `text` のまま持ってきて、描くときに読む ──
+        // ここで剥がすと、Markdown の読み手が電話にもう一つ生える。
+        let cell = { (c: [String: Any]) in c["text"] as? String ?? "" }
+        head = (o["head"] as? [[String: Any]] ?? []).map(cell)
+        align = o["align"] as? [String] ?? []
+        rows = (o["rows"] as? [[[String: Any]]] ?? []).map { $0.map(cell) }
+        alert = o["alert"] as? String ?? ""
+        body = (o["body"] as? [[String: Any]] ?? []).map(cell)
     }
 }
 
@@ -114,12 +129,104 @@ struct Reading: View {
             .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
         case "image":
             picture(b)
+        case "table":
+            table(b)
+        case "alert":
+            alertBox(b)
         case "rule":
             Divider()
         default:
             inline(b)
         }
     }
+
+    /// A table.
+    ///
+    /// **Scrolls sideways rather than squeezing.** A phone is 402 points
+    /// wide and a four-column table is not; wrapping every cell to two
+    /// characters turns a table into a column of syllables. Sideways is a
+    /// gesture people already have.
+    ///
+    /// Drawn with `Grid` so the columns line up down the whole table —
+    /// a `VStack` of `HStack`s lines up nothing, which is the one thing a
+    /// table is for.
+    @ViewBuilder
+    private func table(_ b: Block) -> some View {
+        let wide = b.rows.reduce(b.head.count) { max($0, $1.count) }
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(0..<wide, id: \.self) { c in
+                        cell(at(b.head, c), align: at(b.align, c), head: true)
+                    }
+                }
+                Divider().gridCellUnsizedAxes(.horizontal)
+                ForEach(Array(b.rows.enumerated()), id: \.offset) { _, row in
+                    GridRow {
+                        ForEach(0..<wide, id: \.self) { c in
+                            cell(at(row, c), align: at(b.align, c), head: false)
+                        }
+                    }
+                    Divider().gridCellUnsizedAxes(.horizontal)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.25))
+        )
+    }
+
+    /// The `n`th of something, or empty — **a short row is not a crash.**
+    /// Somebody's table has a row with one cell missing; drawing it with a
+    /// blank there is what they meant.
+    private func at<T>(_ xs: [T], _ n: Int) -> T? { n < xs.count ? xs[n] : nil }
+
+    private func cell(_ text: String?, align: String?, head: Bool) -> some View {
+        let how: Alignment = align == "center" ? .center : (align == "right" ? .trailing : .leading)
+        return markdown(text ?? "")
+            .font(head ? .subheadline.bold() : .subheadline)
+            .frame(minWidth: 74, maxWidth: 210, alignment: how)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+    }
+
+    /// `> [!NOTE]` and its four siblings.
+    ///
+    /// **The kind is not the text.** Left as a quote, the phone drew the
+    /// literal `[!TIP]` on a line of its own — notation showing through, in
+    /// the one place a reader is being told something. It gets the colour and
+    /// the symbol GitHub gives it, so the same note reads the same in both.
+    @ViewBuilder
+    private func alertBox(_ b: Block) -> some View {
+        let look = Self.alerts[b.alert] ?? ("いいたいこと", "info.circle.fill", Color.accentColor)
+        HStack(alignment: .top, spacing: 10) {
+            Rectangle().frame(width: 3).foregroundStyle(look.2)
+            VStack(alignment: .leading, spacing: 7) {
+                Label(look.0, systemImage: look.1)
+                    .font(.footnote.bold())
+                    .foregroundStyle(look.2)
+                ForEach(Array(b.body.enumerated()), id: \.offset) { _, p in
+                    markdown(p).font(.subheadline)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 9)
+            .padding(.trailing, 11)
+        }
+        .background(look.2.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// GitHub の五つ。**名前は日本語で出す** ── `NOTE` と `IMPORTANT` の
+    /// 違いを英語で読ませるより、「おぼえておく」「大事」のほうが早い。
+    private static let alerts: [String: (String, String, Color)] = [
+        "note": ("おぼえておく", "info.circle.fill", .blue),
+        "tip": ("こつ", "lightbulb.fill", .green),
+        "important": ("大事", "exclamationmark.circle.fill", .purple),
+        "warning": ("注意", "exclamationmark.triangle.fill", .orange),
+        "caution": ("あぶない", "hand.raised.fill", .red),
+    ]
 
     /// The picture beside the note.
     ///

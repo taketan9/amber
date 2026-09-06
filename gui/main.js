@@ -98,6 +98,70 @@ function firstRoot() {
     return fresh;
 }
 
+/// 初めて開いた人に、**空の窓を見せない。**
+///
+/// 何も無い一覧を前にすると、Markdown を知らない人は「何ができるのか」を
+/// どこからも知れない ── 説明を読ませるより、**読めて・押せて・書き換えられる
+/// ノートが最初から入っている**ほうが早い（Inkdrop がそうしている）。
+///
+/// 置くのは一度きり。**消したら二度と戻さない** ── 邪魔だから消したものが
+/// 起動のたびに生えるのは、いちばん嫌われる作りかた。だから「空かどうか」
+/// ではなく「**置いたことがあるか**」で決める（置いた直後に全部消して閉じた
+/// 人にも、次の起動で生えない）。
+function seedWelcome() {
+    if (recall().seeded) return;
+    const from = path.join(__dirname, '..', 'packaging', 'welcome');
+    // 見本そのものが無い置かれ方（同梱の仕方によってはありうる）。
+    // **憶えないまま帰る** ── 憶えてしまうと、あとで同梱された日に置けない。
+    if (!fs.existsSync(from)) return;
+    const root = recall().root || firstRoot();
+    try {
+        // **既にノートがあるなら置かない。** `~/Documents/cian` を引き継いだ
+        // 人や、置き場所を自分のフォルダに向けている人の一覧に、見本が
+        // 混ざるのはただの散らかし。それでも「置いた」ことにする ──
+        // あとで空にした日に生えてこないように。
+        if (!hasNotes(root)) {
+            for (const at of walk(from)) {
+                const to = path.join(root, path.relative(from, at));
+                // **上書きはしない。** 同じ名前の自分のノートを消す道は作らない。
+                if (fs.existsSync(to)) continue;
+                fs.mkdirSync(path.dirname(to), { recursive: true });
+                fs.copyFileSync(at, to);
+            }
+            console.log('見本のノートを置きました:', root);
+        }
+        // 憶えるのは**置き終えてから** ── 途中で転んだ回は、次の起動で
+        // もう一度試せる（既にあるものは飛ばすので、二重にはならない）。
+        remember({ seeded: true });
+    } catch (e) {
+        // 見本が置けないことで、窓が開かない理由はない。
+        console.error('見本を置けませんでした:', e.message);
+    }
+}
+
+/// 下まで見て、`.md` が一枚でもあるか。
+function hasNotes(dir) {
+    for (const at of walk(dir)) if (at.toLowerCase().endsWith('.md')) return true;
+    return false;
+}
+
+/// フォルダの中のファイルを、下まで一つずつ。
+function* walk(dir, depth = 0) {
+    if (depth > 6) return;
+    let kids;
+    try {
+        kids = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+        return;
+    }
+    for (const k of kids) {
+        if (k.name.startsWith('.')) continue;
+        const at = path.join(dir, k.name);
+        if (k.isDirectory()) yield* walk(at, depth + 1);
+        else if (k.isFile()) yield at;
+    }
+}
+
 function makeWindow() {
     const saved = recall();
     win = new BrowserWindow({
@@ -175,6 +239,8 @@ function makeWindow() {
 }
 
 app.whenReady().then(() => {
+    // 一覧を訊かれる前に置く ── あとから置くと、最初の一覧が空のまま出る。
+    seedWelcome();
     engine = new Engine();
     ipcMain.handle('amber:call', async (_e, method, params) => engine.call(method, params));
     ipcMain.handle('amber:recall', () => ({ root: firstRoot(), ...recall() }));

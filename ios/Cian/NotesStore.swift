@@ -18,6 +18,7 @@ final class NotesStore: ObservableObject {
     private var root: URL?
     private static let bookmarkKey = "cian.notes.root"
     private static let placesKey = "cian.notes.places"
+    private static let seededKey = "amber.notes.seeded"
 
     /// The app's own folder, which is where notes go when nothing else is
     /// chosen.
@@ -90,6 +91,7 @@ final class NotesStore: ObservableObject {
     /// The folder from last time, or this app's own.
     func restore() {
         loadPlaces()
+        seedWelcome()
         guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else {
             if let ownFolder { adopt(ownFolder, remember: false, scoped: false, named: "amber") }
             return
@@ -105,6 +107,70 @@ final class NotesStore: ObservableObject {
         // handed back stale after an update. Saying so beats an empty list
         // that looks like "you have no notes".
         adopt(url, remember: stale, scoped: true)
+    }
+
+    /// **Don't show a first-time reader an empty list.**
+    ///
+    /// With nothing in it there is nowhere to learn what the app can do —
+    /// Markdown, folders, tags, the diagrams. Three notes that can be read,
+    /// pressed and rewritten teach it faster than a screen of instructions,
+    /// and they are the same three the Mac window puts down
+    /// (`packaging/welcome`), so both ambers open on the same page.
+    ///
+    /// Once only. **Deleted means deleted** — nothing that somebody threw
+    /// away should grow back on the next launch, so the flag records *that we
+    /// put them down*, not whether the folder is empty now.
+    private func seedWelcome() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Self.seededKey) else { return }
+        // **Somebody who already picked a folder is not a first-time reader.**
+        // Their notes live in that folder; putting samples in the app's own
+        // one would drop three files into a place they are not looking at,
+        // and they would find them weeks later without knowing where from.
+        guard defaults.data(forKey: Self.bookmarkKey) == nil else {
+            defaults.set(true, forKey: Self.seededKey)
+            return
+        }
+        guard let from = Bundle.main.resourceURL?.appendingPathComponent("welcome"),
+              FileManager.default.fileExists(atPath: from.path),
+              let to = ownFolder else { return }
+        // Notes already here: somebody's own folder, or a restored backup.
+        // Say we seeded anyway, so an empty day later stays empty.
+        if !hasNotes(to) {
+            copyTree(from: from, to: to)
+        }
+        defaults.set(true, forKey: Self.seededKey)
+    }
+
+    private func hasNotes(_ dir: URL) -> Bool {
+        let walker = FileManager.default.enumerator(
+            at: dir, includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles, .skipsPackageDescendants])
+        while let next = walker?.nextObject() as? URL {
+            if next.pathExtension.lowercased() == "md" { return true }
+        }
+        return false
+    }
+
+    /// Copy a folder in, keeping its shape. **Never over a file that is
+    /// already there** — a sample must not be able to eat somebody's note.
+    private func copyTree(from: URL, to: URL) {
+        let fm = FileManager.default
+        guard let walker = fm.enumerator(
+            at: from, includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]) else { return }
+        for case let at as URL in walker {
+            let rest = at.path.replacingOccurrences(of: from.path + "/", with: "")
+            let landing = to.appendingPathComponent(rest)
+            let isDir = (try? at.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            if isDir {
+                try? fm.createDirectory(at: landing, withIntermediateDirectories: true)
+            } else if !fm.fileExists(atPath: landing.path) {
+                try? fm.createDirectory(
+                    at: landing.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? fm.copyItem(at: at, to: landing)
+            }
+        }
     }
 
     func choose(_ url: URL) {

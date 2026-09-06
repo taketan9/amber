@@ -578,7 +578,7 @@ fn stamps(raw: &str, total: usize) -> String {
 /// `> [!NOTE]` の一行を、注記の種類に。**GitHub が読める五つだけ。**
 ///
 /// 増やすと、ここでだけ見える記法になり、同じノートが GitHub で壊れる。
-fn alert_kind(t: &str) -> Option<String> {
+pub fn alert_kind(t: &str) -> Option<String> {
     let rest = t.strip_prefix('>')?.trim_start();
     let inner = rest.strip_prefix("[!")?.strip_suffix(']')?;
     let k = inner.to_ascii_lowercase();

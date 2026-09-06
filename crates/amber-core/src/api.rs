@@ -229,6 +229,29 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     Block::Image { alt, link } => {
                         serde_json::json!({ "kind": "image", "alt": alt, "link": link })
                     }
+                    // **升は `runs` を持って渡す。** 表の中にも太字は書かれる
+                    // し、引く側が自分で `**` を剥がしはじめると、二つ目の
+                    // Markdown の読み手がそこに生える。
+                    Block::Table { head, align, rows } => serde_json::json!({
+                        "kind": "table",
+                        "align": align.iter().map(|a| match a {
+                            crate::markdown::Align::Center => "center",
+                            crate::markdown::Align::Right => "right",
+                            crate::markdown::Align::Left => "left",
+                        }).collect::<Vec<_>>(),
+                        "head": head.iter().map(|c| serde_json::json!({
+                            "runs": runs(c), "text": c,
+                        })).collect::<Vec<_>>(),
+                        "rows": rows.iter().map(|r| r.iter().map(|c| serde_json::json!({
+                            "runs": runs(c), "text": c,
+                        })).collect::<Vec<_>>()).collect::<Vec<_>>(),
+                    }),
+                    Block::Alert { kind, body } => serde_json::json!({
+                        "kind": "alert", "alert": kind,
+                        "body": body.iter().map(|t| serde_json::json!({
+                            "runs": runs(t), "text": t,
+                        })).collect::<Vec<_>>(),
+                    }),
                     Block::Rule => serde_json::json!({ "kind": "rule" }),
                 })
                 .collect();

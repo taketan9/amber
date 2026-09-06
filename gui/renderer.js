@@ -72,11 +72,11 @@ function drawRail() {
     const rows = [];
     rows.push('<div id="railtop"></div>');
     // 「＋」は全角の空白で離していた ── 字と記号のあいだが不揃いになる。
-    // 印は札の中に描く（同じ太さ・同じ大きさで、字と揃う）。
-    rows.push('<button id="new">'
+    // 印は琥珀の丸の中に描く（同じ太さ・同じ大きさで、字と揃う）。
+    rows.push('<button id="new"><span class="ring">'
         + '<svg viewBox="0 0 16 16" aria-hidden="true">'
-        + '<path d="M8 3.2v9.6M3.2 8h9.6" stroke="currentColor" stroke-width="1.9"'
-        + ' stroke-linecap="round"/></svg>'
+        + '<path d="M8 3.4v9.2M3.4 8h9.2" stroke="currentColor" stroke-width="2.2"'
+        + ' stroke-linecap="round"/></svg></span>'
         + '<span>新しいノート</span></button>');
 
     rows.push('<div class="head">ノート</div>');
@@ -1082,7 +1082,7 @@ async function cmdVim() {
     const to = await askPick('vimモード', [
         { name: 'vim で打つ', sub: 'ノーマル / 挿入 / ビジュアル、`:w` も', value: true },
         { name: '素のメモ帳で打つ', sub: 'ふつうの入力', value: false },
-    ], vimOn ? 'いま: vim' : 'いま: 素のメモ帳');
+    ], vimOn ? 'いま オン（vim の打ち方）' : 'いま オフ（素のメモ帳）');
     if (to === null || to === vimOn) return;
     setVim(to);
 }
@@ -1092,7 +1092,7 @@ async function cmdLineNo() {
     const to = await askPick('行番号', [
         { name: '出す', sub: '「コード」の面の左に', value: true },
         { name: '出さない', value: false },
-    ], lineNo ? 'いま: 出している' : 'いま: 出していない');
+    ], lineNo ? 'いま オン' : 'いま オフ');
     if (to === null || to === lineNo) return;
     setLineNo(to);
 }
@@ -1464,8 +1464,11 @@ async function drawRead() {
     // 保存が黙って止まった。
     armRead();
     findPictures();
-    paintCode();
-    drawDiagrams();
+    // **枠の色付けが先、図はそのあと。** 図の読み込みは `define` を伏せる
+    // 一瞬を持っていて、Monaco はそのとき言語を後から読みに行くことがある
+    // （`rust.js` は `define` を呼ぶ）── 重なると、枠のある図つきノートで
+    // どちらかが落ちる。並べて速くなる場面でもないので、順に行う。
+    paintCode().then(drawDiagrams);
 }
 
 /// 末尾に空の段落を一つ置く（もう空の段落で終わっているなら、置かない）。
@@ -1695,12 +1698,22 @@ function loadMermaid() {
         //
         // だから **`define` を伏せてから素の `<script>` で読む。** 束ねは
         // 最後に `globalThis.mermaid` へ自分を置く。
+        //
+        // **旗（`define.amd`）を下ろすだけでは足りない。** 中の部品は
+        // `typeof define === 'function'` しか見ておらず、旗が無くても
+        // 名乗り出る（「無名の define は一つまで」で落ちた）。
+        //
+        // 伏せているあいだ Monaco が言語を読みに行くと、今度はあちらが
+        // `define is not a function` で落ちる ── 図と枠の両方があるノートで
+        // 実際に落ちた。**だから枠の色付けを先に終わらせてから呼ぶ**
+        // （`drawRead` を見よ）。伏せるのは初回の一度きり。
         const keep = window.define;
         window.define = undefined;
+        const back = () => { window.define = keep; };
         const tag = document.createElement('script');
         tag.src = 'vendor/mermaid/mermaid.min.js';
         tag.onload = () => {
-            window.define = keep;
+            back();
             const lib = globalThis.mermaid;
             if (!lib || typeof lib.initialize !== 'function') {
                 reject(new Error('mermaid が名乗りません'));
@@ -1711,7 +1724,7 @@ function loadMermaid() {
             resolve(lib);
         };
         tag.onerror = () => {
-            window.define = keep;
+            back();
             reject(new Error('vendor/mermaid が置かれていません（node gui/vendor.js）'));
         };
         document.head.append(tag);
@@ -2833,9 +2846,13 @@ function openMenu(at, which) {
     const key = which === 'app' ? 'app' : 'menu';
     const items = CMDS.filter((c) => c[key] && canRun(c)).map((c) => {
         // **いまどうなっているかを、押す前に見せる。**
-        if (c.id === 'theme') return { ...c, sub: 'いま: ' + themeName() };
-        if (c.id === 'vim') return { ...c, sub: vimOn ? 'いま: vim' : 'いま: 素のメモ帳' };
-        if (c.id === 'lineno') return { ...c, sub: lineNo ? 'いま: 出している' : 'いま: 出していない' };
+        // **「いま:」とは書かない。** 献立に出ている値は、これから選ぶ値では
+        // なく**いまの値**しかありえない ── 一行ごとに同じ二文字を読ませる
+        // 意味が無い。入切は「オン / オフ」で揃える（片方だけ「出している」
+        // のような言い方をすると、同じ形の設定が二つの語彙を持つ）。
+        if (c.id === 'theme') return { ...c, sub: themeName() };
+        if (c.id === 'vim') return { ...c, sub: vimOn ? 'オン' : 'オフ' };
+        if (c.id === 'lineno') return { ...c, sub: lineNo ? 'オン' : 'オフ' };
         if (c.id === 'root') return { ...c, sub: shortPath(state.root) };
         return c;
     });
