@@ -73,57 +73,21 @@ struct ContentView: View {
                         }
                     }
                 }
+                // **最上段は歯車だけ。** 前は新しいフォルダ・新しいノート・
+                // 並びの三つが並んでいて、窓の左の列とは別のものになって
+                // いた。作るのは一覧の頭の釦、並べ替えとフィルタはその下 ──
+                // 窓がそうしているので、二つの amber で同じ場所を探せる。
+                if store.up == nil {
+                    ToolbarItem(placement: .topBarLeading) {
+                        // 名前は書かない（Dock も窓の外も既に言っている）。
+                        // 印だけ、いま何のアプリかが分かるぶん。
+                        Mark().frame(width: 26, height: 26)
+                            .accessibilityLabel("amber")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { picking = true } label: { Image(systemName: "gearshape") }
                         .accessibilityLabel("設定")
-                }
-                if !store.rootName.isEmpty {
-                    // Making a folder is a top-level thing to do and was
-                    // buried in the sort menu, where nobody found it.
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { booking = true } label: {
-                            Image(systemName: "folder.badge.plus")
-                        }
-                        .accessibilityLabel("新しいフォルダ")
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        // The same `.badge.plus` as the folder beside it:
-                        // two buttons that both mean "a new one of these"
-                        // should be built the same way, or the pair reads as
-                        // two unrelated things that happen to sit together.
-                        Button { naming = true } label: {
-                            Image(systemName: "note.text.badge.plus")
-                        }
-                        .accessibilityLabel("新しいノート")
-                    }
-                    // Both narrowings in one menu: which notebook, and in what
-                    // order. They are the two questions asked of a list that
-                    // has grown, and a toolbar with a button each would leave
-                    // no room for the ones that make a note.
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Picker("並び", selection: $store.order) {
-                                ForEach(NotesStore.Order.allCases) { Text($0.label).tag($0) }
-                            }
-                            Divider()
-                            Toggle(isOn: $store.tree) {
-                                Label("フォルダごと（ツリー）", systemImage: "list.bullet.indent")
-                            }
-                            Toggle(isOn: $store.flat) {
-                                Label("全部まとめて見る", systemImage: "list.bullet")
-                            }
-                            Divider()
-                            Button { treeing = true } label: {
-                                Label("フォルダの構成…", systemImage: "list.bullet.indent")
-                            }
-
-                        } label: {
-                            Image(systemName: store.flat
-                                ? "line.3.horizontal.decrease.circle.fill"
-                                : "line.3.horizontal.decrease.circle")
-                        }
-                        .accessibilityLabel("並びとフォルダ")
-                    }
                 }
             }
         }
@@ -364,7 +328,7 @@ struct ContentView: View {
                         do { try store.star(note, on: note.star == nil ? "" : nil) }
                         catch { store.trouble = error.localizedDescription }
                     } label: {
-                        Label(note.star == nil ? "お気に入り" : "外す",
+                        Label(note.star == nil ? "ブックマーク" : "外す",
                               systemImage: note.star == nil ? "star" : "star.slash")
                     }
                     .tint(.orange)
@@ -374,7 +338,7 @@ struct ContentView: View {
                     // done in passing; moving is filing; exporting is the one
                     // that leaves cian, and leaving is always last.
                     Button { shelving = note } label: {
-                        Label(note.star == nil ? "お気に入りに登録する" : "棚を変える", systemImage: "star")
+                        Label(note.star == nil ? "ブックマークに登録する" : "置き場所を変える", systemImage: "star")
                     }
                     // Every notebook, not just the ones beside this note —
                     // filing is often filing *away*.
@@ -388,7 +352,7 @@ struct ContentView: View {
                     // mail. The system sheet does all of those, so cian does
                     // not have to know any of them by name.
                     ShareLink(item: URL(fileURLWithPath: note.path)) {
-                        Label("書き出す…", systemImage: "square.and.arrow.up")
+                        Label("エクスポート", systemImage: "square.and.arrow.up")
                     }
                 }
     }
@@ -468,8 +432,26 @@ struct ContentView: View {
             if needle.isEmpty, store.only.isEmpty {
                 Section {
                     if store.at.isEmpty {
-                        Wordmark(notes: store.notes.count, books: store.allBooks.count)
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 14, trailing: 16))
+                        // **一つだけの、押させたい釦。** 窓と同じ形 ── 塊に
+                        // せず、琥珀は丸だけに残す。名前とアイコンの大きな
+                        // 見出しはやめた（アプリの名前は窓の外が言っている
+                        // ので、中で二度言うぶんだけノートが下がる）。
+                        Button { naming = true } label: {
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    Circle().fill(Color.accentColor)
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(.white)
+                                }
+                                .frame(width: 26, height: 26)
+                                .shadow(color: Color.accentColor.opacity(0.45), radius: 3, y: 1)
+                                Text("新しいノート").font(.system(size: 16, weight: .semibold))
+                                Spacer(minLength: 0)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 0, trailing: 16))
                     } else {
                         // A folder's own name does not say where it is, and
                         // two folders called 「2026」 look identical at the
@@ -482,6 +464,94 @@ struct ContentView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
+
+                // 並べ替えとフィルタ。**窓と同じ場所** ── 一覧のすぐ上に
+                // 二つ並ぶ。最上段に置くと、作る釦と同じ高さに座って
+                // 「よく使うもの」に見えてしまう（前はそうなっていた）。
+                if store.at.isEmpty {
+                    HStack(spacing: 14) {
+                        Menu {
+                            Picker("並び", selection: $store.order) {
+                                ForEach(NotesStore.Order.allCases) { Text($0.label).tag($0) }
+                            }
+                        } label: {
+                            Text(store.order.label).font(.footnote)
+                        }
+                        Menu {
+                            Toggle(isOn: $store.tree) {
+                                Label("フォルダごと（ツリー）", systemImage: "list.bullet.indent")
+                            }
+                            Toggle(isOn: $store.flat) {
+                                Label("全部まとめて見る", systemImage: "list.bullet")
+                            }
+                            Divider()
+                            Button { booking = true } label: {
+                                Label("新しいフォルダ", systemImage: "folder.badge.plus")
+                            }
+                            Button { treeing = true } label: {
+                                Label("フォルダの構成", systemImage: "list.bullet.indent")
+                            }
+                            if !store.only.isEmpty {
+                                Divider()
+                                Button(role: .destructive) { store.only = [] } label: {
+                                    Label("タグの絞りを外す", systemImage: "xmark.circle")
+                                }
+                            }
+                        } label: {
+                            Text("フィルタ").font(.footnote)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 2, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+
+                // **窓の左の列と同じ順**（ノート → ブックマーク → フォルダ
+                // → タグ）。二つの amber で同じものを同じ場所に探せる。
+                Section("ノート") {
+                    Button { store.flat.toggle() } label: {
+                        HStack {
+                            Label("すべてのノート", systemImage: store.flat
+                                ? "tray.full.fill" : "tray.full")
+                            Spacer()
+                            Text("\(store.notes.count)")
+                                .foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(store.flat ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                }
+            }
+            // ブックマーク。**窓と同じ名前**（依頼 212 で「お気に入り」から
+            // 改名した ── 「棚」も含めて、何のことか画面が説明して
+            // いなかった）。ここだけ古い名前のままだと、同じものが
+            // 二つの amber で違う名前で呼ばれる。
+            // Pinned notes under a heading that says what pinning did.
+            // A note that silently jumps to the top is a note that moved for
+            // no reason you can see.
+            let stuck = treeing2 ? [] : store.pinnedHere(needle)
+            if !stuck.isEmpty {
+                Section {
+                    ForEach(stuck) { row($0) }
+                } header: {
+                    HStack {
+                        Label {
+                            Text("ブックマーク")
+                        } icon: {
+                            Image(systemName: "star.fill").foregroundStyle(.orange)
+                        }
+                        Spacer()
+                        NavigationLink("ぜんぶ見る") {
+                            Stars(store: store) { note in
+                                desk.open(note)
+                                showing = true
+                            }
+                        }
+                        .font(.caption)
+                        .textCase(nil)
+                    }
+                }
             }
             // The notebooks first, then the notes in this one. Folders above
             // files is what every file manager since the first one has done,
@@ -491,6 +561,7 @@ struct ContentView: View {
             // is exactly what happened the first time, and reads as the list
             // having lost its mind rather than as two views agreeing.
             if !store.flat && needle.isEmpty && !treeing2 {
+                // 見出しを付ける ── 窓の左の列がそう呼んでいる。
                 // The way out, and a place to drop things through it. cian's
                 // own panes have had a `..` row since the beginning, and it
                 // has always meant both: go up, and put this up there.
@@ -505,7 +576,8 @@ struct ContentView: View {
                     } isTargeted: { over in outside = over }
                     .listRowBackground(outside ? Color.accentColor.opacity(0.15) : nil)
                 }
-                ForEach(store.books, id: \.path) { b in
+                Section {
+                  ForEach(store.books, id: \.path) { b in
                     Button {
                         go { store.into(b.path) }
                     } label: {
@@ -545,31 +617,33 @@ struct ContentView: View {
                             Label("削除する", systemImage: "trash")
                         }
                     }
+                  }
+                } header: {
+                    // 中に入っているときは、上の帯が既にどこかを言っている。
+                    if store.at.isEmpty { Text("フォルダ") }
                 }
             }
-            // Pinned notes under a heading that says what pinning did.
-            // A note that silently jumps to the top is a note that moved for
-            // no reason you can see.
-            let stuck = treeing2 ? [] : store.pinnedHere(needle)
-            if !stuck.isEmpty {
-                Section {
-                    ForEach(stuck) { row($0) }
-                } header: {
-                    HStack {
-                        Label {
-                            Text("お気に入り")
-                        } icon: {
-                            Image(systemName: "star.fill").foregroundStyle(.orange)
-                        }
-                        Spacer()
-                        NavigationLink("ぜんぶ見る") {
-                            Stars(store: store) { note in
-                                desk.open(note)
-                                showing = true
+
+            // タグ。**窓の左の列にあって、電話に無かった。** 探す欄の
+            // 提案としてしか出ておらず、「どんなタグがあるか」を見るには
+            // 一度打ちはじめる必要があった ── タグは思い出すものではなく、
+            // 見て選ぶもの。押すと絞り、もう一度押すと外す。
+            if needle.isEmpty, store.at.isEmpty, !store.tagsHere.isEmpty, !store.flat {
+                Section("タグ") {
+                    ForEach(store.tagsHere.prefix(12), id: \.self) { t in
+                        let on = store.only.contains(t)
+                        Button {
+                            if on { store.only.remove(t) } else { store.only.insert(t) }
+                        } label: {
+                            HStack {
+                                Label("#" + t, systemImage: on ? "number.circle.fill" : "number")
+                                Spacer()
+                                Text("\(store.notes.filter { $0.tags.contains(t) }.count)")
+                                    .foregroundStyle(.secondary).monospacedDigit()
                             }
                         }
-                        .font(.caption)
-                        .textCase(nil)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                     }
                 }
             }
@@ -591,6 +665,12 @@ struct ContentView: View {
                 }
             }
         }
+        // 段のあいだを詰める。既定のままだと、釦と絞りと見出しだけで
+        // 画面の三分の一が空き、ノートが下に押し出される。
+        .listSectionSpacing(.compact)
+        // 探す欄のすぐ下から始める ── 一覧が自分で取る上の余白は、
+        // 大きな題があった頃のためのもので、いまは何も置いていない。
+        .contentMargins(.top, 2, for: .scrollContent)
         // The whole list is replaced when the folder changes, so it can
         // slide in from the side it came from.
         .id(walked)
@@ -631,7 +711,7 @@ struct ContentView: View {
         // to `.inline` so the wordmark can have the top of the list, the
         // search field would otherwise be somewhere you have to know about.
         .searchable(text: $needle, placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: "タイトル・タグ・本文　（空白で AND、OR で OR）")
+                    prompt: "ノートを探す")
         // **The tags, offered where you are already typing.** They used to be
         // a bar of chips above the list, which cost a row of the screen for
         // ever so that they could be pressed occasionally. Suggestions appear

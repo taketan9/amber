@@ -19,6 +19,9 @@ struct Where: View {
     let choose: () -> Void
     let bringIn: () -> Void
     let restore: () -> Void
+    /// 見本を何枚置いたか。**言わないと、押しても何も起きなかったように
+    /// 見える**（既にあるものは飛ばすので、本当に何も起きない回がある）。
+    @State private var added: Int?
     @Environment(\.dismiss) private var dismiss
     @State private var zip: URL?
     @State private var trouble: String?
@@ -170,6 +173,17 @@ struct Where: View {
                 }
 
                 Section {
+                    Button {
+                        let n = store.addWelcome()
+                        added = n
+                    } label: {
+                        Label("見本のノートを入れる", systemImage: "sparkles")
+                    }
+                } footer: {
+                    Text("Markdown の書き方・『覚悟の磨き方』・ストラテジーパターンの三枚を、いま見ているフォルダに置きます。同じ名前があるものは飛ばすので、二度押しても増えません。")
+                }
+
+                Section {
                     Toggle("自動保存", isOn: $autosave)
                 } footer: {
                     Text("切ると、書く画面に「保存」が出ます。切っていても、画面を離れるときに一度だけ訊きます。")
@@ -194,6 +208,15 @@ struct Where: View {
             // handed over is a file that is already there — not a promise.
             .sheet(item: $zip) { at in
                 ActivityView(item: at)
+            }
+            .alert("見本のノート", isPresented: Binding(
+                get: { added != nil }, set: { if !$0 { added = nil } }
+            )) {
+                Button("わかりました") {}
+            } message: {
+                Text(added == 0
+                     ? "もう入っています（同じ名前のものは飛ばしました）。"
+                     : "\(added ?? 0) 枚置きました。")
             }
             .alert(
                 "作れませんでした",

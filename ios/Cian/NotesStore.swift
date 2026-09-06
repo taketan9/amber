@@ -142,6 +142,42 @@ final class NotesStore: ObservableObject {
         defaults.set(true, forKey: Self.seededKey)
     }
 
+    /// 見本のノートを、いま見ているフォルダへ置く。
+    ///
+    /// **初回に置けなかった人のための道。** 自動で置くのはアプリ自身の
+    /// フォルダを使っている初回だけで、既に自分のフォルダを選んでいる人
+    /// （同期先を向けている人）には置かない ── 見ていないところに三枚
+    /// 落ちて、何週間かあとにどこから来たか分からないものとして見つかる。
+    /// それでも「入れてくれ」と言える場所が要る。
+    ///
+    /// 返すのは置いた数。同じ名前があるものは飛ばすので、二度押しても
+    /// 増えない。
+    @discardableResult
+    func addWelcome() -> Int {
+        guard let from = Bundle.main.resourceURL?.appendingPathComponent("welcome"),
+              FileManager.default.fileExists(atPath: from.path),
+              let to = root
+        else {
+            trouble = "見本が入っていません"
+            return 0
+        }
+        let before = countNotes(to)
+        copyTree(from: from, to: to)
+        reload()
+        return countNotes(to) - before
+    }
+
+    private func countNotes(_ dir: URL) -> Int {
+        var n = 0
+        let walker = FileManager.default.enumerator(
+            at: dir, includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles, .skipsPackageDescendants])
+        while let next = walker?.nextObject() as? URL {
+            if next.pathExtension.lowercased() == "md" { n += 1 }
+        }
+        return n
+    }
+
     private func hasNotes(_ dir: URL) -> Bool {
         let walker = FileManager.default.enumerator(
             at: dir, includingPropertiesForKeys: nil,
@@ -495,9 +531,14 @@ final class NotesStore: ObservableObject {
         )
     }
 
-    /// Show the tree rather than one folder at a time. The default, because
-    /// knowing what is there is what a notes app is mostly for.
-    @Published var tree = true
+    /// Show the tree rather than one folder at a time.
+    ///
+    /// **既定は切り。** 窓の左の列は「すべてのノート・ブックマーク・
+    /// フォルダ・タグ」を並べて、その右に日付ごとのノートを出す ── 電話も
+    /// 同じ形にした。木は同じものを二度描く（フォルダの段とノートの段）
+    /// ので、出すときは上のフォルダの段のほうを引っこめる。
+    /// 木が要る人は「フィルタ」から入れる。
+    @Published var tree = false
 
     /// The folders directly inside one, wherever the list is standing.
     ///

@@ -26,7 +26,7 @@ struct Nest: View {
                     // `textCase(nil)` or a list header shouts the name back
                     // in capitals — which turns 「cian」 into 「CIAN」 and a
                     // folder somebody named into something they did not.
-                    Label("お気に入り", systemImage: "star.fill")
+                    Label("ブックマーク", systemImage: "star.fill")
                         .foregroundStyle(.orange)
                         .textCase(nil)
                 }

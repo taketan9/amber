@@ -83,7 +83,7 @@ struct Stars: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
-        .navigationTitle(at.isEmpty ? "お気に入り" : (at.split(separator: "/").last.map(String.init) ?? at))
+        .navigationTitle(at.isEmpty ? "ブックマーク" : (at.split(separator: "/").last.map(String.init) ?? at))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { name = ""; making = true } label: {
@@ -102,7 +102,7 @@ struct Stars: View {
                 catch { store.trouble = error.localizedDescription }
             }
         } message: {
-            Text(at.isEmpty ? "お気に入りの中に作ります" : "「\(at)」の中に作ります")
+            Text(at.isEmpty ? "ブックマークの中に作ります" : "「\(at)」の中に作ります")
         }
         .sheet(item: $moving) { note in
             Shelving(store: store, note: note)
