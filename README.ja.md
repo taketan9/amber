@@ -42,10 +42,16 @@ Node.js** の二つだけ。
 ```
 cargo test --workspace          # 判断のテスト
 node scripts/diagram-test.js    # 図が、直しても失われないか
+node gui/vendor.js              # Monaco・vim・mermaid を落とす（git に入れていない）
 ./scripts/ios-build.sh          # iPhone 向け（3ターゲット、記号まで見る）
 python3 packaging/amber_icon.py # アイコンを焼く
 python3 scripts/requests.py     # 頼まれたことが守られているか
 ```
+
+**iPhone も `gui/vendor/` を見る。** 図は電話でも mermaid が描くので、
+`node gui/vendor.js` を通していない木から建てると**図の出ないアプリ**が
+できる（落ちるのではなく、ノートは字のまま出る）。Xcode の「図の道具」
+フェーズがそこを警告で言う。
 
 **rustup は keg-only で PATH に居ない**（`/usr/local/opt/rustup/bin`）。
 ツールチェーン側の cargo を使わないと Homebrew の rustc を拾い、

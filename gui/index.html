@@ -441,7 +441,14 @@ body.split #read { border-left: 1px solid var(--line-2); }
 #read tbody tr:nth-child(even) { background: color-mix(in srgb, var(--rail) 45%, transparent); }
 #read del { color: var(--ink-3); }
 
-#read .mermaid { margin: 1.4em auto; overflow-x: auto; text-align: center; max-width: 34em; }
+/* **図は、文の幅に従わない。** 34em は目が一行を追える長さの話で（`#read`
+   の頭に書いた理由）、図はそもそも行ではない。狭い枠に押し込むと
+   `useMaxWidth` が全体を縮め、年表の札の字が 14px から 8px になって
+   読めなくなった ── 図は図の幅で描かせ、はみ出すぶんだけ横に流す。 */
+#read .mermaid {
+  margin: 1.4em auto; overflow-x: auto; text-align: center;
+  max-width: min(100%, 52em);
+}
 #read .mermaid svg { max-width: 100%; height: auto; }
 /* 描けなかった図は、書いた字のまま残す ── 消すと直しようがない。 */
 #read pre.bad { border-color: #C4564E; }

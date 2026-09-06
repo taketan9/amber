@@ -121,12 +121,19 @@ struct Reading: View {
                 inline(b).foregroundStyle(.secondary)
             }
         case "code":
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(b.text).font(.callout.monospaced())
+            // **`mermaid` の枠は、枠ではなく図。** 窓が絵を出しているところで
+            // 電話が `flowchart LR` と出していたので、同じノートが開く端末に
+            // よって別のものに読めていた。
+            if b.lang == "mermaid" {
+                Drawing(source: b.text)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(b.text).font(.callout.monospaced())
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
         case "image":
             picture(b)
         case "table":

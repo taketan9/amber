@@ -64,6 +64,7 @@
 				1A0000000000000000000006 /* Frameworks */,
 				1A0000000000000000000007 /* Resources */,
 				1A0000000000000000000032 /* 見本のノート */,
+				1A0000000000000000000033 /* 図の道具 */,
 			);
 			buildRules = (
 			);
@@ -152,6 +153,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "# 初めて開いた人に見せる見本を、束ねの中へ運ぶ。\n# **窓と同じ一組を使う**（`packaging/welcome`）── iPhone 用に写しを\n# 置くと、片方だけ直った日に二つの amber が別のことを言う。\nset -e\nfrom=\"$SRCROOT/../packaging/welcome\"\nto=\"$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/welcome\"\n[ -d \"$from\" ] || { echo \"warning: 見本がありません: $from\"; exit 0; }\nrm -rf \"$to\"\nmkdir -p \"$to\"\ncp -R \"$from/\" \"$to/\"\n";
+		};
+		1A0000000000000000000033 /* 図の道具 */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "図の道具";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# mermaid を束ねの中へ。**窓と同じ一本を使う**（`gui/vendor`）──\n# 別の版を電話に積むと、同じノートが二つの amber で違う図になる。\n#\n# `gui/vendor/` は git に入っていない（3.4MB を複製のたびに永久に配る\n# 理由が無い）。無いときは**図の出ないアプリが建つ** ── 落ちるのでは\n# なく、ノートは字のまま出る。それを警告で言う。\nset -e\nfrom=\"$SRCROOT/../gui/vendor/mermaid/mermaid.min.js\"\nto=\"$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/mermaid.min.js\"\nif [ ! -f \"$from\" ]; then\n  echo \"warning: mermaid がありません（node gui/vendor.js）。図は字のまま出ます\"\n  rm -f \"$to\"\n  exit 0\nfi\ncp \"$from\" \"$to\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

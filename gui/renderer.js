@@ -1501,14 +1501,19 @@ let mermaidSeq = 0;
 /// 平らな帯になる（九〇年代の業務資料の色）。7px の点と、円の三割を占める
 /// 面は、同じ色でうまくいくものではない。
 ///
-/// なので**明るさをわざと散らす**。琥珀を一つめに置いて、深い青 → 明るい緑
-/// → 沈んだ紫 → 明るい珊瑚…と交互にした。隣り合う二つが必ず明暗で分かれる
-/// ので、境目が色の違いだけに頼らない（色の見分けにくい人にも切れ端の数が
-/// 数えられる）。
+/// 明るさを上げ、鮮やかさを落とした**淡彩**にする。濃い色を並べると、
+/// 円の面積の大半が暗い塊になって図全体が沈む ── ノートは白い紙で、その上に
+/// 置く図が紙より重くなる理由が無い。
+///
+/// 淡いぶん**字は白ではなく濃い墨**を載せる（`pieSectionTextColor`）。
+/// 明るい地に白は乗らない。
 const FAMILY = [
-    '#F0A52B', '#2E6F8E', '#7FB069', '#8E5EA2', '#E8785A', '#3FA7A0',
-    '#C9A227', '#5C6BC0', '#D45D79', '#4EA8DE', '#9AA0A6',
+    '#F7BD5C', '#8FC8E8', '#A8D9A8', '#C9AEE0', '#F7A99C', '#8ED9CE',
+    '#EFDA8A', '#AEBBEE', '#F4B4CE', '#C6DE8E', '#D3D3D9',
 ];
+
+/// 淡彩の上に置く字の色。
+const FAMILY_INK = '#3a2408';
 
 /// 図の設定。**地の明暗に合わせる** ── 図だけ白いと、暗い画面で目を焼く。
 function mermaidOpts() {
@@ -1547,7 +1552,7 @@ function mermaidOpts() {
             pieStrokeColor: v('--paper', '#fffdf8'),
             pieOuterStrokeColor: v('--line', '#e4d9c4'),
             pieTitleTextColor: v('--ink', '#2a2011'),
-            pieSectionTextColor: '#ffffff',
+            pieSectionTextColor: FAMILY_INK,
             pieLegendTextColor: v('--ink-2', '#6b5a41'),
             pieOpacity: '1',
             fontSize: '14px',
@@ -1563,6 +1568,10 @@ function mermaidOpts() {
             + '.pieCircle{stroke:' + v('--paper', '#fffdf8') + ';stroke-width:2px}'
             + '.pieOuterCircle{stroke:' + v('--line', '#e4d9c4') + '}'
             + '.legend text{font-size:13px}'
+            // 年表の札の字。**縮むぶんを見越して大きめに** ── 出来事が
+            // 増えるほど図は横に伸び、伸びたぶんだけ全体が縮んで字も縮む。
+            + '.timeline text,.timeline tspan{font-size:15px}'
+            + '.timeline .sectionTitle,.timeline .sectionTitle tspan{font-weight:700}'
             // マインドマップだけは `themeVariables` を見ない ── 灰と藤色で
             // 描かれて、琥珀のノートの上で**そこだけ別のアプリ**に見える。
             // 枝は円グラフと同じ十一色にして、まん中は琥珀そのものに。
@@ -1574,25 +1583,31 @@ function mermaidOpts() {
                 + 'filter:drop-shadow(0 2px 5px rgba(0,0,0,.28))}'
             + '.mindmap-node.section--1 .nodeLabel{color:#fff;font-weight:700;font-size:15px}'
             + FAMILY.map((c, n) =>
+                // 淡彩になったので、枝の地は 14% では紙と見分けが付かない。
+                // 塗りを濃くし、枠は一段沈めて形が立つようにする。
                 '.mindmap-node.section-' + n + ' .node-bkg{fill:color-mix(in srgb,' + c
-                    + ' 14%,' + v('--paper', '#fffdf8') + ');stroke:' + c + '}'
+                    + ' 46%,' + v('--paper', '#fffdf8') + ');stroke:color-mix(in srgb,'
+                    + c + ' 78%,#6b5a41)}'
                 // **枝の字の色を、こちらで決める。** 渡さないと mermaid が
                 // 塗りの色から作り、明るい琥珀の枝では薄い字が薄い地に
                 // 載って読めなかった（「仕事」が消えていた）。地はどの枝も
                 // 14% の淡い色なので、字はノートの地の色でいい。
                 + '.mindmap-node.section-' + n + ' .nodeLabel{color:'
                     + v('--ink', '#2a2011') + ';font-weight:600}'
-                + '.mindmap-node.section-' + n + ' line{stroke:' + c + ';stroke-width:2px}'
-                + '.edge.section-edge-' + n + '{stroke:' + c + ';stroke-width:2.5px}').join(''),
+                + '.mindmap-node.section-' + n + ' line{stroke:color-mix(in srgb,'
+                    + c + ' 78%,#6b5a41);stroke-width:2px}'
+                // 線は淡彩のままだと紙に消える ── 一段沈めた色で引く。
+                + '.edge.section-edge-' + n + '{stroke:color-mix(in srgb,'
+                    + c + ' 72%,#6b5a41);stroke-width:2.5px}').join(''),
         flowchart: { curve: 'basis', padding: 14, nodeSpacing: 44, rankSpacing: 46, htmlLabels: true },
         pie: { textPosition: 0.62, useMaxWidth: true },
         sequence: { actorMargin: 44, mirrorActors: false },
         // 年表は、既定だと札が小さくて中の字が読めない ── 「いつ何があった
         // か」を見る図なのに、その「なに」が潰れている。札を広げて字に余白を。
         timeline: {
-            useMaxWidth: true, width: 200, height: 62,
-            padding: 10, boxMargin: 12, boxTextMargin: 7,
-            diagramMarginX: 26, diagramMarginY: 18, leftMargin: 84,
+            useMaxWidth: true, width: 168, height: 66,
+            padding: 10, boxMargin: 12, boxTextMargin: 8,
+            diagramMarginX: 22, diagramMarginY: 18, leftMargin: 70,
         },
         // 予定表は、既定だと細い帯に目盛りが詰まって日付が重なる（読めない）。
         // 横幅いっぱいまで伸ばし、棒と余白を広げて、目盛りの字を離す。
@@ -1623,7 +1638,7 @@ async function cmdDiagram() {
         { name: 'マインドマップ', sub: '一つの言葉から枝を広げる', value: 'mind' },
         { name: '年表', sub: 'いつ何があったか。日記や記録に', value: 'time' },
         { name: '予定表', sub: '棒で見る段取り（ガント）', value: 'gantt' },
-        { name: '四象限', sub: '大事さと急ぎで、やることを置く', value: 'quad' },
+        { name: '四象限', sub: '影響と期限で、やることの順を決める', value: 'quad' },
         { name: 'やりとり', sub: '誰が誰に何を、の順番', value: 'seq' },
         { name: '円グラフ', sub: '割合を見せる', value: 'pie' },
     ], '選ぶと骨組みが入ります。中の言葉は、あとから書き換えられます');
@@ -1687,15 +1702,15 @@ async function cmdDiagram() {
         md = '```mermaid\ngantt\n  title ' + title + '\n  dateFormat YYYY-MM-DD\n'
             + '  axisFormat %m/%d\n  section やること\n' + rows.join('\n') + '\n```';
     } else if (kind === 'quad') {
-        const v = await ask3('置くもの', '「なに: 大事さ, 急ぎ」を 0〜1 で。読点で区切ってください',
+        const v = await ask3('置くもの', '「なに: 影響, 期限の近さ」を 0〜1 で。読点で区切ってください',
             '週報: 0.8, 0.9、片付け: 0.3, 0.2、勉強: 0.9, 0.2');
         if (v === null) return;
         const rows = v.split(/\s*[、]\s*/).filter(Boolean).map((x) => {
             const m = /^(.*?)\s*[:：]\s*([\d.]+)\s*,\s*([\d.]+)/.exec(x.trim());
             return m ? '  "' + m[1] + '": [' + m[3] + ', ' + m[2] + ']' : null;
         }).filter(Boolean);
-        md = '```mermaid\nquadrantChart\n  title やることの置きどころ\n'
-            + '  x-axis いつでも --> いま\n  y-axis 小さい --> 大きい\n'
+        md = '```mermaid\nquadrantChart\n  title やることの優先順\n'
+            + '  x-axis 期限遠 --> 期限近\n  y-axis 影響小 --> 影響大\n'
             + '  quadrant-1 すぐやる\n  quadrant-2 段取りする\n'
             + '  quadrant-3 あとで\n  quadrant-4 誰かに頼む\n' + rows.join('\n') + '\n```';
     } else if (kind === 'seq') {
@@ -2014,8 +2029,8 @@ const DIAGRAM_FORM = {
     quad: {
         name: '四象限', title: '題', add: 'やることを足す',
         cols: [{ k: 'a', label: 'やること', w: 3, ph: '週報' },
-               { k: 'b', label: '大事さ', w: 1, ph: '0.8', slide: true },
-               { k: 'c', label: '急ぎ', w: 1, ph: '0.9', slide: true }],
+               { k: 'b', label: '影響', w: 1, ph: '0.8', slide: true },
+               { k: 'c', label: '期限の近さ', w: 1, ph: '0.9', slide: true }],
     },
     time: {
         name: '年表', title: '題', add: 'できごとを足す',
