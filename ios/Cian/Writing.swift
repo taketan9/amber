@@ -25,7 +25,37 @@ struct NoteView: View {
     /// Whether the seldom-used half of the writing bar is unfolded.
     @State private var more = false
     @State private var trouble: String?
-    @State private var fixing: Block?
+    /// 長押しされた図の、元の字（枠ごと）。
+    @State private var fixingText: Fixing?
+    @Environment(\.colorScheme) private var scheme
+    @AppStorage("cian.look") private var look = Look.auto
+
+    struct Fixing: Identifiable {
+        let md: String
+        var id: String { md }
+    }
+
+    /// ` ```mermaid ` の中身。
+    private func fence(_ md: String) -> String {
+        var lines = md.components(separatedBy: "\n")
+        if lines.first?.hasPrefix("```") == true { lines.removeFirst() }
+        if lines.last?.trimmingCharacters(in: .whitespaces).hasPrefix("```") == true {
+            lines.removeLast()
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// 升を押されたとき ── 行番号で裏返す（何番目の升かではない）。
+    private func tickLine(_ line: Int, _ done: Bool) {
+        guard line >= 0 else { return }
+        do {
+            let whole = try store.checked(tab.whole, line: line, done: done)
+            let (head, body) = try store.split(whole)
+            tab.head = head
+            tab.text = body
+            tab.blocks = try store.blocks(of: whole)
+        } catch { trouble = error.localizedDescription }
+    }
 
     /// 直した図を、本文の中の元の場所へ返す。
     ///
@@ -45,25 +75,19 @@ struct NoteView: View {
     var body: some View {
         Group {
             if tab.reading {
-                ScrollView {
-                    Reading(blocks: tab.blocks, base: folder, tick: tick, fix: { fixing = $0 })
-                        // **叩けば、そこで書ける。** 窓の「表示」はその場で
-                        // 打てる面なので、電話だけ読むだけだと同じ名前の面が
-                        // 二つの amber で別のものになる。電話に
-                        // `contenteditable` は無いので、代わりに**一叩きで
-                        // 書く面に入る** ── 面の切り替えを探しに行かせない。
-                        //
-                        // 空のノートでも効くよう、余白まで受ける。升や図の
-                        // 押しが先に取るので、そちらは奪わない。
-                        .frame(maxWidth: .infinity, minHeight: 420, alignment: .top)
-                        .contentShape(Rectangle())
-                        .onTapGesture { writing = true; tab.reading = false }
-                }
-                // **工房はここで開く。** 図は読む面の中にあり、直した字を
+                // **窓と同じ面。** 組む側は core の `to_html`、書き戻す側は
+                // `gui/renderer.js` から切り出した一組（`paper.js`）── 電話
+                // だけ読むだけだと、同じ名前の面が二つの amber で別のものに
+                // なる。SwiftUI で書き直すと書き戻しがもう一組でき、同じ
+                // ノートが端末によって別の字に保存される。
+                Paper(text: $tab.text, folder: folder,
+                      dark: look == .dark || (look == .auto && scheme == .dark),
+                      onCheck: tickLine, onFix: { fixingText = Fixing(md: $0) })
+                // **工房はここで開く。** 図は表示の面の中にあり、直した字を
                 // 戻す先はこのノートの本文なので、間に人を挟まない。
-                .sheet(item: $fixing) { b in
-                    Studio(source: b.text) { now in
-                        tab.text = swapFence(tab.text, was: b.text, now: now)
+                .sheet(item: $fixingText) { f in
+                    Studio(source: f.md) { now in
+                        tab.text = swapFence(tab.text, was: fence(f.md), now: now)
                     }
                 }
             } else {

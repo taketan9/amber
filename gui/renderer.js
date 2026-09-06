@@ -649,12 +649,24 @@ function richBlock(node) {
 /// **書いてあった字を、かたまりごとに持たせておく**（`data-md`）── 戻せない
 /// ものは、これをそのまま返す。行番号は `to_html` が差している。
 function armRead() {
-    const box = el('read');
-    const open = !!state.open && view !== 'write';
+    armPaper(el('read'), whole(), !!state.open && view !== 'write');
+}
+
+/// **箱と字を受け取る形。** ここから下の五つ（`armPaper`・`paperToMd`・
+/// `blockToMd`・`inlineToMd`・`richBlock`）は、画面のどこにも触らない ──
+/// 渡された箱と字だけを見る。
+///
+/// そうしてあるのは、**電話が同じものを使うため**。iPhone の「表示」も
+/// `WKWebView` の `contenteditable` で、同じ組み方・同じ書き戻し方をする。
+/// 書き戻しをもう一組 Swift で書けば、**同じノートが端末によって別の字に
+/// 保存される** ── 失うのはたいてい表と升と図で、気づくのは何回か保存
+/// したあと。`scripts/paper-test.js` が往復を見ているので、電話が使うのは
+/// 試験の通ったものそのもの。
+function armPaper(box, text, open) {
     box.contentEditable = open ? 'true' : 'false';
     box.spellcheck = false;
     if (!open) return;
-    const src = whole().split('\n');
+    const src = text.split('\n');
     for (const node of [...box.children]) {
         const at = Number(node.dataset.line);
         const span = Number(node.dataset.span) || 1;
@@ -675,8 +687,12 @@ function armRead() {
 
 /// DOM を Markdown に戻す。
 function readToMd() {
+    return paperToMd(el('read'), state.head);
+}
+
+function paperToMd(box, head) {
     const out = [];
-    for (const node of el('read').children) {
+    for (const node of box.children) {
         if (richBlock(node)) {
             // **書いてあった字をそのまま返す。** 図や枠を読み解いて
             // 組み直すより、触らせないほうが失わない。
@@ -694,7 +710,7 @@ function readToMd() {
     // 前書きの後ろに一行空ける ── 新しいノートがそう作られるので、
     // ここで詰めると、触っただけのノートが**同期先で差分**になる。
     const body = out.filter((s) => s !== '').join('\n\n') + '\n';
-    return state.head ? '\n' + body : body;
+    return head ? '\n' + body : body;
 }
 
 function blockToMd(node, depth = 0) {

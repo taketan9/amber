@@ -35,7 +35,7 @@ struct Drawing: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
             } else {
-                Paper(source: source, dark: scheme == .dark, tall: $tall)
+                Canvas(source: source, dark: scheme == .dark, tall: $tall)
                     .frame(height: tall)
                     .frame(maxWidth: .infinity)
             }
@@ -144,7 +144,7 @@ enum Diagrams {
 }
 
 /// The web view itself.
-private struct Paper: UIViewRepresentable {
+struct Canvas: UIViewRepresentable {
     let source: String
     let dark: Bool
     @Binding var tall: CGFloat
