@@ -20,8 +20,11 @@ const state = {
     when: null,
     /// まだ落ちてきていないノート（クラウドが札だけ置いている）。
     waiting: [],
-    /// 家族と分けてあるフォルダ（ルートからの道）。無ければ空。
-    share: '',
+    /// あなたの名乗り。共有したノートの「誰が」に使う（ノートには書かない）。
+    me: '',
+    /// 家族と分けてある棚。**一つとは限らない** ── 印はフォルダごとに置く
+    /// ので、家族用と仕事用が両方あっていい。`[{ at, by }]`。
+    shares: [],
     /// 押して選んだ絞り込み。**タグは全部・フォルダはどれか。**
     /// ノートは一つのフォルダにしか居ないので、フォルダを「全部」にすると
     /// 二つ選んだ瞬間に必ず 0 件になる。
@@ -122,7 +125,7 @@ function drawRail() {
             // **共有のフォルダは、こちらには出さない。** 下の「共有」の段に
             // 同じものが並ぶ ── 二つの場所に同じものが出ると、人はそれを
             // 二度消そうとする（ブックマークを別枠にしたのと同じ理由）。
-            if (state.share && (b === state.share || b.startsWith(state.share + '/'))) continue;
+            if (state.shares.some((sh) => sh.at && (b === sh.at || b.startsWith(sh.at + '/')))) continue;
             const n = state.notes.filter((x) => x.book === b || x.book.startsWith(b + '/')).length;
             rows.push(dest('book', b, b.split('/').pop(), n, on('book', b),
                            b.split('/').length - 1, state.colors[b]));
@@ -136,11 +139,13 @@ function drawRail() {
     // **決めていないうちは出さない。** 空の「共有」が並んでいると、共有が
     // 壊れているのか、まだ何も分けていないのかが見分けられない ── 作る道は
     // フォルダの右押しにある。
-    if (state.share) {
-        const n = state.notes.filter((x) => x.shared).length;
+    if (state.shares.length) {
         rows.push(head('共有'));
-        rows.push(dest('share', state.share, state.share.split('/').pop(), n,
-                       on('share', state.share)));
+        for (const sh of state.shares) {
+            const n = state.notes.filter((x) => inShare(sh.at, x)).length;
+            rows.push(dest('share', sh.at, sh.at.split('/').pop() || 'ぜんぶ', n,
+                           on('share', sh.at)));
+        }
     }
 
     const tags = tagsOf(state.notes);
@@ -216,10 +221,13 @@ function dest(kind, what, name, n, isOn, depth, color) {
 
 /* ── 一覧（中） ── */
 
+/// このノートは、その共有の棚の中か。
+const inShare = (at, n) => !at || n.book === at || (n.book || '').startsWith(at + '/');
+
 function inDest(n) {
     const kind = state.dest.kind;
     const what = state.dest.what;
-    if (kind === 'share') return !!n.shared;
+    if (kind === 'share') return inShare(what, n);
     if (kind === 'book') return n.book === what || n.book.startsWith(what + '/');
     if (kind === 'tag') return (n.tags || []).includes(what);
     if (kind === 'star') {
@@ -3414,7 +3422,7 @@ async function reload(opts) {
         state.stars = r.stars || [];
         state.colors = r.colors || {};
         state.waiting = r.waiting || [];
-        state.share = r.share || '';
+        state.shares = r.shares || [];
         // 開いていた行を新しいほうに繋ぎ直す（更新時刻が動くので）。
         if (state.open) {
             state.open = state.notes.find((n) => n.path === state.open.path) || state.open;
@@ -3802,10 +3810,15 @@ function openMenu(at, which) {
         if (c.id === 'lineno') return { ...c, sub: lineNo ? 'オン' : 'オフ' };
         if (c.id === 'root') return { ...c, sub: shortPath(state.root) };
         if (c.id === 'toshare') {
-            if (!state.share) return { ...c, sub: 'まず共有するフォルダを決めます' };
-            return state.open && state.open.shared
-                ? { ...c, name: '家族との共有をやめる', sub: 'いちばん上へ戻します' }
-                : { ...c, sub: '「' + state.share.split('/').pop() + '」へ移します' };
+            if (state.open && state.open.shared) {
+                return { ...c, name: '家族との共有をやめる', sub: 'いちばん上へ戻します' };
+            }
+            const to = state.shares[0];
+            return { ...c, sub: to
+                // **無ければ作る。** 「共有する」を押した人に、その前に
+                // 「フォルダを作る」を押させない。
+                ? '「' + (to.at.split('/').pop() || 'ぜんぶ') + '」へ移します'
+                : '「家族」という棚を作って、そこへ移します' };
         }
         return c;
     });
@@ -3998,9 +4011,17 @@ function railMenu(kind, what, at) {
     if (kind === 'book') {
         items.push({ name: 'この中にフォルダを作る', run: () => cmdMkBook(what) });
         items.push({ name: 'フォルダに色を付ける', run: () => cmdColor(what) });
+        const isShare = state.shares.some((sh) => sh.at === what);
+        if (isShare) {
+            items.push({
+                name: '家族を招待',
+                sub: 'クラウドの画面が開きます',
+                run: () => window.amber.reveal(state.root + '/' + what),
+            });
+        }
         items.push({
-            name: state.share === what ? '家族との共有をやめる' : '家族と共有するフォルダにする',
-            run: () => cmdShare(state.share === what ? '' : what),
+            name: isShare ? '家族との共有をやめる' : '家族と共有する棚にする',
+            run: () => cmdShare(what, isShare),
         });
         // フォルダの履歴は、**中のノートの姿をまとめて時系列で** ──
         // 「あのあたりで壊した」は、どのノートかを覚えていないほうが多い。
@@ -4749,56 +4770,103 @@ function closeFind() {
     drawList();
 }
 
-/// 家族と分けるフォルダを決める（空でやめる）。
+/// 共有の棚にする（`off` で、やめる）。
 ///
 /// **分けるのは amber の仕事ではない。** クラウドのフォルダ共有に任せる ──
-/// iCloud も Dropbox も Drive も、フォルダを人に分ける道を既に持っている。
-/// amber が憶えるのは「どれが分けてあるか」の一言だけで、それだけで
-/// 「このノートを共有する」が**そのフォルダへ移すこと**になり、フォルダも
-/// タグも履歴も、いまあるものが全部そのまま効く。
-async function cmdShare(folder) {
-    if (folder) {
-        const ok = await askYes('「' + folder + '」を、家族と分けるフォルダにしますか');
+/// amber がするのは、そのフォルダに**印を一枚置くこと**だけ。印はフォルダと
+/// 一緒に旅をするので、**受け取った人は何も教えなくていい** ── 設定に
+/// 書いていた頃は、相手が自分の amber に「これが共有です」と教え直す手が
+/// 要り、機種を替えるたびにもう一度要った。
+async function cmdShare(folder, off) {
+    if (!off) {
+        const ok = await askYes('「' + folder + '」を、家族と分ける棚にしますか');
         if (!ok) return;
     }
+    const by = off ? '' : await myName();
+    if (by === null) return;
     try {
-        const r = await ask('share', { path: state.root, folder });
-        state.share = r.share || '';
+        const r = await ask('share', {
+            path: state.root, folder, off: !!off, by, today: today(),
+        });
+        state.shares = r.shares ? r.shares.map((at) => ({ at, by })) : [];
         await reload({ quiet: true });
-        say(state.share
-            // **二段あることを言う。** amber が憶えただけでは誰にも届かない
-            // ── クラウド側で人に分けるのは、人がやる。
-            ? '「' + state.share + '」を共有のフォルダにしました。'
-                + 'このフォルダを、クラウド側で家族に共有してください'
-            : '共有をやめました（ノートはそのままです）');
+        if (off) { say('共有をやめました（ノートはそのままです）'); return; }
+        // **二段あることを言う。** amber が印を置いただけでは誰にも届かない
+        // ── クラウド側で人に分けるのは、まだ人がやる。
+        await askYes('「' + folder + '」を共有の棚にしました。\n\n'
+            + 'あとは、このフォルダをクラウド側で家族に分けてください。'
+            + '（いま開きますか）')
+            ? window.amber.reveal(state.root + '/' + folder)
+            : say('あとで、フォルダを右押し →「家族を招待」からでもできます');
     } catch (e) {
         say('できません: ' + e.message);
     }
 }
 
-/// 開いているノートを、共有のフォルダへ出し入れする。
+/// 名乗り。**設定画面に置かない** ── 一度しか使わないものを、毎日見る画面に
+/// 置く値打ちは無い。**要る瞬間に一度だけ**訊いて、憶えておく。
 ///
-/// **移すこと以上のことはしない。** 前書きに `share:` と書く道もあったが、
-/// 共有をやめた日に全部のノートを書き換えることになり、同期先では全部が
-/// 差分になる。フォルダを動かすのは、いまも毎日やっていること。
+/// 名前は**履歴に付いて回る**（ノートには書かない）ので、相手の amber が
+/// 「Taketan が足しました」と言える。書かなくてもいい ── そのときは
+/// 「だれか」になるだけで、共有そのものは動く。
+async function myName() {
+    if (state.me) return state.me;
+    const saved = (await window.amber.recall()).me;
+    if (saved) { state.me = saved; return saved; }
+    const got = await askText('あなたの名前',
+        await window.amber.userName() || '',
+        '共有したノートに「誰が直したか」を出すために使います（ノートには書きません）');
+    if (got === null) return null;
+    state.me = got.trim();
+    window.amber.remember({ me: state.me });
+    return state.me;
+}
+
+const today = () => {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+        + '-' + String(d.getDate()).padStart(2, '0');
+};
+
+/// 開いているノートを、共有の棚へ出し入れする。
+///
+/// **棚が無ければ作る。** 「共有する」を押した人に、その前に「フォルダを
+/// 作る」と「棚にする」を押させない ── 押したいのは共有することであって、
+/// フォルダを作ることではない。
 async function cmdToShare() {
     if (!state.open) return;
-    if (!state.share) {
-        say('まず、共有するフォルダを決めてください（フォルダを右押し）');
+    const back = state.open.shared;
+    if (back) {
+        const ok = await askYes('「' + (state.open.title || stem())
+            + '」を共有から外しますか（いちばん上へ戻します）');
+        if (!ok) return;
+        await moveNote('');
         return;
     }
-    const back = state.open.shared;
-    const to = back ? '' : state.share;
-    const ok = await askYes(back
-        ? '「' + (state.open.title || stem()) + '」を共有から外しますか（いちばん上へ戻します）'
-        : '「' + (state.open.title || stem()) + '」を「' + state.share + '」へ移して共有しますか');
-    if (!ok) return;
+    let to = (state.shares[0] || {}).at;
+    if (to === undefined) {
+        const ok = await askYes('「家族」という棚を作って、そこへ移しますか');
+        if (!ok) return;
+        const by = await myName();
+        if (by === null) return;
+        try {
+            await ask('share', { path: state.root, folder: '家族', by, today: today() });
+            to = '家族';
+        } catch (e) { say('できません: ' + e.message); return; }
+    } else {
+        const ok = await askYes('「' + (state.open.title || stem()) + '」を「'
+            + (to.split('/').pop() || 'ぜんぶ') + '」へ移して共有しますか');
+        if (!ok) return;
+    }
+    await moveNote(to);
+}
+
+async function moveNote(to) {
     try {
-        const dir = state.root + (to ? '/' + to : '');
-        const r = await ask('move', { path: state.open.path, dir });
+        const r = await ask('move', { path: state.open.path, dir: state.root + (to ? '/' + to : '') });
         await reload({ quiet: true });
         if (r && r.path) await openNote(r.path);
-        say(back ? '共有から外しました' : '共有しました');
+        say(to ? '共有しました' : '共有から外しました');
     } catch (e) {
         say('移せません: ' + e.message);
     }

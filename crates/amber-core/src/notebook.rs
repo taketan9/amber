@@ -24,17 +24,58 @@ pub struct Book {
     pub colors: BTreeMap<String, String>,
     /// Favourite folders, including the ones nothing is in yet.
     pub stars: Vec<String>,
-    /// 家族と分ける一つのフォルダ（ルートからの道）。無ければ空。
-    ///
-    /// **共有そのものは amber の仕事ではない。** 分けるのはクラウドで、
-    /// amber が持つのは「どれが分けてあるか」の一言だけ ── それだけで
-    /// 「このノートを共有する」が**そのフォルダへ移すこと**になり、
-    /// フォルダ移動もタグも履歴も、既にあるものが全部そのまま効く。
-    ///
-    /// **置き場所は増やさない。** 二つ目のルートを持つ道もあったが、
-    /// 「置き場所は一つにしたい」は本人が決めたこと（電話をそちらに
-    /// 合わせた経緯がある）。共有はルートの中の一段に住む。
-    pub share: String,
+}
+
+/// 共有の棚の印。**設定ではなく、フォルダ自身が持つ。**
+///
+/// 初めは `.amber/settings.json` に「どれが共有か」を書いていた。動きはした
+/// が、**相手の amber には何も伝わらない** ── 受け取った人が自分で「これが
+/// 共有です」と教え直す手が要り、機種を替えるたびにもう一度要った。
+///
+/// フォルダの中に一枚置けば、**読むだけで分かる**。教える手が、どちらの側
+/// からも消える。しかも**フォルダと一緒に旅をする**ので、置き場所を変えても
+/// 機種を替えてもずれない ── amber がもともと持っていた考え方
+/// （「隠しデータベースを持たない。全部フォルダの中のファイル」）そのもの。
+pub const SHARE_MARK: &str = ".amber-share.json";
+
+/// 印に書いてあること。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Shelf {
+    /// 誰が分けはじめたか。空のこともある（名乗らなかった人）。
+    pub by: String,
+    /// いつから。`YYYY-MM-DD`。
+    pub since: String,
+}
+
+/// このフォルダは共有の棚か。印を読む。
+pub fn share_mark(dir: &Path) -> Option<Shelf> {
+    let text = std::fs::read_to_string(dir.join(SHARE_MARK)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    Some(Shelf {
+        by: v.get("by").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+        since: v.get("since").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+    })
+}
+
+/// 印を置く。**もうあれば触らない** ── 相手が置いた印の「誰が」を、
+/// こちらの名前で上書きしない（分けはじめたのはあちらなので）。
+pub fn mark_share(dir: &Path, by: &str, today: &str) -> anyhow::Result<()> {
+    if share_mark(dir).is_some() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(dir)?;
+    let v = serde_json::json!({ "by": by, "since": today });
+    std::fs::write(dir.join(SHARE_MARK), serde_json::to_string_pretty(&v)?)?;
+    Ok(())
+}
+
+/// 印を外す。**中のノートには触らない。**
+pub fn unmark_share(dir: &Path) -> anyhow::Result<()> {
+    let at = dir.join(SHARE_MARK);
+    if at.exists() {
+        std::fs::remove_file(at)?;
+    }
+    Ok(())
 }
 
 /// フォルダに付けられる十一色。
@@ -85,9 +126,6 @@ pub fn read(root: &Path) -> Book {
     if let Some(a) = v.get("stars").and_then(|s| s.as_array()) {
         b.stars = a.iter().filter_map(|s| s.as_str()).map(str::to_string).collect();
     }
-    if let Some(s) = v.get("share").and_then(|s| s.as_str()) {
-        b.share = s.to_string();
-    }
     b
 }
 
@@ -97,28 +135,45 @@ pub fn write(root: &Path, b: &Book) -> anyhow::Result<()> {
     if let Some(dir) = at.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let v = serde_json::json!({ "colors": b.colors, "stars": b.stars, "share": b.share });
+    let v = serde_json::json!({ "colors": b.colors, "stars": b.stars });
     std::fs::write(at, serde_json::to_string_pretty(&v)?)?;
     Ok(())
 }
 
-/// 家族と分けるフォルダを決める。空で、やめる。
+/// 歩いた結果から、印のあるフォルダを拾う（ルートからの道で）。
 ///
-/// **ノートには書かない。** どれを分けているかは、この機械の見方であって
-/// ノートの中身ではない ── 前書きに `share:` と書くと、共有をやめた日に
-/// 全部のノートを書き換えることになる（そして同期先で全部が差分になる）。
-pub fn set_share(root: &Path, folder: &str) -> anyhow::Result<()> {
-    let mut b = read(root);
-    b.share = folder.trim().trim_matches('/').to_string();
-    write(root, &b)
+/// **教えてもらわなくても分かる。** これが `settings.json` に書いていた頃と
+/// のいちばんの違いで、受け取った人の手が一つ消える。
+pub fn shares(root: &Path, rows: &[crate::survey::Row]) -> Vec<String> {
+    let mut out = Vec::new();
+    if share_mark(root).is_some() {
+        // ルートそのものが共有、はありうる（フォルダを丸ごと分けた人）。
+        out.push(String::new());
+    }
+    for r in rows {
+        if !r.is_dir || r.rel.split('/').any(|p| p.starts_with('.')) {
+            continue;
+        }
+        if share_mark(&r.path).is_some() {
+            out.push(r.rel.clone());
+        }
+    }
+    out.sort();
+    out
 }
 
 /// この道は、分けてあるフォルダの中か。
 ///
-/// フォルダそのものと、その下ぜんぶ。**空なら何も分けていない** ── ここで
-/// 空を「全部が共有」と読むと、決めていない人のノートが全部共有の顔をする。
-pub fn shared(share: &str, book: &str) -> bool {
-    !share.is_empty() && (book == share || book.starts_with(&format!("{share}/")))
+/// フォルダそのものと、その下ぜんぶ。**一つも無ければ何も分けていない** ──
+/// ここで空を「全部が共有」と読むと、決めていない人のノートが全部共有の顔を
+/// する。
+pub fn shared(shares: &[String], book: &str) -> bool {
+    shares.iter().any(|s| {
+        if s.is_empty() {
+            return true;
+        }
+        book == s || book.starts_with(&format!("{s}/"))
+    })
 }
 
 /// Give a folder a colour, or take it away.

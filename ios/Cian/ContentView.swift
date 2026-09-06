@@ -39,6 +39,11 @@ struct ContentView: View {
     @State private var seeking = false
     /// いま開いている絞り込みの引き出し。
     @State private var sifting: Sifting.Which?
+    /// これから共有の棚にするフォルダ（名乗りを訊いている間）。
+    @State private var sharing: String?
+    /// あなたの名乗り。**設定画面に置かない** ── 一度しか使わないものを、
+    /// 毎日見る画面に置く値打ちは無い。要る瞬間に一度だけ訊いて憶える。
+    @AppStorage("cian.me") private var me = ""
     @State private var shelving: Note?
     @State private var colouring: String?
     @State private var renaming: String?
@@ -108,6 +113,13 @@ struct ContentView: View {
             }
         } message: {
             Text(dropping2.map { "「\($0.shown)」" } ?? "")
+        }
+        .sheet(item: Binding(get: { sharing.map { Naming.Which(at: $0) } },
+                             set: { if $0 == nil { sharing = nil } })) { w in
+            Naming(folder: w.at, me: $me) { by in
+                do { try store.setShare(w.at, by: by) }
+                catch { store.trouble = error.localizedDescription }
+            }
         }
         .sheet(item: $past) { w in
             Past(store: store, at: w.at, isBook: w.book)
@@ -397,13 +409,13 @@ struct ContentView: View {
                     // 共有のフォルダへ出し入れする。**移すこと以上のことは
                     // しない** ── 前書きに書くと、共有をやめた日に全部の
                     // ノートを書き換えることになる（同期先で全部が差分）。
-                    if !store.share.isEmpty {
-                        Button {
-                            moveTo(note, note.shared ? nil : store.share)
-                        } label: {
-                            Label(note.shared ? "家族との共有をやめる" : "家族と共有する",
-                                  systemImage: "person.2")
-                        }
+                    Button {
+                        if note.shared { moveTo(note, nil) }
+                        else if let sh = store.shares.first { moveTo(note, sh.at) }
+                        else { sharing = "家族" }   // 棚が無ければ、作るところから
+                    } label: {
+                        Label(note.shared ? "家族との共有をやめる" : "家族と共有する",
+                              systemImage: "person.2")
                     }
                     // **長押しから履歴へ。** 窓は右押しで開く ── 電話に
                     // 右押しは無いので、同じ意味の手ぶりに割り当てる。
@@ -502,9 +514,9 @@ struct ContentView: View {
     /// 並ぶ（ブックマークを別枠にしたのと同じ理由）。一か所で数えないと、
     /// 段が空なのに見出しだけ残る（実際に残った）。
     private var ownBooks: [(name: String, path: String, count: Int)] {
-        store.books.filter {
-            store.share.isEmpty
-                || !($0.path == store.share || $0.path.hasPrefix(store.share + "/"))
+        store.books.filter { b in
+            !store.shares.contains { !$0.at.isEmpty
+                && (b.path == $0.at || b.path.hasPrefix($0.at + "/")) }
         }
     }
 
@@ -697,20 +709,21 @@ struct ContentView: View {
             //
             // **決めていないうちは出さない** ── 空の「共有」が並ぶと、共有が
             // 壊れているのか、まだ何も分けていないのかが見分けられない。
-            if needle.isEmpty, store.at.isEmpty, !store.flat, !store.share.isEmpty {
+            if needle.isEmpty, store.at.isEmpty, !store.flat, !store.shares.isEmpty {
                 Section("共有") {
-                    Button { go { store.into(store.share) } } label: {
-                        HStack {
-                            Label(store.share.split(separator: "/").last.map(String.init)
-                                  ?? store.share, systemImage: "person.2")
-                            Spacer()
-                            Text("\(store.notes.filter(\.shared).count)")
-                                .foregroundStyle(.secondary).monospacedDigit()
-                            Image(systemName: "chevron.right")
-                                .font(.caption).foregroundStyle(.tertiary)
+                    ForEach(store.shares) { sh in
+                        Button { go { store.into(sh.at) } } label: {
+                            HStack {
+                                Label(sh.name, systemImage: "person.2")
+                                Spacer()
+                                Text("\(store.notes.filter { store.inShare(sh.at, $0) }.count)")
+                                    .foregroundStyle(.secondary).monospacedDigit()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption).foregroundStyle(.tertiary)
+                            }
                         }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
 
@@ -772,11 +785,9 @@ struct ContentView: View {
                         // 「どれが分けてあるか」の一言だけ ── そのうえで
                         // このフォルダを、クラウド側で家族に共有してもらう。
                         Button {
-                            do { try store.setShare(store.share == b.path ? "" : b.path) }
-                            catch { store.trouble = error.localizedDescription }
+                            sharing = b.path
                         } label: {
-                            Label(store.share == b.path ? "家族との共有をやめる"
-                                  : "家族と共有するフォルダにする", systemImage: "person.2")
+                            Label("家族と共有する棚にする", systemImage: "person.2")
                         }
                         // フォルダの履歴は、**中のノートの姿をまとめて** ──
                         // 「あのあたりで壊した」は、どのノートかを覚えて

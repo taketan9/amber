@@ -44,6 +44,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let stop = std::sync::atomic::AtomicBool::new(false);
             let (found, walk) = crate::note::list(&dir, limits, &stop);
             let book = crate::notebook::read(&dir);
+            // **共有かどうかは、フォルダ自身が言う。** 設定に書いていた頃は
+            // 相手の amber に何も伝わらず、受け取った人が自分で教え直す手が
+            // 要った（`notebook::SHARE_MARK` の註）。
+            let shares = crate::notebook::shares(&dir, &walk.rows);
             // The favourite shelves: the ones notes are standing on, plus the
             // ones that were made and are still empty. Without the second
             // half a shelf vanishes the moment its last note leaves it, which
@@ -87,7 +91,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         // 窓と電話で二度書くと、片方だけ「共有」の印が
                         // 出るノートができる。
                         "shared": crate::notebook::shared(
-                            &book.share,
+                            &shares,
                             f.rel.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
                         ),
                         // **クラウドが作った控えなら、そう言う。**
@@ -131,7 +135,13 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .collect();
             Ok(serde_json::json!({
                 "root": dir.display().to_string(),
-                "share": book.share,
+                // **一つとは限らない。** 家族用と仕事用の棚が両方あって
+                // いい ── 印はフォルダごとに置くので、数を決める理由が無い。
+                "shares": shares.iter().map(|s| serde_json::json!({
+                    "at": s,
+                    "by": crate::notebook::share_mark(&dir.join(s))
+                        .map(|m| m.by).unwrap_or_default(),
+                })).collect::<Vec<_>>(),
                 "waiting": waiting,
                 "books": books,
                 "stars": shelves,
@@ -395,17 +405,32 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "stars": crate::notebook::read(&root).stars }))
         }
 
-        // 家族と分けるフォルダを決める（空でやめる）。
+        // 共有の棚にする（`off` で、やめる）。
         //
-        // **分けるのはクラウドの仕事。** amber がするのは「どれが分けて
-        // あるか」を憶えることだけ ── それだけで「このノートを共有する」が
-        // そのフォルダへ移すことになり、いまあるフォルダの仕組みが
-        // そのまま効く。
+        // **分けるのはクラウドの仕事。** amber がするのは、そのフォルダに
+        // 印を一枚置くことだけ ── それだけで「このノートを共有する」が
+        // そのフォルダへ移すことになり、いまあるフォルダの仕組みがそのまま
+        // 効く。そして印はフォルダと一緒に旅をするので、**受け取った人は
+        // 何も教えなくていい**。
+        //
+        // フォルダが無ければ作る ── 「共有する」を押した人に、その前に
+        // 「フォルダを作る」を押させない。
         "share" => {
             let root = std::path::PathBuf::from(arg(p, "path"));
-            let folder = p["folder"].as_str().unwrap_or("");
-            crate::notebook::set_share(&root, folder)?;
-            Ok(serde_json::json!({ "share": crate::notebook::read(&root).share }))
+            let folder = p["folder"].as_str().unwrap_or("").trim_matches('/');
+            let dir = if folder.is_empty() { root.clone() } else { root.join(folder) };
+            if p["off"].as_bool().unwrap_or(false) {
+                crate::notebook::unmark_share(&dir)?;
+            } else {
+                let by = p["by"].as_str().unwrap_or("");
+                let today = p["today"].as_str().unwrap_or("");
+                crate::notebook::mark_share(&dir, by, today)?;
+            }
+            let stop = std::sync::atomic::AtomicBool::new(false);
+            let walk = crate::survey::survey(&root, crate::survey::Limits {
+                depth: 6, rows: 4000, hidden: false, ..Default::default()
+            }, &stop);
+            Ok(serde_json::json!({ "shares": crate::notebook::shares(&root, &walk.rows) }))
         }
 
         // What colour a folder is. His to choose — cian offers a palette and
@@ -1624,16 +1649,23 @@ mod tests {
 
         // 決めるまでは、何も共有していない ── **空を「全部」と読まない。**
         let out = call("notes", &root).unwrap();
-        assert_eq!(out["share"], "");
+        assert!(out["shares"].as_array().unwrap().is_empty());
         assert!(out["notes"].as_array().unwrap().iter().all(|n| n["shared"] == false));
 
         call("share", &serde_json::json!({
             "path": d.path().to_string_lossy(), "folder": "共有",
+            "by": "Taketan", "today": "2026-09-07",
         }))
         .unwrap();
 
+        // **印はフォルダの中に置く** ── 設定ではなく、フォルダ自身が言う。
+        assert!(d.path().join("共有").join(crate::notebook::SHARE_MARK).is_file());
+        let mark = crate::notebook::share_mark(&d.path().join("共有")).unwrap();
+        assert_eq!(mark.by, "Taketan");
+
         let out = call("notes", &root).unwrap();
-        assert_eq!(out["share"], "共有");
+        assert_eq!(out["shares"][0]["at"], "共有");
+        assert_eq!(out["shares"][0]["by"], "Taketan");
         // **題ではなく道で確かめる** ── 題は一行目から決まるので、
         // `- [ ] 牛乳` で始まるノートの題は「牛乳」になる（そこはこの
         // 試験の話ではない）。
@@ -1649,11 +1681,26 @@ mod tests {
         assert!(shared.contains(&"共有/リスト.md"));
         assert!(shared.contains(&"共有/買い物/週末.md"));
 
+        // **フォルダが無ければ作る** ── 「共有する」を押した人に、その前に
+        // 「フォルダを作る」を押させない。
+        call("share", &serde_json::json!({
+            "path": d.path().to_string_lossy(), "folder": "あたらしい棚",
+            "by": "Taketan", "today": "2026-09-07",
+        }))
+        .unwrap();
+        assert!(d.path().join("あたらしい棚").is_dir());
+
         // やめれば、誰も共有していない ── ノートは一本も書き換えない。
-        call("share", &serde_json::json!({ "path": d.path().to_string_lossy() })).unwrap();
+        for f in ["共有", "あたらしい棚"] {
+            call("share", &serde_json::json!({
+                "path": d.path().to_string_lossy(), "folder": f, "off": true,
+            }))
+            .unwrap();
+        }
         let out = call("notes", &root).unwrap();
-        assert_eq!(out["share"], "");
+        assert!(out["shares"].as_array().unwrap().is_empty());
         assert!(out["notes"].as_array().unwrap().iter().all(|n| n["shared"] == false));
+        assert!(d.path().join("共有").join("リスト.md").is_file(), "ノートは残る");
     }
 
     #[test]

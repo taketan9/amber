@@ -377,6 +377,18 @@ app.whenReady().then(() => {
     // を覚えている人はいない。
     ipcMain.handle('amber:clouds', () => clouds());
 
+    // **「あとはクラウドで分けてください」を、押せる形にする。**
+    // フォルダを人に分けるのはクラウドの画面の仕事だが、そこまで人に
+    // 探させない ── その場所を開いて、選ばれた状態で見せる。
+    ipcMain.handle('amber:reveal', (_e, at) => {
+        try { shell.showItemInFolder(at); return true; } catch { return false; }
+    });
+
+    // 名乗りの下書き。**この機械が既に知っていることを、もう一度打たせない。**
+    ipcMain.handle('amber:userName', () => {
+        try { return os.userInfo().username || ''; } catch { return ''; }
+    });
+
     ipcMain.handle('amber:pickFolder', async () => {
         const r = await dialog.showOpenDialog(win, {
             title: 'ノートの置き場所を選ぶ',

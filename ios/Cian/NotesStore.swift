@@ -296,7 +296,10 @@ final class NotesStore: ObservableObject {
             allBooks = answer["books"] as? [String] ?? []
             stars = answer["stars"] as? [String] ?? []
             colors = answer["colors"] as? [String: String] ?? [:]
-            share = answer["share"] as? String ?? ""
+            shares = (answer["shares"] as? [[String: Any]] ?? []).compactMap {
+                guard let at = $0["at"] as? String else { return nil }
+                return Shelf(at: at, by: $0["by"] as? String ?? "")
+            }
             waiting = (answer["waiting"] as? [[String: Any]] ?? [])
                 .compactMap { $0["of"] as? String }
             fetch(answer["waiting"] as? [[String: Any]] ?? [])
@@ -307,16 +310,36 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    /// 家族と分けてあるフォルダ（ルートからの道）。無ければ空。
+    /// 家族と分けてある棚。**一つとは限らない** ── 印はフォルダごとに置くので、
+    /// 家族用と仕事用が両方あっていい。
     ///
-    /// **共有そのものは amber の仕事ではない** ── 分けるのはクラウドで、
-    /// amber が持つのは「どれが分けてあるか」の一言だけ。
-    @Published var share: String = ""
+    /// **教えてもらわなくても分かる。** 印は共有フォルダの中の一枚
+    /// （`notebook::SHARE_MARK`）で、フォルダと一緒に旅をする ── 受け取った
+    /// 人が自分の amber に「これが共有です」と教え直す手が要らない。
+    @Published var shares: [Shelf] = []
 
-    /// 家族と分けるフォルダを決める（空でやめる）。
-    func setShare(_ folder: String) throws {
+    struct Shelf: Identifiable, Equatable {
+        let at: String
+        let by: String
+        var id: String { at }
+        var name: String { at.split(separator: "/").last.map(String.init) ?? "ぜんぶ" }
+    }
+
+    /// このノートは、その棚の中か。
+    func inShare(_ at: String, _ note: Note) -> Bool {
+        at.isEmpty || note.book == at || note.book.hasPrefix(at + "/")
+    }
+
+    /// 共有の棚にする（`off` で、やめる）。**フォルダが無ければ作る。**
+    func setShare(_ folder: String, off: Bool = false, by: String = "") throws {
         guard let root else { return }
-        _ = try Cian.call("share", ["path": root.path, "folder": folder])
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        _ = try Cian.call("share", [
+            "path": root.path, "folder": folder, "off": off,
+            "by": by, "today": f.string(from: Date()),
+        ])
         reload()
     }
 
