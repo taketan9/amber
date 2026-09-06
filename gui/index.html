@@ -289,6 +289,21 @@ body.mac #top { padding-top: 30px; }
 #gear { font-size: 19px; padding: 0 9px; }
 #dots:hover, #gear:hover { background: var(--hover); color: var(--ink); }
 
+/* 戻す・やり直す。**歯車の左** ── ノートに対してすることなので、
+   amber に対してすること（歯車）より手前に置く。戻れないときは薄くする
+   ── 消すと、押せるものの位置が押すたびに動く。 */
+#back, #fwd {
+  flex: none; width: 27px; height: 25px; border-radius: 7px;
+  color: var(--ink-2); -webkit-app-region: no-drag;
+  display: flex; align-items: center; justify-content: center;
+}
+#back[hidden], #fwd[hidden] { display: none !important; }
+#back svg, #fwd svg { width: 15px; height: 15px; }
+#back:hover:not(:disabled), #fwd:hover:not(:disabled) {
+  background: var(--hover); color: var(--ink);
+}
+#back:disabled, #fwd:disabled { opacity: .3; }
+
 /* 書く面の絵。**字は消さず、行の下に空きを作って置く** ── 消して絵に
    すると、パスを一文字直したいだけのときに直しようがない。 */
 .zoneimg {
@@ -820,6 +835,8 @@ body.dropping::after {
         <button id="zenbtn" title="ノートだけを大きく（F12・戻るのは F12 か Esc）">⤢</button>
       </div>
       <button id="dots" title="このノートにすること（右押しでも同じ）">ノート ▾</button>
+      <button id="back" title="一つ戻す（⌘Z）" hidden></button>
+      <button id="fwd" title="やり直す（⌘⇧Z）" hidden></button>
       <button id="gear" title="amber の設定と見た目（⌘⇧P で全部）">⚙</button>
       <div id="count2"></div>
       <div id="state"></div>

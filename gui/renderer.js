@@ -421,6 +421,9 @@ async function openNote(path, opts) {
         // 切れないなら、そのまま全部見せる。**隠して失うより、出して残す。**
         head = '';
     }
+    // 別のノートを開いたら、戻り道は捨てる ── 別のノートの姿をここへ
+    // 戻せると、一度の押し間違いで二本まとめて壊れる。
+    if (!state.open || state.open.path !== path) forgetSteps();
     state.open = note;
     state.stamp = r.stamp || null;
     state.head = head;
@@ -428,10 +431,12 @@ async function openNote(path, opts) {
     loading = true;
     editor.setValue(body);
     loading = false;
+    lastSaved = body;
     el('title').textContent = note.title || '(題なし)';
     el('state').textContent = when(note.updated)
         + ((note.tags || []).length ? '  ' + note.tags.map((t) => '#' + t).join(' ') : '');
     drawCount();
+    drawSteps();
     applyView();
     drawZones();
     if (!state.guest) drawList();
@@ -2661,12 +2666,101 @@ function diagramAt(target) {
 /// 同じフォルダを二つの端末で触るのがこのアプリの前提なので、「開いたときと
 /// 同じファイルか」を毎回訊く。違えば人に決めてもらう ── 黙ってどちらかを
 /// 捨てるのがいちばん悪い。
+/* ── 取り消しと、やり直し ── */
+
+/// **ノートの字そのものを積む。** Monaco の取り消しには任せられない ──
+/// 表を入れる・図を入れる・升を押す、はどれも `editor.setValue()` で組み
+/// 直しており、`setValue` は Monaco の積み木を**まるごと捨てる**。押した
+/// 直後に ⌘Z を押しても、そこには何も積まれていない。
+///
+/// 積むのは**保存のたび**（打鍵の 0.9 秒後）。一続きに打っているあいだは
+/// 一つにまとまり、手が止まるごとに一段になる ── 「さっきの姿」の単位が
+/// 人の感覚と揃う。一文字ずつ積むと、消した一段落を戻すのに何十回押す
+/// ことになる。
+///
+/// **ノートを替えたら捨てる。** 別のノートの姿をここへ戻す道があると、
+/// 一度の押し間違いで二本まとめて壊れる。
+let backs = [];
+let forwards = [];
+let lastSaved = '';
+let steppingBack = false;
+const BACKS = 120;
+
+/// いまの姿を積む。`save()` の中から、書き込む直前に呼ばれる。
+function keepStep(now) {
+    if (steppingBack || now === lastSaved) return;
+    if (lastSaved !== '') {
+        backs.push(lastSaved);
+        if (backs.length > BACKS) backs.shift();
+        // 新しく打ったら、先の道は消える ── 分かれた先を持っておくと
+        // 「やり直し」が何を指すのか誰にも言えなくなる。
+        forwards = [];
+    }
+    lastSaved = now;
+    drawSteps();
+}
+
+function forgetSteps() {
+    backs = [];
+    forwards = [];
+    lastSaved = '';
+    drawSteps();
+}
+
+/// 一段もどす／すすめる。
+async function stepBack(forward) {
+    const from = forward ? forwards : backs;
+    const to = forward ? backs : forwards;
+    if (!from.length || !editor) return;
+    to.push(lastSaved);
+    const text = from.pop();
+    steppingBack = true;
+    loading = true;
+    editor.setValue(text);
+    loading = false;
+    lastSaved = text;
+    state.dirty = true;
+    await save();
+    steppingBack = false;
+    await drawRead();
+    drawCount();
+    drawSteps();
+    say(forward ? 'やり直しました' : '一つ戻しました');
+}
+
+/// 矢印は字ではなく線で描く ── 「↩」は書体によって太さも向きも変わる。
+const STEP_ICON = (back) => '<svg viewBox="0 0 16 16" aria-hidden="true">'
+    + '<path d="' + (back
+        ? 'M6 3.6 2.4 7.2 6 10.8M2.4 7.2h6.9a3.4 3.4 0 0 1 0 6.8H7.4'
+        : 'M10 3.6 13.6 7.2 10 10.8M13.6 7.2H6.7a3.4 3.4 0 0 0 0 6.8h1.9')
+    + '" fill="none" stroke="currentColor" stroke-width="1.6"'
+    + ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function drawSteps() {
+    const b = el('back');
+    const f = el('fwd');
+    if (!b || !f) return;
+    if (!b.innerHTML) {
+        b.innerHTML = STEP_ICON(true);
+        f.innerHTML = STEP_ICON(false);
+        b.onclick = () => stepBack(false);
+        f.onclick = () => stepBack(true);
+    }
+    const on = !!state.open;
+    b.disabled = !on || !backs.length;
+    f.disabled = !on || !forwards.length;
+    b.hidden = !on;
+    f.hidden = !on;
+}
+
 async function save() {
     if (!state.open || !editor) return;
     const path = state.open.path;
     // 頭を戻してから書く。**ここを忘れると、保存のたびに front matter が
     // 一枚ずつ消える** ── 題もタグも作った日も。
     const text = state.head + editor.getValue();
+    // 書き込む直前の姿を積む ── 書いたあとだと、戻る先が「いまの姿」になる。
+    keepStep(editor.getValue());
     try {
         const r = await ask('write', { path, text, stamp: state.stamp });
         if (r && r.conflict) {
@@ -2747,6 +2841,25 @@ function moveCursor(delta) {
 // `Zenkaku` にも `Process` にも `Unidentified` にもなり、IME が拾っている
 // 間は `?` すら `Process` になる。cian で「Mac では直ったのに JIS で効かない」
 // を二件出している。
+/// 戻す・やり直す。**捕捉の段で受ける。**
+///
+/// Monaco にも読む面にも自前の取り消しがあるが、どちらも
+/// `editor.setValue()` で組み直したところ（表・図・升）で積み木ごと消える
+/// ── 押した直後に ⌘Z を押しても何も起きない。ノートの字を積んでいる
+/// こちらに一本化する。
+///
+/// **泡の段では届かないことがある** ── Monaco は自分の textarea で ⌘Z を
+/// 受けて、そこで止めることがある。捕捉の段なら、どこを打っていても先に
+/// 通る。小窓と工房の中だけは、あちらの受け口に譲る。
+document.addEventListener('keydown', (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.code !== 'KeyZ') return;
+    if (!el('veil').hidden || !el('studio').hidden) return;
+    if (!state.open) return;
+    e.preventDefault();
+    e.stopPropagation();
+    stepBack(e.shiftKey);
+}, true);
+
 document.addEventListener('keydown', (e) => {
     const inField = e.target === el('find');
     const inEditor = el('ed').contains(e.target);
@@ -2933,6 +3046,8 @@ const CMDS = [
     { id: 'root', name: 'amber保存ディレクトリ変更', app: true, run: cmdRoot },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'amber について', app: true, run: cmdAbout },
+    { id: 'back', name: '一つ戻す', key: '⌘Z', need: 'note', run: () => stepBack(false) },
+    { id: 'fwd', name: 'やり直す', key: '⌘⇧Z', need: 'note', run: () => stepBack(true) },
 
     // ── 表には要るが、献立には出さないもの
     { id: 'mkbook', name: '新しいフォルダを作る', run: () => cmdMkBook() },
