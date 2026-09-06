@@ -1068,7 +1068,7 @@ function readHeading() {
 /// **いったん全部を字に戻してから直し、組み直す。** 見た目の上でやろうと
 /// すると、升や表のような「札の形が決まっているもの」を DOM の上で組み立て
 /// 直すことになり、そこだけ別の作り方が生える。
-async function readSourceEdit(change, node) {
+async function readSourceEdit(change, node, stay) {
     const box = el('read');
     // 直すところは、たいてい caret のあるかたまり。**押して開く工房だけは
     // 別** ── 右押しは caret を動かさないので、押されたものを名指しで渡す。
@@ -1097,19 +1097,25 @@ async function readSourceEdit(change, node) {
     await drawRead();
     // **入れたものの次に降りる。** 組み直しで caret は消えるので、
     // 置き直さないと次の一文字がどこへ行くか分からない。
-    landAfter(at);
+    //
+    // `stay` のときは、**その行の終わりに残る** ── チェックリストや引用は
+    // 「この行をそうする」道具で、押した人はそこに打ち続けようとしている。
+    // 次へ降りると、改行されたように見える（箇条書きは DOM を直に触るので
+    // そうならず、二つの道具が違う振る舞いをしていた）。
+    landAfter(at, stay);
 }
 
 /// `n` 番目のかたまりの、次に caret を置く。
-function landAfter(n) {
+function landAfter(n, stay) {
     const box = el('read');
     const kids = [...box.children];
-    const to = kids[n + 1] || kids[kids.length - 1];
+    const to = stay ? kids[n] : (kids[n + 1] || kids[kids.length - 1]);
     if (!to) return;
     box.focus();
     const r = document.createRange();
     r.selectNodeContents(to);
-    r.collapse(true);
+    // 残るときは行の終わりへ、次へ行くときは頭へ。
+    r.collapse(!stay);
     const sel = getSelection();
     sel.removeAllRanges();
     sel.addRange(r);
@@ -1117,8 +1123,8 @@ function landAfter(n) {
     to.scrollIntoView({ block: 'nearest' });
 }
 
-const readMark = (kind, withWhat) => readSourceEdit((md) =>
-    ask('mark', { kind, with: withWhat || '', text: md }).then((r) => r.text));
+const readMark = (kind, withWhat, stay) => readSourceEdit((md) =>
+    ask('mark', { kind, with: withWhat || '', text: md }).then((r) => r.text), null, stay);
 
 const readPut = (text) => readSourceEdit((md) => (md.trim() ? md + '\n\n' : '') + text);
 
@@ -1187,7 +1193,7 @@ const MARKS = [
     [
         ['見出し', '⌘1', () => onRead() ? readHeading() : applyMark('heading')],
         ['箇条書き', '⌘⇧8', () => onRead() ? readBlockAs('ul') : applyMark('line', '- ')],
-        ['チェックリスト', '⌘⇧9', () => onRead() ? readMark('line', '- [ ] ') : applyMark('line', '- [ ] ')],
+        ['チェックリスト', '⌘⇧9', () => onRead() ? readMark('line', '- [ ] ', true) : applyMark('line', '- [ ] ')],
         ['番号リスト', '⌘⇧7', () => onRead() ? readBlockAs('ol') : applyMark('line', '1. ')],
         ['太字', '⌘B', () => onRead() ? readDress('bold') : applyMark('wrap', '**')],
         ['画像', '', pickPicture],
@@ -3114,11 +3120,14 @@ const CMDS = [
     { id: 'back', name: '前に見たノート', key: '⌘←', run: () => walk(-1) },
     { id: 'fwd', name: '次に見たノート', key: '⌘→', run: () => walk(1) },
     { id: 'find', name: 'ノートを探す', key: '⌘F', run: () => { el('find').focus(); el('find').select(); } },
-    { id: 'find2', name: 'フィルタ（タグ・フォルダ・期間）', app: true, run: cmdFind },
+    // **歯車からは外した。** 絞るのは一覧の頭の「フィルタ」がやること
+    // ── 歯車は amber の設定で、「いま何を見るか」は設定ではない。
+    // 命令の表には残す（⌘⇧P から名前で探せる）。
+    { id: 'find2', name: 'フィルタ（タグ・フォルダ・期間）', run: cmdFind },
 
     // ── このノートにすること（⋯ と、ノートの右押し）
     { id: 'star', name: 'ブックマークに登録', key: '⌘D', need: 'note', menu: true, run: cmdStar },
-    { id: 'tags', name: 'ノートのタグ設定', need: 'note', menu: true, run: cmdTags },
+    { id: 'tags', name: 'タグ設定', need: 'note', menu: true, run: cmdTags },
     { id: 'move', name: 'フォルダへ移動', need: 'note', menu: true, run: cmdMove },
     { id: 'remind', name: '通知設定', need: 'note', menu: true, run: cmdRemind },
     { id: 'export', name: 'エクスポート', need: 'note', menu: true, run: cmdExport },
@@ -3135,8 +3144,8 @@ const CMDS = [
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'amber について', app: true, run: cmdAbout },
     { id: 'welcome', name: '見本のノートを入れる', app: true, run: cmdWelcome },
-    { id: 'history', name: '前の姿（履歴）', need: 'note', menu: true, run: () => cmdHistory() },
-    { id: 'keepnow', name: 'いまの姿を残す', key: '⌘S', need: 'note', menu: true, run: cmdKeepNow },
+    { id: 'history', name: '過去バージョン', need: 'note', menu: true, run: () => cmdHistory() },
+    { id: 'keepnow', name: '現状バージョン保存', key: '⌘S', need: 'note', menu: true, run: cmdKeepNow },
     { id: 'back', name: '一つ戻す', key: '⌘Z', need: 'note', run: () => stepBack(false) },
     { id: 'fwd', name: 'やり直す', key: '⌘⇧Z', need: 'note', run: () => stepBack(true) },
 
@@ -3366,7 +3375,7 @@ function railMenu(kind, what, at) {
         items.push({ name: 'フォルダに色を付ける', run: () => cmdColor(what) });
         // フォルダの履歴は、**中のノートの姿をまとめて時系列で** ──
         // 「あのあたりで壊した」は、どのノートかを覚えていないほうが多い。
-        items.push({ name: '前の姿（履歴）', sub: 'この中のノートぜんぶ',
+        items.push({ name: '過去バージョン', sub: 'この中のノートぜんぶ',
                      run: () => cmdHistory(state.root + '/' + what, true) });
     }
     if (kind === 'star') {
@@ -4005,15 +4014,23 @@ function onePage(title, body) {
         + '</style></head><body>' + body + '</body></html>';
 }
 
-/// フォルダと文字色の11色。**iPhone の `Colouring.palette` と同じ並び。**
-/// 色でしか区別できないノートは grep に映らず、読み上げにも伝わらないので、
-/// 増やさない。
-const PALETTE = [
-    ['#0E93A8', 'シアン'], ['#2AA79B', 'みどり青'], ['#3D7FA8', '青'],
-    ['#6E7BC4', '藤'], ['#9A6FB5', '紫'], ['#C2649A', '桃'],
-    ['#C4564E', '赤'], ['#D07A2E', '橙'], ['#B08A2E', '金'],
-    ['#5E8C42', '緑'], ['#7A7A7A', '灰'],
-];
+/// フォルダに付けられる十一色。**core に訊く。**
+///
+/// 前はここと `Colouring.palette`（電話）に同じ表を書いていて、両方の
+/// コメントに「同じ並び」と書いてあった ── それでも**十一色のうち六色が
+/// ずれていた**。電話で付けた青が、Mac では少し違う青で出ていた。
+/// 写しを持てば、いつかずれる。
+let PALETTE = [];
+
+async function loadPalette() {
+    try {
+        const r = await ask('palette', {});
+        PALETTE = (r.colors || []).map((c) => [c.hex, c.name]);
+    } catch {
+        // 訊けなくても色は付けられなくていい ── 窓が開かない理由にはしない。
+        PALETTE = [];
+    }
+}
 
 /// フォルダに色を付ける。**フォルダを右押ししたときだけ。**
 ///
@@ -4180,7 +4197,7 @@ async function cmdKeepNow() {
         const r = await ask('keep', {
             root: state.root, path: state.open.path, gap: 0, force: true, kept: true,
         });
-        say(r.stamp ? 'いまの姿を残しました（この姿は消えません）' : 'この姿はもう残してあります');
+        say(r.stamp ? 'いまのバージョンを残しました（これは消えません）' : 'このバージョンはもう残してあります');
     } catch (e) {
         say('残せません: ' + e.message);
     }
@@ -4203,7 +4220,7 @@ async function cmdHistory(at, isBook) {
     }
     const rows = r.versions || [];
     if (!rows.length) {
-        await askPick('前の姿', [{ name: 'まだありません', value: null }],
+        await askPick('過去バージョン', [{ name: 'まだありません', value: null }],
             '書いて手を止めるたびに、一つずつ残ります（' + r.gens + ' 世代・'
             + r.days + ' 日ぶん）');
         return;
@@ -4215,7 +4232,7 @@ async function cmdHistory(at, isBook) {
         sub: (isBook ? v.note + '  ' : '') + Math.round(v.bytes / 10) / 100 + ' KB',
         value: v,
     }));
-    const pick = await askPick('前の姿', items,
+    const pick = await askPick('過去バージョン', items,
         '選ぶと中身を見られます（' + r.gens + ' 世代・' + r.days + ' 日ぶん残ります）');
     if (!pick) return;
     const note = isBook ? state.root + '/' + pick.note : path;
@@ -4271,10 +4288,20 @@ async function openGuestText(title, text) {
 /// （または打った字）で、やめたときは `null`。
 let sheetDone = null;
 
-function sheet({ title, value, placeholder, items, foot }) {
+function sheet({ title, value, placeholder, items, foot, bare }) {
     closeSheet(null);
     const veil = el('veil');
     const input = veil.querySelector('input');
+    // **四つまでのときは、字を打つ欄を見せない。**
+    //
+    // 四つを絞り込む人はいない。それどころか、「はい／やめる」の二択に
+    // 欄が出ていると「何か打つものがある」に見えて、タグを外すだけの返事
+    // で人が止まる（実際に止まった ── ゴミ箱へ入れるときも同じだった）。
+    //
+    // 欄は残す ── 上下と Enter を受けているのはここなので、消すと鍵盤で
+    // 選べなくなる。見せないだけ。
+    const few = items ? items.length <= 4 : false;
+    veil.querySelector('#sheet').classList.toggle('bare', bare ?? few);
     const list = veil.querySelector('.items');
     veil.querySelector('.hd').textContent = title || '';
     veil.querySelector('.foot').textContent = foot || '';
@@ -4355,7 +4382,7 @@ const askPick = (title, items, foot) =>
 
 /// はい／いいえ。**取り返しのつかないものだけに使う。**
 function askYes(title) {
-    return sheet({ title, items: [
+    return sheet({ title, bare: true, items: [
         { name: 'はい', value: true },
         { name: 'やめる', value: false },
     ] }).then((v) => v === true);
@@ -4379,6 +4406,7 @@ const escapeAttr = escapeHtml;
     // 外から動いたら教えてもらう ── 同じフォルダを二つの端末で触るのが
     // このアプリの前提なのに、開き直すまで出てこなかった。
     window.amber.watch(saved.root);
+    await loadPalette();
     if (saved.view === 'read' || saved.view === 'split' || saved.view === 'write') {
         view = saved.view;
     }

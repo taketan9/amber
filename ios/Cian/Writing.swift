@@ -27,6 +27,37 @@ struct NoteView: View {
     @State private var trouble: String?
     /// 長押しされた図の、元の字（枠ごと）。
     @State private var fixingText: Fixing?
+    /// 「表示」の面へ合図を渡す糸。
+    @StateObject private var hand = PaperHand()
+    /// 表示の面で鍵盤が出ているか ── 帯を出すかどうかの目安。
+    @State private var reading = true
+
+    /// 表示の面の道具。**書く面より少ない** ── `execCommand` で確かに
+    /// できるものだけを出す。できないものを並べると、押しても何も起きない
+    /// 釦ができ、それはあることより悪い。
+    private var readMarks: some View {
+        VStack(spacing: 0) {
+            Divider()
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    mark("見出し", "number") { hand.mark("head") }
+                    mark("箇条書き", "list.bullet") { hand.mark("ul") }
+                    mark("チェック", "checklist") { hand.mark("check") }
+                    mark("番号リスト", "list.number") { hand.mark("ol") }
+                    mark("太字", "bold") { hand.mark("bold") }
+                    mark("斜体", "italic") { hand.mark("italic") }
+                    mark("取り消し線", "strikethrough") { hand.mark("strike") }
+                    mark("引用", "text.quote") { hand.mark("quote") }
+                    Divider().frame(height: 20)
+                    mark("画像", "photo", act: photo)
+                    mark("表", "tablecells", act: table)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+            }
+        }
+        .background(.bar)
+    }
     @Environment(\.colorScheme) private var scheme
     @AppStorage("cian.look") private var look = Look.auto
 
@@ -80,9 +111,16 @@ struct NoteView: View {
                 // だけ読むだけだと、同じ名前の面が二つの amber で別のものに
                 // なる。SwiftUI で書き直すと書き戻しがもう一組でき、同じ
                 // ノートが端末によって別の字に保存される。
-                Paper(text: $tab.text, folder: folder,
-                      dark: look == .dark || (look == .auto && scheme == .dark),
-                      onCheck: tickLine, onFix: { fixingText = Fixing(md: $0) })
+                VStack(spacing: 0) {
+                    Paper(text: $tab.text, folder: folder,
+                          dark: look == .dark || (look == .auto && scheme == .dark),
+                          onCheck: tickLine, onFix: { fixingText = Fixing(md: $0) },
+                          hand: hand)
+                    // **道具の帯は、表示の面にも要る。** 打てる面なのに
+                    // 記号の入れ方が無いと、`#` や `- [ ]` を覚えている人に
+                    // しか使えない ── 電話の鍵盤にその記号は出ていない。
+                    if reading { readMarks }
+                }
                 // **工房はここで開く。** 図は表示の面の中にあり、直した字を
                 // 戻す先はこのノートの本文なので、間に人を挟まない。
                 .sheet(item: $fixingText) { f in
@@ -384,7 +422,11 @@ struct Crumbs: View {
 struct Tree: View {
     @ObservedObject var store: NotesStore
     let go: (String) -> Void
+    /// ここから新しいフォルダを作る。**選ぶのと作るのは、同じ用事の裏表**
+    /// ── 「フォルダへ行きたい」で開いて、無ければその場で作る。
+    var make: ((String) -> Void)?
     @Environment(\.dismiss) private var dismiss
+    @State private var making: String?
 
     var body: some View {
         NavigationStack {
@@ -401,10 +443,28 @@ struct Tree: View {
                     Text("数字は、そのフォルダの中にあるノートの本数です（下の階層も数えます）。")
                 }
             }
-            .navigationTitle("フォルダの構成")
+            .navigationTitle("フォルダ")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("閉じる") { dismiss() } }
+                if make != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { making = store.at } label: {
+                            Image(systemName: "folder.badge.plus")
+                        }
+                        .accessibilityLabel("新しいフォルダ")
+                    }
+                }
+            }
+            .sheet(item: Binding(
+                get: { making.map { Where.Named(name: $0) } },
+                set: { if $0 == nil { making = nil } }
+            )) { at in
+                Booking(inside: at.name.isEmpty ? store.rootName : at.name) { name in
+                    make?(name)
+                    making = nil
+                    dismiss()
+                }
             }
         }
     }

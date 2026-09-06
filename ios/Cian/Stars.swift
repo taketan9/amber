@@ -194,12 +194,21 @@ struct Colouring: View {
     let folder: String
     @Environment(\.dismiss) private var dismiss
 
-    static let palette: [(String, String)] = [
-        ("#0E93A8", "シアン"), ("#2AA79B", "みどり青"), ("#3D7FA8", "青"),
-        ("#5E6FA8", "青むらさき"), ("#8A6BA8", "むらさき"), ("#B85C8A", "もも"),
-        ("#C4544C", "あか"), ("#D9822B", "だいだい"), ("#B39429", "からし"),
-        ("#4E8C43", "みどり"), ("#7A7F86", "はいいろ"),
-    ]
+    /// フォルダに付けられる色。**core に訊く。**
+    ///
+    /// 前はここと窓の `PALETTE` に同じ表を書いていて、両方のコメントに
+    /// 「同じ並び」と書いてあった ── それでも**十一色のうち六色がずれて
+    /// いた**。電話で付けた青が、Mac では少し違う青で出ていた。
+    static let palette: [(String, String)] = {
+        guard let out = try? Cian.call("palette", [:]),
+              let rows = out["colors"] as? [[String: Any]]
+        else { return [] }
+        return rows.compactMap { r in
+            guard let hex = r["hex"] as? String, let name = r["name"] as? String
+            else { return nil }
+            return (hex, name)
+        }
+    }()
 
     var body: some View {
         NavigationStack {

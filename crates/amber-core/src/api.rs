@@ -447,6 +447,15 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "ok": true }))
         }
 
+        // フォルダに付けられる色。**並びは core が持つ** ── 窓と電話に
+        // 同じ表を書いていた頃、十一色のうち六色がずれていた。
+        "palette" => Ok(serde_json::json!({
+            "colors": crate::notebook::PALETTE
+                .iter()
+                .map(|(hex, name)| serde_json::json!({ "hex": hex, "name": name }))
+                .collect::<Vec<_>>(),
+        })),
+
         "restore" => {
             let zip = std::path::PathBuf::from(arg(p, "zip"));
             let to = std::path::PathBuf::from(arg(p, "to"));

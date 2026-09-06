@@ -19,6 +19,12 @@ struct Where: View {
     let choose: () -> Void
     let bringIn: () -> Void
     let restore: () -> Void
+    /// 名前を `sheet(item:)` に渡すための包み。
+    struct Named: Identifiable {
+        let name: String
+        var id: String { name }
+    }
+
     /// 見本を何枚置いたか。**言わないと、押しても何も起きなかったように
     /// 見える**（既にあるものは飛ばすので、本当に何も起きない回がある）。
     @State private var added: Int?
@@ -133,18 +139,7 @@ struct Where: View {
                         Label("見本のノートを入れる", systemImage: "sparkles")
                     }
                 } footer: {
-                    Text("Markdown の書き方・『覚悟の磨き方』・ストラテジーパターンの三枚を、いま見ているフォルダに置きます。同じ名前があるものは飛ばすので、二度押しても増えません。")
-                }
-
-                Section {
-                    Button {
-                        let n = store.addWelcome()
-                        added = n
-                    } label: {
-                        Label("見本のノートを入れる", systemImage: "sparkles")
-                    }
-                } footer: {
-                    Text("Markdown の書き方・『覚悟の磨き方』・ストラテジーパターンの三枚を、いま見ているフォルダに置きます。同じ名前があるものは飛ばすので、二度押しても増えません。")
+                    Text("Markdown の書き方・『覚悟の磨き方』・ストラテジーパターンの三枚を、いま見ているフォルダの直下に置きます（フォルダもタグも作りません）。同じ名前があるものは飛ばすので、二度押しても増えません。")
                 }
 
                 Section {

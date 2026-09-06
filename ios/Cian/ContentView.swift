@@ -45,6 +45,8 @@ struct ContentView: View {
     @State private var walked = ""
     /// 履歴を見せている相手（ノートかフォルダ）。
     @State private var past: Past.Which?
+    /// 消してよいか訊いている相手。**取り返しがつかないので、必ず訊く。**
+    @State private var dropping2: Note?
     @State private var deeper = true
     @State private var wide: CGFloat = 393
 
@@ -93,6 +95,16 @@ struct ContentView: View {
                 }
             }
         }
+        .alert("ゴミ箱へ入れますか", isPresented: Binding(
+            get: { dropping2 != nil }, set: { if !$0 { dropping2 = nil } }
+        )) {
+            Button("やめる", role: .cancel) {}
+            Button("入れる", role: .destructive) {
+                if let n = dropping2 { remove(n) }
+            }
+        } message: {
+            Text(dropping2.map { "「\($0.shown)」" } ?? "")
+        }
         .sheet(item: $past) { w in
             Past(store: store, at: w.at, isBook: w.book)
         }
@@ -124,7 +136,11 @@ struct ContentView: View {
         .sheet(item: $shelving) { note in Shelving(store: store, note: note) }
         .sheet(item: $colouring) { f in Colouring(store: store, folder: f) }
         .sheet(isPresented: $treeing) {
-            Tree(store: store) { to in go { store.into(to) } }
+            Tree(store: store, go: { to in go { store.into(to) } },
+                 make: { name in
+                     do { try store.makeBook(name) }
+                     catch { store.trouble = error.localizedDescription }
+                 })
         }
         .alert("名前を変える", isPresented: Binding(
             get: { renaming != nil }, set: { if !$0 { renaming = nil } }
@@ -365,7 +381,14 @@ struct ContentView: View {
                     // **長押しから履歴へ。** 窓は右押しで開く ── 電話に
                     // 右押しは無いので、同じ意味の手ぶりに割り当てる。
                     Button { past = .init(at: note.path, book: false) } label: {
-                        Label("前の姿（履歴）", systemImage: "clock.arrow.circlepath")
+                        Label("過去バージョン", systemImage: "clock.arrow.circlepath")
+                    }
+                    // **長押しからも消せる。** 消し方は横払いしか無く、
+                    // 「長押しの献立に無い＝消せない」と読める（実際に
+                    // そう読まれた）。窓の献立にも入っているもの。
+                    Divider()
+                    Button(role: .destructive) { dropping2 = note } label: {
+                        Label("ゴミ箱へ入れる", systemImage: "trash")
                     }
                 }
     }
@@ -483,13 +506,15 @@ struct ContentView: View {
                 // 「よく使うもの」に見えてしまう（前はそうなっていた）。
                 if store.at.isEmpty {
                     HStack(spacing: 14) {
-                        // **フォルダを作るのは釦一つで。** 献立の中に畳んで
-                        // いたので、押しはじめる前に「どこにあるか」を
-                        // 探すことになっていた。
-                        Button { booking = true } label: {
-                            Label("フォルダ", systemImage: "folder.badge.plus")
-                                .font(.footnote)
+                        // **フォルダのことは、この印一つに。** 印と「フォルダ」
+                        // の札が並んでいて、同じことを二度置いていた。押すと
+                        // フォルダの構成が出て、そこで**選ぶ／作る**（名前を
+                        // いきなり打たせない ── たいていは既にあるものへ行く）。
+                        Button { treeing = true } label: {
+                            Image(systemName: "folder.badge.plus").font(.footnote)
                         }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("フォルダ")
                         Menu {
                             Picker("並び", selection: $store.order) {
                                 ForEach(NotesStore.Order.allCases) { Text($0.label).tag($0) }
@@ -506,13 +531,6 @@ struct ContentView: View {
                             Toggle(isOn: $store.flat) {
                                 Label("全部まとめて見る", systemImage: "list.bullet")
                             }
-                            Divider()
-                            Button { booking = true } label: {
-                                Label("新しいフォルダ", systemImage: "folder.badge.plus")
-                            }
-                            Button { treeing = true } label: {
-                                Label("フォルダの構成", systemImage: "list.bullet.indent")
-                            }
                             if !store.only.isEmpty {
                                 Divider()
                                 Button(role: .destructive) { store.only = [] } label: {
@@ -524,6 +542,11 @@ struct ContentView: View {
                         }
                         Spacer(minLength: 0)
                     }
+                    // **右の余白は、何でもない場所。** 段のどこを触っても
+                    // 最初の釦が鳴っていて、右端を触るとフォルダを作る小窓が
+                    // 出た ── 一覧の段は、中に釦があっても段ごと押せる。
+                    .contentShape(Rectangle())
+                    .onTapGesture {}
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 2, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -643,7 +666,7 @@ struct ContentView: View {
                         Button {
                             past = .init(at: store.rootPath + "/" + b.path, book: true)
                         } label: {
-                            Label("前の姿（履歴）", systemImage: "clock.arrow.circlepath")
+                            Label("過去バージョン", systemImage: "clock.arrow.circlepath")
                         }
                         Button {
                             renaming = b.path
@@ -740,7 +763,17 @@ struct ContentView: View {
                 if g.startLocation.x < 36, g.translation.width > 0, let up = store.up {
                     go { store.leave(for: up) }
                 } else if g.startLocation.x > wide - 36, g.translation.width < 0 {
-                    go { _ = store.back() }
+                    // **右から左は「開いていたノートへ戻る」。**
+                    //
+                    // 一覧から左へ払うのは、ノートを開くときと同じ向きの
+                    // 手ぶり ── 開いていた一本があるなら、そこへ戻るのが
+                    // 素直。フォルダを一つ潜っただけの「進む」より、
+                    // 待っているノートのほうを先に見る。
+                    if !desk.showing.isEmpty && desk.current != nil {
+                        showing = true
+                    } else {
+                        go { _ = store.back() }
+                    }
                 }
             }
         )

@@ -15,6 +15,16 @@ import WebKit
 /// 絵と図は `amber://` で配る。`WKWebView` は文字列から作った頁に隣の
 /// ファイルを読ませないので、**Swift が給仕する**（束ねの中の道具と、
 /// ノートの隣の絵）。ついでに、ノートの外は配らないことがここで保証できる。
+/// 道具の帯から「表示」の面へ、合図を渡す口。
+///
+/// **帯は SwiftUI、面は WebView。** 間に糸を一本通しておかないと、帯は
+/// 書く面だけの道具のままになる ── 電話で「表示」に打てるようにした意味が
+/// 半分になる。
+final class PaperHand: ObservableObject {
+    var send: ((String) -> Void)?
+    func mark(_ what: String) { send?(what) }
+}
+
 struct Paper: UIViewRepresentable {
     /// いまのノートの Markdown（前書きを除いた本文）。
     @Binding var text: String
@@ -25,6 +35,8 @@ struct Paper: UIViewRepresentable {
     var onCheck: ((Int, Bool) -> Void)?
     /// 図を長押しされた（工房を開く）。
     var onFix: ((String) -> Void)?
+    /// 道具の帯からの合図を受け取る糸。
+    var hand: PaperHand?
 
     func makeCoordinator() -> Hand { Hand(self) }
 
@@ -43,6 +55,9 @@ struct Paper: UIViewRepresentable {
         web.scrollView.keyboardDismissMode = .interactive
         context.coordinator.web = web
         context.coordinator.folder = folder
+        hand?.send = { [weak web] what in
+            web?.evaluateJavaScript("window.mark(\"\(what)\"); true")
+        }
         web.loadHTMLString(Self.page, baseURL: URL(string: Waiter.scheme + "://app/")!)
         return web
     }
@@ -166,16 +181,79 @@ struct Paper: UIViewRepresentable {
       box.addEventListener(ev, () => { clearTimeout(pressed); }, { passive: true });
     }
 
+    /// caret のいるかたまり。
+    function here() {
+      const sel = getSelection();
+      if (!sel || !sel.rangeCount) return null;
+      let n = sel.getRangeAt(0).startContainer;
+      while (n && n.parentElement !== box) n = n.parentElement || n.parentNode;
+      return n && n.parentElement === box ? n : null;
+    }
+
     /// 道具の帯から。窓と同じ `execCommand`。
     window.mark = (what) => {
       box.focus();
       if (what === 'bold') document.execCommand('bold');
       else if (what === 'italic') document.execCommand('italic');
+      else if (what === 'strike') document.execCommand('strikeThrough');
       else if (what === 'ul') document.execCommand('insertUnorderedList');
       else if (what === 'ol') document.execCommand('insertOrderedList');
-      else if (what.startsWith('h')) document.execCommand('formatBlock', false, what);
+      else if (what === 'quote') document.execCommand('formatBlock', false, 'blockquote');
+      else if (what === 'check') check();
+      else if (what === 'head') {
+        // 押すたびに深くなる ── 窓と同じ（`#` → `##` → `###` → 無し）。
+        const n = here();
+        const now = n && /^H[1-6]$/.test(n.tagName) ? Number(n.tagName[1]) : 0;
+        document.execCommand('formatBlock', false, now >= 3 ? 'p' : 'h' + (now + 1));
+      } else if (what.startsWith('h')) document.execCommand('formatBlock', false, what);
       box.dispatchEvent(new Event('input'));
     };
+
+    /// いまの行を、押せる升の付いた一行にする。
+    ///
+    /// **`execCommand` に升は作れない。** 箇条書きにしてから、升を自分で
+    /// 前に置く ── 升は `<button class="box">` で、`paperToMd` はそれを
+    /// 見て `- [ ]` に戻す。
+    function check() {
+      const n = here();
+      if (!n || n.closest('li')?.querySelector(':scope > .box')) return;
+      if (n.tagName !== 'LI' && !n.closest('li')) {
+        document.execCommand('insertUnorderedList');
+      }
+      const li = here()?.closest?.('li') || box.querySelector('li:focus-within');
+      const at = li || here();
+      if (!at || at.querySelector(':scope > .box')) return;
+      const mark = document.createElement('button');
+      mark.type = 'button';
+      mark.className = 'box';
+      mark.setAttribute('aria-pressed', 'false');
+      mark.contentEditable = 'false';
+      at.prepend(mark);
+    }
+
+    /// **升の行で改行しても、箇条書きにしない。**
+    ///
+    /// `contenteditable` の既定は「同じ種類の次の行」だが、升は付いてこない
+    /// ので `- ` だけの行が生まれる ── 押した人は升を足したつもりで、
+    /// 出てきたのは点。何も無い行に降りる。
+    box.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+      const li = here()?.closest?.('li');
+      if (!li || !li.querySelector(':scope > .box')) return;
+      const list = li.closest('ul, ol');
+      if (!list) return;
+      e.preventDefault();
+      const p = document.createElement('p');
+      p.append(document.createElement('br'));
+      list.after(p);
+      const r = document.createRange();
+      r.selectNodeContents(p);
+      r.collapse(true);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      box.dispatchEvent(new Event('input'));
+    });
 
     /// 図を描く。**要るときだけ読む** ── 3.4MB を、図の無いノートで払わない。
     let lib = null;

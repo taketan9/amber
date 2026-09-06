@@ -66,7 +66,7 @@ struct Past: View {
                     }
                 }
             }
-            .navigationTitle("前の姿")
+            .navigationTitle("過去バージョン")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("閉じる") { dismiss() } }
