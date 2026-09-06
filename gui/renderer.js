@@ -14,8 +14,14 @@ const state = {
     notes: [],
     books: [],
     stars: [],
-    /// 期間の絞り込み（`{ which: 'updated'|'created', days }`）。無ければ null。
+    /// 期間の絞り込み（`{ which: 'updated'|'created', from, to }`）。
+    /// `from` / `to` は `YYYY-MM-DD` か null（片方だけでもよい ── 「この日
+    /// から先ぜんぶ」「この日まで」を言えないと、範囲が使いものにならない）。
     when: null,
+    /// 押して選んだ絞り込み。**タグは全部・フォルダはどれか。**
+    /// ノートは一つのフォルダにしか居ないので、フォルダを「全部」にすると
+    /// 二つ選んだ瞬間に必ず 0 件になる。
+    picks: { tag: [], book: [] },
     /// amber の外にある一本を、単発で開いているか。
     guest: false,
     colors: {},
@@ -200,21 +206,40 @@ function inDest(n) {
 /// ここでやるのは当てはめだけ: どれか一組の語が全部あればよい。
 function narrowed() {
     let here = state.notes.filter(inDest);
-    // **期間は言葉ではなく、日付そのもので絞る。** `updated:` のような
-    // 書き方を増やすと、覚える記法がまた一つ増える ── これは札で出して
-    // 札で外すもの。
-    if (state.when) {
-        const key = state.when.which;
-        const days = state.when.days;
-        const edge = Date.now() / 1000 - Math.abs(days) * 86400;
-        here = here.filter((n) => {
-            const at = n[key];
-            if (!at) return false;
-            return days < 0 ? at < Date.now() / 1000 - 365 * 86400 : at >= edge;
-        });
+    // **押して選んだものは、字にしない。** 前は `tag:仕事` を探す欄に流し
+    // 込んでいた ── 押しただけなのに機械の言葉が現れ、消すには字を消す
+    // ことになる。選んだものは選んだものとして持つ。
+    for (const t of state.picks.tag) here = here.filter((n) => (n.tags || []).includes(t));
+    if (state.picks.book.length) {
+        here = here.filter((n) => state.picks.book.some(
+            (b) => n.book === b || (n.book || '').startsWith(b + '/')));
     }
+    // **期間は言葉ではなく、日付そのもので絞る。** `updated:` のような
+    // 書き方を増やすと、覚える記法がまた一つ増える。
+    if (state.when) here = here.filter(inWhen);
     if (!state.filter.trim() || !state.groups.length) return here;
     return here.filter((n) => state.groups.some((g) => g.every((t) => hitTerm(n, t))));
+}
+
+/// その日付が、選んだ範囲の中にあるか。
+///
+/// **日で比べる。** 秒で比べると「9月6日まで」が 9月6日の 0時0分までに
+/// なり、その日に書いたものが軒並み落ちる ── 人の言う「まで」はその日を
+/// 含む。`YYYY-MM-DD` の字で比べれば、この取り違えが起きようがない。
+function inWhen(n) {
+    const at = n[state.when.which];
+    if (!at) return false;
+    const day = dayOf(at);
+    if (state.when.from && day < state.when.from) return false;
+    if (state.when.to && day > state.when.to) return false;
+    return true;
+}
+
+/// 秒を `YYYY-MM-DD` に（**その土地の日付で**）。
+function dayOf(sec) {
+    const d = new Date(sec * 1000);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+        + '-' + String(d.getDate()).padStart(2, '0');
 }
 
 /// 一語が当たるか。**見出しごとに探し先が違う。**
@@ -268,8 +293,12 @@ function drawOrder() {
     el('order').textContent = ORDERS[at < 0 ? 0 : at][1];
 }
 
-el('findhow').onclick = () => cmdFind();
-el('whenchip').onclick = () => { state.when = null; drawFind(); drawList(); };
+el('findbtn').innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none"'
+    + ' stroke="currentColor" stroke-width="1.5" stroke-linecap="round">'
+    + '<circle cx="7.2" cy="7.2" r="4.6"/><path d="m10.6 10.6 3 3"/></svg>'
+    + '<span>ノートを探す</span>';
+el('findbtn').onclick = () => (el('findbox').hidden ? openFind() : closeFind());
+el('findoff').onclick = () => { closeFind(); el('find').blur(); };
 el('guestclose').onclick = closeGuest;
 for (const b of el('tablebar').querySelectorAll('button')) {
     // 押した瞬間に caret を失わないように、`mousedown` を止める。
@@ -299,7 +328,10 @@ function drawList() {
     el('count').textContent = rows.length + ' 件' + (rows.length !== all ? '（' + all + ' 件中）' : '');
     if (!rows.length) {
         el('rows').innerHTML = '<div id="empty">'
-            + (state.filter.trim() ? '見つかりません' : 'ここにはまだノートがありません')
+            // **絞ったから空なのか、もともと空なのかを分けて言う。**
+            // 同じ「ありません」だと、外せば出てくることに気づけない。
+            + (filtering() ? '絞り込みに当たるノートがありません'
+                : 'ここにはまだノートがありません')
             + '</div>';
         return;
     }
@@ -3123,7 +3155,14 @@ async function reload(opts) {
         if (state.open) {
             state.open = state.notes.find((n) => n.path === state.open.path) || state.open;
         }
+        // **消えたタグやフォルダで絞ったままにしない。** 外から消えた
+        // ものを選んだままだと、一覧がずっと空で、理由が帯にしか出ない。
+        const tags = new Set(tagsOf(state.notes).map(([t]) => t));
+        state.picks.tag = state.picks.tag.filter((t) => tags.has(t));
+        state.picks.book = state.picks.book.filter((b) => state.books.includes(b));
         drawRail();
+        drawDrawers();
+        drawDrawer();
         drawList();
     } catch (e) {
         if (!opts || !opts.quiet) say('読めません: ' + e.message);
@@ -3237,16 +3276,12 @@ document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.code === 'ArrowLeft') { e.preventDefault(); walk(-1); return; }
     if ((e.metaKey || e.ctrlKey) && e.code === 'ArrowRight') { e.preventDefault(); walk(1); return; }
     if ((e.metaKey || e.ctrlKey) && e.code === 'KeyN') { e.preventDefault(); newNote(); return; }
-    if ((e.metaKey || e.ctrlKey) && e.code === 'KeyF') {
-        e.preventDefault();
-        el('find').focus();
-        el('find').select();
-        return;
-    }
+    if ((e.metaKey || e.ctrlKey) && e.code === 'KeyF') { e.preventDefault(); openFind(); return; }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
 
     if (e.code === 'Escape') {
-        if (inField) { el('find').blur(); return; }
+        // 探す欄の Esc は**畳んで空にする** ── 見えない絞り込みを残さない。
+        if (inField) { el('find').blur(); closeFind(); return; }
         if (inEditor) { document.activeElement.blur(); return; }
     }
     // 文字を打っている場所では、素の一文字は文字であって命令ではない。
@@ -3261,7 +3296,7 @@ document.addEventListener('keydown', (e) => {
     else if ((e.code === 'Backspace' || e.code === 'Delete') && state.open) {
         e.preventDefault(); cmdDelete();
     }
-    else if (e.code === 'Slash') { e.preventDefault(); el('find').focus(); el('find').select(); }
+    else if (e.code === 'Slash') { e.preventDefault(); openFind(); }
 });
 
 /// 修飾キー付きの一打を、道具の一押しに。
@@ -3368,11 +3403,11 @@ const CMDS = [
     { id: 'rail', name: '左の列を畳む', key: '⌘/', run: () => toggleRail() },
     { id: 'back', name: '前に見たノート', key: '⌘←', run: () => walk(-1) },
     { id: 'fwd', name: '次に見たノート', key: '⌘→', run: () => walk(1) },
-    { id: 'find', name: 'ノートを探す', key: '⌘F', run: () => { el('find').focus(); el('find').select(); } },
-    // **歯車からは外した。** 絞るのは一覧の頭の「フィルタ」がやること
-    // ── 歯車は amber の設定で、「いま何を見るか」は設定ではない。
-    // 命令の表には残す（⌘⇧P から名前で探せる）。
-    { id: 'find2', name: 'フィルタ（タグ・フォルダ・期間）', run: cmdFind },
+    { id: 'find', name: 'ノートを探す', key: '⌘F', run: () => openFind() },
+    // **絞り込みは、命令ではなくなった。** タグ・フォルダ・期間の三つは
+    // 一覧の頭に引き出しとして常に出ている ── 命令の表から呼ぶものが
+    // 別にあると、同じことを頼む道が二つになる。
+    { id: 'when', name: '期間で絞る（こよみ）', run: () => openDrawer('when') },
 
     // ── このノートにすること（⋯ と、ノートの右押し）
     { id: 'star', name: 'ブックマークに登録', key: '⌘D', need: 'note', menu: true, run: cmdStar },
@@ -4100,115 +4135,299 @@ async function cmdTags() {
     }
 }
 
-/* ── フィルタ ── */
+/* ── 絞り込みの帯 ── タグ・フォルダ・期間の引き出し ── */
 
-/// タグ・フォルダ・期間で絞る。**打たせない。**
+/// **絞れることが、絞る前から見えている。**
 ///
-/// 言葉で探すのは上の「ノートを探す」の欄がやる ── ここに同じものを置くと、
-/// 同じことを二か所で頼めることになり、どちらが効いているか分からなくなる。
-/// タグもフォルダも**そのものを指す**（名前を打たせない）── 打たせると
-/// 打ち間違いが「見つかりません」として返ってきて、間違いに見えない。
-async function cmdFind() {
-    const how = await askPick('フィルタ', [
-        { name: 'タグ', sub: 'いくつでも選べます', value: 'tag' },
-        { name: 'フォルダ', value: 'book' },
-        { name: '期間', sub: '作った日・直した日で', value: 'when' },
-        { name: 'フィルタをやめる', value: 'clear' },
-    ], '言葉で探すのは、上の「ノートを探す」で');
-    if (how === null) return;
-    if (how === 'clear') {
-        setFind('');
-        state.when = null;
-        drawFind();
-        drawList();
-        return;
-    }
-    if (how === 'tag') { await findTags(); return; }
-    if (how === 'when') { await findWhen(); return; }
-    const b = await askPick('どのフォルダ', state.books.map((x) => ({
-        name: x,
-        sub: state.notes.filter((n) => n.book === x || (n.book || '').startsWith(x + '/')).length + ' 件',
-        value: x,
-    })), state.books.length ? '' : 'フォルダがまだありません（左の「フォルダ ＋」から作れます）');
-    if (b === null) return;
-    addFind('book:' + b);
+/// 前は「フィルタ」という一つの釦で、押すと小窓が開き、タグかフォルダか
+/// 期間の**どれか一つ**を選んで閉じる作りだった ── 重ねられないうえ、
+/// 選んだ結果は `tag:仕事` という字になって探す欄に流れ込んだ。押しただけ
+/// なのに機械の言葉が現れ、外すには字を消すことになる。
+///
+/// ここは三つの引き出しが常に並び、いくつでも重なる。
+let drawer = null;
+
+const DRAWERS = [
+    ['tag', 'タグ'],
+    ['book', 'フォルダ'],
+    ['when', '期間'],
+];
+
+/// 何か絞っているか。
+function filtering() {
+    return !!(state.picks.tag.length || state.picks.book.length
+        || state.when || state.filter.trim());
 }
 
-/// タグは**いくつでも**選べる。
-///
-/// 一つずつ小窓を開き直すのは、選んでいる途中が見えるから ── 「いま何を
-/// 選んでいるか」を出さずに複数選ばせると、押した数を数えることになる。
-async function findTags() {
-    const picked = [];
-    for (;;) {
-        const all = tagsOf(state.notes);
-        if (!all.length) { say('タグがまだありません'); return; }
-        const items = [
-            ...all.map(([t, n]) => ({
-                name: (picked.includes(t) ? '☑  ' : '☐  ') + t,
-                sub: n + ' 件', value: t,
-            })),
-            { name: '── これで絞る', key: 'Enter', value: ' done' },
-        ];
-        // **欄は見せない。** ここは押して選ぶ一覧で、打つところではない
-        // ── 欄があると「何か打つものがある」に見えて、選ぶ手が止まる
-        // （はい／いいえの小窓で同じことが起きた）。
-        const pick = await askPick('タグ（押すと選び、いくつでも）', items,
-            picked.length ? 'いま ' + picked.join('・') + '（全部付いたものだけ）' : '',
-            true);
-        if (pick === null) return;
-        if (pick === ' done') break;
-        const at = picked.indexOf(pick);
-        if (at < 0) picked.push(pick);
-        else picked.splice(at, 1);
+/// 帯を描く。**いくつ選んでいるかを、開かずに言う。**
+function drawDrawers() {
+    const box = el('drawers');
+    box.innerHTML = '';
+    for (const [kind, name] of DRAWERS) {
+        const b = document.createElement('button');
+        // **選んだものを、開かずに読ませる。** 「タグ 1」では何で絞って
+        // いるか分からない ── 一つなら名前を、二つ以上なら数を出す。
+        const on = kind === 'when' ? state.when : state.picks[kind];
+        b.textContent = drawerName(kind, name) + (drawer === kind ? ' ▴' : ' ▾');
+        b.className = (on && (kind === 'when' || on.length) ? 'on' : '')
+            + (drawer === kind ? ' open' : '');
+        b.onclick = () => { drawer = drawer === kind ? null : kind; drawDrawers(); drawDrawer(); };
+        box.append(b);
     }
-    if (!picked.length) return;
-    addFind(picked.map((t) => 'tag:' + t).join(' '));
+    if (filtering()) {
+        const c = document.createElement('button');
+        c.className = 'clear';
+        c.textContent = 'ぜんぶ外す';
+        c.onclick = () => clearFilter();
+        box.append(c);
+    }
 }
 
-/// 期間で絞る。**日付は打たせない** ── 「先週」を `2026-08-30..` に直すのは
-/// 人の仕事ではない。
-async function findWhen() {
-    const which = await askPick('どちらの日付で', [
-        { name: '直した日', sub: 'いつ書き換えたか', value: 'updated' },
-        { name: '作った日', sub: 'いつ作ったか', value: 'created' },
-    ]);
-    if (which === null) return;
-    const span = await askPick('いつからのものを', [
-        { name: '今日', value: 1 },
-        { name: '3日以内', value: 3 },
-        { name: '1週間以内', value: 7 },
-        { name: '1か月以内', value: 30 },
-        { name: '3か月以内', value: 90 },
-        { name: '1年以内', value: 365 },
-        { name: 'それより前のもの', value: -1 },
-    ]);
-    if (span === null) return;
-    state.when = { which, days: span };
-    drawFind();
+/// 引き出しを一つ開く（命令の表から）。
+function openDrawer(kind) {
+    drawer = kind;
+    drawDrawers();
+    drawDrawer();
+}
+
+/// 帯の一つに出す字。
+function drawerName(kind, name) {
+    if (kind === 'when') {
+        const w = state.when;
+        if (!w) return name;
+        // **「直した日」は言わない。** 既定のほうで、引き出しにも出ている
+        // ── 毎回同じ四文字を読ませるぶん、日付が狭くなる。
+        const head = w.which === 'created' ? '作った日 ' : '';
+        if (w.from && w.to) return head + dayName(w.from) + '〜' + dayName(w.to);
+        return head + (w.from ? dayName(w.from) + ' から' : dayName(w.to) + ' まで');
+    }
+    const on = state.picks[kind];
+    if (!on.length) return name;
+    if (on.length === 1) return name + ' ' + on[0].split('/').pop();
+    return name + ' ' + on.length;
+}
+
+function clearFilter() {
+    state.picks = { tag: [], book: [] };
+    state.when = null;
+    closeFind();
+    drawer = null;
+    drawDrawers();
+    drawDrawer();
     drawList();
 }
 
-/// 期間の札を出し直す。
-function drawFind() {
-    const box = el('whenchip');
-    if (!state.when) { box.hidden = true; box.textContent = ''; return; }
-    const name = state.when.which === 'created' ? '作った日' : '直した日';
-    const days = state.when.days;
-    const how = days < 0 ? '1年より前' : (days === 1 ? '今日' : days + '日以内');
+/// 開いている引き出しの中身。
+function drawDrawer() {
+    const box = el('drawer');
+    if (!drawer) { box.hidden = true; box.innerHTML = ''; return; }
     box.hidden = false;
-    box.textContent = name + ': ' + how + '  ✕';
+    box.innerHTML = '';
+    if (drawer === 'when') { drawWhen(box); return; }
+
+    const rows = drawer === 'tag'
+        ? tagsOf(state.notes).map(([t, n]) => [t, t, n])
+        : state.books.map((b) => [b, b, state.notes.filter(
+            (n) => n.book === b || (n.book || '').startsWith(b + '/')).length]);
+    if (!rows.length) {
+        box.innerHTML = '<div class="none">'
+            + (drawer === 'tag' ? 'タグがまだありません（ノートに付けると出ます）'
+                : 'フォルダがまだありません（左の「フォルダ ＋」から作れます）')
+            + '</div>';
+        return;
+    }
+    const head = document.createElement('div');
+    head.className = 'sec';
+    // **どう重なるかを言う。** タグは全部・フォルダはどれか、で違う ──
+    // 言わずに違えば、選んだ数と出る数が合わない理由が分からない。
+    head.textContent = drawer === 'tag' ? '押して付け外し（全部付いたものだけ）'
+        : '押して付け外し（どれかに入っているもの）';
+    box.append(head);
+    for (const [value, name, n] of rows) {
+        const on = state.picks[drawer].includes(value);
+        const b = document.createElement('button');
+        b.className = 'it' + (on ? ' on' : '');
+        b.innerHTML = '<span class="bx' + (on ? ' on' : '') + '"></span>'
+            + '<span>' + escapeHtml(name) + '</span><span class="n">' + n + ' 件</span>';
+        b.onclick = () => {
+            const at = state.picks[drawer].indexOf(value);
+            if (at < 0) state.picks[drawer].push(value);
+            else state.picks[drawer].splice(at, 1);
+            drawDrawers();
+            drawDrawer();
+            drawList();
+        };
+        box.append(b);
+    }
 }
 
-function setFind(v) {
-    el('find').value = v;
-    el('find').dispatchEvent(new Event('input'));
+/* ── こよみ ── */
+
+/// いま見ている月。**開くたびに今月へ戻さない** ── 去年の秋を探している
+/// 人は、引き出しを閉じて開くたびに今月へ連れ戻されると探せない。
+let calAt = null;
+/// 次に押した日を、どちらに入れるか。
+let calEdge = 'from';
+
+const monthDays = (y, m) => new Date(y, m + 1, 0).getDate();
+const ymd = (y, m, d) => y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+/// 日付の呼び名。**今年なら年を言わない** ── 帯は狭いし、たいていは今年。
+/// 年が違うときだけ年を出す（`12/31` が去年か今年かは、見て分からない）。
+function dayName(s) {
+    if (!s) return '';
+    const md = s.slice(5).replace('-', '/');
+    return s.slice(0, 4) === String(new Date().getFullYear()) ? md : s.slice(0, 4) + '/' + md;
 }
 
-function addFind(add) {
-    const box = el('find');
-    setFind((box.value.trim() ? box.value.trim() + ' ' : '') + add);
-    box.focus();
+/// こよみで、**いつからいつまでを、押して決める。**
+///
+/// 「7日以内」のような決め打ちは、**去年の秋**を探せない。押した日が範囲の
+/// 端になり、片方だけでもよい（「この日から先ぜんぶ」が言えないと、範囲は
+/// 使いものにならない）。
+function drawWhen(box) {
+    const now = new Date();
+    if (!calAt) calAt = { y: now.getFullYear(), m: now.getMonth() };
+
+    // どちらの日付で絞るか。
+    const which = document.createElement('div');
+    which.className = 'pills';
+    for (const [key, name] of [['updated', '直した日'], ['created', '作った日']]) {
+        const b = document.createElement('button');
+        b.textContent = name;
+        if ((state.when?.which || whichWhen) === key) b.className = 'on';
+        b.onclick = () => {
+            whichWhen = key;
+            if (state.when) { state.when = { ...state.when, which: key }; drawList(); }
+            drawDrawers();
+            drawDrawer();
+        };
+        which.append(b);
+    }
+    box.append(which);
+
+    // いつから・いつまで。**次に押した日がどちらに入るかを、先に見せる。**
+    const span = document.createElement('div');
+    span.className = 'span';
+    for (const [key, name] of [['from', 'いつから'], ['to', 'いつまで']]) {
+        const b = document.createElement('button');
+        const at = state.when?.[key];
+        b.textContent = at ? dayName(at) : name;
+        if (calEdge === key) b.className = 'on';
+        b.title = '次に押した日が、ここに入ります';
+        b.onclick = () => { calEdge = key; drawDrawer(); };
+        span.append(b);
+        if (at) {
+            const x = document.createElement('button');
+            x.className = 'x';
+            x.textContent = '✕';
+            x.title = name + 'を外す';
+            x.onclick = () => setWhen(key, null);
+            span.append(x);
+        }
+        if (key === 'from') {
+            span.append(Object.assign(document.createElement('span'), { textContent: '〜' }));
+        }
+    }
+    box.append(span);
+
+    // 月の頭。
+    const head = document.createElement('div');
+    head.className = 'calhead';
+    const back = document.createElement('button');
+    back.className = 'mv'; back.textContent = '‹'; back.title = '前の月';
+    back.onclick = () => { calAt = stepMonth(calAt, -1); drawDrawer(); };
+    const fwd = document.createElement('button');
+    fwd.className = 'mv'; fwd.textContent = '›'; fwd.title = '次の月';
+    fwd.onclick = () => { calAt = stepMonth(calAt, 1); drawDrawer(); };
+    const ttl = document.createElement('span');
+    ttl.textContent = calAt.y + '年 ' + (calAt.m + 1) + '月';
+    const here = document.createElement('button');
+    here.className = 'now'; here.textContent = '今月';
+    here.onclick = () => { calAt = { y: now.getFullYear(), m: now.getMonth() }; drawDrawer(); };
+    head.append(back, ttl, fwd, here);
+    box.append(head);
+
+    // 日。**前の月と次の月のはみ出しも押せる** ── 月末をまたぐ範囲は
+    // よくあるのに、押せないと月を送ってから押し直すことになる。
+    const cal = document.createElement('div');
+    cal.className = 'cal';
+    for (const w of ['日', '月', '火', '水', '木', '金', '土']) {
+        cal.append(Object.assign(document.createElement('div'), { className: 'wd', textContent: w }));
+    }
+    const first = new Date(calAt.y, calAt.m, 1).getDay();
+    const days = monthDays(calAt.y, calAt.m);
+    const prev = stepMonth(calAt, -1);
+    const next = stepMonth(calAt, 1);
+    const cells = [];
+    for (let i = first; i > 0; i--) cells.push([prev, monthDays(prev.y, prev.m) - i + 1, true]);
+    for (let d = 1; d <= days; d++) cells.push([calAt, d, false]);
+    for (let d = 1; cells.length % 7; d++) cells.push([next, d, true]);
+
+    const today = dayOf(Date.now() / 1000);
+    const from = state.when?.from;
+    const to = state.when?.to;
+    for (const [at, d, out] of cells) {
+        const key = ymd(at.y, at.m, d);
+        const b = document.createElement('button');
+        b.textContent = String(d);
+        const edge = key === from || key === to;
+        const inside = from && to && key > from && key < to;
+        b.className = (out ? 'out ' : '') + (edge ? 'edge ' : (inside ? 'in ' : ''))
+            + (key === today ? 'today' : '');
+        b.onclick = () => setWhen(calEdge, key);
+        cal.append(b);
+    }
+    box.append(cal);
+}
+
+function stepMonth({ y, m }, step) {
+    const d = new Date(y, m + step, 1);
+    return { y: d.getFullYear(), m: d.getMonth() };
+}
+
+/// 日付を一つも選んでいない間の「どちらの日付で」。
+let whichWhen = 'updated';
+
+/// 範囲の端を決める。
+///
+/// **前後が入れ替わったら、黙って入れ替える。** 「9月10日から」を決めた
+/// あとに「9月1日まで」を押すのは、たいてい始まりを言い直している ──
+/// 0 件の一覧を返して考えさせる場面ではない。
+function setWhen(edge, day) {
+    const w = { which: state.when?.which || whichWhen,
+                from: state.when?.from || null, to: state.when?.to || null };
+    w[edge] = day;
+    if (w.from && w.to && w.from > w.to) { const t = w.from; w.from = w.to; w.to = t; }
+    state.when = (w.from || w.to) ? w : null;
+    // 次はもう片方 ── 二度押しで範囲が決まる。
+    if (day) calEdge = edge === 'from' ? 'to' : 'from';
+    drawDrawers();
+    drawDrawer();
+    drawList();
+}
+
+/* ── 言葉で探す ── */
+
+/// **探す欄は畳んでおく。** 絞り込みの帯と並べて置きっぱなしにすると、
+/// 一覧の頭が毎回二段ぶん要る ── 言葉で探すのは、絞るより回数が少ない。
+function openFind() {
+    el('findbox').hidden = false;
+    el('findbtn').classList.add('on');
+    el('find').focus();
+    el('find').select();
+}
+
+/// 閉じるときは**必ず空にする。** 見えない絞り込みが残るのがいちばん悪い
+/// ── 一覧が減っている理由が、画面のどこにも書いていないことになる。
+function closeFind() {
+    el('findbox').hidden = true;
+    el('findbtn').classList.remove('on');
+    if (!el('find').value) return;
+    el('find').value = '';
+    state.filter = '';
+    state.groups = [];
+    drawDrawers();
+    drawList();
 }
 
 async function cmdMove() {
@@ -4790,6 +5009,7 @@ const escapeAttr = escapeHtml;
             const q = state.filter.trim();
             // 問いの意味は core に。**打鍵ごとではなく、止まってから一度。**
             state.groups = q ? ((await ask('terms', { q })).groups || []) : [];
+            drawDrawers();
             drawList();
         }, 150);
     };

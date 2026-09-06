@@ -195,32 +195,113 @@ body.mac #railtop { height: 34px; }
 body.mac #listhead { padding-top: 30px; }
 #where { font-size: 15px; font-weight: 700; }
 #count { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
-#find {
-  width: 100%; margin-top: 9px; padding: 6px 10px; border-radius: 8px;
-  background: var(--paper); border: 1px solid var(--line); color: var(--ink);
-  font: inherit; font-size: 13px; -webkit-app-region: no-drag;
-}
-#find:focus { outline: 2px solid var(--amber); outline-offset: -1px; }
-/* 並び順。**押すたびに次へ** ── 三つしかないものに、開いて閉じる幕は要らない。 */
-#order {
-  margin-top: 7px; font-size: 11.5px; color: var(--ink-3);
-  -webkit-app-region: no-drag; padding: 1px 6px; border-radius: 6px;
-}
-#order:hover { background: var(--hover); color: var(--ink-2); }
-/* **書き方を覚えていなくても探せるように。** 選ぶと、その書き方が
-   絞り込みの欄に入る ── 隠すのではなく、一度見せる。 */
-#findhow {
-  margin-top: 7px; margin-left: 10px; font-size: 11.5px; color: var(--ink-3);
-  -webkit-app-region: no-drag; padding: 1px 6px; border-radius: 6px;
-}
-#findhow:hover { background: var(--hover); color: var(--ink-2); }
-/* 期間は札で出して、札で外す ── 記法をもう一つ覚えさせない。 */
-#whenchip {
-  margin-top: 7px; margin-left: 8px; font-size: 11.5px; padding: 1px 7px;
-  border-radius: 999px; background: var(--sel); color: var(--ink-2);
+/* 探す欄は**畳んでおく**。頭に置きっぱなしにすると、絞り込みの帯と
+   合わせて毎回二段ぶん取る ── 言葉で探すのは、絞るより回数が少ない。 */
+#tools {
+  display: flex; align-items: center; gap: 10px; margin-top: 7px;
   -webkit-app-region: no-drag;
 }
-#whenchip:hover { background: var(--amber); color: #3a2408; }
+#tools button {
+  font-size: 11.5px; color: var(--ink-3); padding: 1px 6px; border-radius: 6px;
+}
+#tools button:hover { background: var(--hover); color: var(--ink-2); }
+#findbtn { display: inline-flex; align-items: center; gap: 4px; }
+#findbtn svg { width: 12px; height: 12px; }
+#findbtn.on { background: var(--sel); color: var(--ink); }
+#order { margin-left: auto; }
+#findbox {
+  display: flex; align-items: center; gap: 4px; margin-top: 7px;
+  -webkit-app-region: no-drag;
+}
+#findbox[hidden] { display: none !important; }
+#find {
+  flex: 1; min-width: 0; padding: 6px 10px; border-radius: 8px;
+  background: var(--paper); border: 1px solid var(--line); color: var(--ink);
+  font: inherit; font-size: 13px;
+}
+#find:focus { outline: 2px solid var(--amber); outline-offset: -1px; }
+#findoff { color: var(--ink-3); padding: 2px 5px; border-radius: 6px; }
+#findoff:hover { background: var(--hover); color: var(--ink); }
+
+/* 絞り込みの帯。**絞れることが、絞る前から見えている** ── 「フィルタ」
+   という言葉を覚えなくてよい。押すと下に開く。 */
+#drawers {
+  display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px;
+  -webkit-app-region: no-drag;
+}
+#drawers button {
+  font-size: 11.5px; padding: 2.5px 9px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap;
+}
+#drawers button:hover { background: var(--hover); }
+#drawers button.on {
+  background: var(--amber); border-color: var(--amber-deep); color: #3a2408; font-weight: 600;
+}
+#drawers button.open { background: var(--sel); border-color: #e8caa0; color: var(--ink); }
+#drawers button.clear { border-style: dashed; color: var(--ink-3); }
+
+#drawer {
+  flex: none; max-height: 46vh; overflow-y: auto; background: var(--paper);
+  border-bottom: 1px solid var(--line-2); -webkit-app-region: no-drag;
+}
+#drawer[hidden] { display: none !important; }
+#drawer .sec { padding: 9px 16px 3px; font-size: 11px; color: var(--ink-3); }
+#drawer .it {
+  display: flex; align-items: center; gap: 9px; padding: 5px 16px;
+  font-size: 12.5px; width: 100%; text-align: left;
+}
+#drawer .it:hover { background: var(--hover); }
+#drawer .it.on { background: var(--sel); }
+#drawer .it .n { margin-left: auto; color: var(--ink-3); font-size: 11px; }
+#drawer .bx {
+  width: 14px; height: 14px; border: 1.4px solid var(--ink-3); border-radius: 3.5px;
+  flex: none; position: relative;
+}
+#drawer .bx.on { background: var(--amber); border-color: var(--amber-deep); }
+#drawer .bx.on::after {
+  content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
+  border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(42deg);
+}
+#drawer .pills { display: flex; gap: 5px; padding: 4px 16px 8px; flex-wrap: wrap; }
+#drawer .pills button {
+  font-size: 11.5px; padding: 2.5px 9px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--ink-2);
+}
+#drawer .pills button.on {
+  background: var(--amber); border-color: var(--amber-deep); color: #3a2408; font-weight: 600;
+}
+#drawer .none { padding: 9px 16px 12px; font-size: 12px; color: var(--ink-3); }
+
+/* こよみ。**いつからいつまでを、押して決める。** 日付を打たせない。 */
+#drawer .calhead {
+  display: flex; align-items: center; gap: 6px; padding: 4px 16px 6px;
+  font-size: 12.5px; font-weight: 600;
+}
+#drawer .calhead .mv {
+  padding: 1px 7px; border-radius: 6px; color: var(--ink-2); font-weight: 400;
+}
+#drawer .calhead .mv:hover { background: var(--hover); }
+#drawer .calhead .now { margin-left: auto; font-size: 11.5px; font-weight: 400; color: var(--ink-3); }
+#drawer .cal {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; padding: 0 12px 10px;
+}
+#drawer .cal .wd { text-align: center; font-size: 10.5px; color: var(--ink-3); padding: 2px 0 4px; }
+#drawer .cal button {
+  padding: 4px 0; font-size: 12px; color: var(--ink); border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+#drawer .cal button.out { color: var(--ink-3); opacity: .45; }
+#drawer .cal button:hover { background: var(--hover); }
+#drawer .cal button.in { background: var(--sel); border-radius: 0; }
+#drawer .cal button.edge { background: var(--amber); color: #3a2408; font-weight: 700; border-radius: 6px; }
+#drawer .cal button.today { outline: 1px solid var(--amber-deep); outline-offset: -1px; }
+#drawer .span { display: flex; align-items: center; gap: 6px; padding: 4px 16px 10px; font-size: 12px; }
+#drawer .span button {
+  border: 1px solid var(--line); border-radius: 7px; padding: 3px 9px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+#drawer .span button.on { border-color: var(--amber-deep); background: var(--sel); color: var(--ink); }
+#drawer .span .x { color: var(--ink-3); padding: 2px 5px; border: none; }
 /* 段の見出しの ＋ */
 .head { display: flex; align-items: center; }
 .head .plus {
@@ -837,11 +918,17 @@ body.dropping::after {
     <div id="listhead">
       <div id="where">すべてのノート</div>
       <div id="count"></div>
-      <input id="find" type="text" placeholder="ノートを探す" spellcheck="false">
-      <button id="order" title="並び順を変える"></button>
-      <button id="findhow" title="タグ・フォルダ・期間で絞る">フィルタ</button>
-      <button id="whenchip" title="押すと外します" hidden></button>
+      <div id="tools">
+        <button id="findbtn" title="言葉で探す（⌘F）"></button>
+        <button id="order" title="並び順を変える"></button>
+      </div>
+      <div id="findbox" hidden>
+        <input id="find" type="text" placeholder="ノートを探す" spellcheck="false">
+        <button id="findoff" title="やめる（Esc）">✕</button>
+      </div>
+      <div id="drawers"></div>
     </div>
+    <div id="drawer" hidden></div>
     <div id="rows"></div>
   </div>
   <div id="pane">
