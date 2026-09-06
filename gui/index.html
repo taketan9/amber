@@ -623,6 +623,15 @@ body.vim #vim { display: block; }
   font-weight: 700; letter-spacing: .04em; padding: 4px 7px;
 }
 #studiobox .row.hd .sp { flex: 0 0 84px; }
+#studiobox .row.hd .sp.wide { flex: 0 0 140px; }
+/* 深さは、字下げそのもので見せる ── 「2」と書くより、ずれている形の
+   ほうが枝に見える。 */
+#studiobox .row .deep {
+  color: var(--ink-3); font-size: 11px; text-align: right;
+  padding-right: 3px; white-space: nowrap; overflow: hidden;
+}
+#studiobox .mini:disabled { opacity: .28; }
+#studiobox .mini:disabled:hover { background: none; color: var(--ink-3); }
 #studiobox .row > input, #studiobox .row select {
   min-width: 0; padding: 5px 8px; border-radius: 7px; font: inherit; font-size: 13px;
   background: var(--bg); border: 1px solid var(--line-2); color: var(--ink); outline: none;

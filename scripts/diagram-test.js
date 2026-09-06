@@ -42,7 +42,7 @@ const MADE = {
     '流れ図': 'flowchart LR\n  A[書く]\n  B[見直す]\n  C[出す]\n  A --> B\n  B --> C',
     '分かれ道': 'flowchart LR\n  A{足りている？}\n  B[出す]\n  C[足す]\n'
         + '  A -->|はい| B\n  A -->|いいえ| C',
-    'マインドマップ': 'mindmap\n  root((来年やること))\n    仕事\n    家\n    体\n    学び',
+    'マインドマップ': 'mindmap\n  root((来年やること))\n    仕事\n      資格をとる\n    家\n    体\n    学び',
     '年表': 'timeline\n  title 今年\n  4月 : 引っ越し\n  7月 : 新しい仕事\n  11月 : 旅行',
     '予定表': 'gantt\n  title 段取り\n  dateFormat YYYY-MM-DD\n  axisFormat %m/%d\n'
         + '  section やること\n  下ごしらえ :t0, 2026-09-10, 3d\n  本番 :t1, 2026-09-13, 5d',
@@ -70,7 +70,6 @@ for (const [name, want] of Object.entries(MADE)) {
 
 console.log('読めない形を、読めたことにしないか');
 for (const [why, s] of [
-    ['枝の枝があるマインドマップ', 'mindmap\n  root((A))\n    B\n      C'],
     ['形の付いた枝', 'mindmap\n  root((A))\n    B[四角]'],
     ['区切りが二つある予定表', 'gantt\n  section 一\n  a :t0, 2026-01-01, 1d\n'
         + '  section 二\n  b :t1, 2026-01-02, 1d'],
@@ -79,6 +78,24 @@ for (const [why, s] of [
     ['amber の知らない図', 'classDiagram\n  A <|-- B'],
     ['図ですらないもの', 'これはただの字'],
 ]) ok(mmdParse(s) === null, why);
+
+console.log('枝の枝を、深さのまま持って帰るか');
+{
+    const want = 'mindmap\n  root((来年))\n    仕事\n      資格\n      引き継ぎ\n    家\n      片付け';
+    const d = mmdParse(want);
+    ok(!!d, '枝の枝を読める');
+    ok(d && d.rows.map((r) => r.at).join(',') === '0,1,1,0,1', '深さを取り違えない');
+    ok(mmdBuild(d) === want, '同じ字に戻る');
+
+    // 空白が四つでも二つでも「一段下」は一段下。
+    const wide = mmdParse('mindmap\n  root((A))\n        B\n                C');
+    ok(wide && wide.rows.map((r) => r.at).join(',') === '0,1', '字下げの幅に頼らない');
+
+    // 親のいない孫は、詰めて親のある形に ── そのまま持つと、書き戻した
+    // ときに mermaid がその枝を捨てる。
+    const jump = mmdParse('mindmap\n  root((A))\n          B\n    C');
+    ok(jump && jump.rows.map((r) => r.at).join(',') === '0,0', '一段飛ばしを詰める');
+}
 
 console.log('消した箱を指す線を、残さないか');
 {

@@ -1493,12 +1493,21 @@ function headLines() {
 let Mermaid = null;
 let mermaidSeq = 0;
 
-/// 図に使う色。**アプリのどこを見ても同じ色の家族にする** ── フォルダの
-/// 色も、字の色も、円グラフの切れ端も、マインドマップの枝もこの十一色。
-/// 図ごとに別の並びを持つと、同じノートの中で色の意味が変わる。
+/// 図に使う色。**円グラフも年表もマインドマップも、この十一色**。図ごとに
+/// 別の並びを持つと、同じノートの中で色の意味が変わる。
+///
+/// 前は `PALETTE`（フォルダの色）をそのまま流用していたが、**大きく塗った
+/// ときに芋臭かった** ── どれも明るさも鮮やかさも同じくらいで、並べると
+/// 平らな帯になる（九〇年代の業務資料の色）。7px の点と、円の三割を占める
+/// 面は、同じ色でうまくいくものではない。
+///
+/// なので**明るさをわざと散らす**。琥珀を一つめに置いて、深い青 → 明るい緑
+/// → 沈んだ紫 → 明るい珊瑚…と交互にした。隣り合う二つが必ず明暗で分かれる
+/// ので、境目が色の違いだけに頼らない（色の見分けにくい人にも切れ端の数が
+/// 数えられる）。
 const FAMILY = [
-    '#D07A2E', '#3D7FA8', '#5E8C42', '#9A6FB5', '#C2649A', '#2AA79B',
-    '#B08A2E', '#6E7BC4', '#C4564E', '#0E93A8', '#7A7A7A',
+    '#F0A52B', '#2E6F8E', '#7FB069', '#8E5EA2', '#E8785A', '#3FA7A0',
+    '#C9A227', '#5C6BC0', '#D45D79', '#4EA8DE', '#9AA0A6',
 ];
 
 /// 図の設定。**地の明暗に合わせる** ── 図だけ白いと、暗い画面で目を焼く。
@@ -1527,6 +1536,14 @@ function mermaidOpts() {
             clusterBorder: v('--line', '#e4d9c4'),
             edgeLabelBackground: v('--paper', '#fffdf8'),
             ...Object.fromEntries(FAMILY.map((c, n) => ['pie' + (n + 1), c])),
+            // 年表は `cScale` を見る。渡さないと**灰色の帯が並ぶだけ**に
+            // なって、「いつ何があったか」が全部同じ重さに見える。
+            // 字の色は塗りに載るので、濃い色には白、明るい色には濃い茶。
+            ...Object.fromEntries(FAMILY.flatMap((c, n) => [
+                ['cScale' + n, c],
+                ['cScaleLabel' + n, light(c) ? '#2a2011' : '#ffffff'],
+                ['cScaleInv' + n, c],
+            ])),
             pieStrokeColor: v('--paper', '#fffdf8'),
             pieOuterStrokeColor: v('--line', '#e4d9c4'),
             pieTitleTextColor: v('--ink', '#2a2011'),
@@ -1549,17 +1566,34 @@ function mermaidOpts() {
             // マインドマップだけは `themeVariables` を見ない ── 灰と藤色で
             // 描かれて、琥珀のノートの上で**そこだけ別のアプリ**に見える。
             // 枝は円グラフと同じ十一色にして、まん中は琥珀そのものに。
-            + '.mindmap-node.section--1 circle.basic{fill:' + v('--amber', '#f0a52b')
-                + ';stroke:' + v('--amber', '#f0a52b') + '}'
-            + '.mindmap-node.section--1 .nodeLabel{color:#3a2408;font-weight:700}'
+            // **まん中は、ただの丸い橙ではない。** 濃い琥珀で塗って、
+            // 一段明るい琥珀の輪を掛け、影を一枚敷く ── 枝より手前にある
+            // ものとして見えないと、ここが中心だと形が言っていない。
+            + '.mindmap-node.section--1 circle.basic{fill:#C97F16;stroke:'
+                + v('--amber', '#f0a52b') + ';stroke-width:3px;'
+                + 'filter:drop-shadow(0 2px 5px rgba(0,0,0,.28))}'
+            + '.mindmap-node.section--1 .nodeLabel{color:#fff;font-weight:700;font-size:15px}'
             + FAMILY.map((c, n) =>
                 '.mindmap-node.section-' + n + ' .node-bkg{fill:color-mix(in srgb,' + c
                     + ' 14%,' + v('--paper', '#fffdf8') + ');stroke:' + c + '}'
+                // **枝の字の色を、こちらで決める。** 渡さないと mermaid が
+                // 塗りの色から作り、明るい琥珀の枝では薄い字が薄い地に
+                // 載って読めなかった（「仕事」が消えていた）。地はどの枝も
+                // 14% の淡い色なので、字はノートの地の色でいい。
+                + '.mindmap-node.section-' + n + ' .nodeLabel{color:'
+                    + v('--ink', '#2a2011') + ';font-weight:600}'
                 + '.mindmap-node.section-' + n + ' line{stroke:' + c + ';stroke-width:2px}'
                 + '.edge.section-edge-' + n + '{stroke:' + c + ';stroke-width:2.5px}').join(''),
         flowchart: { curve: 'basis', padding: 14, nodeSpacing: 44, rankSpacing: 46, htmlLabels: true },
         pie: { textPosition: 0.62, useMaxWidth: true },
         sequence: { actorMargin: 44, mirrorActors: false },
+        // 年表は、既定だと札が小さくて中の字が読めない ── 「いつ何があった
+        // か」を見る図なのに、その「なに」が潰れている。札を広げて字に余白を。
+        timeline: {
+            useMaxWidth: true, width: 200, height: 62,
+            padding: 10, boxMargin: 12, boxTextMargin: 7,
+            diagramMarginX: 26, diagramMarginY: 18, leftMargin: 84,
+        },
         // 予定表は、既定だと細い帯に目盛りが詰まって日付が重なる（読めない）。
         // 横幅いっぱいまで伸ばし、棒と余白を広げて、目盛りの字を離す。
         gantt: {
@@ -1614,11 +1648,11 @@ async function cmdDiagram() {
             + step.slice(1).map((_, n) => '  ' + name(n) + ' --> ' + name(n + 1)).join('\n')
             + '\n```';
     } else if (kind === 'branch') {
-        const q = await ask3('分かれ道の問い', '', '足りている？');
+        const q = await ask3('分かれ道の問い', '', '左利きですか？');
         if (q === null) return;
-        const yes = await ask3('「はい」のとき', '', '出す');
+        const yes = await ask3('「はい」のとき', '', '左利きのハサミを使う');
         if (yes === null) return;
-        const no = await ask3('「いいえ」のとき', '', '足す');
+        const no = await ask3('「いいえ」のとき', '', '右利きのハサミを使う');
         if (no === null) return;
         md = '```mermaid\nflowchart LR\n  A{' + q + '}\n  B[' + yes + ']\n  C[' + no + ']\n'
             + '  A -->|はい| B\n  A -->|いいえ| C\n```';
@@ -1817,15 +1851,25 @@ function mmdParse(src) {
         const rootAt = lines.findIndex((l) => /^\s*root\(\(/.test(l));
         if (rootAt < 0) return null;
         const kids = lines.filter((_, i) => i !== rootAt);
-        // 枝の枝と、凝った形（`枝[四角]`）は表にできない ── 平らに直すと
-        // 形が変わってしまうので、そういう図は字で直してもらう。
+        // 凝った形（`枝[四角]`）は表にできない ── 平らに直すと形が変わる。
         if (kids.some((l) => /[[({]/.test(l.trim()))) return null;
         const deep = (l) => /^\s*/.exec(l)[0].length;
-        if (kids.length && kids.some((l) => deep(l) !== deep(kids[0]))) return null;
+        // **字下げの段を、深さの番号に直す。** 空白が二つでも四つでも
+        // 「一段下」は一段下なので、出てきた字下げを浅い順に並べて
+        // 何番目かを取る ── 人が書いた図の空白の数を当てにしない。
+        const steps = [...new Set(kids.map(deep))].sort((x, y) => x - y);
+        const rows = kids.map((l) => ({ a: l.trim(), at: steps.indexOf(deep(l)) }));
+        // 一段飛ばし（親の無い孫）は、そのまま持つと書き戻したときに
+        // 形が変わる ── 詰めて、親のある形にしておく。
+        let top = 0;
+        for (const r of rows) {
+            r.at = Math.min(r.at, top);
+            top = r.at + 1;
+        }
         return {
             kind, first: 'mindmap', head: [], edges: [],
             title: (/root\(\((.*)\)\)/.exec(lines[rootAt]) || ['', ''])[1],
-            rows: kids.map((l) => ({ a: l.trim() })),
+            rows,
         };
     }
 
@@ -1902,8 +1946,9 @@ function mmdBuild(d) {
             .filter((s) => s !== '').join('\n');
 
     if (d.kind === 'mind') {
+        // 深さ一段につき空白二つ。まん中が二つなので、一段目は四つ。
         return 'mindmap\n  root((' + (plain(d.title) || 'まん中') + '))\n'
-            + live.map((r) => '    ' + plain(r.a)).join('\n');
+            + live.map((r) => ' '.repeat(4 + (r.at || 0) * 2) + plain(r.a)).join('\n');
     }
     if (d.kind === 'pie') {
         return body(d.first, live.map((r) => '  "' + q(r.a) + '" : ' + (Number(r.b) || 0)));
@@ -1948,6 +1993,15 @@ function num(v) {
     return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : 0.5;
 }
 
+/// この色の上に濃い字を置けるか。**塗りの明るさで決める** ── 白い字を
+/// 明るい黄の上に置くと読めず、濃い字を深い青の上に置いても読めない。
+/// 目が明るさを感じる重みは色ごとに違うので、そのまま重みを掛ける。
+function light(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    return (r * 0.299 + g * 0.587 + b * 0.114) > 150;
+}
+
 /// 種類ごとの、表の形。**列の名前がそのまま説明になる** ── 「なに」「いつ」
 /// と書いてあれば、何を打てばいいかを別に書かなくていい。
 const DIAGRAM_FORM = {
@@ -1975,7 +2029,7 @@ const DIAGRAM_FORM = {
                { k: 'c', label: '長さ', w: 1, ph: '3d' }],
     },
     mind: {
-        name: 'マインドマップ', title: 'まん中', add: '枝を足す',
+        name: 'マインドマップ', title: 'まん中', add: '枝を足す', deep: true,
         cols: [{ k: 'a', label: '枝', w: 1, ph: '仕事' }],
     },
     seq: {
@@ -2061,7 +2115,13 @@ function studioDraw() {
         return;
     }
     form.append(studioRows(spec.cols, d.rows, spec.add, () =>
-        Object.fromEntries(spec.cols.map((c) => [c.k, c.check ? false : '']))));
+        Object.fromEntries(spec.cols.map((c) => [c.k, c.check ? false : ''])), spec.deep));
+    if (spec.deep) {
+        form.append(tag('div', 'note',
+            '「→」で一段深く、「←」で一段浅く。枝の下に枝を、'
+            + 'そのまた下にも書けます（mermaid の枝と枝のあいだには字を置けないので、'
+            + '間に入れたい言葉は一段の枝として足してください）。'));
+    }
 }
 
 /// 題のような、一つきりの欄。
@@ -2098,7 +2158,7 @@ function studioPick(label, opts, value, set) {
 /// **並べ替えを引きずりで作らない。** 引きずりは掴む場所を探すところから
 /// 始まって、外した時にどこへ落ちたか分からない ── ↑↓ なら一段ずつ、
 /// 見ながら動かせる。
-function studioRows(cols, rows, addName, blank) {
+function studioRows(cols, rows, addName, blank, deep) {
     const box = tag('div', 'rows');
     const head = tag('div', 'row hd');
     for (const c of cols) {
@@ -2106,11 +2166,25 @@ function studioRows(cols, rows, addName, blank) {
         h.style.flex = c.w ? c.w + ' 1 0' : '0 0 auto';
         head.append(h);
     }
-    head.append(tag('span', 'sp'));
+    head.append(tag('span', 'sp' + (deep ? ' wide' : '')));
     box.append(head);
+
+    // **親のいない孫を作らせない。** 一段目の次にいきなり三段目を置くと
+    // mermaid はその枝を捨てる ── 画面では足したのに図に出ない、という
+    // いちばん分かりにくい壊れ方になる。深くできるのは「一つ上の行より
+    // 一段だけ」まで。
+    const roof = (n) => (n === 0 ? 0 : (rows[n - 1].at || 0) + 1);
 
     rows.forEach((r, n) => {
         const line = tag('div', 'row');
+        if (deep) {
+            // 深さは、字下げそのもので見せる ── 数字で「2」と書くより、
+            // ずれている形のほうが枝に見える。
+            const pad = tag('span', 'deep');
+            pad.style.flex = '0 0 ' + ((r.at || 0) * 17) + 'px';
+            if (r.at) pad.textContent = '└';
+            line.append(pad);
+        }
         for (const c of cols) {
             const cell = studioCell(c, r);
             cell.style.flex = c.w ? c.w + ' 1 0' : '0 0 auto';
@@ -2119,13 +2193,28 @@ function studioRows(cols, rows, addName, blank) {
         const move = (to) => {
             if (to < 0 || to >= rows.length) return;
             rows.splice(to, 0, rows.splice(n, 1)[0]);
+            if (deep) settle(rows);
             studioDraw();
             studioShow();
         };
+        if (deep) {
+            const shift = (by) => {
+                r.at = Math.min(Math.max((r.at || 0) + by, 0), roof(n));
+                settle(rows);
+                studioDraw();
+                studioShow();
+            };
+            const out = studioBtn('←', '一段浅く（親の隣へ）', () => shift(-1));
+            const into = studioBtn('→', '一段深く（上の枝の下へ）', () => shift(1));
+            out.disabled = (r.at || 0) === 0;
+            into.disabled = (r.at || 0) >= roof(n);
+            line.append(out, into);
+        }
         line.append(studioBtn('↑', '一つ上へ', () => move(n - 1)));
         line.append(studioBtn('↓', '一つ下へ', () => move(n + 1)));
         line.append(studioBtn('✕', 'この行を消す', () => {
             rows.splice(n, 1);
+            if (deep) settle(rows);
             studioDraw();
             studioShow();
         }));
@@ -2134,7 +2223,11 @@ function studioRows(cols, rows, addName, blank) {
 
     const add = tag('button', 'add', '＋ ' + addName);
     add.onclick = () => {
-        rows.push(blank());
+        const fresh = blank();
+        // **足した枝は、直前の枝と同じ深さに。** 一段目に戻すと、枝の下に
+        // 続きを書いている途中で毎回まん中まで戻される。
+        if (deep && rows.length) fresh.at = rows[rows.length - 1].at || 0;
+        rows.push(fresh);
         studioDraw();
         studioShow();
         // 足した行の、最初の欄へ ── 足してから掴みに行かせない。
@@ -2144,6 +2237,15 @@ function studioRows(cols, rows, addName, blank) {
     const wrap = tag('div', 'grp rowsgrp');
     wrap.append(box, add);
     return wrap;
+}
+
+/// 段の飛びを詰める ── 動かしたり消したりしたあと、親のいない孫が残る。
+function settle(rows) {
+    let roof = 0;
+    for (const r of rows) {
+        r.at = Math.min(Math.max(r.at || 0, 0), roof);
+        roof = r.at + 1;
+    }
 }
 
 /// 一つの欄。数は 0〜1 のつまみ、日付は日付、あとは字。
