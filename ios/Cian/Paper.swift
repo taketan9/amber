@@ -242,12 +242,25 @@ struct Paper: UIViewRepresentable {
       // 節から直に数える。
       let n = getSelection()?.anchorNode;
       if (n && n.nodeType === 3) n = n.parentElement;
-      const li = n?.closest?.('li');
-      if (!li || !box.contains(li)) return;
-      if (!checkEnter(li)) return;
+      if (!n || !box.contains(n)) return;
+      const li = n.closest('li');
+      if (!(li ? checkEnter(li) : false) && !quitEnter(n)) return;
       e.preventDefault();
       box.dispatchEvent(new Event('input'));
     });
+
+    /// 打った字を、飾りの外へ（窓と同じ `outOfDress`）。
+    ///
+    /// **飾ったのは選んだ字で、これから打つ字ではない。** かな漢字は
+    /// 組み始めに出す ── 組んでいる最中に選び目を動かすと変換が壊れる。
+    box.addEventListener('beforeinput', (e) => {
+      if (e.isComposing || e.inputType !== 'insertText' || e.data == null) return;
+      if (!outOfDress()) return;
+      e.preventDefault();
+      document.execCommand('insertText', false, e.data);
+      box.dispatchEvent(new Event('input'));
+    });
+    box.addEventListener('compositionstart', () => outOfDress());
 
     /// 図を描く。**要るときだけ読む** ── 3.4MB を、図の無いノートで払わない。
     let lib = null;

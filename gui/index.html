@@ -341,9 +341,14 @@ body.mac #listhead { padding-top: 30px; }
 
 /* ── 右: 中身 ── */
 #pane { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--paper); }
+/* **帯には、幅の要るものだけ置く。** 1180px（既定の窓）だと中の列が
+   636px しかなく、面の札と釦を並べただけで一杯になる ── 右端の字数と
+   状態は縮んで消えていた（「保存しました」が見えるのに押した釦が動く、
+   の裏側はこれ）。目次（☰）と拡大（⤢）は名前の付いた命令として
+   「ノート ▾」へ移した ── 名無しの記号二つより、名前のほうが見つかる。 */
 #top {
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 18px; border-bottom: 1px solid var(--line-2);
+  display: flex; align-items: center; gap: 7px;
+  padding: 12px 14px; border-bottom: 1px solid var(--line-2);
   -webkit-app-region: drag;
 }
 body.mac #top { padding-top: 30px; }
@@ -357,10 +362,23 @@ body.mac #top { padding-top: 30px; }
 }
 /* ノートを開いていないときは、帯に ⚙ だけが残る ── 右端に寄せる。 */
 #title[hidden] ~ #gear { margin-left: auto; }
+/* **字数と状態は、幅の決まった枠に住む。**
+   前はどちらも中身の長さぶんの幅を取っていた ── 「保存しました」が出た
+   瞬間に帯じゅうが左へずれ、いま押した釦がカーソルの下から逃げる。
+   取り消しを続けて二回押せないのはこれで、一覧の行が一度で開けなかった
+   のと同じ「押した先が動く」不具合。**枠を先に取っておけば動かない。** */
+#meta {
+  /* **幅は中身で決まらない。** `0 1 132px` は「132px から、足りなければ
+     縮む」── 縮むかどうかは窓の広さで決まり、中の字の長さでは決まらない。
+     だから「保存しました」が出ても釦は動かない。 */
+  flex: 0 1 112px; min-width: 0; display: flex; flex-direction: column;
+  align-items: flex-end; gap: 1px; -webkit-app-region: no-drag; overflow: hidden;
+}
+#count2, #state {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 #state {
-  font-size: 11.5px; color: var(--ink-3); -webkit-app-region: no-drag;
-  flex: 0 1 auto; min-width: 0; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; color: var(--ink-3);
 }
 /* いま何字か。**題の隣ではなく右端** ── 書いている間ずっと動く数字が
    題のとなりにあると、視線が題に戻るたびに数字を読んでしまう。 */
@@ -368,7 +386,7 @@ body.mac #top { padding-top: 30px; }
    前は点三つと歯車が並んでいて、どちらがノートの話でどちらがアプリの話か
    画面のどこにも書いていなかった。片方に名前を付ける。 */
 #dots, #gear {
-  flex: none; padding: 3px 10px; border-radius: 8px;
+  flex: none; padding: 3px 8px; border-radius: 8px;
   color: var(--ink-2); -webkit-app-region: no-drag; line-height: 1.3;
 }
 #dots { font-size: 12.5px; font-weight: 600; }
@@ -417,15 +435,18 @@ body.mac #top { padding-top: 30px; }
 #read:focus { outline: none; }
 /* 触れないかたまりだけ、指を乗せると分かるようにする ── そこは押すと
    書く面へ行く（打てるのに保存されない、を作らないため）。 */
-#read pre, #read table, #read figure, #read .alert, #read .mermaid { cursor: pointer; }
-#read pre:hover, #read table:hover, #read figure:hover,
-#read .alert:hover, #read .mermaid:hover {
+/* **注記と表は、ここから外した。** どちらも「表示」で直せるようになった
+   のに、指の形と枠だけが「触れないもの」のまま残っていた ── 押すと書く面
+   へ飛ぶ印が出ているところを、打てると思う人はいない（実際に「注記は表示
+   モードで直せなかった」と言われた）。顔ぶれは `richBlock()` と揃える。 */
+#read pre, #read figure, #read .mermaid { cursor: pointer; }
+#read pre:hover, #read figure:hover, #read .mermaid:hover {
   outline: 2px solid color-mix(in srgb, var(--amber) 45%, transparent);
   outline-offset: 3px; border-radius: 8px;
 }
 #count2 {
-  font-size: 11.5px; color: var(--ink-3); flex: none;
-  font-variant-numeric: tabular-nums; -webkit-app-region: no-drag;
+  font-size: 11.5px; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
 }
 #count2:empty { display: none; }
 /* 書く・読む・並べる。**キーだけにしない** ── ⌘E を知らない人には
@@ -436,7 +457,7 @@ body.mac #top { padding-top: 30px; }
   -webkit-app-region: no-drag;
 }
 #views button {
-  padding: 3px 9px; border-radius: 6px; font-size: 11.5px; color: var(--ink-2);
+  padding: 3px 8px; border-radius: 6px; font-size: 11.5px; color: var(--ink-2);
   white-space: nowrap;
 }
 #views button:hover { background: var(--hover); }
@@ -943,16 +964,16 @@ body.dropping::after {
         <button data-view="read" title="表示（⌘E で入れ替え）">表示</button>
         <button data-view="split" title="並べて表示（⌘P）">並べて表示</button>
         <button data-view="write" title="コード ── Markdown そのもの（⌘E）">コード</button>
-        <button id="tocbtn" title="目次（⌘⇧O）">☰</button>
-        <button id="zenbtn" title="ノートだけを大きく（F12・戻るのは F12 か Esc）">⤢</button>
       </div>
       <button id="dots" title="このノートにすること（右押しでも同じ）">ノート ▾</button>
       <button id="bell" title="通知設定 ── いつ知らせるか" hidden></button>
       <button id="back" title="一つ戻す（⌘Z）" hidden></button>
       <button id="fwd" title="やり直す（⌘⇧Z）" hidden></button>
       <button id="gear" title="amber の設定と見た目（⌘⇧P で全部）">⚙</button>
-      <div id="count2"></div>
-      <div id="state"></div>
+      <div id="meta">
+        <div id="count2"></div>
+        <div id="state"></div>
+      </div>
     </div>
     <div id="blank">
       <div id="blankmark"></div>

@@ -158,5 +158,88 @@ console.log('升の行で改行すると');
     ok(checkEnter(li) === false, '升の無い行は、既定に任せる');
 }
 
+console.log('引用と注記から、空の行で降りる');
+{
+    const caret = (node, at) => {
+        const r = document.createRange();
+        r.setStart(node, at);
+        r.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+    };
+
+    box.innerHTML = '<blockquote><p>引いてきた字</p><p><br></p></blockquote>';
+    let line = box.querySelectorAll('blockquote > p')[1];
+    caret(line, 0);
+    ok(quitEnter(line) === true, '空の行で押すと、受ける');
+    ok(box.querySelector('blockquote > p').textContent === '引いてきた字', '引用は残る');
+    ok(box.lastElementChild.tagName === 'P' && !box.lastElementChild.closest('blockquote'),
+       '引用の外に降りる', box.lastElementChild.outerHTML);
+
+    // 字のある行では、既定のまま（引用が続く）。
+    box.innerHTML = '<blockquote><p>引いてきた字</p></blockquote>';
+    line = box.querySelector('blockquote > p');
+    caret(line.firstChild, 3);
+    ok(quitEnter(line) === false, '字のある行は、既定に任せる');
+
+    // 真ん中で降りても、後ろの行は失わない。
+    box.innerHTML = '<blockquote><p>あたま</p><p><br></p><p>おしり</p></blockquote>';
+    line = box.querySelectorAll('blockquote > p')[1];
+    caret(line, 0);
+    quitEnter(line);
+    ok(box.querySelectorAll('blockquote').length === 2, '引用が二つに割れる');
+    ok(paperToMd(box, '') === '> あたま\n\n> おしり\n', '後ろの行は残る', paperToMd(box, ''));
+
+    // 注記も同じ ── 種類の札は割った先にも付く。
+    box.innerHTML = '<div class="alert warning"><p class="alert-h">注意</p>'
+        + '<p>気をつけて</p><p><br></p><p>あとの行</p></div>';
+    line = box.querySelectorAll('.alert > p')[2];
+    caret(line, 0);
+    quitEnter(line);
+    ok(paperToMd(box, '') === '> [!WARNING]\n> 気をつけて\n\n> [!WARNING]\n> あとの行\n',
+       '注記も割れて、札が付き直す', paperToMd(box, ''));
+
+    // 種類の札そのものでは受けない。
+    box.innerHTML = '<div class="alert note"><p class="alert-h">ノート</p><p>中身</p></div>';
+    const label = box.querySelector('.alert-h');
+    caret(label, 0);
+    ok(quitEnter(label) === false, '種類の札では受けない');
+}
+
+console.log('飾りの終わりから、外へ出る');
+{
+    const caretIn = (node, at) => {
+        const r = document.createRange();
+        r.setStart(node, at);
+        r.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+    };
+    // **飾ったのは選んだ字で、これから打つ字ではない。**
+    box.innerHTML = '<p><b>ふとい</b>ふつう</p>';
+    let b = box.querySelector('b');
+    caretIn(b.firstChild, 3);
+    ok(outOfDress() === true, '飾りの終わりなら、出す');
+    ok(window.getSelection().anchorNode === box.querySelector('p'), '出た先は段落の中',
+       window.getSelection().anchorNode.nodeName);
+
+    // 途中なら出さない ── そこは中の字。
+    caretIn(b.firstChild, 1);
+    ok(outOfDress() === false, '飾りの途中では、出さない');
+
+    // 飾りの外なら、そもそも関わらない。
+    caretIn(box.querySelector('p').lastChild, 2);
+    ok(outOfDress() === false, '飾りの外では、何もしない');
+
+    // 二重の飾りは、いちばん外まで出る。
+    box.innerHTML = '<p><b><i>ふとくて斜め</i></b>あと</p>';
+    caretIn(box.querySelector('i').firstChild, 6);
+    outOfDress();
+    ok(window.getSelection().anchorNode === box.querySelector('p'),
+       '二重でも、いちばん外まで出る', window.getSelection().anchorNode.nodeName);
+}
+
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');
 process.exit(bad ? 1 : 0);

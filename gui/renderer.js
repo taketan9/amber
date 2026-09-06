@@ -524,7 +524,7 @@ async function openNote(path, opts) {
     lastSaved = body;
     // 履歴に渡すのは「保存する前の姿」── 開いた時点の中身。
     state.was = head + body;
-    el('title').textContent = note.title || '（タイトルなし）';
+    drawTitle();
     el('state').textContent = when(note.updated)
         + ((note.tags || []).length ? '  ' + note.tags.map((t) => '#' + t).join(' ') : '');
     drawCount();
@@ -533,6 +533,16 @@ async function openNote(path, opts) {
     drawZones();
     if (!state.guest) drawList();
     window.amber.remember({ open: path });
+}
+
+/// 帯の題。**開いたときだけでなく、保存のたびに書き直す。**
+///
+/// 題は一行目から決まる（`note::title`）ので、新しいノートは一行目を
+/// 打った瞬間に題を持つ ── 一覧の二列目はすぐそう出ていたのに、帯だけが
+/// 「（タイトルなし）」のまま残っていた。同じノートの名前が、画面の二か所
+/// で食い違って見えていたことになる。
+function drawTitle() {
+    el('title').textContent = (state.open && state.open.title) || '（タイトルなし）';
 }
 
 /* ── vim ── */
@@ -959,6 +969,90 @@ function checkEnter(li) {
     return true;
 }
 
+/// 引用と注記の中で、空の行に降りたら**そこから出る**。
+///
+/// 中で改行すると引用が続くのは既定のとおりで、それは正しい ── けれど
+/// **出る道が無かった**。点も番号も升も「空でもう一度押したら降りる」の
+/// だから、引用と注記だけ抜けられないのは覚え違いに見える（Esc を押して
+/// も、下へ矢印を押しても出られない）。
+function quitEnter(node) {
+    const box = node?.closest?.('blockquote, .alert');
+    if (!box) return false;
+    // 箱の直下の一行を探す ── 入れ子（引用の中の箇条書き）は既定に任せる。
+    let line = node.nodeType === 3 ? node.parentElement : node;
+    while (line && line.parentElement !== box) line = line.parentElement;
+    if (!line || line.classList.contains('alert-h')) return false;
+    if (!['P', 'DIV'].includes(line.tagName)) return false;
+    // 字があるうちは、引用を続ける（既定のまま）。
+    if (line.textContent.trim()) return false;
+
+    const p = document.createElement('p');
+    p.append(document.createElement('br'));
+    // **後ろの行は残す。** 真ん中で押した人が下の行ごと失わないように、
+    // そこで箱を割る。
+    const rest = [];
+    for (let x = line.nextElementSibling; x; x = x.nextElementSibling) rest.push(x);
+    box.after(p);
+    if (rest.length) {
+        const more = box.cloneNode(false);
+        more.removeAttribute('data-line');
+        more.removeAttribute('data-md');
+        // 注記は種類の札から始まる ── 割った先にも同じ札を付け直す。
+        const label = box.querySelector(':scope > .alert-h');
+        if (label) more.append(label.cloneNode(true));
+        more.append(...rest);
+        p.after(more);
+    }
+    line.remove();
+    if (!box.querySelector(':scope > p, :scope > div, :scope > ul, :scope > ol')) box.remove();
+    landAt(p, null);
+    return true;
+}
+
+/// 飾りの終わりに caret があるなら、その外へ出す。
+///
+/// **選んだ字を飾ったあと、続けて打った字まで太字になっていた。**
+/// `execCommand` は選び目を `<b>` の中に残すので、そこから打てば中に入る
+/// ── 飾ったのは**選んだ字**であって、これから打つ字ではない。飾りの
+/// 終わりに立っているときだけ外へ出す（途中に居るなら、そこは中の字）。
+const DRESS = 'b, strong, i, em, s, strike, del, code';
+
+function outOfDress() {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
+    const node = sel.anchorNode;
+    const from = node && node.nodeType === 3 ? node.parentElement : node;
+    if (!from || !from.closest) return false;
+    let dress = from.closest(DRESS);
+    if (!dress) return false;
+    // いちばん外側の飾りまで登る（`**_こう_**` は二重になる）。
+    for (let up = dress.parentElement; up && up.matches && up.matches(DRESS); up = up.parentElement) {
+        dress = up;
+    }
+    // caret から飾りの終わりまでに字が残っているなら、そこは途中。
+    const tail = document.createRange();
+    tail.selectNodeContents(dress);
+    tail.setStart(node, sel.anchorOffset);
+    if (tail.toString().length) return false;
+
+    const out = document.createRange();
+    out.setStartAfter(dress);
+    out.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(out);
+    // **選び目を動かすだけでは足りない。** ブラウザは「いま打つと何になるか」
+    // を別に憶えていて（typing style）、飾りの隣で打った字をその飾りの中へ
+    // 吸い込む ── 出たつもりで中に入る。憶えているほうも消す。
+    // **古い呼び方なので、無い画面もある**（試験の軽い DOM がそう）──
+    // 憶えているものを消せなくても、選び目は既に外に出ている。
+    try {
+        for (const k of ['bold', 'italic', 'strikeThrough']) {
+            if (document.queryCommandState(k)) document.execCommand(k, false, null);
+        }
+    } catch { /* 消せなくても、出たことは変わらない */ }
+    return true;
+}
+
 /// caret を置く。`after` があれば、その節の**すぐ後ろ**へ。
 function landAt(node, after) {
     const r = document.createRange();
@@ -999,12 +1093,24 @@ el('read').addEventListener('keydown', (e) => {
     if (e.shiftKey || e.metaKey || e.ctrlKey) return;
     let n = getSelection()?.anchorNode;
     if (n && n.nodeType === 3) n = n.parentElement;
-    const li = n?.closest?.('li');
-    if (!li || !el('read').contains(li)) return;
-    if (!checkEnter(li)) return;
+    if (!n || !el('read').contains(n)) return;
+    const li = n.closest('li');
+    if (!(li ? checkEnter(li) : false) && !quitEnter(n)) return;
     e.preventDefault();
     readChanged();
 });
+
+/// 打った字を、飾りの外へ。**打つ直前に出す** ── 飾った直後に選び目を
+/// 動かすと、続けて ⌘I を押す道が消える。IME は組み始めに出す（組んで
+/// いる最中に選び目を動かすと、変換そのものが壊れる）。
+el('read').addEventListener('beforeinput', (e) => {
+    if (e.isComposing || e.inputType !== 'insertText' || e.data == null) return;
+    if (!outOfDress()) return;
+    e.preventDefault();
+    document.execCommand('insertText', false, e.data);
+    readChanged();
+});
+el('read').addEventListener('compositionstart', () => outOfDress());
 
 /// 表の中の Tab は、次の升へ。
 ///
@@ -1658,8 +1764,6 @@ function applyView() {
     for (const b of document.querySelectorAll('#views button[data-view]')) {
         b.classList.toggle('on', b.dataset.view === view);
     }
-    el('tocbtn').classList.toggle('on', tocOn);
-    el('zenbtn').classList.toggle('on', zen);
     // 幅が変わったので測り直す。**畳みが効いた後で**（今のフレームでは
     // まだ古い幅しか見えない）。
     if (editor && view !== 'read') setTimeout(() => editor.layout(), 0);
@@ -1679,8 +1783,7 @@ function setView(v) {
 for (const b of document.querySelectorAll('#views button[data-view]')) {
     b.onclick = () => setView(b.dataset.view);
 }
-el('tocbtn').onclick = () => toggleToc();
-el('zenbtn').onclick = () => setZen(!zen);
+
 el('gear').onclick = (e) => {
     if (el('more').hidden) openMenu(e.currentTarget.getBoundingClientRect(), 'app');
     else closeMenu();
@@ -3154,6 +3257,7 @@ async function reload(opts) {
         // 開いていた行を新しいほうに繋ぎ直す（更新時刻が動くので）。
         if (state.open) {
             state.open = state.notes.find((n) => n.path === state.open.path) || state.open;
+            drawTitle();
         }
         // **消えたタグやフォルダで絞ったままにしない。** 外から消えた
         // ものを選んだままだと、一覧がずっと空で、理由が帯にしか出ない。
@@ -3398,8 +3502,6 @@ const CMDS = [
     { id: 'save', name: '保存', sub: '打てば自動でも保存されます', need: 'note', run: () => save() },
     { id: 'read', name: '表示 / コードを入れ替え', key: '⌘E', need: 'note', run: () => toggleRead() },
     { id: 'split', name: '並べて表示', key: '⌘P', need: 'note', run: () => toggleSplit() },
-    { id: 'zen', name: 'ノートだけを大きく', key: 'F12', need: 'note', run: () => setZen(!zen) },
-    { id: 'toc', name: '目次', key: '⌘⇧O', need: 'note', run: () => toggleToc() },
     { id: 'rail', name: '左の列を畳む', key: '⌘/', run: () => toggleRail() },
     { id: 'back', name: '前に見たノート', key: '⌘←', run: () => walk(-1) },
     { id: 'fwd', name: '次に見たノート', key: '⌘→', run: () => walk(1) },
@@ -3418,6 +3520,11 @@ const CMDS = [
     // 古いまま残る。表には残す（⌘⇧P から名前で探せる）。
     { id: 'remind', name: '通知設定', need: 'note', run: cmdRemind },
     { id: 'export', name: 'エクスポート', need: 'note', menu: true, run: cmdExport },
+    // **名前で出す。** 前は帯に ☰ と ⤢ が並んでいたが、どちらが目次で
+    // どちらが拡大かは記号のどこにも書いていない ── 帯の幅を食っていた
+    // うえ、押してみるまで分からなかった。
+    { id: 'toc', name: '目次', key: '⌘⇧O', need: 'note', menu: true, run: () => toggleToc() },
+    { id: 'zen', name: 'ノートだけを大きく', key: 'F12', need: 'note', menu: true, run: () => setZen(!zen) },
     { id: 'delete', name: 'ゴミ箱へ入れる', need: 'note', menu: true, sep: true, run: cmdDelete },
 
     // ── amber のこと（⚙）
