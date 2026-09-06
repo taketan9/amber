@@ -28,6 +28,17 @@ final class Desk: ObservableObject {
         var reading = true
         var blocks: [Block] = []
         var loaded = false
+        /// 一つ戻す道と、やり直す道。**窓と同じ持ち方**（`gui/renderer.js`
+        /// の `backs` / `forwards` / `lastSaved`）。
+        ///
+        /// UIKit の取り消しでは足りない ── あれは「打った字」の取り消しで、
+        /// 見出しや升のように**面を組み直したところで積み木ごと消える**。
+        /// しかも「表示」の面（`WKWebView`）にはそもそも届かない。窓が
+        /// 自前に一本化したのと同じ理由で、ここもノートの姿を積む。
+        var backs: [String] = []
+        var forwards: [String] = []
+        /// 最後に積んだ姿。空は「まだ何も積んでいない」。
+        var lastSaved = ""
         /// Where the cursor is, in UTF-16 units. On the desk with the text
         /// because it belongs to the note, not to the moment on screen: swipe
         /// away and back and you are where you left off.
@@ -42,6 +53,11 @@ final class Desk: ObservableObject {
     }
 
     @Published var tabs: [Tab] = []
+    /// 目次から選ばれた行 ── 面がそこへ滑ったら `nil` に戻す。
+    ///
+    /// **面は二つある**（`WKWebView` の「表示」と `UITextView` の「コード」）
+    /// ので、飛ぶ先を持つのは desk、飛ぶのはそれぞれの面。
+    @Published var jumping: Int?
     /// Which tab is showing, by path — **not by index**. Closing a tab shifts
     /// every index after it, and a selection that is an index quietly starts
     /// pointing at the note next door.
@@ -81,6 +97,12 @@ final class Desk: ObservableObject {
         tabs[at].head = head
         tabs[at].text = body
         tabs[at].saved = body
+        // **開いた姿を、戻る先の一段目にしておく。** 空のままだと最初の
+        // 保存が「積むのではなく憶えるだけ」で終わり、開いてから最初の
+        // 一手だけ戻せない（窓の `openNote` も同じ場所で同じことをする）。
+        tabs[at].lastSaved = body
+        tabs[at].backs = []
+        tabs[at].forwards = []
         tabs[at].stamp = stamp
         tabs[at].loaded = true
         tabs[at].blocks = (try? store.blocks(of: text)) ?? []
@@ -110,6 +132,9 @@ final class Desk: ObservableObject {
     func save(_ id: String, _ store: NotesStore, force: Bool = false) throws -> String? {
         guard let at = tabs.firstIndex(where: { $0.id == id }), tabs[at].loaded else { return nil }
         guard force || tabs[at].dirty else { return nil }
+        // 書き込む直前の姿を積む ── 書いたあとだと、戻る先が「いまの姿」に
+        // なる（窓の `save()` と同じ場所で同じことをしている）。
+        keepStep(at)
         switch try store.save(tabs[at].note, text: tabs[at].whole, stamp: tabs[at].stamp, force: force) {
         case .ok(let fresh):
             guard let now = tabs.firstIndex(where: { $0.id == id }) else { return nil }
@@ -121,6 +146,49 @@ final class Desk: ObservableObject {
         case .conflict(let why):
             return why
         }
+    }
+
+    /// 積める数。窓と同じ（`BACKS`）。
+    private static let backs = 120
+
+    /// いまの姿を積む。**戻している最中は積まない** ── 積むと、戻った先が
+    /// また戻る先になって前へ進めなくなる。
+    private var stepping = false
+
+    private func keepStep(_ at: Int) {
+        guard !stepping else { return }
+        let now = tabs[at].text
+        guard now != tabs[at].lastSaved else { return }
+        if !tabs[at].lastSaved.isEmpty {
+            tabs[at].backs.append(tabs[at].lastSaved)
+            if tabs[at].backs.count > Self.backs { tabs[at].backs.removeFirst() }
+            // 新しく打ったら、先の道は消える ── 分かれた先を持っておくと
+            // 「やり直し」が何を指すのか誰にも言えなくなる。
+            tabs[at].forwards = []
+        }
+        tabs[at].lastSaved = now
+    }
+
+    var canStepBack: Bool { current.map { !$0.backs.isEmpty } ?? false }
+    var canStepForward: Bool { current.map { !$0.forwards.isEmpty } ?? false }
+
+    /// 一段もどす／すすめる。**「表示」でも「コード」でも同じ一本。**
+    func stepBack(forward: Bool, _ store: NotesStore) {
+        guard let at = tabs.firstIndex(where: { $0.id == showing }) else { return }
+        let has = forward ? !tabs[at].forwards.isEmpty : !tabs[at].backs.isEmpty
+        guard has else { return }
+        if forward {
+            tabs[at].backs.append(tabs[at].lastSaved)
+            tabs[at].text = tabs[at].forwards.removeLast()
+        } else {
+            tabs[at].forwards.append(tabs[at].lastSaved)
+            tabs[at].text = tabs[at].backs.removeLast()
+        }
+        tabs[at].lastSaved = tabs[at].text
+        stepping = true
+        try? save(showing, store, force: true)
+        stepping = false
+        redraw(showing, store)
     }
 
     func binding(_ id: String) -> Binding<Tab>? {
@@ -153,6 +221,12 @@ struct DeskView: View {
     @State private var saving: Task<Void, Never>?
     @State private var leaving = false
     @State private var tabling = false
+    /// ⋯ から開くもの。**一覧まで戻らずに、開いているノートへ。**
+    @State private var shelving: Note?
+    @State private var pasting: String?
+    @State private var dropping: Note?
+    @State private var touring = false
+    @State private var kept: String?
     /// On by default. Off is for people who want to decide when a note is
     /// written — and then the button has to be there, because nothing else
     /// will write it.
@@ -169,7 +243,7 @@ struct DeskView: View {
             TabView(selection: $desk.showing) {
                 ForEach(desk.tabs) { tab in
                     if let bound = desk.binding(tab.id) {
-                        NoteView(tab: bound, store: store, pen: pen, writing: $writing,
+                        NoteView(tab: bound, desk: desk, store: store, pen: pen, writing: $writing,
                                  table: { tabling = true }, photo: { picking = true })
                             .tag(tab.id)
                     }
@@ -192,6 +266,27 @@ struct DeskView: View {
                     desk.tabs[at].pick = pick
                 }
             }
+            .sheet(item: $shelving) { note in Shelving(store: store, note: note) }
+            .sheet(item: Binding(get: { pasting.map { Past.Which(at: $0, book: false) } },
+                                 set: { if $0 == nil { pasting = nil } })) { w in
+                Past(store: store, at: w.at, isBook: w.book)
+            }
+            .sheet(isPresented: $touring) {
+                Touring(heads: (here?.blocks ?? []).filter { $0.kind == "heading" }) { line in
+                    desk.jumping = line
+                }
+            }
+            .alert("ゴミ箱へ入れますか", isPresented: Binding(
+                get: { dropping != nil }, set: { if !$0 { dropping = nil } }
+            )) {
+                Button("やめる", role: .cancel) {}
+                Button("入れる", role: .destructive) { if let n = dropping { remove(n) } }
+            } message: {
+                Text(dropping.map { "「\($0.shown)」" } ?? "")
+            }
+            .alert("残しました", isPresented: Binding(
+                get: { kept != nil }, set: { if !$0 { kept = nil } }
+            )) { Button("閉じる") {} } message: { Text(kept ?? "") }
             .sheet(isPresented: $tagging, onDismiss: applyTags) {
                 Tagging(tags: $tags, known: store.allTags)
             }
@@ -291,6 +386,16 @@ struct DeskView: View {
             .labelStyle(.iconOnly)
             .accessibilityLabel(here?.dirty == true ? "保存中" : "保存済み")
         }
+        // **一つ戻す／やり直すは、上の帯ではなく下の帯に。**
+        //
+        // 窓は歯車の左に置いた（依頼 265）。電話でも同じ場所に置いてみたら、
+        // iOS が**黙って二つ落とした** ── 題の隣に六つは入らず、消えたのは
+        // 「表示／コード」とベルだった。落ちたことはどこにも出ないので、
+        // 「無くなった」としか見えない。
+        //
+        // 下の帯にしたのは幅のためだけではない。**電話の親指は下に居る** ──
+        // 打ちながら押すものは、打っている手の側にあるほうがいい。帯は
+        // 「表示」にも「コード」にも出ているので、置き場所は一つで済む。
         ToolbarItem(id: "read", placement: .topBarTrailing) {
             Button {
                 guard let id = here?.id else { return }
@@ -314,10 +419,50 @@ struct DeskView: View {
             }
             .accessibilityLabel(reminded ? "通知あり" : "通知")
         }
+        // **⋯ の顔ぶれは、窓の「ノート ▾」と同じ。**
+        //
+        // ここには「タグ」しか無く、ブックマークもフォルダ移動も履歴も
+        // 削除も**一覧まで戻って長押し**するしかなかった ── 開いている
+        // ノートに対してすることなのに、開いている画面からは頼めない。
+        // 二つの amber で同じ順に並べる。
         ToolbarItem(id: "more", placement: .topBarTrailing) {
             Menu {
+                Button { shelving = here?.note } label: {
+                    Label(here?.note.star == nil ? "ブックマークに登録" : "置き場所を変える",
+                          systemImage: "star")
+                }
                 Button { tags = here?.note.tags ?? []; tagging = true } label: {
-                    Label("タグ", systemImage: "tag")
+                    Label("タグ設定", systemImage: "tag")
+                }
+                Menu {
+                    Button("（いちばん上）") { moveHere(nil) }
+                    ForEach(store.allBooks, id: \.self) { b in
+                        Button(b) { moveHere(b) }
+                    }
+                } label: {
+                    Label("フォルダへ移動", systemImage: "folder")
+                }
+                if let note = here?.note {
+                    ShareLink(item: URL(fileURLWithPath: note.path)) {
+                        Label("エクスポート", systemImage: "square.and.arrow.up")
+                    }
+                }
+                Divider()
+                Button { touring = true } label: {
+                    Label("目次", systemImage: "list.bullet.indent")
+                }
+                Button { pasting = here?.note.path } label: {
+                    Label("過去バージョン", systemImage: "clock.arrow.circlepath")
+                }
+                // **いまの姿を、一世代として残す。** 自動保存だと世代が
+                // 打鍵の切れ目で決まる ── 「ここは残しておきたい」を人が
+                // 言える道が要る（窓の ⌘S と同じもの）。
+                Button { keepNow() } label: {
+                    Label("現状バージョン保存", systemImage: "square.and.arrow.down")
+                }
+                Divider()
+                Button(role: .destructive) { dropping = here?.note } label: {
+                    Label("ゴミ箱へ入れる", systemImage: "trash")
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -329,6 +474,29 @@ struct DeskView: View {
     private var reminded: Bool {
         guard let text = here?.whole else { return false }
         return (try? store.reminder(of: text)).map { !$0.once.isEmpty || $0.repeats } ?? false
+    }
+
+    /// 開いているノートを、別のフォルダへ。
+    private func moveHere(_ book: String?) {
+        guard let note = here?.note else { return }
+        do { try store.move(note, to: book) } catch { trouble = error.localizedDescription }
+    }
+
+    /// **いまの姿を、一世代として残す。** 自動保存だと世代が打鍵の切れ目で
+    /// 決まる ── 「ここは残しておきたい」を人が言える道が要る（窓の ⌘S）。
+    private func keepNow() {
+        guard let id = here?.id, let whole = here?.whole else { return }
+        do {
+            try desk.save(id, store)
+            kept = try store.keepNow(path: id, text: whole)
+        } catch { trouble = error.localizedDescription }
+    }
+
+    private func remove(_ note: Note) {
+        do {
+            try store.remove(note)
+            desk.close(note.path)
+        } catch { trouble = error.localizedDescription }
     }
 
     private func load() {

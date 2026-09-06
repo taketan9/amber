@@ -148,6 +148,24 @@ struct Where: View {
                     Text("切ると、書く画面に「保存」が出ます。切っていても、画面を離れるときに一度だけ訊きます。")
                 }
 
+                // **窓の歯車にあって、電話に無かった二つ。**
+                // 記号の書き方を知らない人がいちばん先に困るのがここで、
+                // 電話には帯の釦しか道が無かった。
+                Section {
+                    NavigationLink {
+                        Syntax()
+                    } label: {
+                        Label("マークダウンの書き方", systemImage: "text.book.closed")
+                    }
+                    NavigationLink {
+                        About(store: store)
+                    } label: {
+                        Label("amber について", systemImage: "info.circle")
+                    }
+                } header: {
+                    Text("困ったとき")
+                }
+
                 Section {
                     Picker("見た目", selection: $look) {
                         ForEach(Look.allCases) { Text($0.label).tag($0) }

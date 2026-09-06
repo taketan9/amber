@@ -23,6 +23,9 @@ import WebKit
 final class PaperHand: ObservableObject {
     var send: ((String) -> Void)?
     func mark(_ what: String) { send?(what) }
+    /// 目次から、その行の見出しへ。行番号は core の言う**ファイルの行**
+    /// （前書きを含む）── 組む側が `data-line` にそのまま差している。
+    func go(line: Int) { send?("go:\(line)") }
 }
 
 struct Paper: UIViewRepresentable {
@@ -56,7 +59,12 @@ struct Paper: UIViewRepresentable {
         context.coordinator.web = web
         context.coordinator.folder = folder
         hand?.send = { [weak web] what in
-            web?.evaluateJavaScript("window.mark(\"\(what)\"); true")
+            if what.hasPrefix("go:") {
+                let n = what.dropFirst(3)
+                web?.evaluateJavaScript("window.go(\(n)); true")
+            } else {
+                web?.evaluateJavaScript("window.mark(\"\(what)\"); true")
+            }
         }
         web.loadHTMLString(Self.page, baseURL: URL(string: Waiter.scheme + "://app/")!)
         return web
@@ -248,6 +256,16 @@ struct Paper: UIViewRepresentable {
       e.preventDefault();
       box.dispatchEvent(new Event('input'));
     });
+
+    /// 目次から呼ばれる ── その行のかたまりを画面の上へ。
+    ///
+    /// **無い行では動かない。** 前書きを含む行番号なので、本文だけの
+    /// 面には存在しない番号が来ることがある（そのときは何もしない ──
+    /// 一番上へ飛ぶより、動かないほうが「効かなかった」と分かる）。
+    window.go = (n) => {
+      const at = box.querySelector('[data-line="' + n + '"]');
+      if (at) at.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    };
 
     /// 打った字を、飾りの外へ（窓と同じ `outOfDress`）。
     ///

@@ -13,6 +13,9 @@ import SwiftUI
 /// out.
 struct NoteView: View {
     @Binding var tab: Desk.Tab
+    /// 目次からの飛び先を受け取るため ── **面は二つある**ので、飛ぶ先は
+    /// desk が持ち、飛ぶのはこちら。
+    @ObservedObject var desk: Desk
     let store: NotesStore
     @ObservedObject var pen: Pen
     @Binding var writing: Bool
@@ -38,6 +41,10 @@ struct NoteView: View {
     private var readMarks: some View {
         VStack(spacing: 0) {
             Divider()
+            // **戻す・やり直すは流れない。** 記号は横に流れる帯だが、この
+            // 二つは押し続けるものなので、端に固定して指の下から逃げない
+            // ようにする（窓の「ほかの記号」の釦と同じ考え）。
+            HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     mark("見出し", "number") { hand.mark("head") }
@@ -55,8 +62,29 @@ struct NoteView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
             }
+            steps
+            }
         }
         .background(.bar)
+    }
+
+    /// 一つ戻す・やり直す。**「表示」でも「コード」でも同じ一本**（desk が
+    /// ノートの姿を積んでいる ── `Desk.stepBack`）。
+    ///
+    /// UIKit の取り消しではない ── あれは「打った字」の取り消しで、見出しや
+    /// 升のように面を組み直したところで積み木ごと消えるし、「表示」の面には
+    /// そもそも届かない。同じ名前の道具が二つあって片方だけ効かないのは、
+    /// 見分けの付かない差になる。
+    private var steps: some View {
+        HStack(spacing: 6) {
+            Divider().frame(height: 20)
+            mark("一つ戻す", "arrow.uturn.backward") { desk.stepBack(forward: false, store) }
+                .disabled(!desk.canStepBack)
+            mark("やり直す", "arrow.uturn.forward") { desk.stepBack(forward: true, store) }
+                .disabled(!desk.canStepForward)
+        }
+        .padding(.trailing, 10)
+        .padding(.vertical, 7)
     }
     @Environment(\.colorScheme) private var scheme
     @AppStorage("cian.look") private var look = Look.auto
@@ -74,6 +102,24 @@ struct NoteView: View {
             lines.removeLast()
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// 目次で選ばれた見出しへ。**書く面ならその行へ、表示ならその見出しへ**
+    /// （窓の `gotoHead` と同じ）。
+    ///
+    /// core の行番号は前書きを含むファイルの行。書く面が持っているのは
+    /// 本文だけなので、前書きのぶんを引く ── 引き忘れると、前書きのある
+    /// ノートでだけ数行ずれる（升の行番号で一度やった）。
+    private func jump(_ line: Int) {
+        guard line >= 0 else { return }
+        if tab.reading { hand.go(line: line); return }
+        let head = tab.head.isEmpty ? 0 : tab.head.components(separatedBy: "\n").count - 1
+        let want = max(0, line - head)
+        let rows = tab.text.components(separatedBy: "\n")
+        guard want < rows.count else { return }
+        var at = 0
+        for i in 0..<want { at += rows[i].utf16.count + 1 }
+        tab.pick = NSRange(location: at, length: 0)
     }
 
     /// 升を押されたとき ── 行番号で裏返す（何番目の升かではない）。
@@ -145,6 +191,13 @@ struct NoteView: View {
             Button("閉じる") {}
         } message: {
             Text(trouble ?? "")
+        }
+        // 目次で選ばれた見出しへ。**受け取ったら空に戻す** ── 残しておくと、
+        // 面を入れ替えたときにもう一度飛ぶ。
+        .onChange(of: desk.jumping) { _, line in
+            guard let line else { return }
+            jump(line)
+            desk.jumping = nil
         }
     }
 
@@ -220,11 +273,14 @@ struct NoteView: View {
             HStack(spacing: 6) {
                 Button("閉じる") { writing = false }.font(.callout)
                 Spacer(minLength: 0)
-                // The phone's own undo, not a second one written here.
-                mark("元に戻す", "arrow.uturn.backward") { pen.undo() }
-                    .disabled(!pen.canUndo)
-                mark("やり直す", "arrow.uturn.forward") { pen.redo() }
-                    .disabled(!pen.canRedo)
+                // **ここは UIKit の取り消しだった。** あれは「打った字」の
+                // 取り消しで、見出しや升のように面を組み直したところで積み木
+                // ごと消える ── しかも「表示」の面には届かない。desk が
+                // ノートの姿を積む一本に替えた（窓と同じ理由・同じ持ち方）。
+                mark("一つ戻す", "arrow.uturn.backward") { desk.stepBack(forward: false, store) }
+                    .disabled(!desk.canStepBack)
+                mark("やり直す", "arrow.uturn.forward") { desk.stepBack(forward: true, store) }
+                    .disabled(!desk.canStepForward)
                 Spacer().frame(width: 18)
                 // **The arrows a phone keyboard does not have.** In vim's
                 // order, because that is the order his hands know.

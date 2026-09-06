@@ -855,6 +855,23 @@ final class NotesStore: ObservableObject {
         return .ok(stamp: answer["stamp"] as? String ?? "")
     }
 
+    /// **いまの姿を、一世代として残す。**
+    ///
+    /// 自動保存だと世代が打鍵の切れ目で決まる ── 「ここは残しておきたい」
+    /// を人が言える道が要る（窓の ⌘S と同じ `keep`：間を置かず・印を付けて）。
+    /// 印の付いた世代は数の勘定から外れるので、あとから流れて消えない。
+    func keepNow(path: String, text: String) throws -> String {
+        guard let root = root?.path else { return "保存場所がありません" }
+        let out = try Cian.call("keep", [
+            "root": root, "path": path, "text": text,
+            "gap": 0, "force": true, "kept": true,
+        ])
+        let stamp = out["stamp"] as? String ?? ""
+        return stamp.isEmpty
+            ? "このバージョンはもう残してあります。"
+            : "いまのバージョンを残しました（これは消えません）。"
+    }
+
     /// Put a picture beside a note and hand back the Markdown link for it.
     ///
     /// Base64 because that is what fits down a C string. The bytes go over
