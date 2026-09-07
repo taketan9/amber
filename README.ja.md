@@ -51,6 +51,7 @@ node gui/vendor.js              # Monaco・vim・mermaid を落とす（git に�
 ./scripts/ios-build.sh          # iPhone 向け（3ターゲット、記号まで見る）
 python3 packaging/amber_icon.py # アイコンを焼く
 python3 scripts/requests.py     # 頼まれたことが守られているか
+python3 scripts/shipped.py      # 窓に配られていないものが溜まっていないか
 ```
 
 **iPhone も `gui/vendor/` を見る。** 図は電話でも mermaid が描くので、
