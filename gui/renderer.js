@@ -1881,6 +1881,12 @@ el('gear').onclick = (e) => {
     if (el('more').hidden) openMenu(e.currentTarget.getBoundingClientRect(), 'app');
     else closeMenu();
 };
+// 目次の開け閉め。**押せる場所は一つでいい** ── 献立の「目次」と同じ
+// ものを呼ぶ（`toggleToc`）。一度この釦を外して献立だけにしたら、
+// 見つからず「消えた」と言われた（依頼 297 の幅の都合だったが、
+// 幅は `#meta` を固定してから空いている）。
+el('tocbtn').onclick = () => toggleToc();
+
 el('dots').onclick = (e) => {
     if (el('more').hidden) openMenu(e.currentTarget.getBoundingClientRect());
     else closeMenu();
@@ -3136,7 +3142,27 @@ function findPictures() {
     for (const img of el('read').querySelectorAll('img')) {
         const src = img.getAttribute('src') || '';
         if (src && !/^[a-z][a-z0-9+.-]*:/i.test(src) && !src.startsWith('//')) {
-            img.src = 'file://' + encodeURI(src.startsWith('/') ? src : dir + src);
+            const at = src.startsWith('/') ? src : dir + src;
+            img.src = 'file://' + encodeURI(at);
+            // **読めなかったら、開いているアプリに読んでもらう。**
+            //
+            // この画面は crmaine の `<webview>` の中でも動く。あちらでは
+            // `file://` の絵が届かず、**見本のノートの絵だけが出ない**
+            // ことになっていた（amber 自身の窓では出るので、撮っても
+            // 分からない ── 向こうで開くまで分からない）。
+            //
+            // `fileBytes` は同梱する側も持っている口で、読んだ中身を
+            // そのまま返す ── `data:` なら、どの入れ物でも出る。
+            // **先に `file://` を試すのは、そちらが安いから**（大きな絵を
+            // 毎回 base64 にして持ち歩く理由は、出るなら無い）。
+            img.addEventListener('error', async () => {
+                if (img.dataset.asked) return;
+                img.dataset.asked = '1';
+                try {
+                    const got = await window.amber.fileBytes(at);
+                    if (got && got.b64) img.src = 'data:image/' + (got.ext || 'png') + ';base64,' + got.b64;
+                } catch { /* 読めないものは読めない ── 枠だけ残る */ }
+            }, { once: true });
         }
         // **`alt` は書いた人の言葉。** 出せば説明になり、出さなければ
         // 読み上げにしか届かない字になる。書いていなければ何も足さない
@@ -4163,8 +4189,9 @@ async function railDrop(kind, what) {
     if (!await askYes(ask2)) return;
     try {
         if (kind === 'book') {
-            if (!await window.amber.trash(state.root + '/' + what)) {
-                say('ゴミ箱へ入れられません');
+            const gone = await window.amber.trash(state.root + '/' + what);
+            if (gone !== true) {
+                say('ゴミ箱へ入れられません' + (gone && gone.why ? ': ' + gone.why : ''));
                 return;
             }
         } else if (kind === 'star') {
@@ -4973,8 +5000,13 @@ async function cmdDelete() {
     // **消さずに、ゴミ箱へ。** core の `delete` は消してしまう（電話には
     // ゴミ箱が無いので）。机の上では、戻せないのは強すぎる。
     const path = state.open.path;
-    if (!await window.amber.trash(path)) {
-        say('ゴミ箱へ入れられません');
+    // **真偽でも、理由つきでも受ける。** 同梱している側は `false` を返す
+    // ものもあれば、`{ ok:false, why }` を返すものもある ── どちらでも
+    // 人には理由を見せる。理由が無いときだけ、無いなりの一行。
+    const done = await window.amber.trash(path);
+    if (done !== true) {
+        const why2 = done && done.why;
+        say('ゴミ箱へ入れられません' + (why2 ? ': ' + why2 : ''));
         return;
     }
     state.open = null;

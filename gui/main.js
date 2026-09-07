@@ -463,13 +463,22 @@ app.whenReady().then(() => {
     /// ところでは、消したものが戻せないのは強すぎる ── 電話には
     /// ゴミ箱が無いので core は消すが、窓はここを通す。ディレクトリも
     /// そのまま入る。
+    /// **なぜ駄目なのかを返す。**
+    ///
+    /// `false` だけ返していた頃、押した人が見るのは「ゴミ箱へ入れられません」
+    /// の一行で、手の打ちようが無かった ── `trashItem` が落ちるのは
+    /// ネットワークやクラウドの置き場所（ゴミ箱が無い）・開いたままの
+    /// ファイル・権限で、**どれも人にできることがある**。
+    ///
+    /// 返す形は増やすだけにする（`true` / `false` はそのまま）── 同梱して
+    /// いる側は真偽で受けているので、そこを壊さない。
     ipcMain.handle('amber:trash', async (_e, at) => {
         try {
             await shell.trashItem(String(at));
             return true;
         } catch (e) {
             console.error('ゴミ箱へ入れられません:', e.message);
-            return false;
+            return { ok: false, why: e.message };
         }
     });
 

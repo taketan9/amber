@@ -551,12 +551,21 @@ body.mac #top { padding-top: 30px; }
   flex: 1; min-width: 0; overflow-y: auto;
   padding: 26px 32px 64px; font-size: 14.5px; line-height: 1.9;
 }
-#read > * { max-width: 34em; margin-left: auto; margin-right: auto; }
+/* **柱は一本。左端で揃える。**
+   `34em` は要素ごとの字の大きさで効くので、同じ「34em」でも
+   見出し・本文・罫線が**全部ちがう幅**になっていた ── 実測で
+   H1 が左から 32px、本文が 169px、罫線に至っては 300px で、
+   230px の棒が真ん中に浮いていた。**左端がガタガタ**だった。
+
+   `rem` なら画面の字（16px）で一度だけ決まるので、どのかたまりも
+   同じ幅・同じ左端になる。そして**真ん中に寄せない** ── 「並べて」も
+   「コード」も字は左から始まるので、面を替えるたびに柱が横へ跳ぶ。 */
+#read > * { max-width: 34rem; margin-left: 0; margin-right: 0; }
 #read > :first-child { margin-top: 0; }
 body.split #read { border-left: 1px solid var(--line-2); }
 
 #read h1, #read h2, #read h3, #read h4, #read h5, #read h6 {
-  line-height: 1.45; margin: 1.9em auto .55em; font-weight: 700;
+  line-height: 1.45; margin: 1.9em 0 .55em; font-weight: 700;
   letter-spacing: .002em;
 }
 #read h1 { font-size: 1.72em; letter-spacing: -.012em; margin-top: 0; }
@@ -566,8 +575,8 @@ body.split #read { border-left: 1px solid var(--line-2); }
 }
 #read h3 { font-size: 1.13em; }
 #read h4, #read h5, #read h6 { font-size: 1em; color: var(--ink-2); }
-#read p { margin: .8em auto; }
-#read ul, #read ol { margin: .7em auto; padding-left: 1.5em; max-width: 34em; }
+#read p { margin: .8em 0; }
+#read ul, #read ol { margin: .7em 0; padding-left: 1.5em; max-width: 34rem; }
 #read li { margin: .2em 0; }
 #read li::marker { color: var(--ink-3); }
 #read li > ul, #read li > ol { margin: .2em 0; max-width: none; }
@@ -584,7 +593,7 @@ body.split #read { border-left: 1px solid var(--line-2); }
 #read .box:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; border-radius: 4px; }
 
 #read blockquote {
-  margin: 1em auto; padding: .2em 0 .2em 1.1em;
+  margin: 1em 0; padding: .2em 0 .2em 1.1em;
   border-left: 3px solid var(--line); color: var(--ink-2);
 }
 #read blockquote > :first-child { margin-top: 0; }
@@ -596,7 +605,7 @@ body.split #read { border-left: 1px solid var(--line-2); }
   border-radius: 5px; padding: .12em .38em;
 }
 #read pre {
-  margin: 1.1em auto; padding: 13px 16px; overflow-x: auto;
+  margin: 1.1em 0; padding: 13px 16px; overflow-x: auto;
   background: var(--rail); border: 1px solid var(--line-2); border-radius: 10px;
 }
 #read pre code { background: none; border: 0; padding: 0; font-size: .86em; }
@@ -604,7 +613,7 @@ body.split #read { border-left: 1px solid var(--line-2); }
 /* 区切り線は端まで引かない ── 全幅の線は「ここで終わり」に見えるが、
    Markdown の `---` は「話が変わる」でしかない。 */
 #read hr {
-  margin: 2.2em auto; border: 0; height: 1px; width: 30%;
+  margin: 2.2em 0; border: 0; height: 1px; width: 30%;
   background: var(--line);
 }
 
@@ -617,7 +626,7 @@ body.split #read { border-left: 1px solid var(--line-2); }
 
 /* ── 絵 ──
    裸で置かない。**地と同じ色の絵は、どこからが絵か分からない。** */
-#read figure { margin: 1.4em auto; text-align: center; }
+#read figure { margin: 1.4em 0; text-align: center; }
 #read img {
   max-width: 100%; height: auto; border-radius: 10px;
   border: 1px solid var(--line); background: var(--paper);
@@ -628,8 +637,8 @@ body.split #read { border-left: 1px solid var(--line-2); }
 }
 
 #read table {
-  border-collapse: collapse; margin: 1.1em auto; display: block;
-  overflow-x: auto; max-width: 34em; font-size: .95em;
+  border-collapse: collapse; margin: 1.1em 0; display: block;
+  overflow-x: auto; max-width: 34rem; font-size: .95em;
 }
 #read th, #read td { border: 1px solid var(--line-2); padding: 6px 12px; }
 #read th { background: var(--rail); font-weight: 700; text-align: left; }
@@ -641,7 +650,7 @@ body.split #read { border-left: 1px solid var(--line-2); }
    `useMaxWidth` が全体を縮め、年表の札の字が 14px から 8px になって
    読めなくなった ── 図は図の幅で描かせ、はみ出すぶんだけ横に流す。 */
 #read .mermaid {
-  margin: 1.4em auto; overflow-x: auto; text-align: center;
+  margin: 1.4em 0; overflow-x: auto; text-align: center;
   max-width: min(100%, 52em);
 }
 #read .mermaid svg { max-width: 100%; height: auto; }
@@ -651,12 +660,12 @@ body.split #read { border-left: 1px solid var(--line-2); }
 /* GitHub 風の注記。**色だけで区別しない** ── 見出しの語を必ず出す。
    色が見えない人にも、白黒で刷ったときにも、種類が残る。 */
 #read .alert {
-  margin: 1.2em auto; padding: .1em 1.1em .1em 1em;
+  margin: 1.2em 0; padding: .1em 1.1em .1em 1em;
   border-left: 4px solid var(--ink-3);
   background: var(--rail); border-radius: 0 9px 9px 0;
 }
 #read .alert-h {
-  margin: .7em auto .25em; font-weight: 700; font-size: .9em; letter-spacing: .05em;
+  margin: .7em 0 .25em; font-weight: 700; font-size: .9em; letter-spacing: .05em;
   color: var(--ink-2);
 }
 #read .alert > :last-child { margin-bottom: .7em; }
@@ -1055,6 +1064,10 @@ body.dropping::after {
         <button data-view="split" title="並べて表示（⌘P）">並べて表示</button>
         <button data-view="write" title="コード ── Markdown そのもの（⌘E）">コード</button>
       </div>
+      <!-- **目次は釦で出す。** 一度、帯の幅を空けるために献立へ引っ込めた
+           ことがある（依頼 297）── 献立の中では見つからず、「消えた」と
+           言われた。幅は `#meta` を固定してから空いている。 -->
+      <button id="tocbtn" title="目次（⌘⇧O）">☰</button>
       <button id="dots" title="このノートにすること（右押しでも同じ）">ノート ▾</button>
       <button id="bell" title="通知設定 ── いつ知らせるか" hidden></button>
       <button id="back" title="一つ戻す（⌘Z）" hidden></button>
