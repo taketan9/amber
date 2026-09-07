@@ -33,7 +33,7 @@ console.log('描く側に見せている口');
 {
     const src = read('gui/preload.js');
     const WANT = [
-        'call', 'recall', 'remember', 'pickFolder', 'pickFile', 'saveAs',
+        'call', 'recall', 'remember', 'pickFolder', 'pickFile', 'pickFiles', 'saveAs',
         'openLink', 'fileBytes', 'onGuest', 'pathOf', 'trash', 'saveText',
         'savePDF', 'ring', 'clipboardImage', 'appVersion', 'watch', 'onChanged', 'scratch', 'welcome',
         // クラウド（依頼 313・320）── 置き場所の名前を人の言葉で、

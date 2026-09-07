@@ -621,6 +621,17 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .collect::<Vec<_>>(),
         })),
 
+        // よそから .md を持ってくる。**上書きしない**（`notebook::bring`）。
+        "bring" => {
+            let to = std::path::PathBuf::from(arg(p, "to"));
+            let files: Vec<std::path::PathBuf> = p["files"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str()).map(std::path::PathBuf::from).collect())
+                .unwrap_or_default();
+            let r = crate::notebook::bring(&files, &to)?;
+            Ok(serde_json::json!({ "put": r.put, "renamed": r.renamed, "failed": r.failed }))
+        }
+
         "restore" => {
             let zip = std::path::PathBuf::from(arg(p, "zip"));
             let to = std::path::PathBuf::from(arg(p, "to"));

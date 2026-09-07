@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('amber', {
     reveal: (at) => ipcRenderer.invoke('amber:reveal', at),
     userName: () => ipcRenderer.invoke('amber:userName'),
     pickFile: (filters) => ipcRenderer.invoke('amber:pickFile', filters),
+    pickFiles: (filters) => ipcRenderer.invoke('amber:pickFiles', filters),
     saveAs: (name) => ipcRenderer.invoke('amber:saveAs', name),
     /// 読める形の中のリンクを、外のブラウザへ。`http`/`https` だけ通る。
     openLink: (url) => ipcRenderer.invoke('amber:openLink', url),

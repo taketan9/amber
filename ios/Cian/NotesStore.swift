@@ -65,26 +65,31 @@ final class NotesStore: ObservableObject {
     /// **Copied, not moved.** Whatever exported them still has them, which is
     /// the answer somebody wants the first time they try this and are not yet
     /// sure cian is where the notes are going to live.
+    /// **名前の付け直しは core が決める。**
+    ///
+    /// ここで `名前-2.md` を組み立てていた ── 窓にも取り込みを付けたので、
+    /// 同じ規則が二組になった。二組あるものは必ずずれ、ずれると**同じ
+    /// ノートが端末によって別の名前で入る**（フォルダの色を窓と電話に
+    /// 二度書いて、十一色のうち六色がずれたのと同じ）。写す仕事だけ
+    /// こちらに残る ── 選ばれた URL の鍵を開けていられるのはここだけ。
     func bring(_ urls: [URL]) {
         guard let root else { return }
-        var brought = 0
-        for url in urls {
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            var to = root.appendingPathComponent(url.lastPathComponent)
-            // A name already here is not a reason to overwrite somebody's
-            // note; it is a reason to keep both.
-            var n = 2
-            let stem = to.deletingPathExtension().lastPathComponent
-            let ext = to.pathExtension
-            while FileManager.default.fileExists(atPath: to.path), n <= 99 {
-                to = root.appendingPathComponent("\(stem)-\(n).\(ext)")
-                n += 1
+        var scoped: [URL] = []
+        defer { for u in scoped { u.stopAccessingSecurityScopedResource() } }
+        for url in urls where url.startAccessingSecurityScopedResource() { scoped.append(url) }
+        do {
+            let r = try Cian.call("bring", [
+                "files": urls.map(\.path),
+                "to": root.path,
+            ])
+            if (r["put"] as? Int ?? 0) > 0 { reload() }
+            // 入らなかったぶんは、黙らない（窓と同じ）。
+            if let no = r["failed"] as? Int, no > 0 {
+                trouble = "\(no) 件は入れられませんでした。"
             }
-            do { try FileManager.default.copyItem(at: url, to: to); brought += 1 }
-            catch { trouble = error.localizedDescription }
+        } catch {
+            trouble = error.localizedDescription
         }
-        if brought > 0 { reload() }
     }
 
     /// The folder from last time, or this app's own.

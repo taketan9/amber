@@ -403,6 +403,16 @@ app.whenReady().then(() => {
         });
         return r.canceled ? null : r.filePaths[0];
     });
+    /// 何本でも選べる箱。**取り込みは一本ずつではない** ── よそから
+    /// 持ってくるのはたいていフォルダ一つぶんで、一本ずつ選ばせると
+    /// 同じ手を何十回も繰り返させることになる。
+    ipcMain.handle('amber:pickFiles', async (_e, filters) => {
+        const r = await dialog.showOpenDialog(win, {
+            properties: ['openFile', 'multiSelections'],
+            filters: filters || [],
+        });
+        return r.canceled ? [] : r.filePaths;
+    });
     ipcMain.handle('amber:saveAs', async (_e, name) => {
         const r = await dialog.showSaveDialog(win, { defaultPath: name });
         return r.canceled ? null : r.filePath;

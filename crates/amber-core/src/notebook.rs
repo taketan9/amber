@@ -276,6 +276,75 @@ pub fn migrate(from: &Path, to: &Path) -> anyhow::Result<usize> {
     Ok(jobs.len())
 }
 
+/// 取り込んだ結果 ── 入れた数・名前を変えた数・入らなかった数。
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Brought {
+    pub put: usize,
+    pub renamed: usize,
+    pub failed: usize,
+}
+
+/// よそから持ってきた .md を、ノート帳へ。
+///
+/// **同じ名前は、上書きではなく両方残す。** 戻す（`restore`）ほうは同じ
+/// 名前を「いまのを残す」で飛ばすが、持ってくるのは逆 ── 戻すのは前に
+/// あったものを取り返す行いで、持ってくるのは**知らないものを入れる**
+/// 行いなので、飛ばすと「入れたはずのものが入っていない」になる。
+/// `週報.md` が既にあれば `週報-2.md` にする。
+///
+/// **`週報 2.md`（間が空白）にはしない。** クラウドが作る衝突の控えが
+/// その形で、`cloud::shape` は当てずっぽうで札を貼らないためにその名前を
+/// 拾わないと決めてある ── 持ってきたノートを、貼られない控えと同じ顔に
+/// しない（依頼 316）。
+///
+/// **元のファイルは動かさない。** 写すだけ ── 人が選んだのは自分の
+/// フォルダにあるもので、amber がそれを引き取っていい理由は無い。
+///
+/// 判断（名前の付け直し）がここにあるのは、窓と電話で二組書くと必ず
+/// ずれるから。写す仕事そのものは呼ぶ側にもできるが、**同じノートが
+/// 端末によって別の名前で入る**のは直しようがない。
+pub fn bring(files: &[std::path::PathBuf], to: &Path) -> anyhow::Result<Brought> {
+    std::fs::create_dir_all(to)?;
+    let mut put = 0usize;
+    let mut renamed = 0usize;
+    let mut failed = 0usize;
+    for from in files {
+        let Some(name) = from.file_name() else { continue };
+        let mut dest = to.join(name);
+        if dest.exists() {
+            let stem = Path::new(name)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let ext = Path::new(name)
+                .extension()
+                .map(|s| format!(".{}", s.to_string_lossy()))
+                .unwrap_or_default();
+            // 99 で止める ── ここまで来たら名前を付け直すのは人の仕事で、
+            // 数え続けても同じ名前のノートが百本並ぶだけ。
+            let mut n = 2;
+            while dest.exists() && n <= 99 {
+                dest = to.join(format!("{stem}-{n}{ext}"));
+                n += 1;
+            }
+            if dest.exists() {
+                // ここまで来たら名前を付け直すのは人の仕事。飛ばして次へ。
+                failed += 1;
+                continue;
+            }
+            renamed += 1;
+        }
+        // **一本で転んでも、残りは運ぶ。** 十本選んだうちの三本目が読めない
+        // ときに一本も入らないと、人にできることは「一本ずつ選び直す」しか
+        // ない ── 入ったぶんは入ったと言い、入らなかった数を添える。
+        match std::fs::copy(from, &dest) {
+            Ok(_) => put += 1,
+            Err(_) => failed += 1,
+        }
+    }
+    Ok(Brought { put, renamed, failed })
+}
+
 /// A backup, put back. Returns (put in, left alone).
 ///
 /// **Into the notes folder, never over a note.** A restore that overwrote
@@ -376,6 +445,47 @@ pub fn restore(zip: &Path, to: &Path) -> anyhow::Result<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bringing_notes_in_keeps_both_when_the_name_is_taken() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("ノート");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("週報.md"), "いま書いているほう").unwrap();
+
+        let away = tempfile::tempdir().unwrap();
+        let one = away.path().join("週報.md");
+        let two = away.path().join("献立.md");
+        std::fs::write(&one, "よそから来たほう").unwrap();
+        std::fs::write(&two, "カレー").unwrap();
+
+        let r = bring(&[one.clone(), two], &root).unwrap();
+        assert_eq!(r, Brought { put: 2, renamed: 1, failed: 0 });
+
+        // **いま書いているほうは動かさない。**
+        assert_eq!(std::fs::read_to_string(root.join("週報.md")).unwrap(), "いま書いているほう");
+        assert_eq!(std::fs::read_to_string(root.join("週報-2.md")).unwrap(), "よそから来たほう");
+        assert!(root.join("献立.md").exists());
+
+        // 元のファイルはそのまま ── 写すだけ。
+        assert!(one.exists());
+
+        // 二度持ってくれば、三本目になる（飛ばさない）。
+        let r = bring(&[one], &root).unwrap();
+        assert_eq!(r, Brought { put: 1, renamed: 1, failed: 0 });
+        assert!(root.join("週報-3.md").exists());
+
+        // 空白を挟む名前にはしない ── クラウドの控えと同じ顔にならないように。
+        assert!(!root.join("週報 2.md").exists());
+
+        // 一本読めなくても、残りは運ぶ。
+        let gone = away.path().join("ない.md");
+        let ok = away.path().join("味噌汁.md");
+        std::fs::write(&ok, "だし").unwrap();
+        let r = bring(&[gone, ok], &root).unwrap();
+        assert_eq!(r, Brought { put: 1, renamed: 0, failed: 1 });
+        assert!(root.join("味噌汁.md").exists());
+    }
 
     #[test]
     fn a_folder_remembers_its_colour_and_its_empty_favourites() {

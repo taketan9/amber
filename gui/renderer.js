@@ -3722,12 +3722,17 @@ const CMDS = [
     { id: 'theme', name: 'テーマ', app: true, run: cmdTheme },
     { id: 'vim', name: 'vimモード', app: true, run: cmdVim },
     { id: 'lineno', name: '行番号', app: true, run: cmdLineNo },
-    { id: 'backup', name: 'バックアップ', app: true, sep: true, run: cmdBackup },
+    // ── ノートを入れる／出す
+    // **入れる三つを、並べて置く。** 「見本のノートを入れる」は列の
+    // いちばん下に一つだけ離れて座っていて、探す人は「amber について」の
+    // 下まで来ない ── 同じ行い（ノートを入れる）は同じ場所に。
+    { id: 'bring', name: 'ノートを取り込む', sub: 'よその .md を写す', app: true, sep: true, run: cmdBring },
+    { id: 'welcome', name: '見本のノートを入れる', app: true, run: cmdWelcome },
+    { id: 'backup', name: 'バックアップ', app: true, run: cmdBackup },
     { id: 'restore', name: 'バックアップから戻す', app: true, run: cmdRestore },
     { id: 'root', name: 'amber保存ディレクトリ変更', app: true, run: cmdRoot },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'amber について', app: true, run: cmdAbout },
-    { id: 'welcome', name: '見本のノートを入れる', app: true, run: cmdWelcome },
     { id: 'history', name: '過去バージョン', need: 'note', menu: true, run: () => cmdHistory() },
     { id: 'keepnow', name: '現状バージョン保存', key: '⌘S', need: 'note', menu: true, run: cmdKeepNow },
     // **`back` / `fwd` は上の「前に見たノート」で使っている。** 同じ id を
@@ -5121,6 +5126,35 @@ async function cmdBackup() {
         say(r.files + ' 件を保存しました: ' + shortPath(r.path || into));
     } catch (e) {
         say('保存できません: ' + e.message);
+    }
+}
+
+/// よそにある .md を、ノート帳へ取り込む。
+///
+/// **窓には無かった。** 電話には初めからあり、窓には「バックアップから
+/// 戻す」しかなかった ── zip でなければ入れる道が無く、ほかのアプリから
+/// 書き出した .md を持ってきた人は、Finder でフォルダを開いて自分で写す
+/// しかなかった（そのフォルダがどこかも、amber は言わない）。
+///
+/// **上書きしない・元は動かさない。** 同じ名前があれば `週報-2.md` に
+/// して両方残す（判断は core の `notebook::bring`。窓と電話で二組書くと、
+/// 同じノートが端末によって別の名前で入る）。名前を変えたぶんは数えて
+/// 言う ── 言わないと、開いたノートが「さっき取り込んだやつ」なのか
+/// 「前からあったやつ」なのか見分けが付かない。
+async function cmdBring() {
+    const files = await window.amber.pickFiles([{ name: 'ノート', extensions: ['md', 'markdown', 'txt'] }]);
+    if (!files || !files.length) return;
+    try {
+        const r = await ask('bring', { files, to: state.root });
+        await reload({});
+        // **入らなかった数も言う。** 十本選んで八本入ったとき、黙って
+        // いると人は八本しか選ばなかったと思う ── 気づくのは、あとで
+        // 探しても出てこない日。
+        const re = r.renamed ? '（' + r.renamed + ' 件は名前を変えました）' : '';
+        const no = r.failed ? '。' + r.failed + ' 件は入れられませんでした' : '';
+        say(r.put + ' 件を取り込みました' + re + no);
+    } catch (e) {
+        say('取り込めません: ' + e.message);
     }
 }
 
