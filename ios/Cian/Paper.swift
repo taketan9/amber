@@ -38,6 +38,10 @@ struct Paper: UIViewRepresentable {
     var onCheck: ((Int, Bool) -> Void)?
     /// いま見ている（打っている）ファイルの行 ── 面を替えるときに使う。
     var onAt: ((Int) -> Void)?
+    /// 向こうから来た行と、両方残した行（ファイルの行・0 起点）。
+    /// **ノートには何も書いていない** ので、色は外から渡す。
+    var came: [Int] = []
+    var both: [Int] = []
     /// 図を長押しされた（工房を開く）。
     var onFix: ((String) -> Void)?
     /// 道具の帯からの合図を受け取る糸。
@@ -79,6 +83,10 @@ struct Paper: UIViewRepresentable {
         context.coordinator.parent = self
         context.coordinator.folder = folder
         context.coordinator.show(text, dark: dark)
+        // **組み直すたびに敷き直す。** 札は組み直しで消えるので、
+        // 一度きり渡すと、次に打った瞬間に色が消える。
+        let js = "window.paint(\(came),\(both)); true"
+        web.evaluateJavaScript(js.replacingOccurrences(of: " ", with: ""))
     }
 
     /// 面そのもの。**窓の見た目に寄せる** ── 同じノートが二つの amber で
@@ -129,6 +137,10 @@ struct Paper: UIViewRepresentable {
       #paper .alert-h{font-weight:700;color:var(--amber-deep);margin:.7em 0 .2em}
       #paper .mermaid{margin:1.2em 0;text-align:center;overflow-x:auto}
       #paper .mermaid svg{max-width:100%;height:auto}
+      /* 入ってきたもの ── **淡く敷く**（窓と同じ。濃く敷くと字が沈む）。
+         同じところを二人が更新して両方残したところだけ、脇に線を足す。 */
+      #paper .came{background:rgba(240,165,43,.14)}
+      #paper .both{background:rgba(240,165,43,.14);box-shadow:inset 3px 0 0 #C4564E}
     </style></head><body><div id="paper"></div>
     <script src="paper.js"></script>
     <script>
@@ -167,6 +179,42 @@ struct Paper: UIViewRepresentable {
         window.webkit.messageHandlers.wrote.postMessage(md);
       }, 500);
     });
+
+    /// 来た行に、地色を敷く。**できるだけ細かい単位で。**
+    ///
+    /// 箇条書きは `<ul>` ひとつで一かたまりなので、上の段だけを見て塗ると
+    /// 一行来ただけで三行とも光る ── 買い物リストはまさにその形（窓で
+    /// 実物を見て気づいた・依頼 356）。行の札は `<li>` も持っているので、
+    /// そこまで降りる。最初の `<li>` は札を持たない（親が同じ行を指す）
+    /// ので親から継ぐ。降りきれない形は、そのかたまりぜんぶ。
+    window.paint = (came, both) => {
+      for (const b of box.querySelectorAll('.came,.both')) b.classList.remove('came', 'both');
+      if (!came.length && !both.length) return;
+      const owner = new Map();
+      const walk = (node, up) => {
+        for (const b of node.children) {
+          let line = Number(b.dataset.line);
+          if (Number.isNaN(line) && up !== null && b === node.children[0]) line = up;
+          if (!Number.isNaN(line)) owner.set(line, b);
+          walk(b, Number.isNaN(line) ? up : line);
+        }
+      };
+      walk(box, null);
+      const put = (rows, cls) => {
+        for (const n of rows) {
+          const at = owner.get(n);
+          if (at) { at.classList.add(cls); continue; }
+          for (const b of box.children) {
+            const from = Number(b.dataset.line);
+            if (Number.isNaN(from)) continue;
+            const span = Number(b.dataset.span) || 1;
+            if (from <= n && n < from + span) { b.classList.add(cls); break; }
+          }
+        }
+      };
+      put(came, 'came');
+      put(both, 'both');
+    };
 
     /// **いまどこを見ているかを、こまめに伝えておく。**
     ///

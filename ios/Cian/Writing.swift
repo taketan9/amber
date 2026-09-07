@@ -149,6 +149,34 @@ struct NoteView: View {
         return whole
     }
 
+    /// 入ってきたものの報せ。**面の上に置く** ── 「表示」でも「コード」でも
+    /// 同じことが起きているので、片方の面の中に入れると面を替えたときに
+    /// 消えたように見える（窓と同じ形・依頼 354）。
+    ///
+    /// 言葉は「更新」に揃えてある ── 帯と釦で言葉が割れると、同じことに
+    /// 名前が二つ付く。
+    @ViewBuilder
+    private var band: some View {
+        if !tab.came.isEmpty {
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(tab.eyes ? Color(red: 0.77, green: 0.34, blue: 0.31) : Color("BrandSchwa"))
+                    .frame(width: 8, height: 8)
+                Text(tab.eyes
+                     ? "同じところを二人が更新しました。どちらにするか決めてください"
+                     : "ほかの人が \(tab.came.count) 行更新しました")
+                    .font(.footnote)
+                Spacer(minLength: 8)
+                Button("確認した") { desk.seenIncoming(tab.id) }
+                    .font(.footnote.weight(.semibold))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(Color("BrandSchwa").opacity(0.12))
+            Divider()
+        }
+    }
+
     var body: some View {
         Group {
             if tab.reading {
@@ -158,9 +186,11 @@ struct NoteView: View {
                 // なる。SwiftUI で書き直すと書き戻しがもう一組でき、同じ
                 // ノートが端末によって別の字に保存される。
                 VStack(spacing: 0) {
+                    band
                     Paper(text: $tab.text, folder: folder,
                           dark: look == .dark || (look == .auto && scheme == .dark),
                           onCheck: tickLine, onAt: { tab.at = $0 },
+                          came: tab.came, both: tab.both,
                           onFix: { fixingText = Fixing(md: $0) },
                           hand: hand)
                     // **道具の帯は、表示の面にも要る。** 打てる面なのに
@@ -177,6 +207,7 @@ struct NoteView: View {
                 }
             } else {
                 VStack(spacing: 0) {
+                    band
                     Editor(pen: pen, text: $tab.text, pick: $tab.pick, editing: $writing)
                     // Only while the keyboard is up, which is the only time
                     // it is *above the keyboard* rather than sitting at the

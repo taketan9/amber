@@ -43,6 +43,17 @@ final class Desk: ObservableObject {
         /// because it belongs to the note, not to the moment on screen: swipe
         /// away and back and you are where you left off.
         var pick = NSRange(location: 0, length: 0)
+        /// **混ぜるときの土台**（分かれる前）── 開いた時点、または前に
+        /// 保存できた時点の中身。動くのは**ファイルと確かに一致した瞬間**
+        /// だけ。履歴用の控えを土台に使うと、自動保存が一度でも通ったあと
+        /// 「こちらは何も更新していない」ことになり、向こうで丸ごと上書き
+        /// される（窓で実際にそうなった ── 依頼 355）。
+        var base = ""
+        /// 向こうから来た行と、両方残した行。**押すまで残る。**
+        var came: [Int] = []
+        var both: [Int] = []
+        var eyes = false
+
         /// 「表示」の面で、いま見ている（打っている）**ファイルの行**。
         /// **面を替えても同じ場所に居る**ために要る ── 替えたあとでは、
         /// 前の面の caret も巻き位置も残っていない。まだ分からなければ -1。
@@ -118,6 +129,10 @@ final class Desk: ObservableObject {
         tabs[at].stamp = stamp
         tabs[at].loaded = true
         tabs[at].blocks = (try? store.blocks(of: text)) ?? []
+        // 混ぜるときの土台 ── いまファイルと一致している。
+        tabs[at].base = head + body
+        // 前に来ていて、まだ確認していないものを思い出す（押すまで残る）。
+        recallIncoming(tabs[at].id)
     }
 
     /// Take a whole note back apart — after a sheet has changed a field.
@@ -152,12 +167,70 @@ final class Desk: ObservableObject {
             guard let now = tabs.firstIndex(where: { $0.id == id }) else { return nil }
             tabs[now].stamp = fresh
             tabs[now].saved = tabs[now].text
+            // 書けた ── ここでファイルと一致したので、土台を進める。
+            tabs[now].base = tabs[now].whole
             redraw(id, store)
             store.reload()
             return nil
-        case .conflict(let why):
-            return why
+        case .conflict:
+            // **どちらかを捨てない。混ぜる。**
+            //
+            // 前はここで「やめる／それでも上書き」と訊いていた ── どちらを
+            // 押しても片方の更新が消える。家族で同じ棚を触るのが前提の
+            // アプリで、それは強すぎる（窓と同じ直し・依頼 354）。
+            let got = try store.merge(tabs[at].note, was: tabs[at].base, ours: tabs[at].whole)
+            guard case .ok(let fresh) = try store.save(
+                tabs[at].note, text: got.text, stamp: tabs[at].stamp, force: true
+            ) else { return nil }
+            guard let now = tabs.firstIndex(where: { $0.id == id }) else { return nil }
+            let (head, body) = (try? store.split(got.text)) ?? (tabs[now].head, got.text)
+            tabs[now].stamp = fresh
+            tabs[now].head = head
+            tabs[now].text = body
+            tabs[now].saved = body
+            tabs[now].base = got.text
+            tabs[now].came = got.came
+            tabs[now].both = got.both
+            tabs[now].eyes = got.eyes
+            keepIncoming(tabs[now])
+            redraw(id, store)
+            store.reload()
+            return nil
         }
+    }
+
+    /// 入ってきたものの控え。**この機械の引き出しに置く** ── 「自分が
+    /// 確認したか」は人ごと・機械ごとのことで、フォルダに置くと家族の
+    /// 誰かが読んだ時点で全員のぶんが消える。ノートにも書かない。
+    private static let seenKey = "amber.incoming"
+
+    private func keepIncoming(_ tab: Tab) {
+        var all = UserDefaults.standard.dictionary(forKey: Self.seenKey) ?? [:]
+        if tab.came.isEmpty {
+            all.removeValue(forKey: tab.id)
+        } else {
+            all[tab.id] = ["came": tab.came, "both": tab.both, "eyes": tab.eyes]
+        }
+        UserDefaults.standard.set(all, forKey: Self.seenKey)
+    }
+
+    /// 開いたときに、前に来ていたものを思い出す（押すまで残る）。
+    func recallIncoming(_ id: String) {
+        guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let all = UserDefaults.standard.dictionary(forKey: Self.seenKey) ?? [:]
+        guard let one = all[id] as? [String: Any] else { return }
+        tabs[at].came = (one["came"] as? [Int]) ?? []
+        tabs[at].both = (one["both"] as? [Int]) ?? []
+        tabs[at].eyes = (one["eyes"] as? Bool) ?? false
+    }
+
+    /// 「確認した」を押された ── 印を消す。
+    func seenIncoming(_ id: String) {
+        guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs[at].came = []
+        tabs[at].both = []
+        tabs[at].eyes = false
+        keepIncoming(tabs[at])
     }
 
     /// 積める数。窓と同じ（`BACKS`）。
@@ -238,7 +311,6 @@ struct DeskView: View {
     @StateObject private var pen = Pen()
     @Environment(\.scenePhase) private var phase
     @State private var trouble: String?
-    @State private var clash: String?
     @State private var tagging = false
     @State private var ringing = false
     @State private var picking = false
@@ -333,13 +405,6 @@ struct DeskView: View {
                     )
                 }
             }
-            .alert(
-                "あちらでも更新されています",
-                isPresented: Binding(get: { clash != nil }, set: { if !$0 { clash = nil } })
-            ) {
-                Button("やめる", role: .cancel) {}
-                Button("それでも上書き", role: .destructive) { now(force: true) }
-            } message: { Text(clash ?? "") }
             .alert(
                 "できません",
                 isPresented: Binding(get: { trouble != nil }, set: { if !$0 { trouble = nil } })
@@ -559,7 +624,7 @@ struct DeskView: View {
     private func write(_ id: String, force: Bool = false) {
         guard !id.isEmpty else { return }
         do {
-            if let why = try desk.save(id, store, force: force) { clash = why }
+            try desk.save(id, store, force: force)
         } catch { trouble = error.localizedDescription }
     }
 

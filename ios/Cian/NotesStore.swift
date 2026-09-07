@@ -960,6 +960,45 @@ final class NotesStore: ObservableObject {
         case conflict(why: String)
     }
 
+    /// 混ざった結果 ── 字と、どの行が向こうから来たか。
+    struct Merged {
+        let text: String
+        /// 向こうから来た行（ファイルの行・0 起点）。
+        let came: [Int]
+        /// 同じところを二人が更新して、両方残した行。
+        let both: [Int]
+        /// 人の目が要るか。
+        let eyes: Bool
+    }
+
+    /// 同じノートを二人が更新したとき、**どちらかを捨てずに混ぜる**。
+    ///
+    /// **判断は core**（`merge`）── 窓と同じ一組を呼ぶ。二組書けば、同じ
+    /// ノートが端末によって別の形に混ざる（フォルダの色を二度書いて
+    /// 十一色のうち六色がずれたのと同じ）。ここがするのは、向こうの
+    /// いまの中身を読んで渡し、混ざったものを書き戻すことだけ。
+    func merge(_ note: Note, was: String, ours: String) throws -> Merged {
+        let answer = try Cian.call("read", ["path": note.path])
+        // **空が返ってきたら混ぜない。** 読めなかったのか本当に空なのかを
+        // 見分けられないまま混ぜると、混ざった結果も空になり、それを
+        // そのまま書き戻す（窓で一度それでノートを消した）。
+        guard let theirs = answer["text"] as? String else {
+            throw Cian.Failure.engine("向こうの中身を読めません")
+        }
+        let got = try Cian.call("merge", ["was": was, "ours": ours, "theirs": theirs])
+        let text = got["text"] as? String ?? ""
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !(was + ours).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw Cian.Failure.engine("混ぜた結果が空になりました")
+        }
+        return Merged(
+            text: text,
+            came: (got["came"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue },
+            both: (got["both"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue },
+            eyes: got["eyes"] as? Bool ?? false
+        )
+    }
+
     func save(_ note: Note, text: String, stamp: String, force: Bool = false) throws -> Saved {
         // **書き込む直前の姿を、履歴に渡す。** 一世代にするかどうかを決める
         // のは core（最後の一区切りから間が空いたときだけ）── 電話と窓で
