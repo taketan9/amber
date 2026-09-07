@@ -334,7 +334,7 @@ struct DeskView: View {
                 }
             }
             .alert(
-                "あちらでも書き換えられています",
+                "あちらでも更新されています",
                 isPresented: Binding(get: { clash != nil }, set: { if !$0 { clash = nil } })
             ) {
                 Button("やめる", role: .cancel) {}

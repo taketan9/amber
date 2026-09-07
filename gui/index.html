@@ -553,6 +553,35 @@ body.mac #top { padding-top: 30px; }
   flex: 1; min-width: 0; overflow-y: auto;
   padding: 26px 32px 64px; font-size: 14.5px; line-height: 1.9;
 }
+/* ── 入ってきたもの ──────────────────────────────────────
+   同じノートを二人が書いたときは黙って混ぜる（依頼 336）。**混ぜたことは
+   ノートに書かない**ので、来た行がどれかは画面が色で言う。
+
+   **淡く敷く（案二）。** 柱ではなく地色にしたのは本人が選んだ形 ──
+   目が勝手に行く。濃く敷くと字が沈むので、地は琥珀の淡いほう。 */
+#band {
+  display: flex; align-items: center; gap: 9px; flex: none;
+  padding: 9px 15px; font-size: 12.5px; color: var(--ink);
+  background: color-mix(in srgb, var(--amber) 12%, var(--paper));
+  border-bottom: 1px solid var(--line-2);
+}
+#band[hidden] { display: none !important; }
+#band .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand-s); flex: none; }
+#band.eyes .dot { background: #C4564E; }
+#band .act {
+  margin-left: auto; color: var(--brand-s); font-weight: 600;
+  white-space: nowrap; cursor: pointer;
+}
+#band .act:hover { text-decoration: underline; }
+/* 来た行。**地色だけ** ── 字も並びも動かさない。 */
+#read .came { background: color-mix(in srgb, var(--amber) 12%, transparent); }
+/* 同じ場所を二人が書いて、両方残したところ。**ここだけ強くする** ──
+   人が読んで、要らないほうを消すしかない場所なので。 */
+#read .both {
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+  box-shadow: inset 3px 0 0 #C4564E;
+}
+
 /* **柱は一本。左端で揃える。**
    `34em` は要素ごとの字の大きさで効くので、同じ「34em」でも
    見出し・本文・罫線が**全部ちがう幅**になっていた ── 実測で
@@ -1085,6 +1114,10 @@ body.dropping::after {
       <div>左からノートを選ぶか、<b>新しいノート</b>で書きはじめてください</div>
     </div>
     <div id="work" hidden>
+      <!-- **入ってきたものの報せ。** 面の上に置く ── 「並べて」でも
+           「コード」でも同じことが起きているので、片方の面の中に入れると
+           面を替えたときに消えたように見える。 -->
+      <div id="band" hidden></div>
       <div id="panes">
         <div id="ed"></div>
         <div id="read" hidden></div>

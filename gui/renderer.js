@@ -624,6 +624,15 @@ async function openNote(path, opts) {
     lastSaved = body;
     // 履歴に渡すのは「保存する前の姿」── 開いた時点の中身。
     state.was = head + body;
+    // **混ぜるときの土台**（分かれる前）は、別に持つ。
+    // `state.was` は履歴のための「保存する前の姿」で、保存のたびに
+    // 動く ── それを土台に使うと、自動保存が一度でも通ったあとは
+    // 「こちらは何も書いていない」ことになり、**向こうで丸ごと上書き**
+    // される（実際にそうなって、足した行が消えた）。
+    // ここが動くのは、**ファイルと確かに一致した瞬間**だけ。
+    state.base = head + body;
+    loadIncoming();
+    drawBand();
     drawTitle();
     el('state').textContent = when(note.updated)
         + ((note.tags || []).length ? '  ' + note.tags.map((t) => '#' + t).join(' ') : '');
@@ -1186,6 +1195,8 @@ function landAt(node, after) {
 /// 「呼べば落ちる関数」が入る。
 function armRead() {
     armPaper(el('read'), whole(), !!state.open && view !== 'write');
+    // 来た行の地色は、組み直すたびに敷き直す ── 札は組み直しで消えるので。
+    paintIncoming();
 }
 
 function readToMd() {
@@ -3607,12 +3618,174 @@ function drawSteps() {
     f.hidden = !on;
 }
 
+/* ── 入ってきたもの ── */
+
+/// いま開いているノートに入ってきたもの（`null` なら何も無い）。
+///
+/// **憶えるのはこの機械の引き出し**（`amber.json`）── 「自分が確認したか」は
+/// 人ごと・機械ごとのことで、フォルダに置くと家族の誰かが読んだ時点で
+/// 全員のぶんが消える。ノートにも書かない（ただの Markdown のまま）。
+let incoming = null;
+let incomings = {};
+
+function keepIncoming() {
+    if (incoming) incomings[incoming.path] = incoming;
+    else if (state.open) delete incomings[state.open.path];
+    window.amber.remember({ incomings });
+}
+
+/// このノートに、まだ確認していないものがあるか。**開き直しても出る**
+/// （消え方① ── 押すまで残す。閉じただけで消えると、見逃した日に
+/// 気づく道がどこにも無くなる）。
+function loadIncoming() {
+    incoming = (state.open && incomings[state.open.path]) || null;
+}
+
+/// 報せの帯。**誰が・何行**。
+///
+/// 「直し」でも「更新」でもなく**「書きました」** ── 相手は間違いを
+/// 正したのではなく、書いたのだから（本人と決めた言葉。amber は前から
+/// 「同時に書いた控え」「あちらでも書き換えられています」と言っている）。
+function drawBand() {
+    const b = el('band');
+    if (!incoming || !incoming.came.length) { b.hidden = true; b.innerHTML = ''; return; }
+    const n = incoming.came.length;
+    const what = incoming.eyes
+        ? '同じところを二人が更新しました。どちらにするか決めてください'
+        : 'ほかの人が ' + n + ' 行更新しました';
+    b.className = incoming.eyes ? 'eyes' : '';
+    b.hidden = false;
+    b.innerHTML = '<span class="dot"></span><span>' + what + '</span>'
+        + '<button class="act">ほかの人が更新したところを確認した</button>';
+    b.querySelector('.act').onclick = () => {
+        incoming = null;
+        keepIncoming();
+        drawBand();
+        paintIncoming();
+    };
+}
+
+/// 来た行に、地色を敷く。
+///
+/// **できるだけ細かい単位で。** 箇条書きは `<ul>` ひとつで一かたまりなので、
+/// 上の段だけを見て塗ると**一行来ただけで三行とも光る** ── 買い物リストは
+/// まさにその形で、それでは何が来たのか分からない（実物で見て気づいた）。
+/// 行の札（`data-line`）は `<li>` も持っているので、そこまで降りる。
+///
+/// **最初の `<li>` は札を持たない**（親の `<ul>` が同じ行を指している）ので、
+/// 親から継ぐ。降りきれない形（段落の途中の一行など）は、そのかたまり
+/// ぜんぶを塗る ── 塗り過ぎるほうが、塗り落とすよりまし。
+function paintIncoming() {
+    const rd = el('read');
+    for (const b of rd.querySelectorAll('.came, .both')) b.classList.remove('came', 'both');
+    if (!incoming) return;
+
+    // 行番号 → いちばん深い持ち主。
+    const owner = new Map();
+    const walk = (node, inherited) => {
+        for (const b of node.children) {
+            let line = Number(b.dataset.line);
+            // 一覧の最初の一つは、親の行をそのまま指している。
+            if (Number.isNaN(line) && inherited !== null && b === node.children[0]) line = inherited;
+            if (!Number.isNaN(line)) owner.set(line, b);
+            walk(b, Number.isNaN(line) ? inherited : line);
+        }
+    };
+    walk(rd, null);
+
+    const paint = (rows, cls) => {
+        for (const n of rows) {
+            const at = owner.get(n);
+            if (at) { at.classList.add(cls); continue; }
+            // 持ち主が居ない行は、跨いでいるかたまりごと。
+            for (const b of rd.children) {
+                const from = Number(b.dataset.line);
+                if (Number.isNaN(from)) continue;
+                const span = Number(b.dataset.span) || 1;
+                if (from <= n && n < from + span) { b.classList.add(cls); break; }
+            }
+        }
+    };
+    paint(incoming.came, 'came');
+    paint(incoming.both, 'both');
+}
+
+/// 向こうと混ぜて、書き戻す。返すのは混ざった字（駄目なら `null`）。
+///
+/// **判断は core、運ぶのはここ**（`sync` と同じ切り分け）── どの行が
+/// 向こうから来たかも core が言うので、画面はそれを受け取って印を差す。
+///
+/// **印はノートに書かない。** 憶えるのはこの機械の引き出し（`amber.json`）
+/// ── 「自分が確認したか」は**人ごと・機械ごと**のことで、フォルダに
+/// 置くと家族の誰かが読んだ時点で全員のぶんが消える。
+async function mergeIn(path, ours, was) {
+    // 向こうの、いまの中身（`read` ── 開くときと同じ口）。
+    let theirs;
+    try {
+        const got2 = await ask('read', { path });
+        theirs = got2 && typeof got2.text === 'string' ? got2.text : null;
+    } catch (e) {
+        say('向こうの中身を読めません: ' + why(e));
+        return null;
+    }
+    // **空が返ってきたら、混ぜない。** 読めなかったのか本当に空なのかを
+    // 見分けられないまま混ぜると、**混ざった結果も空**になり、それを
+    // そのまま書き戻す ── 一度それでノートを消した。
+    if (theirs === null) {
+        say('向こうの中身を読めません');
+        return null;
+    }
+    let got;
+    try {
+        got = await ask('merge', { was, ours, theirs });
+    } catch (e) {
+        say('混ぜられません: ' + why(e));
+        return null;
+    }
+    // **空を書き戻さない。** 混ぜた結果が空になるのは、どちらかが空だった
+    // ときだけ ── 両方に字があったのに空が出たなら、それは混ぜ損ねている。
+    if (!got.text.trim() && (was.trim() || ours.trim())) {
+        say('混ぜた結果が空になりました。書き戻していません');
+        return null;
+    }
+    try {
+        const w = await ask('write', { path, text: got.text, force: true });
+        if (w && w.stamp) state.stamp = w.stamp;
+    } catch (e) {
+        say('保存できません: ' + why(e));
+        return null;
+    }
+    // 面に出す ── 誰が・何行・どこ。名前は向こうが書いた履歴が持っている
+    // ものではないので、分かるときだけ言う。
+    // **誰が書いたかは、言えない。** ノートはただの Markdown で、名前は
+    // どこにも書いていない（書かないと決めた ── 依頼 320）。分からない
+    // ことを分かったように言わない。
+    incoming = {
+        path,
+        came: got.came || [],
+        both: got.both || [],
+        eyes: !!got.eyes,
+    };
+    keepIncoming();
+    // 混ざった字を面へ。**caret は飛ばさない**ので、組み直しはこのあと。
+    loading = true;
+    const body = got.text.startsWith(state.head) ? got.text.slice(state.head.length) : got.text;
+    editor.setValue(body);
+    loading = false;
+    lastSaved = body;
+    state.was = got.text;
+    state.base = got.text;
+    drawBand();
+    return got.text;
+}
+
 async function save() {
     if (!state.open || !editor) return;
     const path = state.open.path;
     // 頭を戻してから書く。**ここを忘れると、保存のたびに front matter が
     // 一枚ずつ消える** ── 題もタグも作った日も。
-    const text = state.head + editor.getValue();
+    // 混ぜたときに差し替わるので `let`。
+    let text = state.head + editor.getValue();
     // 書き込む直前の姿を積む ── 書いたあとだと、戻る先が「いまの姿」になる。
     keepStep(editor.getValue());
     // **一世代にするかは core が決める。** 同じフォルダを二つの端末で
@@ -3623,22 +3796,34 @@ async function save() {
             await ask('keep', { root: state.root, path, text: state.was ?? text, gap: KEEP_GAP });
         } catch { /* 履歴が置けないことで、保存が止まる理由はない */ }
     }
+    // **分かれる前の姿**（開いた時点、または前に保存できた時点の中身）。
+    // `state.was` はこのあと上書きされるので、先に控える。
+    const ancestor = state.base ?? state.was ?? text;
     state.was = text;
     try {
         const r = await ask('write', { path, text, stamp: state.stamp });
         if (r && r.conflict) {
-            const keep = confirm(
-                'このノートは、開いたあとで別のところから書き換えられています。\n\n'
-                + (r.why || '') + '\n\nこちらの内容で上書きしますか？\n'
-                + '（「キャンセル」なら、向こうの内容を読み直します）');
-            if (!keep) {
+            // **どちらかを捨てない。混ぜる。**
+            //
+            // 前はここで「こちらで上書きしますか／向こうを読み直しますか」と
+            // 訊いていた ── どちらを押しても、**片方の書いたものが消える**。
+            // 家族で同じ棚を触るのが前提のアプリで、それは強すぎる。
+            //
+            // 混ぜ方は core（`merge`）── 分かれる前（開いた時点の中身）と、
+            // こちらと、向こうの三つを渡す。同じ場所を二人が書いていたら
+            // 両方残る（迷ったら残す）。
+            const merged = await mergeIn(path, text, ancestor);
+            if (merged === null) {
+                // 混ぜられなかった（向こうが読めないなど）── 前の姿に戻す。
                 state.dirty = false;
                 await openNote(path);
                 return;
             }
-            await ask('write', { path, text, force: true });
+            text = merged;
         }
         if (r && r.stamp) state.stamp = r.stamp;
+        // 書けた ── ここでファイルと一致したので、土台を進める。
+        state.base = text;
         state.dirty = false;
         el('state').textContent = '保存しました';
         await reload({ quiet: true });
@@ -4412,7 +4597,7 @@ async function shelveOne(n, to) {
     const out = (await ask('star', { text, shelf: to })).text;
     if (same) { await putWhole(out); return; }
     const r = await ask('write', { path: n.path, text: out });
-    if (r && r.conflict) throw new Error(n.path + ' は別のところから書き換えられています');
+    if (r && r.conflict) throw new Error(n.path + ' は別のところで更新されています');
 }
 
 async function retagOne(n, kind, from, to) {
@@ -4431,7 +4616,7 @@ async function retagOne(n, kind, from, to) {
         await putWhole(out);
     } else {
         const r = await ask('write', { path: n.path, text: out });
-        if (r && r.conflict) throw new Error(n.path + ' は別のところから書き換えられています');
+        if (r && r.conflict) throw new Error(n.path + ' は別のところで更新されています');
     }
 }
 
@@ -4725,12 +4910,12 @@ function drawCloud() {
     }
     if (clash.length) {
         rows.push('<div class="c clash"><b>' + clash.length
-            + ' 件、同時に書いた控えがあります</b>'
+            + ' 件、同時に更新された控えがあります</b>'
             + '<span>'
             + escapeHtml(clash.slice(0, 3).map((n) =>
                 n.clash.of + (n.clash.by ? '（' + n.clash.by + '）' : '')).join('・'))
             + (clash.length > 3 ? ' ほか' : '')
-            + ' ── クラウドが作ったもの。中身を見比べて、要るほうを残してください</span></div>');
+            + ' ── クラウドが作ったもの。中身を見比べて、どちらにするか決めてください</span></div>');
     }
     box.innerHTML = rows.join('');
     box.hidden = false;
@@ -5855,6 +6040,7 @@ const escapeAttr = escapeHtml;
     const saved = await window.amber.recall();
     state.root = saved.root;
     noBins = Array.isArray(saved.noBins) ? saved.noBins : [];
+    incomings = (saved.incomings && typeof saved.incomings === 'object') ? saved.incomings : {};
     // 外から動いたら教えてもらう ── 同じフォルダを二つの端末で触るのが
     // このアプリの前提なのに、開き直すまで出てこなかった。
     sayIfBlind(await window.amber.watch(saved.root));

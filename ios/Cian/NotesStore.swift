@@ -974,7 +974,7 @@ final class NotesStore: ObservableObject {
         if !stamp.isEmpty { params["stamp"] = stamp }
         let answer = try Cian.call("write", params)
         if answer["conflict"] as? Bool == true {
-            return .conflict(why: answer["why"] as? String ?? "開いたあとで書き換えられています")
+            return .conflict(why: answer["why"] as? String ?? "開いたあとで更新されています")
         }
         return .ok(stamp: answer["stamp"] as? String ?? "")
     }

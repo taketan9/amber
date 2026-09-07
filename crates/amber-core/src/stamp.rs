@@ -62,7 +62,7 @@ pub fn describe(path: &Path, since: &Stamp) -> String {
             let (a, b) = (since.len, now.len);
             format!("{name} は開いたあとで変わっています（{a} → {b} バイト）")
         }
-        Some(_) => format!("{name} は開いたあとで書き換えられています"),
+        Some(_) => format!("{name} は開いたあとで更新されています"),
     }
 }
 

@@ -642,13 +642,13 @@ struct ContentView: View {
                              + " ── クラウドが中身をまだ持ってきていないだけで、消えてはいません")
                     }
                     if !store.clashes.isEmpty {
-                        band(.orange, "\(store.clashes.count) 件、同時に書いた控えがあります",
+                        band(.orange, "\(store.clashes.count) 件、同時に更新された控えがあります",
                              store.clashes.prefix(3).map {
                                  ($0.clash?.of ?? "") + (($0.clash?.by.isEmpty == false)
                                      ? "（\($0.clash!.by)）" : "")
                              }.joined(separator: "・")
                              + (store.clashes.count > 3 ? " ほか" : "")
-                             + " ── クラウドが作ったもの。中身を見比べて、要るほうを残してください")
+                             + " ── クラウドが作ったもの。中身を見比べて、どちらにするか決めてください")
                     }
 
                     // 絞り込みの帯（窓と同じ三つの引き出し）。
