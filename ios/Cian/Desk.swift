@@ -89,9 +89,30 @@ final class Desk: ObservableObject {
     var current: Tab? { tabs.first { $0.id == showing } }
 
     /// Open a note, or come back to it if it is already open.
-    func open(_ note: Note, writing: Bool = false) {
+    /// ノートを机に出す。
+    ///
+    /// **ふつうに押したら、いまのタブを差し替える。** 前は押すたびに
+    /// `append` していて、入れ替える道がそもそも無かった ── 一覧を上から
+    /// 順に見ただけでタブが溜まる（窓に同じものを持ってきたら、1002 本の
+    /// 棚で 1002 タブになる）。増やしたいときだけ `fresh` で増やす
+    /// （窓の `⌥` 押しと、長押しの「新しいタブで開く」）。
+    ///
+    /// **もう机の上にあるなら、そのタブへ。** 同じノートが二枚並ぶと、
+    /// 片方に打った字がもう片方から見えない。
+    /// `store` は差し替えるときだけ要る（**置いていく書きかけを、先に
+    /// 書くため**）。渡さなければ書かない ── 呼ぶ側が既に書いている場合。
+    func open(_ note: Note, _ store: NotesStore? = nil,
+              writing: Bool = false, fresh: Bool = false) {
         if let at = tabs.firstIndex(where: { $0.id == note.path }) {
             if writing { tabs[at].reading = false }
+        } else if let now = tabs.firstIndex(where: { $0.id == showing }), !fresh {
+            // 差し替えるぶんの書きかけは、置いていかない ── `Tab` ごと
+            // 捨てるので、ここで書かないと消える。
+            if let store, tabs[now].dirty { _ = try? save(tabs[now].id, store) }
+            tabs[now] = Tab(note: note, reading: !writing)
+        } else if let now = tabs.firstIndex(where: { $0.id == showing }) {
+            // 新しいタブは、いまのすぐ右へ（窓と同じ）。
+            tabs.insert(Tab(note: note, reading: !writing), at: now + 1)
         } else {
             tabs.append(Tab(note: note, reading: !writing))
         }

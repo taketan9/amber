@@ -470,6 +470,10 @@ function drawList() {
             // `Shift` 押しは、起点からここまで。**一覧に出ている順**で
             // 数える（並び替えたら、見えている通りに繋がる）。
             if (e.shiftKey && state.anchor) { pickTo(at); return; }
+            // **`⌥` 押しで、新しいタブ。** `⌘` ではない ── あちらは
+            // 「まとめて選ぶ」が先に取っている。同梱先（crmaine）が
+            // 欲しがる鍵（`⌘W`・`⌘＋数字`・`⌃Tab`）は、こちらは取らない。
+            if (e.altKey) { if (state.picked.size) unpickAll(); openNote(at, { tab: true }); return; }
             // ふつうの押し下げは、いままで通り開く。**選びは畳む** ──
             // 選んだままにすると、次に押した「ゴミ箱へ」が二十本に効く。
             if (state.picked.size) unpickAll();
@@ -485,7 +489,19 @@ function drawList() {
             // ── 開くと選びが畳まれて、出したかった献立が消える。
             if (state.picked.has(at)) { pickedMenu({ x: e.clientX, y: e.clientY }); return; }
             if (state.picked.size) unpickAll();
-            if (!state.open || state.open.path !== at) await openNote(at);
+            // **「新しいタブで開く」は、開く前に。** 開いてしまうと、
+            // いまのタブが差し替わったあとで「新しいタブ」を押すことになる。
+            if (!state.open || state.open.path !== at) {
+                popMenu([
+                    { name: '開く', run: () => openNote(at) },
+                    { name: '新しいタブで開く', key: '⌥ 押し', run: () => openNote(at, { tab: true }) },
+                    { name: 'このノートにすること…', sep: true, run: async () => {
+                        await openNote(at);
+                        openMenu({ right: e.clientX + 190, bottom: e.clientY });
+                    } },
+                ], { x: e.clientX, y: e.clientY });
+                return;
+            }
             openMenu({ right: e.clientX + 190, bottom: e.clientY });
         };
     }
@@ -904,6 +920,7 @@ function makeEditor() {
                 readStale();
                 state.dirty = true;
                 el('state').textContent = '書きかけ';
+                drawStrip();
                 clearTimeout(saveTimer);
                 saveTimer = setTimeout(save, 900);
                 readSoon();
@@ -920,10 +937,229 @@ function makeEditor() {
     });
 }
 
+/* ── 机（タブ） ── */
+
+/// 開いているノートの列。**電話と同じ形**（`Desk.Tab`）── 一本ぶんの
+/// 持ちものを、まとめてしまっておく箱。
+///
+/// **エディタは一台のまま。** 電話は面をタブごとに持てるが、Monaco を
+/// ノートの数だけ建てるのは高い ── 替えるときに字と caret と巻き位置を
+/// 出し入れすれば、同じことになる。
+///
+/// **単発で開く一本（`state.guest`）は机に載せない。** あれは amber の棚の
+/// 外にある一本で、閉じれば元の机へ戻るもの ── 列に並べると、閉じたあとに
+/// 棚の外のノートがタブに残る。
+let tabs = [];
+let showing = null;
+
+/// タブ一本ぶんの持ちもの。**ここに挙げたものが、タブごとに別々**。
+/// 面（表示／コード）は窓ぜんぶのことなので、入れない ── タブごとに
+/// 変わると、替えるたびに面が飛ぶ。
+function stashTab() {
+    const t = tabs.find((x) => x.path === showing);
+    if (!t || !state.open) return;
+    t.keep = {
+        open: state.open,
+        stamp: state.stamp,
+        head: state.head,
+        base: state.base,
+        was: state.was,
+        dirty: state.dirty,
+        backs: backs.slice(),
+        forwards: forwards.slice(),
+        lastSaved,
+        incoming,
+        body: editor ? editor.getValue() : '',
+        at: editor ? editor.getPosition() : null,
+        top: editor ? editor.getScrollTop() : 0,
+    };
+}
+
+/// しまってあったものを出す。**読み直さない** ── タブに戻ったときに
+/// ファイルから読み直すと、打ちかけの字が消える（タブがある意味が無い）。
+function restoreTab(t) {
+    const k = t.keep;
+    if (!k) return false;
+    state.open = k.open;
+    state.stamp = k.stamp;
+    state.head = k.head;
+    state.base = k.base;
+    state.was = k.was;
+    state.dirty = k.dirty;
+    backs = k.backs.slice();
+    forwards = k.forwards.slice();
+    lastSaved = k.lastSaved;
+    incoming = k.incoming;
+    if (editor) {
+        loading = true;
+        editor.setValue(k.body);
+        loading = false;
+        if (k.at) editor.setPosition(k.at);
+        editor.setScrollTop(k.top || 0);
+    }
+    return true;
+}
+
+/// 机の帯を描く。**一本のときは出さない** ── ふだんの画面を、タブのために
+/// 一段ぶん狭くしない（電話も同じ）。
+/// 最後に描いた机の姿。**同じなら描き直さない** ── 打つたびに帯を組み
+/// 直すと、掴んでいる巻き位置が毎回先頭へ戻る。
+let stripWas = null;
+
+function drawStrip() {
+    const box = el('strip');
+    const was = box.hidden;
+    box.hidden = state.guest || tabs.length < 2;
+    // 出たり引っ込んだりすると、下の面の高さが変わる ── Monaco は自分で
+    // 気づかないので、測り直させる（畳む鍵と同じ扱い）。
+    if (was !== box.hidden && editor) setTimeout(() => editor.layout(), 0);
+    if (box.hidden) { box.innerHTML = ''; stripWas = null; return; }
+    // **いま出しているタブは、しまってあるものを見ない。** `keep` が書かれる
+    // のは離れるときなので、出している間ずっと古い ── 書きかけの点が
+    // 点かないし、題を直しても帯が変わらない。生のほうを見る。
+    const shape = tabs.map((t) => {
+        const here = t.path === showing;
+        const row = state.notes.find((x) => x.path === t.path);
+        const name = (here && state.open && state.open.title)
+            || (t.keep && t.keep.open && t.keep.open.title)
+            || (row && row.title) || baseOf(t.path);
+        return { path: t.path, here, name: name || '（タイトルなし）',
+                 dirty: here ? state.dirty : !!(t.keep && t.keep.dirty) };
+    });
+    const key = JSON.stringify(shape);
+    if (key === stripWas) return;
+    stripWas = key;
+    box.innerHTML = shape.map((t, n) =>
+        '<div class="tab' + (t.here ? ' on' : '') + '" data-n="' + n + '"'
+        + ' title="' + escapeAttr(t.path) + '">'
+        + (t.dirty ? '<span class="d"></span>' : '')
+        + '<span class="t">' + escapeHtml(t.name) + '</span>'
+        + '<button class="x" title="閉じる">✕</button></div>').join('');
+    for (const d of box.querySelectorAll('.tab')) {
+        const t = tabs[Number(d.dataset.n)];
+        d.onmousedown = (e) => {
+            // まん中押しで閉じる（机の上のふつう）。
+            if (e.button === 1) { e.preventDefault(); closeTab(t.path); return; }
+            if (e.button !== 0) return;
+            if (e.target.closest('.x')) return;      // ✕ は下の `onclick` が受ける
+            if (inNote(document.activeElement)) e.preventDefault();
+            openNote(t.path, { keep: true });
+        };
+        d.querySelector('.x').onclick = (e) => { e.stopPropagation(); closeTab(t.path); };
+        d.oncontextmenu = (e) => {
+            e.preventDefault();
+            const at = tabs.indexOf(t);
+            popMenu([
+                { name: '閉じる', run: () => closeTab(t.path) },
+                { name: 'ほかを閉じる', dim: tabs.length < 2,
+                  run: () => { for (const o of tabs.slice()) if (o.path !== t.path) closeTab(o.path); } },
+                { name: '右のぜんぶを閉じる', dim: at >= tabs.length - 1,
+                  run: () => { for (const o of tabs.slice(at + 1)) closeTab(o.path); } },
+                { name: '一覧でこの本を選ぶ', sep: true, run: () => openNote(t.path, { keep: true }) },
+                { name: 'Finder で表示', run: () => window.amber.reveal(t.path) },
+            ], { x: e.clientX, y: e.clientY });
+        };
+    }
+    const on = box.querySelector('.tab.on');
+    if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+/// タブを閉じる。**書きかけは、黙って捨てない。**
+///
+/// この窓は打てば勝手に保存されるので、閉じる前に一度書いてから閉じる
+/// ── 訊かない（訊くほうが、この窓の作りに合っていない）。
+async function closeTab(path) {
+    const at = tabs.findIndex((t) => t.path === path);
+    if (at < 0) return;
+    if (path === showing) {
+        clearTimeout(readTimer);
+        await syncRead();
+        if (state.dirty) await save();
+        stashTab();
+    } else {
+        const t = tabs[at];
+        // 出していないタブの書きかけも、置いていかない。
+        if (t.keep && t.keep.dirty) await saveTab(t);
+    }
+    tabs.splice(at, 1);
+    rememberTabs();
+    if (path !== showing) { drawStrip(); return; }
+    if (!tabs.length) {
+        showing = null;
+        state.open = null;
+        state.dirty = false;
+        applyView();
+        drawStrip();
+        drawList();
+        return;
+    }
+    // **左の隣へ。** そこから来たので ── 端まで飛ぶと、居た場所を見失う。
+    const next = tabs[Math.min(Math.max(0, at - 1), tabs.length - 1)];
+    await openNote(next.path, { keep: true });
+}
+
+/// 出していないタブの書きかけを、ファイルへ。**開き直さずに書く** ──
+/// 閉じるためだけに面を組み直すのは高いし、caret が飛ぶ。
+async function saveTab(t) {
+    const k = t.keep;
+    if (!k) return;
+    try {
+        await ask('write', { path: t.path, text: k.head + k.body, stamp: k.stamp });
+    } catch { /* 書けなくても、閉じるのは止めない ── 字はファイルに残っている */ }
+}
+
+/// 開いていたタブを憶える。**次に開いたとき、同じ机に戻る**（電話と同じ）。
+function rememberTabs() {
+    if (state.guest) return;
+    window.amber.remember({ tabs: tabs.map((t) => t.path) });
+}
+
 async function openNote(path, opts) {
     // 一覧に無い一本（外から来たもの）は、`opts.guest` が持ってくる。
     const note = (opts && opts.guest) || state.notes.find((n) => n.path === path);
     if (!note) return;
+    // **机の上を整えるのが先。** どのタブに出すかを決めてから読む。
+    if (!opts || !opts.guest) {
+        const at = tabs.findIndex((t) => t.path === path);
+        if (at >= 0) {
+            // もう机の上にある ── そのタブへ。
+            if (showing !== path) {
+                clearTimeout(readTimer);
+                await syncRead();
+                if (state.dirty) await save();
+                stashTab();
+                showing = path;
+                // **しまってあるなら、読み直さない。** 打ちかけの字を
+                // 失わないための机なので、戻るだけで捨てては元も子もない。
+                if (restoreTab(tabs[at])) {
+                    if (!opts || !opts.walking) trailPush(path);
+                    afterTab();
+                    return;
+                }
+            } else if (opts && opts.keep && tabs[at].keep) {
+                // 同じタブを押しただけ ── 何もしない。
+                return;
+            }
+        } else if (opts && opts.tab && showing) {
+            // **新しいタブは、いまのすぐ右へ。** 端に足すと、たどっていた
+            // 順と並びが合わなくなる。
+            clearTimeout(readTimer);
+            await syncRead();
+            if (state.dirty) await save();
+            stashTab();
+            tabs.splice(tabs.findIndex((t) => t.path === showing) + 1, 0, { path, keep: null });
+            showing = path;
+        } else if (showing) {
+            // いまのタブを差し替える（ふつうに一覧を押したとき）。
+            const now = tabs.findIndex((t) => t.path === showing);
+            if (now >= 0) tabs[now] = { path, keep: null };
+            showing = path;
+        } else {
+            tabs = [{ path, keep: null }];
+            showing = path;
+        }
+        rememberTabs();
+    }
     // たどっている最中は積まない ── 積むと前へ戻れなくなる。
     if (!opts || !opts.walking) trailPush(path);
     // 開く前に、書きかけを置いていかない。**読む面はまだ字になっていない**
@@ -983,16 +1219,23 @@ async function openNote(path, opts) {
     // ここが動くのは、**ファイルと確かに一致した瞬間**だけ。
     state.base = head + body;
     loadIncoming();
-    drawBand();
-    drawTitle();
     el('state').textContent = when(note.updated)
         + ((note.tags || []).length ? '  ' + note.tags.map((t) => '#' + t).join(' ') : '');
+    afterTab();
+}
+
+/// 一本を出したあとに、画面を揃える。**読んだときも、タブに戻ったときも
+/// 同じ一組**を通す ── 二か所に並べると、片方にだけ増えた描き直しができる。
+function afterTab() {
+    drawBand();
+    drawTitle();
     drawCount();
     drawSteps();
     applyView();
     drawZones();
+    drawStrip();
     if (!state.guest) drawList();
-    window.amber.remember({ open: path });
+    if (state.open) window.amber.remember({ open: state.open.path });
 }
 
 /// 帯の題。**開いたときだけでなく、保存のたびに書き直す。**
@@ -1657,6 +1900,7 @@ function readChanged() {
     if (syncing || view === 'write' || !state.open) return;
     state.dirty = true;
     el('state').textContent = '書きかけ';
+    drawStrip();
     clearTimeout(readTimer);
     readTimer = setTimeout(syncRead, 700);
 }
@@ -4370,6 +4614,7 @@ async function save() {
         state.dirty = false;
         el('state').textContent = '保存しました';
         await freshenRow(path);
+        drawStrip();
         setTimeout(() => {
             if (!state.dirty && state.open && state.open.path === path) {
                 el('state').textContent = when(state.open.updated);
@@ -4754,6 +4999,8 @@ const CMDS = [
     // どちらが拡大かは記号のどこにも書いていない ── 帯の幅を食っていた
     // うえ、押してみるまで分からなかった。
     { id: 'toc', name: '目次', key: '⌘⇧O', need: 'note', menu: true, run: () => toggleToc() },
+    { id: 'closetab', name: 'このタブを閉じる', need: 'note', menu: true,
+      run: () => closeTab(showing) },
     { id: 'zen', name: 'ノートだけを大きく', key: 'F12', need: 'note', menu: true, run: () => setZen(!zen) },
     { id: 'delete', name: 'ゴミ箱へ入れる', need: 'note', menu: true, sep: true, run: cmdDelete },
 
@@ -6769,7 +7016,17 @@ const escapeAttr = escapeHtml;
     };
 
     await reload();
-    if (saved.open && state.notes.some((n) => n.path === saved.open)) await openNote(saved.open);
+    // **開いていた机に戻る。** 電話が憶えているのと同じ ── 閉じて開いたら
+    // 一本きりに戻るのでは、机として使えない。
+    //
+    // 憶えた道のうち**いま棚にあるものだけ**を並べる（消えた・移した本を
+    // 並べると、押せないタブが残る）。中身はまだ読まない ── 押されたぶん
+    // だけ読めば足りる（`restoreTab` が空を返せば、そこで読む）。
+    const back = (saved.tabs || []).filter((at) => state.notes.some((n) => n.path === at));
+    if (back.length) tabs = back.map((at) => ({ path: at, keep: null }));
+    const first = (saved.open && back.includes(saved.open)) ? saved.open : back[0];
+    if (first) { showing = first; await openNote(first, { keep: true }); }
+    else if (saved.open && state.notes.some((n) => n.path === saved.open)) await openNote(saved.open);
 
     // **保存しかけたまま閉じない。**
     window.addEventListener('beforeunload', () => { if (state.dirty) save(); });

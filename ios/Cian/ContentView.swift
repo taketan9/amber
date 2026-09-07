@@ -292,7 +292,7 @@ struct ContentView: View {
                     // **作ったノートも「表示」で開く。** 窓がそうなので
                     // 電話も同じに ── 打ちたくなったら、面のどこを叩いても
                     // その場で書く面に入る（`NoteView`）。
-                    desk.open(note)
+                    desk.open(note, store)
                     showing = true
                 }
             }, known: store.allTags)
@@ -311,7 +311,7 @@ struct ContentView: View {
     @ViewBuilder
     private func row(_ note: Note) -> some View {
                 Button {
-                desk.open(note)
+                desk.open(note, store)
                 showing = true
             } label: {
                     VStack(alignment: .leading, spacing: 2) {
@@ -400,6 +400,17 @@ struct ContentView: View {
                     .tint(.orange)
                 }
                 .contextMenu {
+                    // **新しいタブで開く。** 押しただけならいまのタブを
+                    // 差し替えるので（窓と同じ）、増やす道をここに置く ──
+                    // 電話に右押しは無いので、長押しがその手ぶり。窓の
+                    // 「⌥ 押し」と同じことをする。
+                    Button {
+                        desk.open(note, store, fresh: true)
+                        showing = true
+                    } label: {
+                        Label("新しいタブで開く", systemImage: "rectangle.stack.badge.plus")
+                    }
+                    Divider()
                     // The order they are reached for. Favouriting is the one
                     // done in passing; moving is filing; exporting is the one
                     // that leaves cian, and leaving is always last.
@@ -470,7 +481,7 @@ struct ContentView: View {
         guard let want = ring.wanted else { return }
         guard let note = store.notes.first(where: { $0.path == want }) else { return }
         ring.wanted = nil
-        desk.open(note)
+        desk.open(note, store)
         showing = true
     }
 
@@ -726,7 +737,7 @@ struct ContentView: View {
                         Spacer()
                         NavigationLink("ぜんぶ見る") {
                             Stars(store: store) { note in
-                                desk.open(note)
+                                desk.open(note, store)
                                 showing = true
                             }
                         }
@@ -863,7 +874,7 @@ struct ContentView: View {
             // when you are not, what you want is to see where things are.
             if treeing2 {
                 Nest(store: store, open: { note in
-                    desk.open(note)
+                    desk.open(note, store)
                     showing = true
                 }, row: { note in AnyView(row(note)) })
             } else {

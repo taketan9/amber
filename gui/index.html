@@ -439,6 +439,39 @@ body.mac #listhead { padding-top: 30px; }
 }
 #empty { padding: 34px 20px; color: var(--ink-3); font-size: 13px; text-align: center; }
 
+/* ── 机（タブ） ── */
+#strip {
+  display: flex; gap: 4px; align-items: center; flex: none;
+  padding: 5px 10px; background: var(--list);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+}
+#strip::-webkit-scrollbar { display: none; }
+.tab {
+  display: flex; align-items: center; gap: 5px; flex: none;
+  max-width: 16ch; padding: 3px 6px 3px 9px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); font-size: 12px; color: var(--ink-2);
+  cursor: pointer; user-select: none;
+}
+.tab:hover { background: var(--hover); }
+/* いま出しているタブ。**下の縁で言う** ── 地色だけだと、選んだノートの
+   地色（琥珀）と見分けがつかない。 */
+.tab.on {
+  background: var(--paper); color: var(--ink); font-weight: 600;
+  border-color: var(--amber); box-shadow: inset 0 -2px 0 var(--amber);
+}
+.tab .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* まだ書き込まれていない印。**閉じるかどうかを決める、まさにその場所で言う。** */
+.tab .d { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex: none; }
+.tab .x {
+  border: 0; background: none; padding: 0 2px; cursor: pointer;
+  color: var(--ink-3); font-size: 11px; line-height: 1; flex: none;
+}
+.tab .x:hover { color: var(--ink); }
+/* ノートだけを大きくしているときは、机も畳む。 */
+body.zen #strip { display: none; }
+
 /* ── 右: 中身 ── */
 #pane { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--paper); }
 /* **帯には、幅の要るものだけ置く。** 1180px（既定の窓）だと中の列が
@@ -1160,6 +1193,10 @@ body.dropping::after {
       <div id="blankmark"></div>
       <div>左からノートを選ぶか、<b>新しいノート</b>で書きはじめてください</div>
     </div>
+    <!-- **机（タブ）。** 題の帯の下、ノートの上 ── 電話と同じ並び。
+         一本しか開いていないときは出ない（ふだんの画面を、タブのために
+         一段ぶん狭くしない）。 -->
+    <div id="strip" hidden></div>
     <div id="work" hidden>
       <!-- **入ってきたものの報せ。** 面の上に置く ── 「並べて」でも
            「コード」でも同じことが起きているので、片方の面の中に入れると
