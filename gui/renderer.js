@@ -7,6 +7,17 @@
 // 結果が違う**が、一度の編集で作れてしまう。
 
 const el = (id) => document.getElementById(id);
+
+/// 道の最後の一片。**区切りは `/` だけではない。**
+///
+/// core が返す道は土台のもので、Windows では `C:\Users\…\ノート.md`。
+/// `split('/')` で切ると**道まるごと**が名前になる ── 書き出すと
+/// `C：Users…ノート.md` のような名前のファイルができ、ゴミ箱へ入れる
+/// 確認にも道が出る。絵の在りかを求めるほうは、切り落とせずに `''` に
+/// なって**絵が一枚も出なくなる**（Windows でだけ）。
+const baseOf = (at) => String(at || '').split(/[/\\]/).pop();
+/// その一片を落とした残り（末尾の区切りは残す ── 後ろに名前を繋ぐため）。
+const dirOf = (at) => String(at || '').replace(/[^/\\]*$/, '');
 const ask = (method, params) => window.amber.call(method, params || {});
 
 /// **この画面を開いているアプリが、その口を持っていないとき。**
@@ -690,7 +701,7 @@ function drawZones() {
     if (!editor || !state.open) return;
     const model = editor.getModel();
     if (!model) return;
-    const dir = state.open.path.replace(/[^/]*$/, '');
+    const dir = dirOf(state.open.path);
     const want = [];
     for (let n = 1; n <= model.getLineCount(); n++) {
         const t = model.getLineContent(n).trim();
@@ -3138,7 +3149,7 @@ function keepMark(from, to) {
 }
 
 function findPictures() {
-    const dir = state.open ? state.open.path.replace(/[^/]*$/, '') : '';
+    const dir = state.open ? dirOf(state.open.path) : '';
     for (const img of el('read').querySelectorAll('img')) {
         const src = img.getAttribute('src') || '';
         if (src && !/^[a-z][a-z0-9+.-]*:/i.test(src) && !src.startsWith('//')) {
@@ -4419,7 +4430,7 @@ async function editNote(change) {
 
 /// いま開いているノートの、拡張子を外した名前。
 function stem() {
-    const f = (state.open?.path || 'note').split('/').pop();
+    const f = baseOf(state.open?.path || 'note');
     return f.replace(/\.[^.]*$/, '');
 }
 
@@ -5005,9 +5016,26 @@ async function cmdDelete() {
     // 人には理由を見せる。理由が無いときだけ、無いなりの一行。
     const done = await window.amber.trash(path);
     if (done !== true) {
+        // **断られたら、行き止まりにしない。**
+        //
+        // Windows の会社端末では `Documents` が OneDrive へ寄せられている
+        // ことがあり（Known Folder Move）、そこにはゴミ箱が無い ──
+        // `Failed to perform delete operation` で断られる。ネットワークの
+        // 置き場所も同じ。ここで黙ると、**そのノートは二度と消せない**。
+        //
+        // **消すのは、訊いてから。** ゴミ箱が「戻せる」ことの担保だった
+        // ので、それが無い以上そう言う ── 言わずに消すほうが強すぎる。
         const why2 = done && done.why;
-        say('ゴミ箱へ入れられません' + (why2 ? ': ' + why2 : ''));
-        return;
+        const go = await askYes('ゴミ箱へ入れられませんでした'
+            + (why2 ? '（' + why2 + '）' : '')
+            + '。このまま消しますか ── **戻せません**');
+        if (!go) return;
+        try {
+            await ask('delete', { path });
+        } catch (e) {
+            say('消せません: ' + why(e));
+            return;
+        }
     }
     state.open = null;
     state.dirty = false;
