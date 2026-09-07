@@ -99,6 +99,19 @@ jobs:
       # **一往復して、本当に話すか見る。** 組めたことと動くことは別で、
       # 動かないほうは配ったあとにしか出ない。`version` は何も要らない
       # 唯一の問いなので、煙を見るのにちょうどいい。
+      # **判断の試験を、Windows の上でも回す。**
+      #
+      # 道の区切りと鍵盤の Enter で、mac では一生出ない不具合を二度出した
+      # （依頼 342・344）。`win-test.js` は道と鍵の形を渡すだけなので
+      # どの土台でも走るが、**本物の Windows でも走らせておく** ── 「渡した
+      # 形」が本当に Windows の形かどうかは、Windows でしか確かめられない。
+      # 依存は要らない（`node_modules` は積まない）。
+      - name: Windows の形を、Windows の上で
+        if: runner.os == 'Windows'
+        run: |
+          node scripts/win-test.js
+          node scripts/diagram-test.js
+
       - name: 一往復してみる（Windows）
         if: runner.os == 'Windows'
         shell: pwsh
