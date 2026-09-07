@@ -120,11 +120,22 @@ enum Diagrams {
         window.webkit.messageHandlers.tall.postMessage(Math.ceil(h) + 2);
       }));
     }
+    // mermaid が測るために建てた仮の箱を片付ける。**`document.body` の
+    // 直下だけ** ── 返ってくる SVG にも同じ id が付くので、id だけで
+    // 消すと、いま面に挿した図そのものが消える（窓でそうなった）。
+    window.sweep = (id) => {
+      for (const at of [id, 'd' + id]) {
+        const n = document.getElementById(at);
+        if (n && n.parentElement === document.body) n.remove();
+      }
+      for (const x of document.body.querySelectorAll(':scope > [id^="dm"]')) x.remove();
+    };
     window.draw = async (src, opts, bad) => {
       const box = document.getElementById('box');
+      const id = 'm' + Math.random().toString(36).slice(2);
       try {
         mermaid.initialize(opts);
-        const { svg } = await mermaid.render('m' + Math.random().toString(36).slice(2), src);
+        const { svg } = await mermaid.render(id, src);
         box.innerHTML = svg;
       } catch (e) {
         // **Show what was written, and why it did not draw.** An empty
@@ -136,6 +147,8 @@ enum Diagrams {
         p.textContent = '図にできません: ' + String((e && e.message) || e) + '\\n\\n' + src;
         box.innerHTML = '';
         box.append(p);
+      } finally {
+        window.sweep(id);
       }
       tell();
     };
@@ -296,6 +309,13 @@ struct Canvas: UIViewRepresentable {
                 + mind
             let opts: [String: Any] = [
                 "startOnLoad": false,
+                // **書き損じの絵を、mermaid に描かせない。**
+                //
+                // 既定では、字が通らないと mermaid は自分で赤い絵を描いて
+                // `document.body` に置いていく ── こちらの `catch` は届かない。
+                // 打つたびに描き直すので一文字ごとに一枚積み上がり、積まれた
+                // 絵が幅を持つので面が潰れる。窓で実際にそうなった（依頼 347）。
+                "suppressErrorRendering": true,
                 "theme": "base",
                 "themeVariables": vars.merging(["darkMode": dark ? "true" : "false"]) { a, _ in a },
                 "themeCSS": css,

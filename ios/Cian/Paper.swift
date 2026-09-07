@@ -36,6 +36,8 @@ struct Paper: UIViewRepresentable {
     let dark: Bool
     /// 升を押したときなど、core を通したいことがある。
     var onCheck: ((Int, Bool) -> Void)?
+    /// いま見ている（打っている）ファイルの行 ── 面を替えるときに使う。
+    var onAt: ((Int) -> Void)?
     /// 図を長押しされた（工房を開く）。
     var onFix: ((String) -> Void)?
     /// 道具の帯からの合図を受け取る糸。
@@ -49,6 +51,9 @@ struct Paper: UIViewRepresentable {
         config.userContentController.add(context.coordinator, name: "tick")
         config.userContentController.add(context.coordinator, name: "fix")
         config.userContentController.add(context.coordinator, name: "trouble")
+        // **いまどこを見ているか。** 面を替えたときに同じ場所へ立つために
+        // 要る ── 替えてから訊くのでは、もう前の面が無い。
+        config.userContentController.add(context.coordinator, name: "at")
         config.setURLSchemeHandler(context.coordinator, forURLScheme: Waiter.scheme)
         let web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
@@ -162,6 +167,30 @@ struct Paper: UIViewRepresentable {
         window.webkit.messageHandlers.wrote.postMessage(md);
       }, 500);
     });
+
+    /// **いまどこを見ているかを、こまめに伝えておく。**
+    ///
+    /// 替えるときに訊きに行く形にすると、答えを待つあいだ面が止まる ──
+    /// 先に渡しておけば、替える側は待たずに読める。伝えるのは caret の
+    /// あるかたまり、無ければ**いま上に見えているかたまり**の行番号。
+    let tellAt = () => {
+      let n = document.getSelection() && document.getSelection().anchorNode;
+      if (n && n.nodeType === 3) n = n.parentElement;
+      let at = n && box.contains(n) ? n.closest('#paper > *') : null;
+      if (!at) {
+        const top = box.getBoundingClientRect().top;
+        for (const b of box.children) {
+          if (b.getBoundingClientRect().bottom > top + 4) { at = b; break; }
+        }
+      }
+      const line = at ? Number(at.dataset.line) : NaN;
+      if (!Number.isNaN(line)) window.webkit.messageHandlers.at.postMessage(line);
+    };
+    let atHold = null;
+    const tellSoon = () => { clearTimeout(atHold); atHold = setTimeout(tellAt, 250); };
+    document.addEventListener('selectionchange', tellSoon);
+    window.addEventListener('scroll', tellSoon, { passive: true });
+    box.addEventListener('scroll', tellSoon, { passive: true });
 
     /// 升は打つものではなく押すもの ── 行番号で裏返す（何番目かではない）。
     box.addEventListener('click', (e) => {
@@ -296,12 +325,23 @@ struct Paper: UIViewRepresentable {
         lib = globalThis.mermaid || null;
         if (!lib) return;
         // 図の色も設定も、窓と同じもの（`Drawing` が組み立てて渡す）。
-        lib.initialize(window.__mmd || { startOnLoad: false, securityLevel: 'strict' });
+        lib.initialize(window.__mmd
+          || { startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true });
       }
+      // mermaid が測るために建てた仮の箱を片付ける。**`document.body` の
+      // 直下だけ** ── 返ってくる SVG にも同じ id が付くので、id だけで
+      // 消すと、いま面に挿した図そのものが消える（窓でそうなった）。
+      const sweep = (id) => {
+        for (const at of [id, 'd' + id]) {
+          const n = document.getElementById(at);
+          if (n && n.parentElement === document.body) n.remove();
+        }
+        for (const x of document.body.querySelectorAll(':scope > [id^="dm"]')) x.remove();
+      };
       for (const code of blocks) {
+        const id = 'm' + Math.random().toString(36).slice(2);
         try {
-          const { svg } = await lib.render('m' + Math.random().toString(36).slice(2),
-                                           code.textContent);
+          const { svg } = await lib.render(id, code.textContent);
           const div = document.createElement('div');
           div.className = 'mermaid';
           div.innerHTML = svg;
@@ -315,6 +355,7 @@ struct Paper: UIViewRepresentable {
           div.contentEditable = 'false';
           code.parentElement.replaceWith(div);
         } catch { /* 描けない図は、書いた字のまま残す */ }
+        finally { sweep(id); }
       }
     }
     </script></body></html>
@@ -360,6 +401,9 @@ struct Paper: UIViewRepresentable {
                 guard md != shown else { return }
                 shown = md
                 parent.text = md
+            case "at":
+                guard let line = (m.body as? NSNumber)?.intValue else { return }
+                parent.onAt?(line)
             case "tick":
                 guard let d = m.body as? [String: Any],
                       let line = (d["line"] as? NSNumber)?.intValue,

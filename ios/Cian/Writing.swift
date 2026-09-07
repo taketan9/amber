@@ -160,7 +160,8 @@ struct NoteView: View {
                 VStack(spacing: 0) {
                     Paper(text: $tab.text, folder: folder,
                           dark: look == .dark || (look == .auto && scheme == .dark),
-                          onCheck: tickLine, onFix: { fixingText = Fixing(md: $0) },
+                          onCheck: tickLine, onAt: { tab.at = $0 },
+                          onFix: { fixingText = Fixing(md: $0) },
                           hand: hand)
                     // **道具の帯は、表示の面にも要る。** 打てる面なのに
                     // 記号の入れ方が無いと、`#` や `- [ ]` を覚えている人に

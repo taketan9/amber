@@ -43,11 +43,23 @@ final class Desk: ObservableObject {
         /// because it belongs to the note, not to the moment on screen: swipe
         /// away and back and you are where you left off.
         var pick = NSRange(location: 0, length: 0)
+        /// 「表示」の面で、いま見ている（打っている）**ファイルの行**。
+        /// **面を替えても同じ場所に居る**ために要る ── 替えたあとでは、
+        /// 前の面の caret も巻き位置も残っていない。まだ分からなければ -1。
+        var at = -1
 
         var id: String { note.path }
         /// The file, as it would be written.
         var whole: String { head + text }
         var dirty: Bool { loaded && text != saved }
+
+        /// 書く面の caret が、**ファイルの何行目**にあるか（前書きを含む）。
+        /// core の行番号はファイルの行、この面が持っているのは本文だけ。
+        var lineOfCaret: Int {
+            let head2 = head.isEmpty ? 0 : head.components(separatedBy: "\n").count - 1
+            let upto = (text as NSString).substring(to: min(pick.location, (text as NSString).length))
+            return head2 + upto.components(separatedBy: "\n").count - 1
+        }
 
         static func == (a: Tab, b: Tab) -> Bool { a.id == b.id && a.text == b.text && a.reading == b.reading }
     }
@@ -416,9 +428,16 @@ struct DeskView: View {
             Button {
                 guard let id = here?.id else { return }
                 if here?.reading == false { desk.redraw(id, store) }
-                if let at = desk.tabs.firstIndex(where: { $0.id == id }) {
-                    desk.tabs[at].reading.toggle()
-                }
+                guard let n = desk.tabs.firstIndex(where: { $0.id == id }) else { return }
+                // **替える前に、どこに居たかを控える。** 替えたあとでは、
+                // 前の面の caret も巻き位置も残っていない ── 替えるたびに
+                // 頭へ飛ばされると、そのつど探し直すことになる（窓と同じ
+                // 直し・依頼 346）。飛ぶ先を持つのは desk、飛ぶのは面。
+                let line = desk.tabs[n].reading
+                    ? desk.tabs[n].at
+                    : desk.tabs[n].lineOfCaret
+                desk.tabs[n].reading.toggle()
+                if line >= 0 { desk.jumping = line }
             } label: {
                 Image(systemName: here?.reading == true ? "eye.slash" : "eye")
             }
