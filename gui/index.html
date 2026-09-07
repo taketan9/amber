@@ -37,6 +37,10 @@
   --ink-3:   #9a8a6f;
   --sel:     #f7e2b6;
   --hover:   #f1e6cf;
+  /* 名札のシュワ。**明るい地では濃い琥珀** ── `--amber`（#f0a52b）は
+     明るい黄橙で、白い紙の上の一文字だと薄れて沈む。テーマごとの
+     「濃い琥珀」に乗せておけば、紙でもあゆでも、その画面の色になる。 */
+  --brand-s: var(--amber-deep);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
@@ -52,6 +56,10 @@
     --ink-3:   #8a7d66;
     --sel:     #3b2f16;
     --hover:   #262017;
+    /* **ここだけ名指しする。** OS まかせの暗い方は `--amber-deep` を
+       上書きしていないので、明るい版の #b5760f が残っている ── 暗い紙の
+       上ではただの焦げ茶になる。暗い地は `--amber` のほうが灯る。 */
+    --brand-s: #f0a52b;
   }
 }
 
@@ -71,6 +79,9 @@
   --line: #302a20; --line-2: #262017;
   --ink: #f0e7d6; --ink-2: #bcac91; --ink-3: #8a7d66;
   --sel: #3b2f16; --hover: #262017;
+  /* 名札のシュワは `--amber-deep`（#e0a94e）ではなく `--amber` ──
+     暗い紙の上では、落ち着いた方は引っ込む。灯るほうを採った。 */
+  --brand-s: #f0a52b;
 }
 
 /* ayu ── 明るいほう。`--amber-deep` はリンクと升に乗るので、
@@ -715,7 +726,20 @@ body.vim #vim { display: block; }
   background: var(--paper); border: 1px solid var(--line); border-radius: 13px;
   box-shadow: 0 18px 48px rgba(0,0,0,.3); overflow: hidden;
 }
+/* **名前を名前として見せる、ただ一つの場所。**
+   ここだけは題でも行でもなく「名札」なので、綴りに琥珀を一点差せる
+   ── ホーム画面の名札も窓の題名も OS が描くので色を持てず、
+   README は GitHub が色を落とす。 */
+#sheet .brand { padding: 16px 15px 13px; }
+#sheet .brand .nm { font-size: 27px; font-weight: 600; color: var(--ink); line-height: 1.2; }
+#sheet .brand .ex { font-size: 11.5px; color: var(--ink-3); margin-top: 3px; }
+/* **明るい地では濃い琥珀、暗い地では明るい琥珀。**
+   `--amber`（#f0a52b）は明るい黄橙なので、明るい紙の上では一文字だけだと
+   薄れて沈む ── 地の明暗で入れ替える（`--amber-deep` は既にその色）。 */
+#sheet .brand .s { color: var(--brand-s); }
 #sheet .hd { padding: 11px 15px 0; font-size: 12px; color: var(--ink-3); }
+/* 名札が題を兼ねる小窓では、題は空になる ── 空のまま置くと余白だけが残る。 */
+#sheet .hd:empty { display: none; }
 #sheet input {
   margin: 7px 12px 10px; padding: 8px 11px; border-radius: 9px; font: inherit;
   font-size: 14.5px; background: var(--bg); border: 1px solid var(--line);
@@ -1034,6 +1058,7 @@ body.dropping::after {
     </div>
   </div>
   <div id="veil" hidden><div id="sheet">
+    <div class="brand" hidden></div>
     <div class="hd"></div>
     <input type="text" spellcheck="false">
     <div class="items"></div>

@@ -67,25 +67,38 @@ struct About: View {
         return "amber-server " + (out["amber"] as? String ?? "?")
     }
 
+    /// **名前を名前として見せる、電話でただ一つの場所。**
+    ///
+    /// シュワだけ琥珀に差せるのはここだけ ── ホーム画面の名札も
+    /// 「ファイル」に出るフォルダ名も iOS が描くので、色を持てない。
+    /// 明るい地では濃い琥珀（#b5760f）、暗い地では明るい琥珀（#f0a52b）
+    /// ── `BrandSchwa` がその二色を持っている。`AccentColor` とは別に
+    /// した: あれはアプリ中の釦を塗る色で、ここだけ変えたいときに
+    /// 一緒に動いてしまう。
+    private var plate: Text {
+        Text("amb")
+            + Text("ə").foregroundColor(Color("BrandSchwa"))
+            + Text("r")
+    }
+
     var body: some View {
         List {
+            // **名前が先、数字があと。** 開いた瞬間に名前が目に入る。
+            // 名前の意味は献立にも帯にも出さない ── 一度読めば済むもので、
+            // 毎日見る場所を取る値打ちは無い（設定に名前の欄を作らなかった
+            // のと同じ理由）。
+            Section {
+                plate.font(.title.weight(.semibold))
+                Text("Advanced Markdown Browser & Editor for Readability")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             Section {
                 LabeledContent("画面", value: app)
                 LabeledContent("エンジン", value: engine)
                 LabeledContent("ノートの置き場所", value: store?.rootName ?? "（この画面からは見えません）")
             } footer: {
                 Text("不具合を伝えるときは、この三つを添えてください。")
-            }
-            // **名前の意味は、名前を見た人が探す場所に置く。**
-            // 献立にも帯にも出さない ── 一度読めば済むもので、毎日見る
-            // 場所を取る値打ちは無い（設定に名前の欄を作らなかったのと
-            // 同じ理由）。
-            Section {
-                Text("ambər")
-                    .font(.title3.weight(.semibold))
-                Text("Advanced Markdown Browser & Editor for Readability")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
         }
         .navigationTitle("ambər について")

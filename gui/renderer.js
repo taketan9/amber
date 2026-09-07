@@ -5269,11 +5269,17 @@ async function cmdAbout() {
     } catch (e) {
         engine = '答えません: ' + e.message;
     }
-    await askPick('ambər について', [
+    // **名札が題を兼ねる。** 上に「ambər について」と書いて、その下に
+    // もう一度 ambər と出すのは、同じことを二度言っているだけ。
+    await askPick('', [
         { name: '画面', sub: 'ambər ' + (await window.amber.appVersion() || '?'), value: null },
         { name: 'エンジン', sub: engine, value: null },
         { name: 'ノートの置き場所', sub: state.root || '（まだ決めていません）', value: null },
-    ], 'ambər ── Advanced Markdown Browser & Editor for Readability\n不具合を伝えるときは、この三つを添えてください');
+    // **`bare` は渡さない。** `false` を渡すと `bare ?? few` の `??` が
+    // それを素通しし（`??` が拾うのは null と undefined だけ）、三つしか
+    // 無い一覧に「絞り込む」の欄が出る ── 三つを絞り込む人はいない。
+    ], '不具合を伝えるときは、この三つを添えてください', undefined,
+       'Advanced Markdown Browser & Editor for Readability');
 }
 
 /* ── 前の姿 ── */
@@ -5403,7 +5409,15 @@ async function openGuestText(title, text) {
 /// （または打った字）で、やめたときは `null`。
 let sheetDone = null;
 
-function sheet({ title, value, placeholder, items, foot, bare }) {
+/// 名前を、名前として見せる一枚。
+///
+/// **ここだけ HTML を通す。** 題（`.hd`）と添え書き（`.foot`）は
+/// `textContent` のまま ── あそこにはノートの名前が入る（「ゴミ箱へ
+/// 入れる」など）ので、HTML にすると人の書いた字が印になる道が開く。
+/// 名札はこちらが書いた決め打ちなので、そこだけ通してよい。
+const BRAND = 'amb<span class="s">ə</span>r';
+
+function sheet({ title, value, placeholder, items, foot, bare, brand }) {
     closeSheet(null);
     const veil = el('veil');
     const input = veil.querySelector('input');
@@ -5418,6 +5432,11 @@ function sheet({ title, value, placeholder, items, foot, bare }) {
     const few = items ? items.length <= 4 : false;
     veil.querySelector('#sheet').classList.toggle('bare', bare ?? few);
     const list = veil.querySelector('.items');
+    const plate = veil.querySelector('.brand');
+    plate.hidden = !brand;
+    plate.innerHTML = brand
+        ? '<div class="nm">' + BRAND + '</div><div class="ex">' + escapeHtml(brand) + '</div>'
+        : '';
     veil.querySelector('.hd').textContent = title || '';
     veil.querySelector('.foot').textContent = foot || '';
     veil.querySelector('.foot').hidden = !foot;
@@ -5493,8 +5512,8 @@ function closeSheet(v) {
 const askText = (title, value, foot) => sheet({ title, value, foot });
 /// 一つ選ぶ小窓。`items` は `{ name, sub, key, value }`。
 /// `bare` が真なら、字を打つ欄を見せない（押して選ぶだけの一覧）。
-const askPick = (title, items, foot, bare) =>
-    sheet({ title, items, placeholder: '絞り込む', foot, bare });
+const askPick = (title, items, foot, bare, brand) =>
+    sheet({ title, items, placeholder: '絞り込む', foot, bare, brand });
 
 /// はい／いいえ。**取り返しのつかないものだけに使う。**
 function askYes(title) {
