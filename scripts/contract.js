@@ -92,6 +92,12 @@ console.log('見本のノートの在りか');
     ok(read('.github/workflows/release.yml').includes('packaging/gui_zip.py'),
         '配る一枚は gui_zip.py が組む（見本を入れて、開いて数える）',
         'zip コマンドは UTF-8 の印を立てないので、日本語の名前が Windows で化けます');
+    // **配る一枚は、タグから組み直せること。** `npm install` は lock を
+    // 書き直すことがあり、書き直されたものがそのまま zip に入る ──
+    // 配る一枚の中に、どのコミットにも無いファイルが混ざる。
+    ok(/npm ci /.test(read('.github/workflows/release.yml')),
+        '配るときは npm ci（lock を書き換えない）',
+        'npm install だと lock がずれ、同じタグから同じ一枚が出なくなります');
 }
 
 /* ── 四 ── 画面の組み立て手順 ──────────────────────────────── */

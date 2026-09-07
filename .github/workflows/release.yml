@@ -176,10 +176,18 @@ jobs:
         with:
           node-version: "22"
 
+      # **`npm ci` で積む（`npm install` ではなく）。**
+      #
+      # `npm install` は `package-lock.json` を**書き直す**ことがある ──
+      # 書き直された lock がそのまま zip に入り、配る一枚の中に
+      # **どのコミットにも無いファイル**が混ざっていた（v2.7.1 で 100 バイト
+      # ずれていて、同梱する側が「同じタグでも組み直すと lock がずれる」と
+      # 気づいた）。`npm ci` は lock のとおりに入れ、lock を触らない。
+      # 噛み合っていなければその場で落ちる ── 黙ってずれるより、落ちるほうがいい。
       - name: エディタと図を積む
         working-directory: gui
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           node vendor.js
 
       - name: 積み終えたか、見る

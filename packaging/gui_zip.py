@@ -90,6 +90,19 @@ def main() -> None:
     at = Path(sys.argv[1])
     at.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(at, "w", zipfile.ZIP_DEFLATED) as z:
+        # **フォルダの項目も書く。** `zip -r` は書くので、書かないと
+        # 同じ中身でも**形の違う一枚**になる ── 同梱する側は配られた
+        # この一枚をそのまま組み込むと言ってきていて、実機で展開まで
+        # 確かめてある。ほどく側はたいてい親を勝手に作るが、
+        # 「たいてい」で配るものではない。
+        seen: set[str] = set()
+        for _, inside in rows():
+            parts = inside.split("/")[:-1]
+            for i in range(len(parts)):
+                d = "/".join(parts[: i + 1]) + "/"
+                if d not in seen:
+                    seen.add(d)
+                    z.writestr(zipfile.ZipInfo(d), b"")
         for real, inside in rows():
             z.write(real, inside)
     check(at)
