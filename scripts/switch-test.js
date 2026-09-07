@@ -96,6 +96,7 @@ global.ask = async (method, params) => {
 
 // eslint-disable-next-line no-eval
 (0, eval)(line('function readDrawn(') + line('function readStale(') + line('function readCurrent(')
+    + cut('function sameNote(')
     + cut('async function syncRead(') + cut('async function drawRead('));
 
 let bad = 0;

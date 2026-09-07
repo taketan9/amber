@@ -24,6 +24,16 @@ pub struct Book {
     pub colors: BTreeMap<String, String>,
     /// Favourite folders, including the ones nothing is in yet.
     pub stars: Vec<String>,
+    /// 共有の棚へ移したノートが、**もといたフォルダ**。ルートからの道 →
+    /// フォルダ（ルート直下だったなら空）。
+    ///
+    /// **ノートには書かない。** ノートはただの Markdown で、amber の都合を
+    /// 中に書き足す理由が無い ── 家族に渡ったノートに「元は くらし に居た」
+    /// と書いてあっても、相手には何の意味も無い。棚の帳面に一行持つ。
+    ///
+    /// 憶えるのは共有へ入れるときだけ。ふつうの「フォルダへ移す」では
+    /// 憶えない ── 人が自分で選んで動かしたものに、戻し先は要らない。
+    pub came: BTreeMap<String, String>,
 }
 
 /// 共有の棚の印。**設定ではなく、フォルダ自身が持つ。**
@@ -103,8 +113,57 @@ pub const PALETTE: [(&str, &str); 11] = [
     ("#7A7A7A", "グレー"),
 ];
 
+/// 色とブックマークの置き場所（`<root>/.amber/settings.json`）。
+///
+/// **隠しフォルダは一つ。** 履歴は `.amber/history/` に置いていたのに、
+/// 色と棚は `.cian/settings.json`、同期の憶えは `.cian/sync.json` に
+/// 置いていた ── 名前を amber に替えたときに、片方だけ替えそこねている。
+/// 人のノートのフォルダに amber のものが**二か所**あって、片方が古い名前で
+/// 残っているのは、いつか片方だけ消される形。
 pub fn file(root: &Path) -> PathBuf {
+    root.join(".amber").join("settings.json")
+}
+
+/// 前の置き場所。**まだ移していない棚のために、読むときだけ見る。**
+fn old_file(root: &Path) -> PathBuf {
     root.join(".cian").join("settings.json")
+}
+
+/// 前の隠しフォルダ（`.cian`）に残っているものを、`.amber` へ移す。
+///
+/// **隠しフォルダは一つ。** 履歴は `.amber/history/` に置いていたのに、色と
+/// ブックマークは `.cian/settings.json`、同期の憶えは `.cian/sync.json` に
+/// 置いていた ── 名前を amber に替えたときに、片方だけ替えそこねている。
+/// 人のノートのフォルダに amber のものが二か所あって、片方が古い名前で
+/// 残っているのは、**いつか片方だけ消される**形。
+///
+/// **写してから消す。** `rename` は別のディスクをまたぐと失敗するし、先に
+/// 消すと途中で転んだ回に色も憶えも無くなる。**向こうに同じ名前があるなら
+/// 何もしない** ── そちらが新しい。
+///
+/// 同期の憶え（`sync.json`）もここで一緒に移す。移す場所を二か所に書くと、
+/// 片方だけ直した日に `.cian` が半分だけ残る。
+pub fn tidy(root: &Path) {
+    let old = root.join(".cian");
+    if !old.is_dir() {
+        return;
+    }
+    let new = root.join(".amber");
+    for name in ["settings.json", "sync.json"] {
+        let (from, to) = (old.join(name), new.join(name));
+        if !from.is_file() || to.exists() {
+            continue;
+        }
+        if std::fs::create_dir_all(&new).is_err() {
+            return;
+        }
+        if std::fs::copy(&from, &to).is_ok() {
+            let _ = std::fs::remove_file(&from);
+        }
+    }
+    // 空になったら片付ける。**空でなければ何もしない** ── `remove_dir` は
+    // 中身のあるフォルダを消さないので、知らないものを置いた人のぶんは残る。
+    let _ = std::fs::remove_dir(&old);
 }
 
 /// What the folder says about itself, or the defaults.
@@ -113,7 +172,12 @@ pub fn file(root: &Path) -> PathBuf {
 /// colour yet, and a corrupt one is not a reason to refuse to show the notes
 /// — the notes are the thing, and this is decoration and bookkeeping.
 pub fn read(root: &Path) -> Book {
-    let Ok(text) = std::fs::read_to_string(file(root)) else { return Book::default() };
+    // **`.cian` に居るなら、そちらが本物。** 今日まで書いていたのはそこで、
+    // `.amber/settings.json` があるとすれば、名前を替える前のもっと古い版が
+    // 置いていったもの ── 新しいほうを先に読むと、色が何代か巻き戻る。
+    // 次に何か書いた時点で `.amber` へ移り、こちらは消える。
+    let from = if old_file(root).exists() { old_file(root) } else { file(root) };
+    let Ok(text) = std::fs::read_to_string(from) else { return Book::default() };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return Book::default() };
     let mut b = Book::default();
     if let Some(m) = v.get("colors").and_then(|c| c.as_object()) {
@@ -126,16 +190,25 @@ pub fn read(root: &Path) -> Book {
     if let Some(a) = v.get("stars").and_then(|s| s.as_array()) {
         b.stars = a.iter().filter_map(|s| s.as_str()).map(str::to_string).collect();
     }
+    if let Some(m) = v.get("came").and_then(|c| c.as_object()) {
+        for (k, val) in m {
+            if let Some(s) = val.as_str() {
+                b.came.insert(k.clone(), s.to_string());
+            }
+        }
+    }
     b
 }
 
-/// Write it back, making `.cian` if it is not there.
+/// Write it back, making `.amber` if it is not there. 前の隠しフォルダに
+/// 残っているものは、書く前に引き取る（[`tidy`]）。
 pub fn write(root: &Path, b: &Book) -> anyhow::Result<()> {
+    tidy(root);
     let at = file(root);
     if let Some(dir) = at.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let v = serde_json::json!({ "colors": b.colors, "stars": b.stars });
+    let v = serde_json::json!({ "colors": b.colors, "stars": b.stars, "came": b.came });
     std::fs::write(at, serde_json::to_string_pretty(&v)?)?;
     Ok(())
 }
@@ -195,6 +268,28 @@ pub fn add_star(root: &Path, folder: &str) -> anyhow::Result<()> {
     b.stars.push(folder.to_string());
     b.stars.sort();
     write(root, &b)
+}
+
+/// 共有の棚へ入れたノートの、もといたフォルダを憶える。
+///
+/// `rel` は移したあとのルートからの道（`家族/買い物.md`）、`from` はもと
+/// いたフォルダ（ルート直下だったなら空）。
+pub fn came_from(root: &Path, rel: &str, from: &str) -> anyhow::Result<()> {
+    let mut b = read(root);
+    b.came.insert(rel.to_string(), from.to_string());
+    write(root, &b)
+}
+
+/// 憶えを忘れる（憶えていた場所を返す）。**戻すのは一度きり** ── 戻した
+/// あとも憶えていると、別のフォルダへ移してからもう一度共有して外した人が、
+/// **二回前の場所**へ連れて行かれる。
+///
+/// 憶えが無ければ `None`（いちばん上へ戻す、といういままでの形）。
+pub fn came_back(root: &Path, rel: &str) -> Option<String> {
+    let mut b = read(root);
+    let from = b.came.remove(rel)?;
+    let _ = write(root, &b);
+    Some(from)
 }
 
 /// Forget one, and everything under it.
@@ -513,8 +608,82 @@ mod tests {
     #[test]
     fn a_broken_settings_file_is_not_a_reason_to_lose_the_notes() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".cian")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".amber")).unwrap();
         std::fs::write(file(dir.path()), "{ これは JSON ではない").unwrap();
         assert_eq!(read(dir.path()), Book::default());
+    }
+
+    #[test]
+    fn 前の隠しフォルダに置いた色は_引き継がれて片付く() {
+        // `.cian` に色を置いていた棚を開いても、色は消えない ── そして
+        // 何か書いた時点で `.amber` へ移り、古いほうは残らない。
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".cian")).unwrap();
+        std::fs::write(
+            dir.path().join(".cian").join("settings.json"),
+            r##"{"colors":{"仕事":"#D07A2E"},"stars":["買い物"]}"##,
+        )
+        .unwrap();
+        let b = read(dir.path());
+        assert_eq!(b.colors.get("仕事").map(String::as_str), Some("#D07A2E"));
+        assert_eq!(b.stars, vec!["買い物".to_string()]);
+
+        write(dir.path(), &b).unwrap();
+        assert!(file(dir.path()).exists(), ".amber に移っていること");
+        assert!(!dir.path().join(".cian").exists(), "空になった .cian は残さない");
+        // 移したあとも、同じことを言う。
+        assert_eq!(read(dir.path()), b);
+    }
+
+    #[test]
+    fn 共有をやめたら_もといたフォルダへ戻る() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // 「くらし」に居た買い物リストを、「家族」へ入れた。
+        came_from(root, "家族/買い物.md", "くらし").unwrap();
+        assert_eq!(read(root).came.get("家族/買い物.md").map(String::as_str), Some("くらし"));
+        // やめたら、そこへ戻る ── そして**忘れる**。
+        assert_eq!(came_back(root, "家族/買い物.md"), Some("くらし".into()));
+        assert_eq!(came_back(root, "家族/買い物.md"), None, "戻すのは一度きり");
+        assert!(read(root).came.is_empty());
+    }
+
+    #[test]
+    fn ルート直下から入れたノートは_ルート直下へ戻る() {
+        // 空は「憶えが無い」ではなく「いちばん上に居た」── 取り違えると、
+        // 上に居たノートが戻ってこない。
+        let dir = tempfile::tempdir().unwrap();
+        came_from(dir.path(), "家族/めも.md", "").unwrap();
+        assert_eq!(came_back(dir.path(), "家族/めも.md"), Some(String::new()));
+    }
+
+    #[test]
+    fn 色とブックマークと憶えは_同じ帳面に並んで残る() {
+        // どれか一つを書いたときに、ほかが消えない。
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        add_star(root, "買い物").unwrap();
+        let mut b = read(root);
+        b.colors.insert("仕事".into(), "#D07A2E".into());
+        write(root, &b).unwrap();
+        came_from(root, "家族/め.md", "仕事").unwrap();
+        let got = read(root);
+        assert_eq!(got.stars, vec!["買い物".to_string()]);
+        assert_eq!(got.colors.get("仕事").map(String::as_str), Some("#D07A2E"));
+        assert_eq!(got.came.get("家族/め.md").map(String::as_str), Some("仕事"));
+    }
+
+    #[test]
+    fn 古い方が居るあいだは_古い方を読む() {
+        // `.amber/settings.json` は名前を替える前のもっと古い版が置いた
+        // もの ── 新しい名前のほうを先に読むと、色が何代か巻き戻る。
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".cian")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".amber")).unwrap();
+        std::fs::write(dir.path().join(".amber").join("settings.json"), r#"{"stars":["ふるい"]}"#)
+            .unwrap();
+        std::fs::write(dir.path().join(".cian").join("settings.json"), r#"{"stars":["いま"]}"#)
+            .unwrap();
+        assert_eq!(read(dir.path()).stars, vec!["いま".to_string()]);
     }
 }

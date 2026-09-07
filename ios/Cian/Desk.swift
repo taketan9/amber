@@ -170,7 +170,7 @@ final class Desk: ObservableObject {
             // 書けた ── ここでファイルと一致したので、土台を進める。
             tabs[now].base = tabs[now].whole
             redraw(id, store)
-            store.reload()
+            store.freshen(tabs[now].note.path)
             return nil
         case .conflict:
             // **どちらかを捨てない。混ぜる。**
@@ -194,7 +194,7 @@ final class Desk: ObservableObject {
             tabs[now].eyes = got.eyes
             keepIncoming(tabs[now])
             redraw(id, store)
-            store.reload()
+            store.freshen(tabs[now].note.path)
             return nil
         }
     }

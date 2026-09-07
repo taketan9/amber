@@ -424,11 +424,14 @@ struct ContentView: View {
                     // しない** ── 前書きに書くと、共有をやめた日に全部の
                     // ノートを書き換えることになる（同期先で全部が差分）。
                     Button {
-                        if note.shared { moveTo(note, nil) }
-                        else if let sh = store.shares.first { moveTo(note, sh.at) }
+                        // やめるときは、**もといたフォルダへ戻す**（窓と
+                        // 同じ）── いちばん上へ返していたので、フォルダに
+                        // 分けている人ほど「どこへ行った」になっていた。
+                        if note.shared { unshare(note) }
+                        else if let sh = store.shares.first { share(note, sh.at) }
                         else { sharing = "家族" }   // 棚が無ければ、作るところから
                     } label: {
-                        Label(note.shared ? "家族との共有をやめる" : "家族と共有する",
+                        Label(note.shared ? unshareWords(note) : "家族と共有する",
                               systemImage: "person.2")
                     }
                     // **長押しから履歴へ。** 窓は右押しで開く ── 電話に
@@ -473,6 +476,21 @@ struct ContentView: View {
 
     private func moveTo(_ note: Note, _ book: String?) {
         do { try store.move(note, to: book) } catch { store.trouble = error.localizedDescription }
+    }
+
+    private func share(_ note: Note, _ book: String) {
+        do { try store.share(note, to: book) } catch { store.trouble = error.localizedDescription }
+    }
+
+    private func unshare(_ note: Note) {
+        do { try store.unshare(note) } catch { store.trouble = error.localizedDescription }
+    }
+
+    /// **押す前に、どこへ戻るかを言う。** 「やめる」とだけ出しておいて別の
+    /// フォルダへ入るのは、黙って動かすのと同じ。
+    private func unshareWords(_ note: Note) -> String {
+        guard let home = store.home(of: note) else { return "家族との共有をやめる" }
+        return "共有をやめて「\(home.split(separator: "/").last.map(String.init) ?? home)」へ戻す"
     }
 
     private func make(_ title: String, _ tags: [String]) -> Note? {

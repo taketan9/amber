@@ -41,6 +41,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 hidden: false,
                 ..Default::default()
             };
+            // **開いたときに、前の隠しフォルダを引き取る。** `.cian` と
+            // `.amber` の二つが人のノートのフォルダに並んでいるのを、放って
+            // おかない ── いつか片方だけ消される。移すものが無ければ何もしない。
+            crate::notebook::tidy(&dir);
             let stop = std::sync::atomic::AtomicBool::new(false);
             let (found, walk) = crate::note::list(&dir, limits, &stop);
             let book = crate::notebook::read(&dir);
@@ -146,6 +150,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 "books": books,
                 "stars": shelves,
                 "colors": book.colors,
+                // 共有へ入れたノートが、もといたフォルダ。**一覧と一緒に
+                // 渡す** ── 献立に「どこへ戻すか」を出すのに要る（訊きに
+                // 行くと、押す前に消費してしまう）。
+                "came": book.came,
                 "notes": notes,
                 "partial": walk.partial().then(|| serde_json::json!({
                     "whole_to": walk.whole_to(),
@@ -818,6 +826,31 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let dir = std::path::PathBuf::from(arg(p, "dir"));
             let at = crate::note::move_to(&note, &dir)?;
             Ok(serde_json::json!({ "path": at.display().to_string() }))
+        }
+
+        // 共有の棚へ入れたノートの、**もといたフォルダ**を憶える／思い出す。
+        //
+        // 「共有をやめる」を押した人が探しているのは、そのノートが前に居た
+        // ところ ── いままではいちばん上へ戻していて、フォルダに分けている
+        // 人ほど「どこへ行った」になった。
+        //
+        // **ノートには書かない。** ノートはただの Markdown で、家族に渡った
+        // ノートに「元は くらし に居た」と書いてあっても相手には意味が無い。
+        // 棚の帳面（`.amber/settings.json`）に一行持つ。
+        //
+        // 憶えは `notes` が一覧と一緒に渡すので、ここは**書くだけ** ──
+        // `from` があれば憶える、`forget` なら忘れる。戻したあとも憶えて
+        // いると、別のフォルダへ移してからもう一度共有して外した人が
+        // **二回前の場所**へ連れて行かれる。
+        "came" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let rel = arg(p, "rel");
+            if p["forget"].as_bool().unwrap_or(false) {
+                crate::notebook::came_back(&root, &rel);
+            } else {
+                crate::notebook::came_from(&root, &rel, &arg(p, "from"))?;
+            }
+            Ok(serde_json::json!({ "came": crate::notebook::read(&root).came }))
         }
 
         // Make a notebook. A folder, because that is what a notebook is

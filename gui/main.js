@@ -344,15 +344,24 @@ function watch(root) {
     eyesAt = root;
     if (!root || !fs.existsSync(root)) return { ok: false, why: 'そのフォルダがありません' };
     let hold = null;
+    // **何が動いたかを憶えておく。** 名前を落として「何かが変わった」とだけ
+    // 言うと、受け取った側は棚を丸ごと数え直すしかない ── 自分がいま保存した
+    // 一本の報せでも、1002 本を数え直していた。
+    let moved = new Set();
     try {
         // `recursive` は mac と Windows にはあり、Linux には無い ──
         // 無いところでは根の一段だけになる（それでも無いよりよい）。
         eyes = fs.watch(root, { recursive: true, persistent: false }, (_kind, name) => {
             // 自分の一時ファイルで起こさない。
             if (name && /(^|[\\/])\.|\.tmp$|~$/.test(name)) return;
+            // 名前を教えてもらえない回もある（OS による）。そのときは
+            // 空のまま送る ── 受け取った側は丸ごと数え直す。
+            if (name) moved.add(path.join(root, name));
             clearTimeout(hold);
             hold = setTimeout(() => {
-                if (win && !win.isDestroyed()) win.webContents.send('amber:changed');
+                const names = [...moved];
+                moved = new Set();
+                if (win && !win.isDestroyed()) win.webContents.send('amber:changed', names);
             }, 400);
         });
         eyes.on('error', () => { eyes = null; });

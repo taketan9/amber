@@ -63,5 +63,6 @@ contextBridge.exposeInMainWorld('amber', {
     watch: (root) => ipcRenderer.invoke('amber:watch', root),
     /// 見本のノートを、言われた場所へ置いてもらう。
     welcome: (root) => ipcRenderer.invoke('amber:welcome', root),
-    onChanged: (fn) => ipcRenderer.on('amber:changed', () => fn()),
+    // 何が変わったかも渡す ── 自分が書いたぶんで棚を数え直さないため。
+    onChanged: (fn) => ipcRenderer.on('amber:changed', (_e, names) => fn(names || [])),
 });

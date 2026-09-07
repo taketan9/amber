@@ -14,6 +14,9 @@ final class NotesStore: ObservableObject {
     @Published var notes: [Note] = []
     @Published var rootName: String = ""
     @Published var trouble: String?
+    /// 共有の棚へ入れたノートが、もといたフォルダ（ルートからの道 →
+    /// フォルダ名）。**共有をやめたときに、そこへ戻す。**
+    @Published var came: [String: String] = [:]
 
     private var root: URL?
     private static let bookmarkKey = "cian.notes.root"
@@ -301,6 +304,7 @@ final class NotesStore: ObservableObject {
             allBooks = answer["books"] as? [String] ?? []
             stars = answer["stars"] as? [String] ?? []
             colors = answer["colors"] as? [String: String] ?? [:]
+            came = answer["came"] as? [String: String] ?? [:]
             shares = (answer["shares"] as? [[String: Any]] ?? []).compactMap {
                 guard let at = $0["at"] as? String else { return nil }
                 return Shelf(at: at, by: $0["by"] as? String ?? "")
@@ -313,6 +317,42 @@ final class NotesStore: ObservableObject {
         } catch {
             trouble = error.localizedDescription
         }
+    }
+
+    /// いま書いた一本の行だけ、新しくする。**書いたあとに棚を丸ごと数え
+    /// 直さない**（窓の `freshenRow` と同じ直し）。
+    ///
+    /// 窓で測ったら、1002 本の棚では数え直しに 370ms かかっていた ── 一本
+    /// ずつ読み直して、全部を JSON にして渡している。**自分が書いた一本の
+    /// ことは自分が知っている**：字を書いて変わるのは題・書き出し・タグ・
+    /// 時刻だけで、どのフォルダに居るか（`book`・`shared`・`clash`）は動か
+    /// ない。だから手元の行のものを残し、core が答えた分だけ上に重ねる。
+    ///
+    /// **題の決め方は core に一つ。** ここで「一行目が題」と決めると、
+    /// core の決め方（`title:` → 見出し → 書き出し → ファイル名）とずれて、
+    /// 一覧と帯で違う名前が出る。
+    ///
+    /// 訊けなかったら、前のように丸ごと数え直す ── 一覧が古いまま残るよりよい。
+    func freshen(_ path: String) {
+        guard let at = notes.firstIndex(where: { $0.path == path }),
+              let one = try? Cian.call("note", ["path": path])
+        else { return reload() }
+        let now = notes[at]
+        var o: [String: Any] = [
+            "path": now.path, "book": now.book, "shared": now.shared,
+            "title": now.title, "excerpt": now.excerpt, "tags": now.tags,
+            "updated": now.updated, "created": now.created, "search": now.search,
+        ]
+        if let s = now.star { o["star"] = s }
+        if let c = now.clash { o["clash"] = ["of": c.of, "by": c.by] }
+        // **重ねる欄は名指しで。** `note` は「amber の外にある一本」も読める
+        // 口なので、`book` は空で返る ── 丸ごと重ねると、保存するたびに
+        // ノートがいちばん上のフォルダへ移ったように見える。
+        for k in ["title", "excerpt", "tags", "updated", "created", "search"] {
+            if let v = one[k] { o[k] = v }
+        }
+        guard let fresh = Note(o) else { return reload() }
+        notes[at] = fresh
     }
 
     /// 家族と分けてある棚。**一つとは限らない** ── 印はフォルダごとに置くので、
@@ -1067,6 +1107,51 @@ final class NotesStore: ObservableObject {
         let dir = book.map { root.appendingPathComponent($0) } ?? root
         _ = try Cian.call("move", ["path": note.path, "dir": dir.path])
         reload()
+    }
+
+    /// ルートからの道（`家族/買い物.md`）。憶えの見出しに使う ── core が
+    /// `rel` として返しているのと同じ形。
+    private func rel(of note: Note) -> String {
+        let name = URL(fileURLWithPath: note.path).lastPathComponent
+        return note.book.isEmpty ? name : note.book + "/" + name
+    }
+
+    /// 共有をやめたら戻る先。**憶えていなければ nil**（いちばん上へ戻す、
+    /// といういままでの形）。
+    ///
+    /// 憶えていたフォルダが、もう無いことはある（消した・名前を変えた）──
+    /// **無いところへは戻さない**。移せずに止まるより、いちばん上へ。
+    func home(of note: Note) -> String? {
+        guard let was = came[rel(of: note)], allBooks.contains(was) else { return nil }
+        return was
+    }
+
+    /// 共有の棚へ入れる。**入れる前に居たフォルダを憶える** ── やめたときに
+    /// そこへ戻せるように（窓と同じ・`.amber/settings.json` の中）。
+    func share(_ note: Note, to book: String) throws {
+        guard let root else { return }
+        let from = note.book
+        try move(note, to: book)
+        // **憶えるのは移せてから。** 移せなかった回の憶えが残ると、次に
+        // やめた人が身に覚えのないフォルダへ連れて行かれる。
+        let name = URL(fileURLWithPath: note.path).lastPathComponent
+        let now = book.isEmpty ? name : book + "/" + name
+        // 憶えられないことで、共有が止まる理由はない。
+        if let got = try? Cian.call("came", ["path": root.path, "rel": now, "from": from]) {
+            came = got["came"] as? [String: String] ?? came
+        }
+    }
+
+    /// 共有をやめる。もといたフォルダへ戻し、**憶えは忘れる** ── 戻した
+    /// あとも憶えていると、別のフォルダへ移してからもう一度共有してやめた
+    /// 人が、二回前の場所へ連れて行かれる。
+    func unshare(_ note: Note) throws {
+        guard let root else { return }
+        let was = rel(of: note)
+        try move(note, to: home(of: note))
+        if let got = try? Cian.call("came", ["path": root.path, "rel": was, "forget": true]) {
+            came = got["came"] as? [String: String] ?? came
+        }
     }
 
     /// Remove a note. There is no trash on a phone, so this cannot be undone

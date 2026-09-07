@@ -84,6 +84,9 @@ const state = {
     /// amber の外にある一本を、単発で開いているか。
     guest: false,
     colors: {},
+    /// 共有の棚へ入れたノートが、もといたフォルダ（ルートからの道 →
+    /// フォルダ名）。**共有をやめたときに、そこへ戻す。**
+    came: {},
     /// いま選んでいる行き先。kind は all / book / star / tag。
     dest: { kind: 'all', what: '' },
     filter: '',
@@ -365,10 +368,18 @@ const ORDERS = [
 ];
 let order = 'updated';
 
+/// 名前順に並べる物差し。**一度だけ作って、使い回す。**
+///
+/// `localeCompare(b, 'ja', {…})` は呼ぶたびに物差しを作り直す ── 1002 本を
+/// 並べると一万回作ることになり、それだけで 119ms かかっていた（同じ並びが
+/// `Intl.Collator` の使い回しでは 7ms）。並べ替えは一覧を組むたびに走り、
+/// 一覧は保存のたびに組み直される。
+const BY_NAME = new Intl.Collator('ja', { numeric: true });
+
 function sortNotes(list) {
     const out = [...list];
     if (order === 'title') {
-        out.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'ja', { numeric: true }));
+        out.sort((a, b) => BY_NAME.compare(a.title || '', b.title || ''));
     } else if (order === 'created') {
         out.sort((a, b) => (b.created || 0) - (a.created || 0));
     } else {
@@ -1230,6 +1241,13 @@ function readToMd() {
     return paperToMd(el('read'), state.head);
 }
 
+/// 同じノートと見てよいか。**末尾の空行の数だけは、見ない。**
+/// 読む面がそこを勝手に決めているので（`tailStop`）、そこの差は
+/// 「人が書き換えた」ではない。
+function sameNote(a, b) {
+    return String(a).replace(/\n+$/, '') === String(b).replace(/\n+$/, '');
+}
+
 /// 打ったら、落ち着いてから書き戻す。
 function readChanged() {
     if (syncing || view === 'write' || !state.open) return;
@@ -1316,6 +1334,13 @@ async function syncRead() {
     if (syncing || !state.open || !editor) return;
     // **面の字が、いま開いているノートのものでなければ書き戻さない。**
     // 前のノートの字を、今のノートへ書くことになる（`readDrawn`）。
+    //
+    // 同じ道で、**空の面**からも書き戻さない ── コードの面だけを使って
+    // いる人の読む面は一度も組まれず、空の面を字に戻すと `"\n"` になり、
+    // それが「一文字のノートに書き換えられた」として保存される（v2.8.3 で
+    // 再現。コードの面で立ち上げて一覧で別のノートを押すと 2 バイトに
+    // なった）。組んでいないなら札も無いので、ここで止まる ──
+    // **見張りは一つ。** 二つ置くと、片方だけ直した日に必ずずれる。
     if (!readCurrent()) return;
     const body = readToMd();
     if (body === null) {
@@ -1325,7 +1350,17 @@ async function syncRead() {
         el('state').textContent = '保存できません';
         return;
     }
-    if (state.head + body === whole()) return;
+    // **末尾の空行の数では、変わったことにしない。**
+    //
+    // 読む面は末尾にいつも空の段落を一つ置く（`tailStop` ── 表や罫線で
+    // 終わるノートに caret を降ろす先が要る）。だから字に戻すと、末尾の
+    // 改行が元の字より一つ多くなる ── **見ただけのノートが、毎回「変わった」
+    // ことになっていた**。ノートAを見てBを開くと、Aがフル保存され、履歴が
+    // 一枚積まれ、棚が丸ごと数え直された（1002本で 0.7 秒）。
+    //
+    // 末尾の空行は、読む面では人が決められない（消しても `tailStop` が
+    // 足し直す）。**決められないものの差で、保存を走らせない。**
+    if (sameNote(state.head + body, whole())) return;
     syncing = true;
     try {
         loading = true;
@@ -3862,7 +3897,7 @@ async function save() {
         state.base = text;
         state.dirty = false;
         el('state').textContent = '保存しました';
-        await reload({ quiet: true });
+        await freshenRow(path);
         setTimeout(() => {
             if (!state.dirty && state.open && state.open.path === path) {
                 el('state').textContent = when(state.open.updated);
@@ -3890,6 +3925,44 @@ async function newNote() {
 
 /* ── 読み直し ── */
 
+/// いま書いた一本の行だけ、新しくする。
+///
+/// **書いたあとに棚を丸ごと数え直さない。** 1002 本で毎回 370ms かかって
+/// いた（エンジンが 220ms、一覧を組み直すのに 150ms）── しかも打ち終えて
+/// 0.7 秒後に走るので、**打ち終わるたびに画面が固まる**。自分が書いた一本の
+/// ことは自分が知っていて、外で何かが変わったなら見張り（`onChanged`）が
+/// 別に教えてくれる。
+///
+/// **重ねる欄は、名指しで選ぶ。** 返ってきたものを丸ごと重ねてはいけない
+/// ── `note` は「amber の外にある一本」も読める口なので、`rel` はファイル名
+/// だけ、`book` は空で返る。丸ごと重ねると、**保存するたびにノートが
+/// いちばん上のフォルダへ移ったように見える**（共有の印も消える）。
+/// 字を書いて変わるのは、下に並べた欄だけ。
+///
+/// 訊けなかったら、前のように丸ごと数え直す ── 一覧が古いまま残るよりよい。
+const FRESH = ['title', 'excerpt', 'tags', 'updated', 'created', 'bytes', 'search'];
+
+/// 最後に自分で書いたノート。見張りが自分の書き込みで起きたかを見分ける。
+let lastWrote = null;
+
+async function freshenRow(path) {
+    lastWrote = path;
+    const at = state.notes.findIndex((n) => n.path === path);
+    if (at < 0) return reload({ quiet: true });
+    let one;
+    try {
+        one = await ask('note', { path });
+    } catch {
+        return reload({ quiet: true });
+    }
+    const row = { ...state.notes[at] };
+    for (const k of FRESH) if (k in one) row[k] = one[k];
+    state.notes[at] = row;
+    if (state.open && state.open.path === path) state.open = row;
+    drawTitle();
+    drawList();
+}
+
 async function reload(opts) {
     try {
         const r = await ask('notes', { path: state.root });
@@ -3897,6 +3970,9 @@ async function reload(opts) {
         state.books = r.books || [];
         state.stars = r.stars || [];
         state.colors = r.colors || {};
+        // 共有へ入れたノートが、もといたフォルダ。**献立に「どこへ戻すか」
+        // を出すのに要る** ── そのつど訊きに行くと、押す前に消費してしまう。
+        state.came = r.came || {};
         state.waiting = r.waiting || [];
         state.shares = r.shares || [];
         // 開いていた行を新しいほうに繋ぎ直す（更新時刻が動くので）。
@@ -4292,7 +4368,11 @@ function openMenu(at, which) {
         if (c.id === 'root') return { ...c, sub: shortPath(state.root) };
         if (c.id === 'toshare') {
             if (state.open && state.open.shared) {
-                return { ...c, name: '家族との共有をやめる', sub: 'いちばん上へ戻します' };
+                // **押す前に、どこへ戻るかを言う。** 「いちばん上へ」と
+                // 出しておいて別のフォルダへ入るのは、黙って動かすのと同じ。
+                const home = homeOf(state.open);
+                return { ...c, name: '家族との共有をやめる',
+                    sub: home ? '「' + home.split('/').pop() + '」へ戻します' : 'いちばん上へ戻します' };
             }
             const to = state.shares[0];
             return { ...c, sub: to
@@ -4762,8 +4842,19 @@ document.addEventListener('drop', async (e) => {
 /// ものを、向こうの版で黙って置き換えるのが一番悪い。打っていなければ
 /// 静かに読み直す（保存のときの衝突検査は、そのまま残っている）。
 let churn = null;
-window.amber.onChanged(() => {
+window.amber.onChanged((names) => {
     clearTimeout(churn);
+    // **自分が書いたぶんで、棚を数え直さない。**
+    //
+    // 保存するとファイルが動くので、見張りが自分の書き込みで起きる ──
+    // 保存の中で行を直したすぐあとに、1002 本を数え直していた（370ms）。
+    // 動いたのが**いま自分で書いた一本だけ**なら、もう新しい。
+    // 名前は `NFC` に揃えて比べる ── mac は濁点を分けて持つことがあり
+    // （`が` = `か` + `゛`）、字の上では同じ名前が一致しなくなる。外れても
+    // 数え直すだけで害は無いが、**日本語の名前のノートだけ遅い**になる。
+    const nfc = (s) => String(s).normalize('NFC');
+    if (names && names.length && lastWrote
+        && names.every((n) => nfc(n) === nfc(lastWrote))) return;
     churn = setTimeout(async () => {
         if (state.guest) return;                 // 単発で開いている一本は索引の外
         await reload({});
@@ -5319,10 +5410,14 @@ async function cmdToShare() {
     if (!state.open) return;
     const back = state.open.shared;
     if (back) {
-        const ok = await askYes('「' + (state.open.title || stem())
-            + '」を共有から外しますか（いちばん上へ戻します）');
+        // **もといたフォルダへ戻す。** 憶えが無ければ、いままでどおり
+        // いちばん上へ ── 共有に入れたのが憶えるより前のノートもある。
+        const home = homeOf(state.open);
+        const rel = state.open.rel;
+        const ok = await askYes('「' + (state.open.title || stem()) + '」を共有から外しますか（'
+            + (home ? '「' + home.split('/').pop() + '」へ戻します' : 'いちばん上へ戻します') + '）');
         if (!ok) return;
-        await moveNote('');
+        await moveNote(home || '', { home, forget: rel });
         return;
     }
     let to = (state.shares[0] || {}).at;
@@ -5340,15 +5435,47 @@ async function cmdToShare() {
             + (to.split('/').pop() || 'ぜんぶ') + '」へ移して共有しますか');
         if (!ok) return;
     }
-    await moveNote(to);
+    await moveNote(to, { from: state.open.book || '' });
 }
 
-async function moveNote(to) {
+/// このノートがもといたフォルダ。**憶えていなければ空**（いちばん上へ
+/// 戻す、といういままでの形）。
+///
+/// 憶えていたフォルダが、もう無いことはある（消した・名前を変えた）──
+/// **無いところへは戻さない**。移せずに止まるより、いちばん上へ。
+function homeOf(note) {
+    if (!note || !note.rel) return '';
+    const home = (state.came || {})[note.rel];
+    return home && state.books.includes(home) ? home : '';
+}
+
+/// 共有の棚へ入れる（`to`）／外して戻す（`to` が空ならいちばん上）。
+///
+/// `opts.from` があれば、**入れる前に居たフォルダを憶える** ── 外すときに
+/// そこへ戻せるように。`opts.home` は戻した先で、言葉にするために持つ。
+async function moveNote(to, opts) {
     try {
         const r = await ask('move', { path: state.open.path, dir: state.root + (to ? '/' + to : '') });
+        // **憶えるのは移せてから。** 移せなかった回の憶えが残ると、次に
+        // 外した人が身に覚えのないフォルダへ連れて行かれる。
+        try {
+            if (to && opts && opts.from !== undefined && r && r.path) {
+                const rel = r.path.slice(state.root.length + 1);
+                const got = await ask('came', { path: state.root, rel, from: opts.from });
+                state.came = (got && got.came) || state.came;
+            } else if (opts && opts.forget) {
+                const got = await ask('came', { path: state.root, rel: opts.forget, forget: true });
+                state.came = (got && got.came) || state.came;
+            }
+        } catch { /* 憶えられないことで、共有が止まる理由はない */ }
         await reload({ quiet: true });
         if (r && r.path) await openNote(r.path);
-        say(to ? '共有しました' : '共有から外しました');
+        // **行き先では、どちらか決められない。** 戻し先を憶えるようになって
+        // から、外すときの `to` も空ではなくなった（もといたフォルダ）──
+        // 行き先の有無で分けていたので、外したのに「共有しました」と言った。
+        if (!opts || !opts.forget) { say('共有しました'); return; }
+        const home = opts.home;
+        say(home ? '共有から外して「' + home.split('/').pop() + '」へ戻しました' : '共有から外しました');
     } catch (e) {
         say('移せません: ' + why(e));
     }

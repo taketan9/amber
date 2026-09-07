@@ -157,13 +157,26 @@ pub fn plan(here: &[Here], there: &[There], was: &[Was]) -> Vec<Step> {
 /// 憶えの置き場所。**ノートの隣ではなく `.amber` の中** ── これは amber の
 /// 都合であって、ノートの中身ではない。
 pub fn ledger(root: &std::path::Path) -> std::path::PathBuf {
+    root.join(".amber").join("sync.json")
+}
+
+/// 前の置き場所。**読むときだけ見る**（`notebook::old_file` と同じ理由 ──
+/// 隠しフォルダは一つにする）。
+fn old_ledger(root: &std::path::Path) -> std::path::PathBuf {
     root.join(".cian").join("sync.json")
+}
+
+/// いま読むべき憶え。**`.cian` に居るなら、そちらが本物** ── 今日まで
+/// 書いていたのはそこ。次に憶え直した時点で `.amber` へ移る。
+fn ledger_now(root: &std::path::Path) -> std::path::PathBuf {
+    let old = old_ledger(root);
+    if old.exists() { old } else { ledger(root) }
 }
 
 /// 相手ごとの憶え。`who` は `drive` など ── **一つに決め打たない**。
 /// いつか二つ目の相手が来たときに、片方の憶えがもう片方を上書きしない。
 pub fn recall(root: &std::path::Path, who: &str) -> Vec<Was> {
-    let Ok(text) = std::fs::read_to_string(ledger(root)) else { return Vec::new() };
+    let Ok(text) = std::fs::read_to_string(ledger_now(root)) else { return Vec::new() };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return Vec::new() };
     let Some(files) = v.get(who).and_then(|w| w.get("files")).and_then(|f| f.as_object()) else {
         return Vec::new();
@@ -191,8 +204,11 @@ pub fn recall(root: &std::path::Path, who: &str) -> Vec<Was> {
 pub fn remember(root: &std::path::Path, who: &str, done: &[Was], gone: &[String])
     -> anyhow::Result<()>
 {
+    // 前の隠しフォルダに憶えが残っているなら、書く前に引き取る ── 移す
+    // 場所を二か所に書かないため、片付けは `notebook::tidy` に一つ。
+    crate::notebook::tidy(root);
     let at = ledger(root);
-    let mut v: serde_json::Value = std::fs::read_to_string(&at)
+    let mut v: serde_json::Value = std::fs::read_to_string(ledger_now(root))
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_else(|| serde_json::json!({}));
@@ -282,13 +298,36 @@ mod tests {
         // **憶えが読めないのは、合わせ直せば済むこと。** ここで落ちると、
         // ノートが一本も見られなくなる。
         let d = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(d.path().join(".cian")).unwrap();
+        std::fs::create_dir_all(d.path().join(".amber")).unwrap();
         std::fs::write(ledger(d.path()), "{ こわれている").unwrap();
         assert!(recall(d.path(), "drive").is_empty());
         // 書き直せる（壊れた字を持ち越さない）。
         let one = vec![Was { rel: "a.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }];
         remember(d.path(), "drive", &one, &[]).unwrap();
         assert_eq!(recall(d.path(), "drive"), one);
+    }
+
+    #[test]
+    fn 前の隠しフォルダの憶えは_引き継がれて片付く() {
+        // `.cian/sync.json` に憶えがある棚でも、次の同期が全部を運び直さない。
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join(".cian")).unwrap();
+        let one = vec![Was { rel: "a.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }];
+        std::fs::write(
+            d.path().join(".cian").join("sync.json"),
+            r#"{"drive":{"files":{"a.md":{"hash":"1","id":"i","tag":"x"}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(recall(d.path(), "drive"), one);
+
+        let two = vec![Was { rel: "b.md".into(), hash: "2".into(), id: "j".into(), tag: "y".into() }];
+        remember(d.path(), "drive", &two, &[]).unwrap();
+        assert!(ledger(d.path()).exists(), ".amber に移っていること");
+        assert!(!d.path().join(".cian").exists(), "空になった .cian は残さない");
+        // **前の憶えを持ち越す** ── 落とすと、次の同期が全部を運び直す。
+        let mut both = recall(d.path(), "drive");
+        both.sort_by(|a, b| a.rel.cmp(&b.rel));
+        assert_eq!(both.len(), 2, "前の一本も残っていること");
     }
 
     #[test]
