@@ -8,6 +8,17 @@
 
 const el = (id) => document.getElementById(id);
 
+/// Enter が押されたか。**鍵盤の右にもう一つある。**
+///
+/// フルサイズの鍵盤（会社の机にたいてい載っている）は、数字の並びの脇の
+/// Enter を `NumpadEnter` として送る ── `code === 'Enter'` だけを見ていた
+/// ので、そこを押した人には**升の続きが出なかった**。
+///
+/// 点と番号は「出ていた」ので、なおさら分からない ── あれは**画面が
+/// 勝手にやっている**（`contenteditable` の既定）。こちらの手当てが要る
+/// のは升だけで、手当てが飛ぶと**升だけが出ない**という形で現れる。
+const isEnter = (e) => e.code === 'Enter' || e.code === 'NumpadEnter';
+
 /// 道の最後の一片。**区切りは `/` だけではない。**
 ///
 /// core が返す道は土台のもので、Windows では `C:\Users\…\ノート.md`。
@@ -1193,7 +1204,7 @@ function readChanged() {
 /// 升の行の Enter を、`checkEnter` に渡す。**判断は切り出しの側** ──
 /// 電話も同じ関数を呼ぶので、押し心地が端末で分かれない。
 el('read').addEventListener('keydown', (e) => {
-    if (e.code !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+    if (!isEnter(e) || e.isComposing || e.keyCode === 229) return;
     if (e.shiftKey || e.metaKey || e.ctrlKey) return;
     let n = getSelection()?.anchorNode;
     if (n && n.nodeType === 3) n = n.parentElement;
@@ -3091,7 +3102,7 @@ el('studio').addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.isComposing || e.keyCode === 229) return;
     if (e.code === 'Escape') { e.preventDefault(); studioClose(); return; }
-    if (e.code === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); studioOk(); }
+    if (isEnter(e) && (e.metaKey || e.ctrlKey)) { e.preventDefault(); studioOk(); }
 });
 el('studio').addEventListener('mousedown', (e) => {
     if (e.target.id === 'studio') studioClose();
@@ -3646,7 +3657,7 @@ document.addEventListener('keydown', (e) => {
 
     if (e.code === 'ArrowDown' || e.code === 'KeyJ') { e.preventDefault(); moveCursor(1); }
     else if (e.code === 'ArrowUp' || e.code === 'KeyK') { e.preventDefault(); moveCursor(-1); }
-    else if (e.code === 'Enter') { e.preventDefault(); if (editor) editor.focus(); }
+    else if (isEnter(e)) { e.preventDefault(); if (editor) editor.focus(); }
     else if (e.code === 'KeyN') { e.preventDefault(); newNote(); }
     // **消すのは、必ず訊いてから。** 打っている場所では上で戻しているので、
     // ここに来るのは一覧を見ているときだけ。
@@ -5571,7 +5582,7 @@ function sheet({ title, value, placeholder, items, foot, bare, brand }) {
         if (e.isComposing || e.keyCode === 229) return;
         if (e.code === 'Escape') { e.preventDefault(); closeSheet(null); return; }
         if (!items) {
-            if (e.code === 'Enter') { e.preventDefault(); closeSheet(input.value); }
+            if (isEnter(e)) { e.preventDefault(); closeSheet(input.value); }
             return;
         }
         const hit = items.filter((i) => {
@@ -5580,7 +5591,7 @@ function sheet({ title, value, placeholder, items, foot, bare, brand }) {
         });
         if (e.code === 'ArrowDown') { e.preventDefault(); at = Math.min(at + 1, hit.length - 1); draw(); }
         else if (e.code === 'ArrowUp') { e.preventDefault(); at = Math.max(at - 1, 0); draw(); }
-        else if (e.code === 'Enter') {
+        else if (isEnter(e)) {
             e.preventDefault();
             if (hit[at]) closeSheet(hit[at].value);
         }
