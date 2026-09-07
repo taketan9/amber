@@ -215,11 +215,34 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dl
+      # **本体は生のまま と zip の両方で並べる。**
+      #
+      # 会社の運用端末は、社内の網が `.exe` の直接ダウンロードを止めて
+      # いる ── Release に生の一枚しか無いと、いちばん配りたい相手に
+      # だけ届かない（crmaine の配布先がまさにそれで、落とせなかった）。
+      # zip なら通る。
+      #
+      # **生のほうも残す。** いま生を落としている手順を、こちらの都合で
+      # 折らない。同梱する側（crmaine の `gui/pack.js`）は生でも zip でも
+      # 受けるようにしてある。
+      #
+      # zip の直下に一枚だけ・名前はそのまま（`-j`）── 取り出した人が
+      # 名前を直さずに置ける。`-X` は付けない ── mac と Linux の実行の
+      # 印（+x）まで落ちて、取り出した人が `chmod` する羽目になる。
       - name: 一つにまとめて、指紋を書く
         run: |
           mkdir -p out
           find dl -type f -exec cp {} out/ \;
-          cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+          cd out
+          for f in amber-server-*; do
+            case "$f" in *.zip) continue;; esac
+            chmod +x "$f"
+            zip -j -q "$f.zip" "$f"
+            # 入れたつもりで空、を配らない ── 一枚だけ入っているか数える。
+            [ "$(unzip -Z1 "$f.zip" | wc -l)" -eq 1 ] || { echo "$f.zip の中身が一枚ではありません"; exit 1; }
+            unzip -Z1 "$f.zip" | grep -qx "$f" || { echo "$f.zip の中の名前が違います"; exit 1; }
+          done
+          sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*
