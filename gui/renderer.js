@@ -559,6 +559,8 @@ function makeEditor() {
                 // 動く（実際に一本動かした）。同期しているフォルダでは、それが
                 // 相手側に「向こうが編集した」と見える ── 何もしていないのに。
                 if (loading || !state.open) return;
+                // 打ったので、読む面はもう今の字ではない（組み直すまで）。
+                readStale();
                 state.dirty = true;
                 el('state').textContent = '書きかけ';
                 clearTimeout(saveTimer);
@@ -613,7 +615,15 @@ async function openNote(path, opts) {
     }
     // 別のノートを開いたら、戻り道は捨てる ── 別のノートの姿をここへ
     // 戻せると、一度の押し間違いで二本まとめて壊れる。
-    if (!state.open || state.open.path !== path) forgetSteps();
+    if (!state.open || state.open.path !== path) {
+        forgetSteps();
+        // 前のノートの字を面に残さない ── 「コード」の面では組み直さない
+        // ので、残すと次の書き戻しがそれを今のノートへ書く（`readDrawn`）。
+        el('read').replaceChildren();
+    }
+    // 同じノートを開き直すときも、面はもう今の字ではない（エディタは
+    // このあとファイルの字に置き換わる。組み直せば札は付け直される）。
+    readStale();
     state.open = note;
     state.stamp = r.stamp || null;
     state.head = head;
@@ -786,6 +796,23 @@ function zonesSoon() {
 let readTimer = null;
 /// 書き戻している間は、描き直しを止める（自分の保存で自分を消さない）。
 let syncing = false;
+
+/// **読む面に組んであるのは、どのノートの字か。**
+///
+/// `drawRead` が組んだときに札（`data-of`）を置き、**それ以外で字が動いたら
+/// 剥がす** ── 別のノートを開いたとき、「コード」の面で打ったとき。
+/// 書き戻し（`syncRead`）は、札がいま開いているノートを指しているときだけ
+/// 通す。
+///
+/// これが無いと、読む面は「いま出ているのは、いま開いているノートの字」と
+/// 思い込んだまま書き戻す。「コード」の面ではノートを替えても組み直さない
+/// ので、面は**前のノートの字のまま** ── 次に別のノートへ替えた瞬間、
+/// その字が今のノートへ書き込まれる（実際に二本のノートが、前書きだけ
+/// 自分のまま**本文が別のノート**になった）。同じ道で、「コード」で打った
+/// 行が、ノートを替えた瞬間に**組んだ時の字へ戻される**。
+function readDrawn(path) { el('read').dataset.of = path; }
+function readStale() { delete el('read').dataset.of; }
+function readCurrent() { return !!state.open && el('read').dataset.of === state.open.path; }
 
 /// 打った跡を拾う。**面ぜんぶが入力欄なので、`input` 一本で足りる。**
 el('read').addEventListener('input', () => { readChanged(); tableBar(); });
@@ -1287,6 +1314,9 @@ function landInCell(cell) {
 /// 見た目は既に打った通りになっているので、組み直す理由も無い。
 async function syncRead() {
     if (syncing || !state.open || !editor) return;
+    // **面の字が、いま開いているノートのものでなければ書き戻さない。**
+    // 前のノートの字を、今のノートへ書くことになる（`readDrawn`）。
+    if (!readCurrent()) return;
     const body = readToMd();
     if (body === null) {
         // **黙って止まらない。** 打った字が消えたように見えるのがいちばん悪い。
@@ -2054,6 +2084,10 @@ function readSoon() {
 async function drawRead() {
     if (view === 'write' || !state.open) return;
     const seq = ++readSeq;
+    // 組みはじめたときのノート。帰ってきたときに別のノートが開いていたら
+    // 捨てる ── 「コード」の面へ替えてから別のノートを開くと組み直しが
+    // 走らないので、遅れて着いた前のノートの字に今のノートの札が付く。
+    const of = state.open.path;
     let html;
     try {
         html = (await ask('html', { text: whole() })).html || '';
@@ -2063,9 +2097,11 @@ async function drawRead() {
     }
     // 追い越されていたら捨てる。速く打つと、古い答えが後から着く。
     if (seq !== readSeq) return;
+    if (!state.open || state.open.path !== of) return;
     // 空のノートでも打ちはじめられるように、空の段落を一つ置く ──
     // `contenteditable` は中身が無いと caret を置く先が無い。
     el('read').innerHTML = html.trim() ? html : '<p data-line="' + headLines() + '" data-span="1"><br></p>';
+    readDrawn(of);
     // **末尾には、いつも降りられる一行を置く。**
     //
     // 表や水平線でノートが終わっていると、その下に caret を置く手が
