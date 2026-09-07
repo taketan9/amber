@@ -16,7 +16,19 @@ const { Engine } = require('./engine');
 // **名前を先に決める。** これが `userData` の置き場所を決めるので、
 // 決めないと憶えごとが `.../Electron/` に入り、Electron を使う他のものと
 // 同じ引き出しを共有することになる。
-app.setName('amber');
+//
+// **見える名前は `ambƏr`、引き出しの名前は `amber` のまま。**
+//
+// 名前を替えると `userData` も一緒に動く ── `.../amber/amber.json` に
+// 入れてある憶えごと（置き場所・見た目・窓の大きさ・見本を置いたか）が
+// 丸ごと置き去りになり、開けた人の目には**初めて開いた日の画面**が出る。
+// 置き場所を忘れているので一覧は空、見本を置いたことも忘れているので
+// 見本が生える ── 綴りを変えただけで、そう見える。
+//
+// なので引き出しを先に釘で留めてから、名前を替える。中の名前は変えない
+// （依頼 148 で決めたこと ── 設定キーとバンドル ID は動かさない）。
+app.setPath('userData', path.join(app.getPath('appData'), 'amber'));
+app.setName('ambƏr');
 
 /// 渡された `.md` は、開いたら**単発で**出す。
 ///
@@ -234,7 +246,7 @@ function makeWindow() {
         height: saved.height || 760,
         minWidth: 720,
         minHeight: 440,
-        title: 'amber',
+        title: 'ambƏr',
         icon: ICON,
         backgroundColor: nativeTheme.shouldUseDarkColors ? '#17140f' : '#fbf7ef',
         // 題字は窓の中に描く。OS の帯を残すと、三列の上にもう一段増える。

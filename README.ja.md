@@ -1,7 +1,9 @@
-# amber
+# ambƏr
 
-**A Markdown Box for Everything we Remember**
-── 憶えておきたいもの、ぜんぶ入るマークダウンの箱。
+**Advanced Markdown Browser & Editor for Readability**
+── 読みやすさのためのマークダウン閲覧・編集。
+
+`Ə` はシュワー（曖昧母音）。大きく見えるが、ただの e の音。
 
 ノートはただの Markdown ファイル。フォルダがそのまま索引で、front matter が
 題とタグ。**独自の形式も、隠しデータベースも無い** ── 別のアプリで開いても、

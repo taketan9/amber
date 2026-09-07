@@ -38,7 +38,7 @@ struct Naming: View {
                 Section {
                     Text("「\(folder)」を、家族と分ける棚にします。")
                         .font(.footnote).foregroundStyle(.secondary)
-                    Text("このあと、フォルダそのものをクラウド側で家族に分けてください ── amber が印を置いただけでは、まだ誰にも届きません。")
+                    Text("このあと、フォルダそのものをクラウド側で家族に分けてください ── ambƏr が印を置いただけでは、まだ誰にも届きません。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }

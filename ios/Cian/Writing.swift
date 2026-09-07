@@ -381,7 +381,7 @@ struct Wordmark: View {
         HStack(spacing: 14) {
             Mark().frame(width: 38, height: 38)
             VStack(alignment: .leading, spacing: 1) {
-                Text("amber")
+                Text("ambƏr")
                     .font(.system(size: 34, weight: .heavy, design: .rounded))
                     .kerning(-0.5)
                 Text("\(notes) のノート ・ \(books) のフォルダ")

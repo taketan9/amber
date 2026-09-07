@@ -9,7 +9,7 @@
      `worker-src` の代わりに使われ、Monaco は自分の worker を `blob:` で
      組み立てるので弾かれていた（`console-message` を端末へ流して初めて
      見えた）。通すのは `blob:` だけで、外の道は開けない。 -->
-<title>amber</title>
+<title>ambƏr</title>
 <style>
 /* ── 色 ──
    既定は「琥珀」── アイコンと同じ色（packaging/amber-master.png）。窓と
@@ -737,8 +737,11 @@ body.vim #vim { display: block; }
 #sheet .it .k { margin-left: auto; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 #sheet .it .sub { font-size: 11.5px; color: var(--ink-3); }
 #sheet .it.on { background: var(--sel); }
+/* **改行をそのまま出す。** `textContent` に入れた `\n` は既定では
+   ただの空白に潰れる ── 二行のつもりで書いた添え書きが一本の長い行に
+   なり、書いたほうは画面を見るまで気づかない。 */
 #sheet .foot { padding: 8px 15px; font-size: 11.5px; color: var(--ink-3);
-  border-top: 1px solid var(--line-2); }
+  border-top: 1px solid var(--line-2); white-space: pre-line; }
 
 /* ── 図の工房 ── 左に表、右に図。**直したそばから見える** ──
    見えないまま字を直させるのが、mermaid をいちばん難しくしていた。 */
@@ -995,7 +998,7 @@ body.dropping::after {
   </div>
   <div id="pane">
     <div id="guestbar" hidden>
-      <span class="what">amber の外にあるノートを、単発で開いています</span>
+      <span class="what">ambƏr の外にあるノートを、単発で開いています</span>
       <span id="guestwhere"></span>
       <button id="guestclose">閉じて一覧に戻る</button>
     </div>
@@ -1010,7 +1013,7 @@ body.dropping::after {
       <button id="bell" title="通知設定 ── いつ知らせるか" hidden></button>
       <button id="back" title="一つ戻す（⌘Z）" hidden></button>
       <button id="fwd" title="やり直す（⌘⇧Z）" hidden></button>
-      <button id="gear" title="amber の設定と見た目（⌘⇧P で全部）">⚙</button>
+      <button id="gear" title="ambƏr の設定と見た目（⌘⇧P で全部）">⚙</button>
       <div id="meta">
         <div id="count2"></div>
         <div id="state"></div>

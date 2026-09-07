@@ -59,7 +59,7 @@ struct About: View {
     private var app: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        return "amber \(v) (\(b))"
+        return "ambƏr \(v) (\(b))"
     }
 
     private var engine: String {
@@ -76,8 +76,19 @@ struct About: View {
             } footer: {
                 Text("不具合を伝えるときは、この三つを添えてください。")
             }
+            // **名前の意味は、名前を見た人が探す場所に置く。**
+            // 献立にも帯にも出さない ── 一度読めば済むもので、毎日見る
+            // 場所を取る値打ちは無い（設定に名前の欄を作らなかったのと
+            // 同じ理由）。
+            Section {
+                Text("ambƏr")
+                    .font(.title3.weight(.semibold))
+                Text("Advanced Markdown Browser & Editor for Readability")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .navigationTitle("amber について")
+        .navigationTitle("ambƏr について")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
