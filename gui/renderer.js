@@ -87,6 +87,11 @@ const state = {
     /// 共有の棚へ入れたノートが、もといたフォルダ（ルートからの道 →
     /// フォルダ名）。**共有をやめたときに、そこへ戻す。**
     came: {},
+    /// まとめて選んでいるノートの道。**開いている一本とは別のもの** ──
+    /// 選んでいても、右にはいままで通り一本が出ている。
+    picked: new Set(),
+    /// 範囲選び（Shift+押し）の起点。
+    anchor: null,
     /// いま選んでいる行き先。kind は all / book / star / tag。
     dest: { kind: 'all', what: '' },
     filter: '',
@@ -458,16 +463,340 @@ function drawList() {
         r.onmousedown = (e) => {
             if (e.button !== 0) return;
             if (inNote(document.activeElement)) e.preventDefault();
-            openNote(r.dataset.path);
+            const at = r.dataset.path;
+            // **`Ctrl`／`⌘` 押しは、出し入れ。** 開かない ── 二十本目を
+            // 選ぶたびに二十本目が開いていては、選んでいる意味が無い。
+            if (e.metaKey || e.ctrlKey) { pickToggle(at); return; }
+            // `Shift` 押しは、起点からここまで。**一覧に出ている順**で
+            // 数える（並び替えたら、見えている通りに繋がる）。
+            if (e.shiftKey && state.anchor) { pickTo(at); return; }
+            // ふつうの押し下げは、いままで通り開く。**選びは畳む** ──
+            // 選んだままにすると、次に押した「ゴミ箱へ」が二十本に効く。
+            if (state.picked.size) unpickAll();
+            state.anchor = at;
+            openNote(at);
         };
         // 右押しでも、⋯ と同じ献立。**開いてから出す** ── 開いていない
         // ノートに「削除」を出すと、どれが消えるのか画面が言っていない。
         r.oncontextmenu = async (e) => {
             e.preventDefault();
-            if (!state.open || state.open.path !== r.dataset.path) await openNote(r.dataset.path);
+            const at = r.dataset.path;
+            // **選んでいる行を右押ししたら、選んだぶんの献立。** 開かない
+            // ── 開くと選びが畳まれて、出したかった献立が消える。
+            if (state.picked.has(at)) { pickedMenu({ x: e.clientX, y: e.clientY }); return; }
+            if (state.picked.size) unpickAll();
+            if (!state.open || state.open.path !== at) await openNote(at);
             openMenu({ right: e.clientX + 190, bottom: e.clientY });
         };
     }
+    drawPicked();
+}
+
+/// 一覧の空きどころの右押し。**行の上ではない**ので、ノートのことではなく
+/// 「この一覧」のこと。
+el('list').addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.row')) return;          // 行は行の献立が受ける
+    if (e.target.closest('input, textarea')) return;
+    e.preventDefault();
+    const at = { x: e.clientX, y: e.clientY };
+    popMenu([
+        { name: '新しいノート', key: '⌘N', run: newNote },
+        { name: 'ここに貼り付けて新しいノート', run: cmdPasteNote },
+        { name: '並び順 ── ' + ORDERS.find(([k]) => k === order)[1], sep: true, run: () => {
+            const n = ORDERS.findIndex(([k]) => k === order);
+            order = ORDERS[(n + 1) % ORDERS.length][0];
+            window.amber.remember({ order });
+            drawOrder();
+            drawList();
+        } },
+        { name: 'すべて選ぶ', key: '⌘A', sep: true, run: pickAll },
+        { name: '一覧を畳む', key: '⌘⇧/', run: toggleList },
+    ], at);
+});
+
+/// 左の列の空きどころの右押し。行き先の上ではないので、「この列」のこと。
+el('rail').addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.dest, .plus')) return;  // 行き先は `railMenu` が受ける
+    e.preventDefault();
+    popMenu([
+        { name: '新しいフォルダ', run: () => cmdMkBook() },
+        { name: '新しいブックマークの置き場所', run: () => newShelf('') },
+        { name: '左の列を畳む', key: '⌘/', sep: true, run: toggleRail },
+    ], { x: e.clientX, y: e.clientY });
+});
+
+/// 帯の題の右押し。
+el('title').addEventListener('contextmenu', (e) => {
+    if (!state.open) return;
+    e.preventDefault();
+    const path = state.open.path;
+    popMenu([
+        { name: '題を直す', run: renameTitle },
+        { name: 'ファイル名を写す', run: () => copyText(baseOf(path), 'ファイル名') },
+        { name: '道を写す', run: () => copyText(path, '置き場所') },
+        { name: 'Finder で表示', sep: true, run: () => window.amber.reveal(path) },
+    ], { x: e.clientX, y: e.clientY });
+});
+
+/// 貼り付けた字から、新しいノートを一本。
+async function cmdPasteNote() {
+    let text = '';
+    try {
+        text = await navigator.clipboard.readText();
+    } catch (e) {
+        say('貼り付けられません: ' + why(e));
+        return;
+    }
+    if (!text.trim()) { say('貼り付けるものがありません'); return; }
+    const made = await newNote();
+    if (!made || !editor || !state.open || state.open.path !== made) return;
+    loading = true;
+    editor.setValue(text);
+    loading = false;
+    state.dirty = true;
+    await save();
+}
+
+/* ── まとめて選ぶ ── */
+
+/// いま一覧に出ている順のノート。**選びの範囲は、見えている通り。**
+/// `drawList` と同じ並べ方を通す（ブックマークが上に別枠で出るところまで）。
+function shownNotes() {
+    const rows = sortNotes(narrowed());
+    if (state.dest.kind === 'star') return rows;
+    return [...rows.filter(starred), ...rows.filter((n) => !starred(n))];
+}
+
+function pickToggle(at) {
+    if (state.picked.has(at)) state.picked.delete(at);
+    else { state.picked.add(at); state.anchor = at; }
+    drawList();
+}
+
+/// 起点からここまで、まとめて選ぶ。**足すだけで、外さない** ── 続けて
+/// 二回 Shift を押した人が、一回目に選んだぶんを失わないように。
+function pickTo(at) {
+    const rows = shownNotes().map((n) => n.path);
+    const a = rows.indexOf(state.anchor);
+    const b = rows.indexOf(at);
+    if (a < 0 || b < 0) { pickToggle(at); return; }
+    for (const p of rows.slice(Math.min(a, b), Math.max(a, b) + 1)) state.picked.add(p);
+    drawList();
+}
+
+function pickAll() {
+    // **絞り込んでいるなら、絞り込んだぶんだけ。** 見えていないものまで
+    // 選ぶと、次に押した「ゴミ箱へ」が見えていない本に効く。
+    for (const n of shownNotes()) state.picked.add(n.path);
+    drawList();
+}
+
+function unpickAll() {
+    if (!state.picked.size) return;
+    state.picked.clear();
+    state.anchor = null;
+    drawList();
+}
+
+/// 選んでいる間だけ、一覧の頭に帯を出す。
+function drawPicked() {
+    const bar = el('picked');
+    const n = state.picked.size;
+    bar.hidden = !n;
+    if (!n) return;
+    bar.innerHTML = '<span class="n">' + n + ' 本を選んでいます</span><span class="sp"></span>'
+        + '<button id="pickdo">まとめて ▾</button><button id="pickoff">やめる</button>';
+    el('pickdo').onclick = (e) =>
+        pickedMenu(e.currentTarget.getBoundingClientRect());
+    el('pickoff').onclick = unpickAll;
+}
+
+/// 選んだノートの行（一覧に無いものは落とす ── 外で消えていることがある）。
+function pickedNotes() {
+    return state.notes.filter((n) => state.picked.has(n.path));
+}
+
+/// 選んだノートにすること。**「まとめて ▾」と、選んだ行の右押しで同じもの。**
+function pickedMenu(at) {
+    const n = state.picked.size;
+    popMenu([
+        { name: n + ' 本にタグを付ける', run: () => manyTagOn() },
+        { name: n + ' 本からタグを外す', run: () => manyTagOff() },
+        { name: n + ' 本をフォルダへ移動', run: () => manyMove() },
+        { name: n + ' 本をブックマークに登録', run: () => manyStar(true) },
+        { name: n + ' 本のブックマークを外す', run: () => manyStar(false) },
+        { name: '選ぶのをやめる', key: 'Esc', sep: true, run: unpickAll },
+        { name: n + ' 本をゴミ箱へ入れる', sep: true, run: () => manyDelete() },
+    ], at);
+}
+
+/// 選んだノートを一本ずつ書き換える。**一本転んでも、残りは進む** ──
+/// 二十本のうち三本目で止まると、どこまで済んだのかが誰にも分からない。
+///
+/// `change(note, text)` が新しい字を返す。**同じ字を返したら書かない** ──
+/// 同期しているフォルダで、中身の変わらないファイルの時刻だけ動くのが
+/// いちばん困る（「向こうが書き換えた」に見える）。
+async function eachPicked(change) {
+    const done = [];
+    const skipped = [];
+    const failed = [];
+    for (const note of pickedNotes()) {
+        try {
+            const got = await ask('read', { path: note.path });
+            const was = typeof got.text === 'string' ? got.text : null;
+            if (was === null) { failed.push(note); continue; }
+            const now = await change(note, was);
+            if (now === null || now === was) { skipped.push(note); continue; }
+            await ask('write', { path: note.path, text: now, force: true });
+            done.push(note);
+        } catch {
+            failed.push(note);
+        }
+    }
+    await reload({ quiet: true });
+    // 開いていた一本も書き換わっているかもしれない ── 読み直す。
+    if (state.open && state.picked.has(state.open.path)) await openNote(state.open.path, { quiet: true });
+    return { done, skipped, failed };
+}
+
+/// 数で言う。**「済みました」だけにしない** ── 何本に効いて、何本は
+/// もともとそうだったのかは、押した人が知りたいことそのもの。
+function sayMany(verb, r, why2) {
+    let m = r.done.length + ' 本' + verb;
+    if (r.skipped.length) m += '（' + r.skipped.length + ' 本は' + why2 + '）';
+    if (r.failed.length) m += '／' + r.failed.length + ' 本は書けませんでした';
+    say(m);
+}
+
+async function manyTagOn() {
+    const notes = pickedNotes();
+    const all = tagsOf(state.notes).map(([t, c]) => ({ name: t, sub: c + ' 件', value: t }));
+    const pick = await askPick(notes.length + ' 本に付けるタグ',
+        [...all, { name: '＋ 新しいタグを作る', value: ' new' }]);
+    if (pick === null) return;
+    let tag = pick;
+    if (pick === ' new') {
+        const v = await askText('新しいタグの名前', '', '空白は使えません（`買い物` のように）');
+        if (!v || !v.trim()) return;
+        tag = v.trim().replace(/^#/, '').replace(/\s+/g, '');
+        if (!tag) return;
+    }
+    const r = await eachPicked(async (note, text) => {
+        const now = note.tags || [];
+        // **もう付いている本は触らない。** 書き換えないので時刻も動かない。
+        if (now.includes(tag)) return null;
+        const got = await ask('settags', { text, tags: [...now, tag] });
+        return typeof got.text === 'string' ? got.text : null;
+    });
+    sayMany('に #' + tag + ' を付けました', r, 'もとから付いています');
+}
+
+async function manyTagOff() {
+    const notes = pickedNotes();
+    // **選んだ中に実際にあるタグだけを、件数つきで出す。**
+    //
+    // 打ち込ませると、選んだ二十本のうち十二本にしか無いタグを外したとき
+    // 「残り八本で何が起きたのか」が誰にも分からない。並べてしまえば、
+    // 無いタグは選びようがない。
+    const here = tagsOf(notes);
+    if (!here.length) { say('選んだノートにタグは付いていません'); return; }
+    const tag = await askPick(notes.length + ' 本から外すタグ',
+        here.map(([t, c]) => ({ name: t, sub: notes.length + ' 本中 ' + c + ' 本', value: t })));
+    if (tag === null) return;
+    const r = await eachPicked(async (note, text) => {
+        const now = note.tags || [];
+        if (!now.includes(tag)) return null;
+        const got = await ask('settags', { text, tags: now.filter((t) => t !== tag) });
+        return typeof got.text === 'string' ? got.text : null;
+    });
+    sayMany('から #' + tag + ' を外しました', r, 'もとから付いていません');
+}
+
+async function manyStar(on) {
+    const r = await eachPicked(async (note, text) => {
+        if (starred(note) === on) return null;
+        const got = await ask('star', { text, shelf: on ? '' : null });
+        return typeof got.text === 'string' ? got.text : null;
+    });
+    sayMany(on ? 'をブックマークに入れました' : 'のブックマークを外しました',
+        r, on ? 'もとから入っています' : 'もとから入っていません');
+}
+
+async function manyMove() {
+    const notes = pickedNotes();
+    const here = [{ name: '（いちばん上）', value: '' },
+        ...state.books.map((b) => ({ name: b, value: b })),
+        { name: '＋ 新しいフォルダを作る', value: ' new' }];
+    let to = await askPick(notes.length + ' 本をどのフォルダへ', here);
+    if (to === null) return;
+    if (to === ' new') {
+        const made = await cmdMkBook();
+        if (!made) return;
+        to = made;
+    }
+    const dir = to ? state.root + '/' + to : state.root;
+    if (state.dirty) await save();
+    let moved = 0;
+    let failed = 0;
+    const now = new Set();
+    for (const note of notes) {
+        // もう居るところへは動かさない。
+        if ((note.book || '') === to) { now.add(note.path); continue; }
+        try {
+            const r = await ask('move', { path: note.path, dir });
+            moved++;
+            if (r && r.path) now.add(r.path);
+        } catch { failed++; now.add(note.path); }
+    }
+    // **選びは道で憶えている。** 移すと道が変わるので、繋ぎ直す ──
+    // 繋がないと、移した直後に選びが空になる。
+    state.picked = now;
+    await reload({ quiet: true });
+    if (state.open) await openNote(state.open.path, { quiet: true });
+    drawList();
+    say(moved + ' 本を' + (to ? '「' + to + '」へ' : 'いちばん上へ') + '移しました'
+        + (failed ? '／' + failed + ' 本は移せませんでした' : ''));
+}
+
+/// まとめてゴミ箱へ。**訊くのは一度だけ。**
+///
+/// 一本ずつの `cmdDelete` を二十回まわすと、二十回訊かれる ── ゴミ箱の
+/// 無い置き場所（会社の OneDrive）では、断られてからもう一度、で四十回に
+/// なる。数を言って一度承知をもらい、そのあとは黙って進める。
+async function manyDelete() {
+    const notes = pickedNotes();
+    if (!notes.length) return;
+    const knew = noBin();
+    const head = notes.length + ' 本を';
+    if (!await askYes(knew
+        ? head + '消しますか（ここにはゴミ箱が無いので、戻せません）'
+        : head + 'ゴミ箱へ入れますか')) return;
+    let binned = 0;
+    let erased = 0;
+    let failed = 0;
+    let asked = knew;
+    for (const note of notes) {
+        const got = await window.amber.trash(note.path);
+        if (got === true) { binned++; if (noBin()) markNoBin(false); continue; }
+        // 断られた ── **ここで初めて分かったときだけ、もう一度訊く。**
+        markNoBin(true);
+        if (!asked) {
+            asked = true;
+            const go = await askYes('ゴミ箱へ入れられませんでした'
+                + (got && got.why ? '（' + got.why + '）' : '')
+                + '。残りをこのまま消しますか。もう戻せません');
+            if (!go) break;
+        }
+        try { await ask('delete', { path: note.path }); erased++; } catch { failed++; }
+    }
+    // 消えた一本を開いたままにしない。
+    if (state.open && state.picked.has(state.open.path)) { state.open = null; state.dirty = false; applyView(); }
+    unpickAll();
+    await reload({ quiet: true });
+    say((binned ? binned + ' 本をゴミ箱へ入れました' : '')
+        + (binned && erased ? '／' : '') + (erased ? erased + ' 本を消しました' : '')
+        + (failed ? '／' + failed + ' 本は消せませんでした' : '')
+        || '何も消しませんでした');
 }
 
 function row(n) {
@@ -489,7 +818,8 @@ function row(n) {
     const done = (n.excerpt || '').match(/\[x\]/gi)?.length || 0;
     const todo = (n.excerpt || '').match(/\[ \]/g)?.length || 0;
     const bar = done + todo ? '<span class="done">' + done + '/' + (done + todo) + '</span>' : '';
-    return '<div class="row' + (open ? ' on' : '') + '" data-path="' + escapeAttr(n.path) + '">'
+    return '<div class="row' + (open ? ' on' : '') + (state.picked.has(n.path) ? ' pick' : '')
+        + '" data-path="' + escapeAttr(n.path) + '">'
         + '<div class="t">' + (starred(n) ? '<span class="star">★</span> ' : '')
         + escapeHtml(n.title || '（タイトルなし）') + shared + clash + '</div>'
         + '<div class="x">' + escapeHtml(n.excerpt || '') + '</div>'
@@ -672,8 +1002,82 @@ async function openNote(path, opts) {
 /// 「（タイトルなし）」のまま残っていた。同じノートの名前が、画面の二か所
 /// で食い違って見えていたことになる。
 function drawTitle() {
+    // 直している最中は、下から書き換えない ── 打っている字が消える。
+    if (document.activeElement === el('title')) return;
     el('title').textContent = (state.open && state.open.title) || '（タイトルなし）';
 }
+
+/* ── 帯の題を直す ── */
+
+/// 帯の題は押せば直せる。**直すのは前書きの `title:` だけ。**
+///
+/// 題の出どころは core が決めている（`title:` → 最初の見出し → 書き出しの
+/// 一行 → ファイル名）── そのうち**書き換えるのは `title:` の欄だけ**に
+/// する。見出しからきていた人の見出しは、そのまま残って題が付く。
+///
+/// **本文には触らない。** 「題を直す」と押した人が期待しているのは題が
+/// 変わることで、一行目の見出しが書き換わることではない。ただしそのぶん
+/// 題と見出しが食い違いうるので、**一覧も帯も同じ core の答え**を出す
+/// （どちらかが自前で「一行目が題」と決めない ── `freshenRow` と同じ話）。
+///
+/// 空にしたら `title:` を**外す** ── 元の決め方（見出し・書き出し）に戻る。
+/// 「題を消す」ではなく「付けるのをやめる」。
+async function renameTitle() {
+    const box = el('title');
+    box.contentEditable = 'plaintext-only';
+    box.spellcheck = false;
+    box.focus();
+    // 全部選んでおく ── 直したい人は、たいてい丸ごと書き換える。
+    const r = document.createRange();
+    r.selectNodeContents(box);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+}
+
+/// 直した題を書き込む。**空白だけなら「付けない」。**
+async function titleDone(keep) {
+    const box = el('title');
+    box.contentEditable = 'false';
+    if (!state.open) return;
+    const want = keep ? box.textContent.trim().replace(/\s+/g, ' ') : null;
+    drawTitle();
+    if (!keep) return;
+    // 「（タイトルなし）」はこちらが出している言葉で、人が書いた題ではない。
+    const to = want === '（タイトルなし）' ? '' : want;
+    if (to === (state.open.title || '')) return;
+    try {
+        // **前書きの組み立ては core。** ここで `---` を書き足すと、
+        // 前書きの形を決めるところが二つになる。
+        const got = await ask('setfield', {
+            text: state.head + editor.getValue(),
+            key: 'title',
+            value: to || null,
+        });
+        if (typeof got.text !== 'string') return;
+        const cut = await ask('split', { text: got.text });
+        state.head = cut.head || '';
+        loading = true;
+        editor.setValue(cut.body || '');
+        loading = false;
+        state.dirty = true;
+        await save();
+        say(to ? '題を「' + to + '」にしました' : '題を外しました（見出しから決まります）');
+    } catch (e) {
+        say('題を直せません: ' + why(e));
+        drawTitle();
+    }
+}
+
+el('title').onclick = () => { if (state.open && el('title').contentEditable !== 'plaintext-only') renameTitle(); };
+el('title').onkeydown = (e) => {
+    if (isEnter(e)) { e.preventDefault(); el('title').blur(); return; }
+    // **やめたら、何も変えない。** 打ちかけの字を捨てて元の題に戻す。
+    if (e.code === 'Escape') { e.preventDefault(); titleDone(false); el('title').blur(); }
+};
+el('title').onblur = () => {
+    if (el('title').contentEditable === 'plaintext-only') titleDone(true);
+};
 
 /* ── vim ── */
 
@@ -3461,11 +3865,87 @@ el('read').addEventListener('click', async (e) => {
 // 図の余白を右押しすれば、これまでどおり工房が開く。
 el('read').addEventListener('contextmenu', (e) => {
     const art = diagramAt(e.target);
-    if (!art) return;
-    e.preventDefault();
-    if (paintNode(art, e)) return;
-    studioOpen(art);
+    if (art) {
+        e.preventDefault();
+        if (paintNode(art, e)) return;
+        studioOpen(art);
+        return;
+    }
+    readMenu(e);
 });
+
+/* ── 右押し ── */
+
+/// 字を写す。**転んでも黙らない** ── 写せたつもりで貼れないのが最悪。
+async function copyText(text, what) {
+    try {
+        await navigator.clipboard.writeText(text);
+        say(what + 'を写しました');
+    } catch (e) {
+        say('写せません: ' + why(e));
+    }
+}
+
+/// 「表示」の面の右押し。**指しているものにすることだけを出す。**
+///
+/// 表の上なら表のこと、リンクの上ならリンクのこと、升の上なら升のこと。
+/// どこでもない字の上なら、切り貼りと飾り ── 飾りの中身は道具帯
+/// （`MARKS`）から引く。**二か所に書かない** ── 書くと、記号を一つ足した
+/// 日に道具帯にだけ増えて、右押しには出てこない。
+function readMenu(e) {
+    if (view === 'write') return;
+    e.preventDefault();
+    const at = { x: e.clientX, y: e.clientY };
+    const t = e.target;
+    const sel = String(getSelection() || '');
+
+    // 升の上 ── 済み／未済と、下に一つ。
+    const box = t.closest('.box');
+    if (box) { popMenu([
+        { name: '済み／未済を入れ替える', run: () => box.click() },
+        { name: 'この下に一つ足す', run: () => { landAfter(box); readMark('line', '- [ ] ', true); } },
+    ], at); return; }
+
+    // リンクの上。
+    const a = t.closest('a[href]');
+    if (a) { popMenu([
+        { name: '開く', sub: a.getAttribute('href'), run: () => window.amber.openLink(a.href) },
+        { name: 'リンク先を写す', run: () => copyText(a.getAttribute('href') || '', 'リンク先') },
+        { name: '字だけ残す', run: () => { landAt(a); readDress('unlink'); } },
+    ], at); return; }
+
+    // 表の中 ── 道具帯と同じもの。**同じ命令を二度書かない。**
+    const cell = t.closest('td, th');
+    if (cell && el('read').contains(cell)) {
+        landAt(cell);
+        popMenu([
+            { name: '行を足す', run: () => tableDo('row+') },
+            { name: '行を消す', run: () => tableDo('row-') },
+            { name: '列を足す', sep: true, run: () => tableDo('col+') },
+            { name: '列を消す', run: () => tableDo('col-') },
+            { name: '左に寄せる', sep: true, run: () => tableDo('align:left') },
+            { name: '真ん中に寄せる', run: () => tableDo('align:center') },
+            { name: '右に寄せる', run: () => tableDo('align:right') },
+        ], at);
+        return;
+    }
+
+    // どこでもない字の上 ── 切り貼りと飾り。
+    popMenu([
+        { name: '切り取り', key: '⌘X', dim: !sel, run: () => document.execCommand('cut') },
+        { name: '写す', key: '⌘C', dim: !sel, run: () => document.execCommand('copy') },
+        { name: '貼り付け', key: '⌘V', run: () => document.execCommand('paste') },
+        ...MARKS.flat().filter(([n]) => n !== '|' && n !== '画像' && n !== 'フロー')
+            .map(([name, key, run], i) => ({ name, key, sep: i === 0, run })),
+    ], at);
+}
+
+/// 升のある行へ caret を置く（`landAt` は切り出しの側にある一本を使う ──
+/// 同じことをする関数を二つ持たない）。
+function landAfter(box) {
+    const li = box.closest('li') || box.parentElement;
+    if (li) landAt(li);
+}
 
 /// 押されたところの図。描けた図（`.mermaid`）と、描けなかった枠のどちらも。
 /// 描かれた図の、箱そのものを右押しして色を変える。受けたら `true`。
@@ -3498,22 +3978,14 @@ function paintNode(art, e) {
 /// 色の献立。**名前と、その色そのものを並べる** ── 「ベルガモット」が
 /// どれかを覚えている人はいない。
 function paintMenu(at, now, set) {
-    const box = el('more');
-    const rows = [['', '色なし'], ...PALETTE];
-    box.innerHTML = rows.map(([hex, name], n) =>
-        '<button data-n="' + n + '">'
-        + '<span class="dot" style="background:' + (hex ? escapeAttr(soften(hex, 0.3)) : 'transparent')
-        + ';border-color:' + (hex ? escapeAttr(hex) : 'var(--line)') + '"></span>'
-        + escapeHtml(name)
-        + (hex === (now || '') ? '<span class="k">いま</span>' : '') + '</button>').join('');
-    for (const b of box.querySelectorAll('button')) {
-        b.onclick = () => { closeMenu(); set(rows[Number(b.dataset.n)][0]); };
-    }
-    box.hidden = false;
-    const w = box.offsetWidth;
-    box.style.left = Math.max(8, Math.min(at.x, innerWidth - w - 8)) + 'px';
-    box.style.top = (at.y + 4) + 'px';
-    setTimeout(() => document.addEventListener('mousedown', closeMenuOnce, { once: true }), 0);
+    popMenu([['', '色なし'], ...PALETTE].map(([hex, name]) => ({
+        html: '<span class="dot" style="background:'
+            + (hex ? escapeAttr(soften(hex, 0.3)) : 'transparent')
+            + ';border-color:' + (hex ? escapeAttr(hex) : 'var(--line)') + '"></span>'
+            + escapeHtml(name),
+        key: hex === (now || '') ? 'いま' : '',
+        run: () => set(hex),
+    })), at);
 }
 
 function diagramAt(target) {
@@ -3918,8 +4390,12 @@ async function newNote() {
         await reload({ quiet: true });
         await openNote(r.path);
         if (editor) editor.focus();
+        // **作れた道を返す。** 貼り付けて作る道（`cmdPasteNote`）が、
+        // 作れたかどうかを見るのに要る。
+        return r.path;
     } catch (e) {
         say('作れません: ' + why(e));
+        return null;
     }
 }
 
@@ -4097,7 +4573,20 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault(); cmdKeys(); return;
     }
     // 左の列を畳む（Inkdrop の ⌘/）。狭い画面では二列ぶんが効く。
-    if ((e.metaKey || e.ctrlKey) && e.code === 'Slash') { e.preventDefault(); toggleRail(); return; }
+    if ((e.metaKey || e.ctrlKey) && e.code === 'Slash') {
+        e.preventDefault();
+        // `⇧` を足すと二枚目。**同じ鍵の並びに揃える** ── 畳むことは
+        // 一つの動きで、畳む相手が違うだけ。
+        if (e.shiftKey) toggleList(); else toggleRail();
+        return;
+    }
+    // **まとめて選ぶ。** 打っている最中は取らない ── エディタと探す欄の
+    // `⌘A` は「字を全部選ぶ」で、そちらのほうが強い。
+    if ((e.metaKey || e.ctrlKey) && e.code === 'KeyA' && !inField && !inEditor && !inNote(document.activeElement)) {
+        e.preventDefault();
+        pickAll();
+        return;
+    }
     // 見たノートの前後（Inkdrop の ⌘← / ⌘→）。
     if ((e.metaKey || e.ctrlKey) && e.code === 'ArrowLeft') { e.preventDefault(); walk(-1); return; }
     if ((e.metaKey || e.ctrlKey) && e.code === 'ArrowRight') { e.preventDefault(); walk(1); return; }
@@ -4108,6 +4597,8 @@ document.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') {
         // 探す欄の Esc は**畳んで空にする** ── 見えない絞り込みを残さない。
         if (inField) { el('find').blur(); closeFind(); return; }
+        // 選んでいるなら、まず選びを畳む ── いちばん手前のものから。
+        if (state.picked.size) { unpickAll(); return; }
         if (inEditor) { document.activeElement.blur(); return; }
     }
     // 文字を打っている場所では、素の一文字は文字であって命令ではない。
@@ -4187,6 +4678,19 @@ function toggleRail() {
     if (editor) setTimeout(() => editor.layout(), 0);
 }
 
+/// 一覧（二枚目）を畳む。
+///
+/// **三枚目の「ノートだけ」は作らない。** 二枚とも畳めばそこへ行き着くし、
+/// `F12`（ノートだけを大きく）が既にある ── 同じところへ着く道を三本
+/// 持つと、どれで畳んだのかによって戻り方が違う画面になる。
+let listOff = false;
+function toggleList() {
+    listOff = !listOff;
+    document.body.classList.toggle('nolist', listOff);
+    window.amber.remember({ listOff });
+    if (editor) setTimeout(() => editor.layout(), 0);
+}
+
 /// 見たノートの前後をたどる。
 ///
 /// **開いた順に積む。** 一覧の並び順ではない ── 「さっき見ていたもの」は
@@ -4224,7 +4728,10 @@ const CMDS = [
     { id: 'save', name: '保存', sub: '打てば自動でも保存されます', need: 'note', run: () => save() },
     { id: 'read', name: '表示 / コードを入れ替え', key: '⌘E', need: 'note', run: () => toggleRead() },
     { id: 'split', name: '並べて表示', key: '⌘P', need: 'note', run: () => toggleSplit() },
-    { id: 'rail', name: '左の列を畳む', key: '⌘/', run: () => toggleRail() },
+    // **⚙ にも出す。** 鍵（`⌘/`）を覚えていない人には、畳む道がどこにも
+    // 無かった ── Inkdrop は献立に並べている。
+    { id: 'rail', name: '左の列を畳む', key: '⌘/', app: true, run: () => toggleRail() },
+    { id: 'list', name: '一覧を畳む', key: '⌘⇧/', app: true, run: () => toggleList() },
     { id: 'back', name: '前に見たノート', key: '⌘←', run: () => walk(-1) },
     { id: 'fwd', name: '次に見たノート', key: '⌘→', run: () => walk(1) },
     { id: 'find', name: 'ノートを探す', key: '⌘F', run: () => openFind() },
@@ -4354,7 +4861,6 @@ async function palette() {
 /// **「見た目」をノートの右押しに出さない。** ノートを右押しした人が
 /// 訊いているのは「このノートをどうするか」で、アプリの色ではない。
 function openMenu(at, which) {
-    const box = el('more');
     const key = which === 'app' ? 'app' : 'menu';
     const items = CMDS.filter((c) => c[key] && canRun(c)).map((c) => {
         // **いまどうなっているかを、押す前に見せる。**
@@ -4365,6 +4871,8 @@ function openMenu(at, which) {
         if (c.id === 'theme') return { ...c, sub: themeName() };
         if (c.id === 'vim') return { ...c, sub: vimOn ? 'オン' : 'オフ' };
         if (c.id === 'lineno') return { ...c, sub: lineNo ? 'オン' : 'オフ' };
+        if (c.id === 'rail') return { ...c, name: railOff ? '左の列を出す' : '左の列を畳む' };
+        if (c.id === 'list') return { ...c, name: listOff ? '一覧を出す' : '一覧を畳む' };
         if (c.id === 'root') return { ...c, sub: shortPath(state.root) };
         if (c.id === 'toshare') {
             if (state.open && state.open.shared) {
@@ -4383,26 +4891,46 @@ function openMenu(at, which) {
         }
         return c;
     });
-    if (!items.length) return;
     // 区切りは**印の付いた命令の手前**に置く ── 「最後の一つの前」に
     // すると、命令が増えた日に区切りが勝手に動く。
-    box.innerHTML = items.map((c) =>
+    popMenu(items, at);
+}
+
+/// 献立を出す。**描くのも置くのも、ここ一つ。**
+///
+/// 前は三か所（⋯ の献立・左の列の右押し・色の献立）が同じことを書いて
+/// いた ── 画面の外へはみ出さない直しを一か所に入れて、残り二つが古い
+/// まま、が起こる形。右押しを十か所に増やすので、先に一本にする。
+///
+/// `items` は `{ name, sub, key, sep, dim, html, run }` の並び。`at` は
+/// 押した場所（`{x, y}`）か、釦の四角（`{right, bottom}` ── 右端に揃える）。
+function popMenu(items, at) {
+    const box = el('more');
+    const rows = items.filter(Boolean);
+    if (!rows.length) return;
+    box.innerHTML = rows.map((c, n) =>
         (c.sep ? '<div class="sep"></div>' : '')
-        + '<button data-id="' + c.id + '">' + escapeHtml(c.name)
+        + '<button data-n="' + n + '"' + (c.dim ? ' disabled' : '') + '>'
+        + (c.html || escapeHtml(c.name))
         + (c.sub ? '<span class="sub">' + escapeHtml(c.sub) + '</span>' : '')
-        + (c.key ? '<span class="k">' + escapeHtml(c.key) + '</span>' : '') + '</button>').join('');
+        + (c.key ? '<span class="k">' + escapeHtml(c.key) + '</span>' : '')
+        + '</button>').join('');
     for (const b of box.querySelectorAll('button')) {
         b.onclick = async () => {
             closeMenu();
-            const c = CMDS.find((x) => x.id === b.dataset.id);
-            if (c) await c.run();
+            const c = rows[Number(b.dataset.n)];
+            if (c && c.run) await c.run();
         };
     }
     box.hidden = false;
-    // 画面の外へはみ出さない。**右端に置くものなので、右から測る。**
     const w = box.offsetWidth;
-    box.style.left = Math.max(8, Math.min(at.right - w, innerWidth - w - 8)) + 'px';
-    box.style.top = (at.bottom + 6) + 'px';
+    const h = box.offsetHeight;
+    // 右端に揃えるか、押したところに置くか。どちらでも**画面の外へは
+    // 出さない** ── 下に出ないときは、押したところの上へ返す。
+    const x = at.right !== undefined ? at.right - w : at.x;
+    const y = at.bottom !== undefined ? at.bottom + 6 : at.y + 4;
+    box.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
+    box.style.top = (y + h > innerHeight - 8 ? Math.max(8, y - h - 10) : y) + 'px';
     setTimeout(() => document.addEventListener('mousedown', closeMenuOnce, { once: true }), 0);
 }
 
@@ -4445,6 +4973,14 @@ async function drawToc() {
         + escapeHtml(h.text) + '</button>').join('');
     for (const b of box.querySelectorAll('.h')) {
         b.onclick = () => gotoHead(heads[Number(b.dataset.n)]);
+        b.oncontextmenu = (e) => {
+            e.preventDefault();
+            const h = heads[Number(b.dataset.n)];
+            popMenu([
+                { name: 'ここへ飛ぶ', run: () => gotoHead(h) },
+                { name: '見出しの字を写す', run: () => copyText(h.text, '見出し') },
+            ], { x: e.clientX, y: e.clientY });
+        };
     }
 }
 
@@ -4565,7 +5101,6 @@ async function railPlus(kind) {
 /// 行き先を右押ししたときの献立。**フォルダ・タグ・ブックマークを、名前ごと直す。**
 function railMenu(kind, what, at) {
     if (!what) return;
-    const box = el('more');
     const items = [];
     // **下の階層は、ここから作る。** 名前に「/」を打たせるのは、
     // 書き方を知っている人にしか通じない。
@@ -4598,17 +5133,7 @@ function railMenu(kind, what, at) {
             : (kind === 'tag' ? 'このタグを全部のノートから外す' : 'この置き場所を消す'),
         run: () => railDrop(kind, what),
     });
-    box.innerHTML = items.map((c, n) =>
-        (c.sep ? '<div class="sep"></div>' : '')
-        + '<button data-n="' + n + '">' + escapeHtml(c.name) + '</button>').join('');
-    for (const b of box.querySelectorAll('button')) {
-        b.onclick = () => { closeMenu(); items[Number(b.dataset.n)].run(); };
-    }
-    box.hidden = false;
-    const w = box.offsetWidth;
-    box.style.left = Math.max(8, Math.min(at.x, innerWidth - w - 8)) + 'px';
-    box.style.top = (at.y + 4) + 'px';
-    setTimeout(() => document.addEventListener('mousedown', closeMenuOnce, { once: true }), 0);
+    popMenu(items, at);
 }
 
 /// そのフォルダ・タグ・ブックマークに居るノート。
@@ -6218,6 +6743,7 @@ const escapeAttr = escapeHtml;
     // 置き場所を決める道がどこにも無い。
     applyView();
     if (saved.railOff) { railOff = true; document.body.classList.add('norail'); }
+    if (saved.listOff) { listOff = true; document.body.classList.add('nolist'); }
     // エディタはまだ無い ── 開いたときに入る（`makeEditor` の末尾）。
     if (saved.vim) vimOn = true;
     if (typeof saved.fontStep === 'number') fontStep = saved.fontStep;
