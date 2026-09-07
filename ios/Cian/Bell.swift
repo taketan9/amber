@@ -75,7 +75,7 @@ enum Bell {
 
         let body = UNMutableNotificationContent()
         body.title = note.title
-        body.body = note.excerpt.isEmpty ? "ambƏr" : note.excerpt
+        body.body = note.excerpt.isEmpty ? "ambər" : note.excerpt
         body.sound = .default
         // Which note this was about. Without it a notification can only say
         // "open amber", and the person then has to find the note the phone

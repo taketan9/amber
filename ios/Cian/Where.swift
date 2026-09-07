@@ -47,7 +47,7 @@ struct Where: View {
                             .font(.callout)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(store.own
-                             ? "この iPhone の中。「ファイル」→ この iPhone 内 → ambƏr で開けます"
+                             ? "この iPhone の中。「ファイル」→ この iPhone 内 → ambər で開けます"
                              : store.rootPath)
                             .font(.caption2).foregroundStyle(.secondary)
                             .lineLimit(4)
@@ -83,7 +83,7 @@ struct Where: View {
                     // is a thing cian cannot do for him — the sidebar is the
                     // Files app's own setting — so the least it can do is say
                     // exactly where it is.
-                    Text("選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。\n\n・iCloud Drive → そのまま一覧にあります\n・Google Drive / Dropbox → 「場所」の下に並びます\n\n出てこないときは、その並びの下の「…」→「サイドバーを編集」で、使いたいものをオンにしてください（「ファイル」アプリ側の設定なので、ambƏr からは変えられません）。\n\n灰色で選べないものがあります。フォルダを丸ごと他のアプリに渡せるかどうかは、そのアプリ側の作りによるもので、ambƏr からは変えられません（2026-09 現在、「ドライブ」は灰色、iCloud Drive と Dropbox は選べます）。\n\n窓版の ambƏr に同じフォルダを指定すれば、両方から同じノートを触れます。")
+                    Text("選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。\n\n・iCloud Drive → そのまま一覧にあります\n・Google Drive / Dropbox → 「場所」の下に並びます\n\n出てこないときは、その並びの下の「…」→「サイドバーを編集」で、使いたいものをオンにしてください（「ファイル」アプリ側の設定なので、ambər からは変えられません）。\n\n灰色で選べないものがあります。フォルダを丸ごと他のアプリに渡せるかどうかは、そのアプリ側の作りによるもので、ambər からは変えられません（2026-09 現在、「ドライブ」は灰色、iCloud Drive と Dropbox は選べます）。\n\n窓版の ambər に同じフォルダを指定すれば、両方から同じノートを触れます。")
                 }
 
                 Section {
@@ -160,7 +160,7 @@ struct Where: View {
                     NavigationLink {
                         About(store: store)
                     } label: {
-                        Label("ambƏr について", systemImage: "info.circle")
+                        Label("ambər について", systemImage: "info.circle")
                     }
                 } header: {
                     Text("困ったとき")

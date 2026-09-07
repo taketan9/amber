@@ -2977,7 +2977,7 @@ function studioRaw() {
     wrap.append(t);
     if (!studio.data) {
         wrap.append(tag('div', 'note',
-            'この図は表にできない形（手で書いたか、ambƏr の知らない書き方）です。'
+            'この図は表にできない形（手で書いたか、ambər の知らない書き方）です。'
             + '右の絵を見ながら、ここで直してください。'));
     }
     return wrap;
@@ -3679,7 +3679,7 @@ function walk(step) {
 /// 置き場所（いつもある）。`menu` が真なら、⋯ の献立にも出る。
 const CMDS = [
     { id: 'new', name: '新しいノート', key: '⌘N', run: () => newNote() },
-    { id: 'outside', name: 'ambƏr フォルダ以外のノートを開く', key: '⌘O', app: true,
+    { id: 'outside', name: 'ambər フォルダ以外のノートを開く', key: '⌘O', app: true,
       run: cmdOpenOutside },
     // **`⌘S` は「現状バージョン保存」が持っている**（受け口は捕捉の段）。
     // ここにも同じ鍵を書くと、一覧に二つ並んで、どちらが走るのか
@@ -3730,9 +3730,9 @@ const CMDS = [
     { id: 'welcome', name: '見本のノートを入れる', app: true, run: cmdWelcome },
     { id: 'backup', name: 'バックアップ', app: true, run: cmdBackup },
     { id: 'restore', name: 'バックアップから戻す', app: true, run: cmdRestore },
-    { id: 'root', name: 'ambƏr 保存ディレクトリ変更', app: true, run: cmdRoot },
+    { id: 'root', name: 'ambər 保存ディレクトリ変更', app: true, run: cmdRoot },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
-    { id: 'about', name: 'ambƏr について', app: true, run: cmdAbout },
+    { id: 'about', name: 'ambər について', app: true, run: cmdAbout },
     { id: 'history', name: '過去バージョン', need: 'note', menu: true, run: () => cmdHistory() },
     { id: 'keepnow', name: '現状バージョン保存', key: '⌘S', need: 'note', menu: true, run: cmdKeepNow },
     // **`back` / `fwd` は上の「前に見たノート」で使っている。** 同じ id を
@@ -5269,11 +5269,11 @@ async function cmdAbout() {
     } catch (e) {
         engine = '答えません: ' + e.message;
     }
-    await askPick('ambƏr について', [
-        { name: '画面', sub: 'ambƏr ' + (await window.amber.appVersion() || '?'), value: null },
+    await askPick('ambər について', [
+        { name: '画面', sub: 'ambər ' + (await window.amber.appVersion() || '?'), value: null },
         { name: 'エンジン', sub: engine, value: null },
         { name: 'ノートの置き場所', sub: state.root || '（まだ決めていません）', value: null },
-    ], 'ambƏr ── Advanced Markdown Browser & Editor for Readability\n不具合を伝えるときは、この三つを添えてください');
+    ], 'ambər ── Advanced Markdown Browser & Editor for Readability\n不具合を伝えるときは、この三つを添えてください');
 }
 
 /* ── 前の姿 ── */

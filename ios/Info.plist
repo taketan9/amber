@@ -10,7 +10,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>ja</string>
 	<key>CFBundleDisplayName</key>
-	<string>ambƏr</string>
+	<string>ambər</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

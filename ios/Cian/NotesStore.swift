@@ -35,14 +35,14 @@ final class NotesStore: ObservableObject {
 
     /// Whether the notes are in the app's own folder rather than one picked.
     @Published var own = true
-    /// The path as a trail of names — 「この iPhone › ambƏr › 仕事」.
+    /// The path as a trail of names — 「この iPhone › ambər › 仕事」.
     ///
     /// A phone hides paths, which is usually kind and here is not: the same
-    /// folder name can exist in three different clouds, and "ambƏr" on its own
+    /// folder name can exist in three different clouds, and "ambər" on its own
     /// answers *what is it called* when the question is *where is it*.
     var trail: [String] {
         guard let root else { return [] }
-        if own { return ["この iPhone", "ambƏr"] }
+        if own { return ["この iPhone", "ambər"] }
         // The tail of the path, which is the part that means anything: the
         // front of it is the provider's own bookkeeping.
         let parts = root.pathComponents.filter { $0 != "/" }
@@ -57,7 +57,7 @@ final class NotesStore: ObservableObject {
     /// Go back to the app's own folder.
     func useOwn() {
         UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
-        if let own = ownFolder { adopt(own, remember: false, scoped: false, named: "ambƏr") }
+        if let own = ownFolder { adopt(own, remember: false, scoped: false, named: "ambər") }
     }
 
     /// Copy Markdown files in from somewhere else.
@@ -96,7 +96,7 @@ final class NotesStore: ObservableObject {
     func restore() {
         seedWelcome()
         guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else {
-            if let ownFolder { adopt(ownFolder, remember: false, scoped: false, named: "ambƏr") }
+            if let ownFolder { adopt(ownFolder, remember: false, scoped: false, named: "ambər") }
             return
         }
         var stale = false
@@ -257,7 +257,7 @@ final class NotesStore: ObservableObject {
     /// 書いているか」の答えが違う形をしているのが、いちばん分かりにくい。
     /// 探すのが大変なのは変わらないが、それは選ぶ画面の話で、選んだあとに
     /// 八つ並べておく話ではない。
-    var ownName: String { "この iPhone の中（ambƏr）" }
+    var ownName: String { "この iPhone の中（ambər）" }
 
     /// The path as a trail of names, for a URL that is not the current one.
     ///
@@ -283,7 +283,7 @@ final class NotesStore: ObservableObject {
         root = url
         // The app's own folder is literally named `Documents`, which is what
         // the filesystem calls it and not what anybody calls it — Files shows
-        // it as **ambƏr** (the display name), and so should the title above it.
+        // it as **ambər** (the display name), and so should the title above it.
         rootName = named ?? url.lastPathComponent
         own = named != nil
         if remember, let data = try? url.bookmarkData() {

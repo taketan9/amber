@@ -95,7 +95,7 @@ struct ContentView: View {
                         // 名前は書かない（Dock も窓の外も既に言っている）。
                         // 印だけ、いま何のアプリかが分かるぶん。
                         Mark().frame(width: 26, height: 26)
-                            .accessibilityLabel("ambƏr")
+                            .accessibilityLabel("ambər")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {

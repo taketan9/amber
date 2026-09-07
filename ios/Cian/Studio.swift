@@ -107,7 +107,7 @@ struct Studio: View {
         if byText || model == nil {
             VStack(alignment: .leading, spacing: 8) {
                 if model == nil {
-                    Text("この図は表にできない形（手で書いたか、ambƏr の知らない書き方）です。上の絵を見ながら、ここで直してください。")
+                    Text("この図は表にできない形（手で書いたか、ambər の知らない書き方）です。上の絵を見ながら、ここで直してください。")
                         .font(.footnote).foregroundStyle(.secondary)
                         .padding(.horizontal, 16).padding(.top, 10)
                 }

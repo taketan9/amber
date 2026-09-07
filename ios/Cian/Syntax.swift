@@ -59,7 +59,7 @@ struct About: View {
     private var app: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        return "ambƏr \(v) (\(b))"
+        return "ambər \(v) (\(b))"
     }
 
     private var engine: String {
@@ -81,14 +81,14 @@ struct About: View {
             // 場所を取る値打ちは無い（設定に名前の欄を作らなかったのと
             // 同じ理由）。
             Section {
-                Text("ambƏr")
+                Text("ambər")
                     .font(.title3.weight(.semibold))
                 Text("Advanced Markdown Browser & Editor for Readability")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("ambƏr について")
+        .navigationTitle("ambər について")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

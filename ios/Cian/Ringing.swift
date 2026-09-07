@@ -52,7 +52,7 @@ struct Ringing: View {
                     // The one sentence that stops this being a lie. iOS will
                     // not wake an app to write a file, and a routine that
                     // claimed to would quietly only happen when you looked.
-                    Text("繰り返しは、時刻に通知が届きます。その日のノートは、次に ambƏr を開いたときに作られます（iPhone はアプリを勝手に動かさないため）。")
+                    Text("繰り返しは、時刻に通知が届きます。その日のノートは、次に ambər を開いたときに作られます（iPhone はアプリを勝手に動かさないため）。")
                 }
             }
             .navigationTitle("通知")
