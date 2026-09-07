@@ -1882,16 +1882,87 @@ function applyView() {
     // 幅が変わったので測り直す。**畳みが効いた後で**（今のフレームでは
     // まだ古い幅しか見えない）。
     if (editor && view !== 'read') setTimeout(() => editor.layout(), 0);
-    if (open && view !== 'write') drawRead();
+    // **組み直しの終わりを返す。** 面を替えたあとに「さっき居た場所」へ
+    // 立つには、読む面が組み直って触れるようになってからでないと、
+    // 置いた選び目が古い DOM のものになる（実際に、立てずに落ちていた）。
+    const drawn = open && view !== 'write' ? drawRead() : Promise.resolve();
     if (open && tocOn) drawToc();
+    return drawn;
 }
 
-function setView(v) {
+/// いま見ている（打っている）のは、ファイルの何行目か（`headLines` は下にある）。
+///
+/// 見ているものが同じなら、面を替えても同じ場所に居てほしい ── 替えた
+/// 先で毎回いちばん上に飛ばされると、**替えるたびに探し直す**ことになる。
+function whereAmI() {
+    if (view === 'write' && editor) {
+        return editor.getPosition().lineNumber - 1 + headLines();
+    }
+    // 読む面 ── caret のあるかたまり。無ければ、いま上に見えているもの。
+    const rd = el('read');
+    let n = getSelection()?.anchorNode;
+    if (n && n.nodeType === 3) n = n.parentElement;
+    let at = n && rd.contains(n) ? n.closest('#read > *') : null;
+    if (!at) {
+        const top = rd.getBoundingClientRect().top;
+        for (const b of rd.children) {
+            if (b.getBoundingClientRect().bottom > top + 4) { at = b; break; }
+        }
+    }
+    const line = at && Number(at.dataset.line);
+    return Number.isNaN(line) || line === null || at === null ? -1 : line;
+}
+
+/// その行のところへ、替えた先で立つ。
+///
+/// **図の中には立たせない。** 図は触れないかたまりで、caret を置くと
+/// 押せるものが打てるものに見える ── **図の一つ上**に置く（本人の言葉で
+/// 「マーメイドのちょっと上にカーソルがあればいい」）。
+function goToLine(line) {
+    if (line < 0) return;
+    if (view !== 'read' && editor) {
+        const at = Math.max(line - headLines(), 0) + 1;
+        const last = editor.getModel().getLineCount();
+        const n = Math.min(at, last);
+        editor.revealLineNearTop(n);
+        editor.setPosition({ lineNumber: n, column: 1 });
+        return;
+    }
+    const rd = el('read');
+    let hit = null;
+    for (const b of rd.children) {
+        const from = Number(b.dataset.line);
+        if (Number.isNaN(from)) continue;
+        const span = Number(b.dataset.span) || 1;
+        if (from <= line && line < from + span) { hit = b; break; }
+        if (from > line) break;
+        hit = b;
+    }
+    if (!hit) return;
+    hit.scrollIntoView({ block: 'center' });
+    // 触れないかたまり（図・枠・絵）なら、その一つ上の打てるところへ。
+    let land = hit;
+    while (land && richBlock(land)) land = land.previousElementSibling;
+    // **焦点を渡してから置く。** 置くだけだと、面に焦点が無いあいだの
+    // 選び目は誰のものでもなく、そのまま打っても入らない
+    // （`setView` は「表示」に移るとき焦点を落とすので、そのあとに要る）。
+    if (land && rd.isContentEditable) {
+        rd.focus();
+        landAt(land, null);
+    }
+}
+
+async function setView(v) {
+    // **替える前に、どこに居たかを控える。** 替えたあとでは、もう
+    // 前の面の caret も巻き位置も残っていない。
+    const at = whereAmI();
     view = v;
-    applyView();
+    const drawn = applyView();
     window.amber.remember({ view: v });
     if (v === 'read') document.activeElement?.blur();
     else if (editor) editor.focus();
+    await drawn;
+    goToLine(at);
 }
 
 /// 上の帯の三つ。**押せる形と、キーと、同じ一本の道を通す。**
@@ -2020,6 +2091,26 @@ function headLines() {
 
 /* ── 図（mermaid） ── */
 
+/// mermaid が測るために建てた仮の箱を、片付ける。
+///
+/// `render(id, …)` は `#<id>` と `#d<id>` を `document.body` に建てて
+/// 測る。うまくいけば自分で片付けるが、**転ぶと置いていく** ── 積もると
+/// 画面の上に並び、幅を持つのでノートが潰れる。**呼んだほうが片付ける。**
+function sweepMermaid(id) {
+    for (const at of [id, 'd' + id]) {
+        const n = document.getElementById(at);
+        // **`document.body` の直下だけ消す。** mermaid は返す SVG にも
+        // 渡した id をそのまま付けるので、id だけで消すと**いま面に挿した
+        // 図そのもの**が消える（実際に消えて、図が一枚も出なくなった）。
+        // 片付けたいのは、測るために建てられた仮の箱だけ。
+        if (n && n.parentElement === document.body) n.remove();
+    }
+    // 前に置いていかれたものも、ついでに。
+    for (const x of document.body.querySelectorAll(':scope > [id^="dmmd"], :scope > [id^="dstudio"]')) {
+        x.remove();
+    }
+}
+
 /// **図のあるノートを開くまで、読み込まない。** 3.4MB あって、ほとんどの
 /// ノートには図が無い ── 起動のたびに払う値段ではない。
 let Mermaid = null;
@@ -2057,6 +2148,16 @@ function mermaidOpts() {
     const dark = isDark();
     return {
         startOnLoad: false,
+        // **書き損じの絵を、mermaid に描かせない。**
+        //
+        // 既定では、字が通らないと mermaid は**自分で赤い絵を描いて
+        // 置いていく** ── その置き場所は `document.body` で、こちらの
+        // `catch` は絵を消せない。打つたびに描き直すので、一文字ごとに
+        // 一枚ずつ積み上がり、画面の上に「Syntax error in text」が
+        // 並んだ。積まれた絵は幅を持つので**ノートが左へ潰れる**。
+        // 戻す（⌘Z）は字を戻すだけで、置いていかれた絵には届かない ──
+        // だから閉じて開くまで直らなかった。
+        suppressErrorRendering: true,
         theme: 'base',
         themeVariables: {
             background: v('--paper', '#fffdf8'),
@@ -2326,8 +2427,9 @@ async function drawDiagrams() {
     if (seq !== readSeq) return;
     for (const code of blocks) {
         const src = code.textContent;
+        const id = 'mmd' + (++mermaidSeq);
         try {
-            const { svg } = await lib.render('mmd' + (++mermaidSeq), src);
+            const { svg } = await lib.render(id, src);
             if (seq !== readSeq) return;
             const box = document.createElement('div');
             box.className = 'mermaid';
@@ -2343,6 +2445,8 @@ async function drawDiagrams() {
             if (seq !== readSeq) return;
             code.parentElement.classList.add('bad');
             code.parentElement.title = '図にできません: ' + (e && why(e) ? why(e) : e);
+        } finally {
+            sweepMermaid(id);
         }
     }
     // 掛け替えたあとの札にも、触れない印と元の字を。
@@ -2966,7 +3070,7 @@ function studioFlow() {
         const label = document.createElement('input');
         label.type = 'text';
         label.value = e.b || '';
-        label.placeholder = '（なくてもいい）';
+        label.placeholder = '（なし）';
         label.style.flex = '2 1 0';
         label.oninput = () => { e.b = label.value; studioShow(); };
         const to = studioPick('', pickable(), e.to, (v) => { e.to = v; studioShow(); });
@@ -3079,8 +3183,11 @@ async function studioRender() {
         return;
     }
     if (!studio) return;
+    // **工房はいちばん積もる場所。** 打つたびに描き直すので、通らない字を
+    // 打っているあいだ、一文字ごとに転ぶ ── 片付けないと、そのぶん溜まる。
+    const id = 'studio' + (++mermaidSeq);
     try {
-        const { svg } = await lib.render('studio' + (++mermaidSeq), src);
+        const { svg } = await lib.render(id, src);
         if (!studio) return;
         view.innerHTML = svg;
         studio.good = svg;
@@ -3092,6 +3199,8 @@ async function studioRender() {
         if (studio.good) view.innerHTML = studio.good;
         err.hidden = false;
         err.textContent = 'いまの字では図になりません: ' + (e && why(e) ? why(e) : e);
+    } finally {
+        sweepMermaid(id);
     }
 }
 

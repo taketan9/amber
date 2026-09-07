@@ -341,7 +341,9 @@ body.mac #listhead { padding-top: 30px; }
   width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid; flex: none;
 }
 /* 工房の色の選び口 ── 選んだ色で、選び口そのものを塗る。 */
-#studio .paint select { text-align: center; }
+/* **色の列も、ほかの列と同じ左揃え。** ここだけ真ん中に寄っていて、
+   上下に並んだ選び口の字がそこだけ揃わなかった。 */
+#studio .paint select { text-align: left; }
 /* 段の見出しの ＋ */
 .head { display: flex; align-items: center; }
 .head .plus {
