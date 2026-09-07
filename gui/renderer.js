@@ -9,6 +9,36 @@
 const el = (id) => document.getElementById(id);
 const ask = (method, params) => window.amber.call(method, params || {});
 
+/// **この画面を開いているアプリが、その口を持っていないとき。**
+///
+/// amber の画面は crmaine の中でも動く。あちらは自前で `ipcMain` を建てて
+/// いて、**amber の preload が見せている口の一部しか無い**（2026-09-07 時点で
+/// 23 のうち 9）。無い口を呼ぶと Electron がそのまま投げてくるので、人は
+///
+///     置けません: Error invoking remote method 'amber:welcome':
+///     Error: No handler registered for 'amber.welcome'
+///
+/// という札を見る ── 自分が何を間違えたのか、どこにも書いていない。
+/// 直す道も無い（直すのは同梱している側で、押した人ではない）。
+///
+/// **その一行だけ、人の言葉に置き換える。** ほかの失敗はそのまま通す ──
+/// 「保存できません: 権限がありません」は、押した人にできることがある。
+///
+/// **包みだけを剥がす。** 一度、`Error invoking remote method` で判じて
+/// しまい、エンジンの本物の失敗まで「対応していません」に置き換わった
+/// ── Electron は**成功しなかった呼び出しを全部**その言い回しで包むので、
+/// 「保存できません: 権限がありません」も同じ顔で来る。**口が無いことを
+/// 名指ししているのは `No handler registered` の一語だけ。**
+function why(e) {
+    const m = String((e && e.message) || e);
+    if (/No handler registered/.test(m)) {
+        return 'この画面を開いているアプリが、まだこの操作に対応していません';
+    }
+    // 包みの中の一行だけを出す ── 外の言い回しは、押した人には何も言わない。
+    const inner = m.match(/Error invoking remote method '[^']*':\s*(?:Error:\s*)?([\s\S]+)/);
+    return inner ? inner[1] : m;
+}
+
 const state = {
     root: '',
     notes: [],
@@ -542,7 +572,7 @@ async function openNote(path, opts) {
     try {
         r = await ask('read', { path });
     } catch (e) {
-        say('開けません: ' + e.message);
+        say('開けません: ' + why(e));
         return;
     }
     // **front matter はエディタに出さない。** 題もタグも作った日も、上の帯が
@@ -639,7 +669,7 @@ async function setVim(on) {
         vimOn = false;
         document.body.classList.remove('vim');
         drawMarks();
-        say('vim を読めません: ' + (e && e.message ? e.message : e));
+        say('vim を読めません: ' + why(e));
     }
 }
 
@@ -1447,7 +1477,7 @@ async function readSourceEdit(change, node, stay) {
     try {
         blocks[at] = await change(blocks[at]);
     } catch (e) {
-        say('置けません: ' + e.message);
+        say('置けません: ' + why(e));
         return;
     }
     const body = blocks.filter((s) => s !== '').join('\n\n') + '\n';
@@ -1720,7 +1750,7 @@ async function applyMark(kind, withWhat) {
     try {
         after = (await ask('mark', { kind, with: withWhat || '', text: before })).text;
     } catch (e) {
-        say('置けません: ' + e.message);
+        say('置けません: ' + why(e));
         return;
     }
     const start = sel.getStartPosition();
@@ -1778,7 +1808,7 @@ async function attach(b64, ext) {
         put(`![](${r.link})\n`);
         zonesSoon();
     } catch (e) {
-        say('絵を置けません: ' + e.message);
+        say('絵を置けません: ' + why(e));
     }
 }
 
@@ -1918,7 +1948,7 @@ async function drawRead() {
     try {
         html = (await ask('html', { text: whole() })).html || '';
     } catch (e) {
-        say('組めません: ' + e.message);
+        say('組めません: ' + why(e));
         return;
     }
     // 追い越されていたら捨てる。速く打つと、古い答えが後から着く。
@@ -2262,7 +2292,7 @@ async function drawDiagrams() {
     try {
         lib = await loadMermaid();
     } catch (e) {
-        say('図を読めません: ' + (e && e.message ? e.message : e));
+        say('図を読めません: ' + (e && why(e) ? why(e) : e));
         return;
     }
     if (seq !== readSeq) return;
@@ -2284,7 +2314,7 @@ async function drawDiagrams() {
             // **描けない図は、書いた字のまま残す。** 消すと、直しようがない。
             if (seq !== readSeq) return;
             code.parentElement.classList.add('bad');
-            code.parentElement.title = '図にできません: ' + (e && e.message ? e.message : e);
+            code.parentElement.title = '図にできません: ' + (e && why(e) ? why(e) : e);
         }
     }
     // 掛け替えたあとの札にも、触れない印と元の字を。
@@ -3017,7 +3047,7 @@ async function studioRender() {
         lib = await loadMermaid();
     } catch (e) {
         err.hidden = false;
-        err.textContent = '図を読めません: ' + (e && e.message ? e.message : e);
+        err.textContent = '図を読めません: ' + (e && why(e) ? why(e) : e);
         return;
     }
     if (!studio) return;
@@ -3033,7 +3063,7 @@ async function studioRender() {
         // 一文字のあいだ図が消えて、何を直していたのか分からなくなる。
         if (studio.good) view.innerHTML = studio.good;
         err.hidden = false;
-        err.textContent = 'いまの字では図になりません: ' + (e && e.message ? e.message : e);
+        err.textContent = 'いまの字では図になりません: ' + (e && why(e) ? why(e) : e);
     }
 }
 
@@ -3410,7 +3440,7 @@ async function save() {
         }, 1400);
     } catch (e) {
         el('state').textContent = '保存できません';
-        say('保存できません: ' + e.message);
+        say('保存できません: ' + why(e));
     }
 }
 
@@ -3424,7 +3454,7 @@ async function newNote() {
         await openNote(r.path);
         if (editor) editor.focus();
     } catch (e) {
-        say('作れません: ' + e.message);
+        say('作れません: ' + why(e));
     }
 }
 
@@ -3455,7 +3485,7 @@ async function reload(opts) {
         drawCloud();
         drawList();
     } catch (e) {
-        if (!opts || !opts.quiet) say('読めません: ' + e.message);
+        if (!opts || !opts.quiet) say('読めません: ' + why(e));
     }
 }
 
@@ -3727,7 +3757,7 @@ const CMDS = [
     // **入れる三つを、並べて置く。** 「見本のノートを入れる」は列の
     // いちばん下に一つだけ離れて座っていて、探す人は「amber について」の
     // 下まで来ない ── 同じ行い（ノートを入れる）は同じ場所に。
-    { id: 'bring', name: 'ノートを取り込む', sub: 'よその .md を写す', app: true, sep: true, run: cmdBring },
+    { id: 'bring', name: 'ノートを取り込む', app: true, sep: true, run: cmdBring },
     { id: 'welcome', name: '見本のノートを入れる', app: true, run: cmdWelcome },
     { id: 'backup', name: 'バックアップ', app: true, run: cmdBackup },
     { id: 'restore', name: 'バックアップから戻す', app: true, run: cmdRestore },
@@ -4010,7 +4040,7 @@ async function railPlus(kind) {
             await reload({ quiet: true });
             say('「' + name.trim() + '」を作りました');
         } catch (e) {
-            say('作れません: ' + e.message);
+            say('作れません: ' + why(e));
         }
         return;
     }
@@ -4117,7 +4147,7 @@ async function railRename(kind, what) {
         await reload({ quiet: true });
         say('「' + name + '」に変えました（' + hit.length + ' 件）');
     } catch (e) {
-        say('変えられません: ' + e.message);
+        say('変えられません: ' + why(e));
     }
 }
 
@@ -4157,7 +4187,7 @@ async function railDrop(kind, what) {
             : kind === 'star' ? '「' + what + '」を消しました'
                 : '外しました（' + hit.length + ' 件）');
     } catch (e) {
-        say('外せません: ' + e.message);
+        say('外せません: ' + why(e));
     }
 }
 
@@ -4228,7 +4258,7 @@ async function openGuest(path) {
     try {
         note = await ask('note', { path });
     } catch (e) {
-        say('開けません: ' + e.message);
+        say('開けません: ' + why(e));
         return;
     }
     // 書きかけを置いていかない ── 戻ったときに消えている、を作らない。
@@ -4345,7 +4375,7 @@ async function editNote(change) {
     try {
         text = await change(whole());
     } catch (e) {
-        say('直せません: ' + e.message);
+        say('直せません: ' + why(e));
         return false;
     }
     if (text == null) return false;
@@ -4417,7 +4447,7 @@ async function newShelf(under) {
         say('「' + full + '」を作りました');
         return full;
     } catch (e) {
-        say('作れません: ' + e.message);
+        say('作れません: ' + why(e));
         return null;
     }
 }
@@ -4820,7 +4850,7 @@ async function cmdShare(folder, off) {
             ? window.amber.reveal(state.root + '/' + folder)
             : say('あとで、フォルダを右押し →「家族を招待」からでもできます');
     } catch (e) {
-        say('できません: ' + e.message);
+        say('できません: ' + why(e));
     }
 }
 
@@ -4873,7 +4903,7 @@ async function cmdToShare() {
         try {
             await ask('share', { path: state.root, folder: '家族', by, today: today() });
             to = '家族';
-        } catch (e) { say('できません: ' + e.message); return; }
+        } catch (e) { say('できません: ' + why(e)); return; }
     } else {
         const ok = await askYes('「' + (state.open.title || stem()) + '」を「'
             + (to.split('/').pop() || 'ぜんぶ') + '」へ移して共有しますか');
@@ -4889,7 +4919,7 @@ async function moveNote(to) {
         if (r && r.path) await openNote(r.path);
         say(to ? '共有しました' : '共有から外しました');
     } catch (e) {
-        say('移せません: ' + e.message);
+        say('移せません: ' + why(e));
     }
 }
 
@@ -4913,7 +4943,7 @@ async function cmdMove() {
         await openNote(r.path);
         say(to ? '「' + to + '」へ移しました' : 'いちばん上へ移しました');
     } catch (e) {
-        say('移せません: ' + e.message);
+        say('移せません: ' + why(e));
     }
 }
 
@@ -4933,7 +4963,7 @@ async function cmdMkBook(under) {
         say('「' + full + '」を作りました');
         return full;
     } catch (e) {
-        say('作れません: ' + e.message);
+        say('作れません: ' + why(e));
         return null;
     }
 }
@@ -5017,7 +5047,7 @@ async function cmdExport() {
             : await window.amber.savePDF(name + '.pdf', page);
         if (at) say('書き出しました: ' + at);
     } catch (e) {
-        say('書き出せません: ' + e.message);
+        say('書き出せません: ' + why(e));
     }
 }
 
@@ -5087,7 +5117,7 @@ async function cmdColor(folder) {
         state.colors = r.colors || {};
         drawRail();
     } catch (e) {
-        say('色を付けられません: ' + e.message);
+        say('色を付けられません: ' + why(e));
     }
 }
 
@@ -5126,7 +5156,7 @@ async function cmdBackup() {
         const r = await ask('backup', { path: state.root, scope, what, into });
         say(r.files + ' 件を保存しました: ' + shortPath(r.path || into));
     } catch (e) {
-        say('保存できません: ' + e.message);
+        say('保存できません: ' + why(e));
     }
 }
 
@@ -5155,7 +5185,7 @@ async function cmdBring() {
         const no = r.failed ? '。' + r.failed + ' 件は入れられませんでした' : '';
         say(r.put + ' 件を取り込みました' + re + no);
     } catch (e) {
-        say('取り込めません: ' + e.message);
+        say('取り込めません: ' + why(e));
     }
 }
 
@@ -5176,7 +5206,7 @@ async function cmdRestore() {
         const kept = r.kept ? '（' + r.kept + ' 件は、いまのを残しました）' : '';
         say(r.put + ' 件を戻しました' + kept);
     } catch (e) {
-        say('戻せません: ' + e.message);
+        say('戻せません: ' + why(e));
     }
 }
 
@@ -5215,7 +5245,7 @@ async function cmdRoot() {
         try {
             await ask('place', { dir });
         } catch (e) {
-            say('作れません: ' + e.message);
+            say('作れません: ' + why(e));
             return;
         }
     }
@@ -5237,7 +5267,7 @@ async function cmdRoot() {
         } catch (e) {
             // **移せなくても、置き場所は変えない。** 半分だけ移った状態で
             // 向こうを見せると、残りが消えたようにしか見えない。
-            say('移せません: ' + e.message);
+            say('移せません: ' + why(e));
             return;
         }
     }
@@ -5268,7 +5298,7 @@ async function cmdAbout() {
         const r = await ask('version', {});
         engine = 'amber-server ' + (r.amber || '?');
     } catch (e) {
-        engine = '答えません: ' + e.message;
+        engine = '答えません: ' + why(e);
     }
     // **名札が題を兼ねる。** 上に「ambər について」と書いて、その下に
     // もう一度 ambər と出すのは、同じことを二度言っているだけ。
@@ -5299,7 +5329,7 @@ async function cmdWelcome() {
         await reload({});
         say(r.put ? r.put + ' 枚置きました' : 'もう入っています（同じ名前は飛ばしました）');
     } catch (e) {
-        say('置けません: ' + e.message);
+        say('置けません: ' + why(e));
     }
 }
 
@@ -5321,7 +5351,7 @@ async function cmdKeepNow() {
         });
         say(r.stamp ? 'いまのバージョンを残しました（これは消えません）' : 'このバージョンはもう残してあります');
     } catch (e) {
-        say('残せません: ' + e.message);
+        say('残せません: ' + why(e));
     }
 }
 
@@ -5337,7 +5367,7 @@ async function cmdHistory(at, isBook) {
     try {
         r = await ask('history', { root: state.root, path });
     } catch (e) {
-        say('履歴を読めません: ' + e.message);
+        say('履歴を読めません: ' + why(e));
         return;
     }
     const rows = r.versions || [];
@@ -5362,7 +5392,7 @@ async function cmdHistory(at, isBook) {
     try {
         old = (await ask('oldtext', { root: state.root, path: note, stamp: pick.stamp })).text;
     } catch (e) {
-        say('読めません: ' + e.message);
+        say('読めません: ' + why(e));
         return;
     }
     const go = await askPick(pick.when + ' の姿', [
