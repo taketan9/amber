@@ -157,6 +157,12 @@ jobs:
   # `../packaging/amber-mark.png` と指しているので、`gui/` だけでは
   # 印の出ない画面になる。
   #
+  # **見本のノート（`packaging/welcome/`）も入れる。** 「見本のノートを
+  # 入れる」は `<画面の隣>/../packaging/welcome` を写す ── 入れておかないと、
+  # 同梱した側で押した人に「見本が入っていません」が出る（実際に出た）。
+  # 同梱する側に写しを置かせない、というのはあちらの決めごとでもある
+  # （写しを持つと、amber を入れ替えた日に古い見本が残る）。
+  #
   # **`node_modules` は入れない。** あそこには Electron 本体（200MB 超）が
   # 居て、同梱する側は自分の Electron の中でこの画面を動かす。
   # **`amber-server` も入れない** ── 実行ファイルは機械ごとに別で、
@@ -184,21 +190,25 @@ jobs:
                    packaging/amber-mark.png; do
             [ -f "$f" ] || { echo "ありません: $f"; exit 1; }
           done
+          # 見本は**何枚あるか**で見る ── 一枚も無いフォルダは、
+          # 「入れた」と「入っていない」が同じ顔をする。
+          n=$(find packaging/welcome -name '*.md' | wc -l)
+          [ "$n" -ge 1 ] || { echo "見本のノートがありません"; exit 1; }
+          echo "見本 $n 枚"
           # 積み忘れは「窓は開くが中身が真っ白」として出る ── 数えて言う。
           echo "monaco $(du -sh gui/vendor/monaco | cut -f1) / mermaid $(du -sh gui/vendor/mermaid | cut -f1)"
 
       - name: 同梱する側との約束を確かめる
         run: node scripts/contract.js
 
+      # **`zip` ではなく Python で組む。** 見本のノートの名前は日本語で、
+      # 一枚は `ambər へようこそ.md`（シュワ入り）── Info-ZIP の `zip` は
+      # 既定で UTF-8 の印を立てないので、日本語 Windows で展開すると
+      # 名前が化ける。`-UN=UTF8` で立つが、Apple が入れ替えた zip はその
+      # 札を知らない ── 手元で試せないものを、ここにだけ書くことになる。
+      # 組んだあと自分で開いて数えるところまで、その中に入っている。
       - name: 一枚にまとめる
-        run: |
-          mkdir -p out pack/packaging
-          cp -R gui pack/gui
-          rm -rf pack/gui/node_modules
-          cp packaging/amber-mark.png pack/packaging/
-          cp LICENSE pack/ 2>/dev/null || true
-          (cd pack && zip -qr ../out/amber-gui.zip gui packaging LICENSE)
-          unzip -l out/amber-gui.zip | tail -3
+        run: python3 packaging/gui_zip.py out/amber-gui.zip
 
       - uses: actions/upload-artifact@v4
         with:

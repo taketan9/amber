@@ -75,6 +75,25 @@ console.log('印の在りか');
         'python3 packaging/amber_icon.py で焼けます');
 }
 
+/* ── 見本のノート ──────────────────────────────────────────
+ * 「見本のノートを入れる」は `<画面の隣>/../packaging/welcome` を写します。
+ * **同梱する側は写しを持ちません**（持つと、amber を入れ替えた日に古い
+ * 見本が残る）ので、ここに無いものは向こうにも届きません ── 押した人には
+ * 「見本が入っていません」だけが出ます。
+ */
+console.log('見本のノートの在りか');
+{
+    const at = path.join(root, 'packaging/welcome');
+    const notes = fs.existsSync(at)
+        ? fs.readdirSync(at).filter((f) => f.endsWith('.md'))
+        : [];
+    ok(notes.length > 0, 'packaging/welcome に .md がある（' + notes.length + ' 枚）',
+        '同梱する側の「見本のノートを入れる」が、ここを写します');
+    ok(read('.github/workflows/release.yml').includes('packaging/gui_zip.py'),
+        '配る一枚は gui_zip.py が組む（見本を入れて、開いて数える）',
+        'zip コマンドは UTF-8 の印を立てないので、日本語の名前が Windows で化けます');
+}
+
 /* ── 四 ── 画面の組み立て手順 ──────────────────────────────── */
 console.log('画面の組み立て');
 {
