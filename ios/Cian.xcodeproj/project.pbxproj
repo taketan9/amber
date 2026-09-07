@@ -256,7 +256,7 @@
 				FRAMEWORK_SEARCH_PATHS = "$(SRCROOT)/../target/ios";
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/../crates/amber-ffi/include";
 				INFOPLIST_FILE = Info.plist;
-				MARKETING_VERSION = 2.6.0;
+				MARKETING_VERSION = 2.7.0;
 				OTHER_LDFLAGS = (
 					"-framework",
 					CoreFoundation,
@@ -284,7 +284,7 @@
 				FRAMEWORK_SEARCH_PATHS = "$(SRCROOT)/../target/ios";
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/../crates/amber-ffi/include";
 				INFOPLIST_FILE = Info.plist;
-				MARKETING_VERSION = 2.6.0;
+				MARKETING_VERSION = 2.7.0;
 				OTHER_LDFLAGS = (
 					"-framework",
 					CoreFoundation,
