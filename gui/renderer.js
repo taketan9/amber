@@ -5178,8 +5178,35 @@ async function cmdMkBook(under) {
     }
 }
 
+/// ゴミ箱の無い置き場所（憶えたもの）。
+///
+/// **一度断られたら、次からは初めからそう言う。** `Documents` が OneDrive
+/// へ寄せられている机では、断られるのは一度きりではなく毎回 ── そこで
+/// 二度訊き続けると、消すたびに二回答えることになる。分かっているなら、
+/// 初めの一回で正直に訊けばいい。
+///
+/// 置き場所ごとに憶える ── 別のフォルダへ移せば、そちらにはゴミ箱がある。
+let noBins = [];
+const noBin = () => noBins.includes(state.root);
+
+function markNoBin(yes) {
+    const was = noBins.filter((r) => r !== state.root);
+    noBins = yes ? [...was, state.root] : was;
+    window.amber.remember({ noBins });
+}
+
 async function cmdDelete() {
-    if (!await askYes('「' + (state.open.title || stem()) + '」をゴミ箱へ入れますか')) return;
+    const name = state.open.title || stem();
+    // **ゴミ箱が無いと分かっているなら、初めからそう訊く。**
+    // 「ゴミ箱へ入れますか」→「入れられません」→「では消しますか」は、
+    // 三度目には嘘をついているのと同じ。
+    const first = noBin()
+        ? '「' + name + '」を消しますか（ここにはゴミ箱が無いので、戻せません）'
+        : '「' + name + '」をゴミ箱へ入れますか';
+    // 訊く**前に**分かっていたか ── 断られたあとで訊き直すかどうかは、
+    // これで決まる（もう承知をもらっているなら、二度は訊かない）。
+    const knew = noBin();
+    if (!await askYes(first)) return;
     // **消さずに、ゴミ箱へ。** core の `delete` は消してしまう（電話には
     // ゴミ箱が無いので）。机の上では、戻せないのは強すぎる。
     const path = state.open.path;
@@ -5197,17 +5224,28 @@ async function cmdDelete() {
         //
         // **消すのは、訊いてから。** ゴミ箱が「戻せる」ことの担保だった
         // ので、それが無い以上そう言う ── 言わずに消すほうが強すぎる。
+        // **小窓は記号を解さない。** ここは `textContent` なので、
+        // `**戻せません**` と書くと星が四つそのまま出る（実際に出た）。
+        // 強めたいことは、言葉の側で強める。
         const why2 = done && done.why;
-        const go = await askYes('ゴミ箱へ入れられませんでした'
-            + (why2 ? '（' + why2 + '）' : '')
-            + '。このまま消しますか ── **戻せません**');
-        if (!go) return;
+        markNoBin(true);
+        if (!knew) {
+            // 初めて断られた回だけ、ここで訊く。二度目からは、上の一回で
+            // 「戻せません」と言ったうえで はい をもらっている。
+            const go = await askYes('ゴミ箱へ入れられませんでした'
+                + (why2 ? '（' + why2 + '）' : '')
+                + '。このまま消しますか。もう戻せません');
+            if (!go) return;
+        }
         try {
             await ask('delete', { path });
         } catch (e) {
             say('消せません: ' + why(e));
             return;
         }
+    } else {
+        // 入った ── ここにはゴミ箱がある。前に断られていても、憶えを直す。
+        if (noBin()) markNoBin(false);
     }
     state.open = null;
     state.dirty = false;
@@ -5801,6 +5839,7 @@ const escapeAttr = escapeHtml;
     el('blankmark').innerHTML = mark(54);
     const saved = await window.amber.recall();
     state.root = saved.root;
+    noBins = Array.isArray(saved.noBins) ? saved.noBins : [];
     // 外から動いたら教えてもらう ── 同じフォルダを二つの端末で触るのが
     // このアプリの前提なのに、開き直すまで出てこなかった。
     window.amber.watch(saved.root);
