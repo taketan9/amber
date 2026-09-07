@@ -3386,12 +3386,32 @@ function forgetSteps() {
 }
 
 /// 一段もどす／すすめる。
+/// 二つの字の、**初めて食い違う行**（0 起点）。同じなら `-1`。
+///
+/// 戻したあと、そこへ連れていくために要る ── どこが変わったのかは、
+/// 変わった場所を見せる以外に言いようがない。
+function firstDiff(a, b) {
+    const x = String(a).split('\n');
+    const y = String(b).split('\n');
+    const n = Math.min(x.length, y.length);
+    for (let i = 0; i < n; i++) if (x[i] !== y[i]) return i;
+    return x.length === y.length ? -1 : n;
+}
+
 async function stepBack(forward) {
     const from = forward ? forwards : backs;
     const to = forward ? backs : forwards;
     if (!from.length || !editor) return;
     to.push(lastSaved);
     const text = from.pop();
+    // **戻したら、戻った場所へ連れていく。**
+    //
+    // `editor.setValue` は Monaco の caret を 1 行目へ戻し、画面も先頭へ
+    // 飛ばす ── 十行目を直して戻すと、**関係のない冒頭へぐいーんと動く**。
+    // Undo が効いているのは分かるのに、いまどこを見ているのか分からない。
+    //
+    // どこへ連れていくかは決まっている ── **変わった行**。
+    const at = firstDiff(lastSaved, text);
     steppingBack = true;
     loading = true;
     editor.setValue(text);
@@ -3403,7 +3423,39 @@ async function stepBack(forward) {
     await drawRead();
     drawCount();
     drawSteps();
+    landBack(at);
     say(forward ? 'やり直しました' : '一つ戻しました');
+}
+
+/// 戻したあとの行き先。書く面ならその行、読む面ならその行のかたまり。
+///
+/// 変わった行が無い（`-1`）ときは動かさない ── 動く理由が無いのに
+/// 動くのが、そもそもの不具合だった。
+function landBack(at) {
+    if (at < 0) return;
+    // 書く面が出ているときは Monaco（`gotoHead` と同じ切り分け ── 一度
+    // ここを `!== 'write'` と書き、書く面でだけ動かなかった）。
+    if (view !== 'read' && editor) {
+        const line = at + 1;
+        editor.revealLineNearTop(line);
+        editor.setPosition({ lineNumber: line, column: 1 });
+    }
+    if (view !== 'write') {
+        // 読む面のかたまりは、元の字の何行目からかを持っている
+        // （`data-line`）── そこを跨ぐものが、変わった行のかたまり。
+        const cut = state.head ? state.head.split('\n').length - 1 : 0;
+        const want = at + cut;
+        let hit = null;
+        for (const b of el('read').children) {
+            const from2 = Number(b.dataset.line);
+            if (Number.isNaN(from2)) continue;
+            const span = Number(b.dataset.span) || 1;
+            if (from2 <= want && want < from2 + span) { hit = b; break; }
+            if (from2 > want) break;
+            hit = b;
+        }
+        if (hit) hit.scrollIntoView({ block: 'center' });
+    }
 }
 
 /// 矢印は字ではなく線で描く ── 「↩」は書体によって太さも向きも変わる。
