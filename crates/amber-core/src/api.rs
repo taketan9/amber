@@ -621,6 +621,19 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .collect::<Vec<_>>(),
         })),
 
+        // 同じノートを二人が書いたときに、混ぜる。**繋がない** ── 三つの
+        // 姿を渡されて、混ざった字と「どの行が向こうから来たか」を返すだけ。
+        // ファイルに書き戻すのは呼ぶ側（通信も保存も I/O）。
+        "merge" => {
+            let m = crate::merge::merge(&arg(p, "was"), &arg(p, "ours"), &arg(p, "theirs"));
+            Ok(serde_json::json!({
+                "text": m.text,
+                "came": m.came,
+                "both": m.both,
+                "eyes": m.needs_eyes(),
+            }))
+        }
+
         // よそから .md を持ってくる。**上書きしない**（`notebook::bring`）。
         "bring" => {
             let to = std::path::PathBuf::from(arg(p, "to"));

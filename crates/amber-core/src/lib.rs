@@ -11,6 +11,7 @@ pub mod api;
 pub mod cloud;
 pub mod history;
 pub mod markdown;
+pub mod merge;
 pub mod note;
 pub mod notebook;
 pub mod stamp;
