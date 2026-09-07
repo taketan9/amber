@@ -332,11 +332,17 @@ function makeWindow() {
 let eyes = null;
 let eyesAt = '';
 
+/// 見張る。**張れたかどうかを返す。**
+///
+/// 張れないフォルダはある（ネットワーク越し、権限）── そのとき amber は
+/// 「外で変わったら教えてもらう」をしないまま黙って動く。黙ると、二台で
+/// 同じフォルダを触っているのに片方が古いまま、が起きても誰も気づけない。
+/// 同梱する側が自前の帯で言うしかなかったのは、ここに返り値が無かったから。
 function watch(root) {
-    if (eyesAt === root && eyes) return;
+    if (eyesAt === root && eyes) return true;
     if (eyes) { eyes.close(); eyes = null; }
     eyesAt = root;
-    if (!root || !fs.existsSync(root)) return;
+    if (!root || !fs.existsSync(root)) return { ok: false, why: 'そのフォルダがありません' };
     let hold = null;
     try {
         // `recursive` は mac と Windows にはあり、Linux には無い ──
@@ -350,10 +356,12 @@ function watch(root) {
             }, 400);
         });
         eyes.on('error', () => { eyes = null; });
+        return true;
     } catch (e) {
         // 見張れないフォルダ（ネットワーク越しなど）はある。**開かない
         // 理由にはならない** ── 開き直せば読める、という前の姿に戻るだけ。
         console.error('見張れません:', e.message);
+        return { ok: false, why: e.message };
     }
 }
 
@@ -365,7 +373,7 @@ app.whenReady().then(() => {
     ipcMain.handle('amber:recall', () => ({ root: firstRoot(), ...recall() }));
     ipcMain.handle('amber:appVersion', () => app.getVersion());
     // 描く側が置き場所を決めたら、そこを見張る。
-    ipcMain.handle('amber:watch', (_e, root) => { watch(root); });
+    ipcMain.handle('amber:watch', (_e, root) => watch(root));
     /// 見本のノートを、言われた場所へ。**上書きはしない。**
     ipcMain.handle('amber:welcome', (_e, root) => {
         const from = path.join(__dirname, '..', 'packaging', 'welcome');

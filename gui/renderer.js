@@ -5178,6 +5178,21 @@ async function cmdMkBook(under) {
     }
 }
 
+/// 見張れなかったら、そう言う。
+///
+/// **黙ると、誰も気づけない。** 見張れないフォルダはある（ネットワーク
+/// 越し・権限）── そのとき amber は「外で変わったら教えてもらう」を
+/// しないまま動くので、二台で同じフォルダを触っているのに片方が古い
+/// まま、が起きても分からない。開かない理由にはならないので、**言って
+/// そのまま続ける**。同梱する側が自前の帯で言っていたのは、ここに
+/// 返り値が無かったから ── 言うのは、それを知っているこちらの仕事。
+function sayIfBlind(got) {
+    if (got === true || got === undefined) return;
+    const why2 = got && got.why;
+    say('このフォルダは見張れません' + (why2 ? '（' + why2 + '）' : '')
+        + '。外で変えたら、開き直すと出ます');
+}
+
 /// ゴミ箱の無い置き場所（憶えたもの）。
 ///
 /// **一度断られたら、次からは初めからそう言う。** `Documents` が OneDrive
@@ -5544,7 +5559,7 @@ async function cmdRoot() {
 
     state.root = dir;
     window.amber.remember({ root: dir });
-    window.amber.watch(dir);
+    sayIfBlind(await window.amber.watch(dir));
     state.open = null;
     applyView();
     await reload({});
@@ -5842,7 +5857,7 @@ const escapeAttr = escapeHtml;
     noBins = Array.isArray(saved.noBins) ? saved.noBins : [];
     // 外から動いたら教えてもらう ── 同じフォルダを二つの端末で触るのが
     // このアプリの前提なのに、開き直すまで出てこなかった。
-    window.amber.watch(saved.root);
+    sayIfBlind(await window.amber.watch(saved.root));
     await loadPalette();
     if (saved.view === 'read' || saved.view === 'split' || saved.view === 'write') {
         view = saved.view;

@@ -52,6 +52,25 @@ def rows() -> list[tuple[Path, str]]:
     return out
 
 
+# **フォルダの項目には、フォルダだと書く。**
+#
+# 素の `ZipInfo` は権限を持たない ── そのまま書くと `0o600`（`S_IFDIR` も
+# 実行ビットも無し）になり、Unix で展開したフォルダに**入れなくなる**。
+# 中のファイルは正しく入っているのに `gui/index.html` が「無い」ように
+# 見えるので、配ってから同梱する側の CI が止まって初めて分かった。
+# Windows は Unix の権限を見ないので、いちばん配りたい相手では起きない。
+#
+#   `0o40755 << 16` … S_IFDIR と rwxr-xr-x（入るには実行ビットが要る）
+#   `| 0x10`         … MS-DOS のフォルダ属性（Windows の道具が見る）
+DIR_MODE = (0o40755 << 16) | 0x10
+
+
+def folder(name: str) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo(name)
+    info.external_attr = DIR_MODE
+    return info
+
+
 def check(at: Path) -> None:
     """組んだ一枚を開いて、要るものが本当に入っているか。"""
     with zipfile.ZipFile(at) as z:
@@ -80,6 +99,17 @@ def check(at: Path) -> None:
     if flat:
         sys.exit("NG: UTF-8 の印が立っていない名前があります: " + ", ".join(flat[:3]))
 
+    # **フォルダの項目に、フォルダだと書いてあるか。** 一度これを落とし、
+    # Unix で「中身の無いフォルダ」に見える一枚を三つの版ぶん配った。
+    for i in info:
+        if not i.filename.endswith("/"):
+            continue
+        mode = i.external_attr >> 16
+        if not mode & 0o040000:
+            sys.exit(f"NG: {i.filename} が「フォルダ」になっていません（S_IFDIR 無し）")
+        if not mode & 0o111:
+            sys.exit(f"NG: {i.filename} に実行ビットがありません（Unix で中に入れません）")
+
     kb = at.stat().st_size // 1024
     print(f"できました: {at} ({kb} KB ・ {len(names)} 件 ・ 見本 {seen} 枚)")
 
@@ -102,7 +132,7 @@ def main() -> None:
                 d = "/".join(parts[: i + 1]) + "/"
                 if d not in seen:
                     seen.add(d)
-                    z.writestr(zipfile.ZipInfo(d), b"")
+                    z.writestr(folder(d), b"")
         for real, inside in rows():
             z.write(real, inside)
     check(at)
