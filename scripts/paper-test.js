@@ -241,5 +241,28 @@ console.log('飾りの終わりから、外へ出る');
        '二重でも、いちばん外まで出る', window.getSelection().anchorNode.nodeName);
 }
 
+console.log('図の「元の字」は、行番号がずれても作り直さない');
+{
+    // **これが図を丸ごと消した。**
+    //
+    // 組み直したときの行番号で本文を切って持たせていたが、`syncRead` は
+    // caret を飛ばさないために組み直さずに保存する ── 上に一行足した次の
+    // 保存から番号がずれ、切り直した「元の字」が別の場所の字になり、その
+    // 次の保存でそれが図の場所へ書き戻された。鍵盤では消していないのに
+    // 図が消えるので、原因が画面のどこにも出ない。
+    const was = '一行目。\n\n```mermaid\nflowchart LR\n  A --> B\n```\n';
+    box.innerHTML = '<pre class="mermaid" data-line="2" data-span="4">A --&gt; B</pre>';
+    armPaper(box, was, true);
+    const first = box.firstElementChild.dataset.md;
+    ok(first === '```mermaid\nflowchart LR\n  A --> B\n```',
+       '初めは、行番号のところの字を持つ', first);
+
+    // 上に一行増えた。番号は組み直すまで古いまま。
+    const now = '一行目。\n足した行。\n\n```mermaid\nflowchart LR\n  A --> B\n```\n';
+    armPaper(box, now, true);
+    ok(box.firstElementChild.dataset.md === first,
+       'ずれても、持っている字は変わらない', box.firstElementChild.dataset.md);
+}
+
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');
 process.exit(bad ? 1 : 0);

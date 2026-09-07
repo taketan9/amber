@@ -36,6 +36,9 @@ console.log('描く側に見せている口');
         'call', 'recall', 'remember', 'pickFolder', 'pickFile', 'saveAs',
         'openLink', 'fileBytes', 'onGuest', 'pathOf', 'trash', 'saveText',
         'savePDF', 'ring', 'clipboardImage', 'appVersion', 'watch', 'onChanged', 'scratch', 'welcome',
+        // クラウド（依頼 313・320）── 置き場所の名前を人の言葉で、
+        // フォルダを机の上で開く、この機械が知っている名前。
+        'clouds', 'reveal', 'userName',
     ];
     // `exposeInMainWorld('amber', { … })` の中の、頭に来る名前だけ。
     const body = src.slice(src.indexOf("exposeInMainWorld('amber'"));

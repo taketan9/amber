@@ -787,7 +787,22 @@ function armPaper(box, text, open) {
     for (const node of [...box.children]) {
         const at = Number(node.dataset.line);
         const span = Number(node.dataset.span) || 1;
-        if (!Number.isNaN(at)) node.dataset.md = src.slice(at, at + span).join('\n');
+        // **一度持たせたら、二度と作り直さない。**
+        //
+        // 行番号は組み直した時点のもので、そのあと上の行が増えれば**ずれる**
+        // ── `syncRead` は組み直さずに保存するので（caret を飛ばさないため）、
+        // ずれた番号で字を切り直すと、図の「元の字」が**別の場所の字**に
+        // なる。次の保存でそれが図の場所へ書き戻され、**図が丸ごと消える**。
+        //
+        // 実際に消した。「マーメイドの図がいつのまにか消えた」はこれ ──
+        // 鍵盤で消していないのに消えるので、原因がどこにも見えない。
+        //
+        // 触れないかたまりの元の字は、**組み直したときにしか変わらない**
+        // （図を直す工房は `readSourceEdit` を通り、あちらは必ず組み直す）
+        // ので、既に持っているならそれが正しい。
+        if (node.dataset.md === undefined && !Number.isNaN(at)) {
+            node.dataset.md = src.slice(at, at + span).join('\n');
+        }
         if (richBlock(node)) {
             node.contentEditable = 'false';
             node.title = node.classList.contains('mermaid') || node.querySelector('code.language-mermaid')
