@@ -94,7 +94,8 @@ const starred = (n) => n.star !== null && n.star !== undefined;
 function drawRail() {
     const on = (kind, what) => state.dest.kind === kind && state.dest.what === what;
     const rows = [];
-    rows.push('<div id="railtop"></div>');
+    // 名前は決め打ちなので、`BRAND` をそのまま置く（人の書いた字は入らない）。
+    rows.push('<div id="railtop"><span class="wm">' + BRAND + '</span></div>');
     // 「＋」は全角の空白で離していた ── 字と記号のあいだが不揃いになる。
     // 印は琥珀の丸の中に描く（同じ太さ・同じ大きさで、字と揃う）。
     rows.push('<button id="new"><span class="ring">'

@@ -366,38 +366,15 @@ struct NoteView: View {
     }
 }
 
-/// The name of the thing, at the top of its own list.
-///
-/// **A navigation bar's large title is somebody else's typography.** cian
-/// gets one screen where its name is the first thing you see, so it is set
-/// the way the icon is set — the mark, the word, and one quiet line of what
-/// is inside. Below the top folder the bar takes over again: there the
-/// question is *where am I*, and a wordmark does not answer it.
-struct Wordmark: View {
-    let notes: Int
-    let books: Int
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Mark().frame(width: 38, height: 38)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("ambər")
-                    .font(.system(size: 34, weight: .heavy, design: .rounded))
-                    .kerning(-0.5)
-                Text("\(notes) のノート ・ \(books) のフォルダ")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            Spacer(minLength: 0)
-        }
-    }
-}
-
 /// The icon, loaded rather than drawn.
 ///
 /// Literally the app icon, so the thing on the home screen and the thing at
 /// the top of the list cannot drift apart.
+///
+/// **いまは電話のどこからも呼んでいない**（2026-09-07、帯の印を名前に
+/// 替えたので ── 絵と字を並べると「くどい」）。残してあるのは、絵そのもの
+/// （`Mark.imageset`）はまだ束ねに入っていて、窓は空の面で同じ一枚を出して
+/// いるから。下の注釈に、描き直すと必ずずれるという教訓が残っている。
 struct Mark: View {
     // **アプリのアイコンそのもの**を小さくして出す。案2「琥珀の中の
     // Markdown」で、`packaging/amber_icon.py` が焼いた 128px の一枚。

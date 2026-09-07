@@ -143,11 +143,33 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   background: var(--rail); border-right: 1px solid var(--line);
   overflow-y: auto; padding-bottom: 12px;
 }
-/* **左上に名前は出さない。** アプリの名前は窓の外（Dock・タスクバー・
-   ⌘Tab）が既に言っている。中で二度言うと、そのぶんノートが下がる。
-   mac の信号機のぶんだけ、列の上を空ける。 */
-#railtop { height: 14px; flex: none; -webkit-app-region: drag; }
-body.mac #railtop { height: 34px; }
+/* **名前だけ置く。印は置かない。**
+   長いあいだここは空だった ── アプリの名前は窓の外（Dock・タスクバー・
+   ⌘Tab）が既に言っていて、中で二度言うとそのぶんノートが下がるので
+   （依頼 175）。戻したのは、名前に**姿**ができたから ── 外したのは
+   「アイコン＋ただの名前」で、あれは確かに二度言っているだけだった。
+   `ambər` の綴りは、外のどこにも出ていない。
+
+   **印は置かない**（本人の言葉で「くどい」）── 絵と字を並べると、
+   同じことを二つの形で言うことになる。
+
+   mac では**高さが変わらない**: 34px は信号機のぶんで既に空けてある。
+   Windows と Linux は 14px しか無いので 30px へ伸ばす ── そこだけは
+   一覧が 16px 下がる。承知のうえで本人が選んだ（Ｗ１）。
+
+   帯そのものは掴んで動かす場所なので、字も一緒に掴める（`drag`）。 */
+#railtop {
+  height: 30px; flex: none; -webkit-app-region: drag;
+  display: flex; align-items: center; padding: 0 14px;
+}
+/* 信号機（`hiddenInset`）は x=20 から並んで右端が 74 あたり ──
+   その右に置く。詰めると、閉じるつもりの指が字に当たる。 */
+body.mac #railtop { height: 34px; padding-left: 88px; }
+#railtop .wm {
+  font-size: 13px; font-weight: 600; color: var(--ink-3); letter-spacing: .01em;
+}
+/* 名札と同じ差し方（`--brand-s`）── 明るい地では濃い琥珀、暗い地では明るい琥珀。 */
+#railtop .wm .s { color: var(--brand-s); }
 /* **一つだけの、押させたい釦 ── ただし塊にはしない。**
    前は琥珀のべた塗りに階調と、琥珀色に光る影を二枚。古く見えていたのは
    色ではなく**塊であること**で、階調と影はその塊を立体に見せるための飾り

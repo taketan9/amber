@@ -92,9 +92,23 @@ struct ContentView: View {
                 // 窓がそうしているので、二つの amber で同じ場所を探せる。
                 if store.up == nil {
                     ToolbarItem(placement: .topBarLeading) {
-                        // 名前は書かない（Dock も窓の外も既に言っている）。
-                        // 印だけ、いま何のアプリかが分かるぶん。
-                        Mark().frame(width: 26, height: 26)
+                        // **印ではなく、名前。**
+                        //
+                        // 前はここに `Mark()` を 26pt で置いていた ── 電話は
+                        // Dock も ⌘Tab も無く、外に「いま何のアプリか」を
+                        // 言ってくれるものが無いから。名前に姿ができたので、
+                        // 綴りそのものを出す方に替えた（窓の掴む帯と同じ）。
+                        //
+                        // **絵と字を並べない**（本人の言葉で「くどい」）──
+                        // 同じことを二つの形で言うことになる。
+                        //
+                        // 大きな題（34pt）にはしなかった: あれは巻けば縮む
+                        // かわりに、開くたび一覧を 52pt 押し下げる。帯なら
+                        // 高さは変わらない ── ここは一覧を見に来る画面。
+                        (Text("amb")
+                            + Text("ə").foregroundColor(Color("BrandSchwa"))
+                            + Text("r"))
+                            .font(.headline)
                             .accessibilityLabel("ambər")
                     }
                 }
