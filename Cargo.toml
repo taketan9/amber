@@ -9,7 +9,7 @@ members = [
 [workspace.package]
 # **番号を決めるのは Taketan。** 自分からは上げない。
 # cian と別勘定 ── 分かれた日にどちらも 2.1.0 だったが、これ以降は別に進む。
-version = "2.5.0"
+version = "2.6.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
