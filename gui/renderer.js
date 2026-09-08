@@ -2603,7 +2603,12 @@ async function pickPicture() {
 async function attach(b64, ext) {
     try {
         const r = await ask('image', { note: state.open.path, b64, ext });
-        put(`![](${r.link})\n`);
+        // **どちらの面でも打つ。** `put` は「表示」の面では黙って帰るので、
+        // ここだけ面を見ずに呼んでいると、**絵はフォルダに置かれたのに
+        // リンクがどこにも入らない** ── 誰も指していない絵が
+        // `attachments/` に溜まる（ほかの記号は道具帯の側で面を見ている）。
+        if (onRead()) await readPut(`![](${r.link})`);
+        else put(`![](${r.link})\n`);
         zonesSoon();
     } catch (e) {
         say('絵を置けません: ' + why(e));
@@ -4935,7 +4940,10 @@ function markKey(e) {
 /// **捕まえるのは絵のときだけ。** 字の貼り付けはエディタの仕事で、
 /// ここが横取りすると Monaco の取り消しが繋がらなくなる。
 document.addEventListener('paste', async (e) => {
-    if (!state.open || !editor || view === 'read') return;
+    // **「表示」の面でも受ける。** 前はここで帰っていたので、読む面に
+    // 撮った画面を貼っても何も起きなかった ── 画面を撮って貼るのは、
+    // いちばん「表示」の面でやりたいこと。
+    if (!state.open || !editor) return;
     const items = [...(e.clipboardData?.items || [])];
     const pic = items.find((i) => i.kind === 'file' && i.type.startsWith('image/'));
     if (!pic) return;
