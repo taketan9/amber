@@ -55,6 +55,7 @@ Node.js** の二つだけ。
 cargo test --workspace          # 判断のテスト
 node scripts/diagram-test.js    # 図が、直しても失われないか
 node scripts/paper-test.js      # 「表示」の面が、打っても字を失わないか
+node scripts/round-test.js      # 字 → 面 → 字 が、元に戻るか（総当たり）
 node scripts/win-test.js        # Windows の道と鍵盤（mac では一生出ない不具合）
 node scripts/contract.js        # 同梱する側（crmaine）との約束が生きているか
 node gui/vendor.js              # Monaco・vim・mermaid を落とす（git に入れていない）
