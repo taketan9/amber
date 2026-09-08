@@ -1077,9 +1077,62 @@ fn length(v: &str) -> Option<String> {
     }
 }
 
+/// **絵の大きさを、押して選べるようにするための書き換え**（依頼 420）。
+///
+/// 記法を覚えていない人が、絵を押して「小さめ」を選ぶと、amber が
+/// `![猫 w:200px](…)` と**書いておく** ── 覚えている人が打つのと同じ字で。
+/// 二つの道が同じところへ着くので、片方で付けた大きさをもう片方で直せる。
+///
+/// `width` が `None` なら指示を外す（はばいっぱいに戻す）。
+/// **説明の字は動かさない** ── 書いた人の言葉なので、順番も含めてそのまま。
+pub fn set_picture_size(line: &str, width: Option<&str>) -> String {
+    let Some(crate::note::Block::Image { alt, link }) = crate::note::lone_image(line.trim()) else {
+        // 絵の行でないなら、触らない ── 読めないものを書き換えない。
+        return line.to_string();
+    };
+    let mut words: Vec<&str> = alt
+        .split(' ')
+        .filter(|w| !matches!(w.split_once(':'),
+            Some(("width" | "w" | "height" | "h", v)) if length(v).is_some()))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let hold;
+    if let Some(w) = width {
+        hold = format!("w:{w}");
+        // **指示は後ろに置く。** 説明が先に読めるほうが、コードの面を
+        // 開いた人に「何の絵か」が先に届く。
+        words.push(&hold);
+    }
+    format!("![{}]({link})", words.join(" "))
+}
+
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn set_picture_size_writes_what_a_person_would_type() {
+        let one = |line: &str, w: Option<&str>| super::set_picture_size(line, w);
+
+        // 付ける。
+        assert_eq!(one("![猫](a.png)", Some("200px")), "![猫 w:200px](a.png)");
+        // 付け直す ── 二つ並べない。
+        assert_eq!(one("![猫 w:200px](a.png)", Some("400px")), "![猫 w:400px](a.png)");
+        // 外す ── 説明は残る。
+        assert_eq!(one("![猫 w:200px](a.png)", None), "![猫](a.png)");
+        // 説明が無くても壊れない。
+        assert_eq!(one("![](a.png)", Some("200px")), "![w:200px](a.png)");
+        assert_eq!(one("![w:200px](a.png)", None), "![](a.png)");
+        // 縦の指示も一緒に落ちる（大きさは一か所で決める）。
+        assert_eq!(one("![猫 h:80px w:1](a.png)", Some("200px")), "![猫 w:200px](a.png)");
+        // **絵の行でないものは、触らない。**
+        assert_eq!(one("ただの本文", Some("200px")), "ただの本文");
+        assert_eq!(one("# 見出し", None), "# 見出し");
+        // 書いた字を、もう一度読める（往復する）。
+        let out = super::to_html(&[one("![猫](a.png)", Some("200px"))]);
+        assert!(out.contains(r#"style="width:200px;height:auto""#), "{out}");
+        assert!(out.contains(r#"alt="猫""#), "{out}");
+    }
+
     #[test]
     fn picture_size_reads_marp_and_keeps_the_words() {
         let one = |md: &str| super::to_html(&[md.to_string()]);

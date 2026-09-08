@@ -5077,8 +5077,11 @@ el('read').addEventListener('click', async (e) => {
         if (rich && el('read').contains(rich)) {
             const pic = rich.tagName === 'FIGURE';
             popMenu([
+                // **絵の大きさは、押して選べる**（依頼 420）── 記法を
+                // 覚えていない人が、いちばん変えたがるのがこれ。
+                pic ? { name: '大きさ…', sub: sizeNow(rich), run: () => askSize(rich) } : null,
                 pic ? null : { name: 'コードで直す', sub: '書く面のその行へ', run: () => toSource(rich) },
-                { name: '消す', sep: !pic, run: () => dropBlock(rich) },
+                { name: '消す', sep: true, run: () => dropBlock(rich) },
             ], { x: e.clientX, y: e.clientY });
         }
         return;
@@ -5109,6 +5112,42 @@ el('read').addEventListener('click', async (e) => {
 /// 外の行き先を開く。
 async function openLink(href) {
     if (!(await window.amber.openLink(href))) say('この行き先は開けません: ' + href);
+}
+
+/// **絵の大きさの選び肢。**
+///
+/// 数を訊かない ── 「200px」と打てる人は記法で書ける（`![w:200px]`）。
+/// ここに来るのは打てない人なので、**言葉で選ばせる**。
+/// 幅だけを指す: 縦横のどちらも訊くと、釣り合いを自分で守る仕事になる。
+const SIZES = [
+    { name: 'はばいっぱい', sub: '指示なし（もとの出かた）', px: null },
+    { name: '大きめ', sub: '横 640px', px: '640px' },
+    { name: '中くらい', sub: '横 400px', px: '400px' },
+    { name: '小さめ', sub: '横 200px', px: '200px' },
+];
+
+/// いまの大きさを、献立の右に添える一言。
+function sizeNow(fig) {
+    const w = fig.querySelector('img')?.style.width || '';
+    return SIZES.find((s) => s.px === w)?.name || (w ? '横 ' + w : 'はばいっぱい');
+}
+
+/// 絵の大きさを選んで、**ノートの字に書く**。
+///
+/// 押して選んだ結果が `![猫 w:200px](…)` という**打てる字**として残る ──
+/// あとから記法で直せるし、amber の外でも読める（芯の 1）。
+async function askSize(fig) {
+    const now = fig.querySelector('img')?.style.width || '';
+    const px = await askPick('絵の大きさ',
+        SIZES.map((s) => ({ name: s.name, sub: s.sub, value: s.px === null ? '' : s.px })),
+        SIZES.find((s) => s.px === now)
+            ? 'いま ' + SIZES.find((s) => s.px === now).name
+            : (now ? 'いま 横 ' + now : 'いま はばいっぱい'));
+    if (px === null) return;
+    await readSourceEdit(async (md) => {
+        const r = await ask('imgsize', { line: md, width: px || null });
+        return r.line;
+    }, fig);
 }
 
 /// 触れないかたまりを、書く面のその行へ。

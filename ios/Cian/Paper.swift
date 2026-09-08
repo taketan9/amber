@@ -342,13 +342,18 @@ struct Paper: UIViewRepresentable {
         window.webkit.messageHandlers.menu.postMessage({ kind: 'link', at: href });
         return;
       }
-      // **絵は `<img>` そのもの。** 窓は `<figure>` で包むが、電話は包んで
-      // いない ── ここで `figure` だけ見ていると、絵を押しても何も起きない。
-      const art = e.target.closest('.mermaid, pre, figure, img');
+      let art = e.target.closest('.mermaid, pre, figure, img');
       if (!art || !box.contains(art)) return;
+      // **絵は包みごと持つ。** `closest` はいちばん内側を返すので、絵を
+      // 叩くと `<img>` が来る ── 元の字（`data-md`）を持っているのは
+      // `keepMark` で受け取った `<figure>` のほうなので、そちらへ上がる。
+      // 持たずに渡すと、大きさを直す先が分からない（依頼 420）。
+      if (art.tagName === 'IMG' && art.parentElement?.tagName === 'FIGURE') {
+        art = art.parentElement;
+      }
       e.preventDefault();
       picked = art;
-      const kind = art.tagName === 'IMG' ? 'img'
+      const kind = art.tagName === 'FIGURE' || art.tagName === 'IMG' ? 'img'
         : (art.classList.contains('mermaid') || art.querySelector('code.language-mermaid') ? 'fig' : 'pre');
       window.webkit.messageHandlers.menu.postMessage({
         kind, at: art.dataset.md || '', line: Number(art.dataset.line ?? -1),

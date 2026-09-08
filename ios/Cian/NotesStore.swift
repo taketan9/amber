@@ -1109,6 +1109,16 @@ final class NotesStore: ObservableObject {
         reload()
     }
 
+    /// 絵の行に、大きさの指示を書く／外す（依頼 420）。**決めるのは core**
+    /// ── 窓と電話が別々に文字列をいじると、片方で付けた大きさをもう片方が
+    /// 読めない形になる。
+    func sized(_ line: String, width: String?) throws -> String {
+        var p: [String: Any] = ["line": line]
+        if let width { p["width"] = width }
+        let got = try Cian.call("imgsize", p)
+        return got["line"] as? String ?? line
+    }
+
     /// **型を置くフォルダの名前**（窓と同じ一語・依頼 417）。
     ///
     /// 決め打ちにする ── 設定にすると「どこに置けば型になるか」が人に

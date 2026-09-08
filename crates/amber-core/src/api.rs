@@ -820,6 +820,16 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
+        // 絵の大きさを、押して選べるように書き換える（依頼 420）。
+        // **決めるのはここ一か所** ── 窓と電話が別々に文字列をいじると、
+        // 片方で付けた大きさをもう片方が読めない形になる。
+        "imgsize" => {
+            let width = p["width"].as_str();
+            Ok(serde_json::json!({
+                "line": crate::markdown::set_picture_size(&arg(p, "line"), width),
+            }))
+        }
+
         // 絵文字の表（依頼 418）。**一度受け取れば、あとは前端の仕事。**
         // 外の何かを取りに行かない ── 会社の窓に閉じた機械でも出る。
         "emoji" => Ok(crate::emoji::table()),

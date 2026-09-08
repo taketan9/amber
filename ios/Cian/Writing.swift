@@ -33,6 +33,8 @@ struct NoteView: View {
     @State private var fixingText: Fixing?
     /// 絵文字の板を出しているか（依頼 418）。
     @State private var facing = false
+    /// 絵の大きさを訊いているか（依頼 420）。
+    @State private var sizing = false
     /// 表示の面で叩かれた、触れないかたまり・リンク（依頼 403）。
     /// **どの小窓を出すか**を決めるのはこちら（閉じると空になる）。
     @State private var tapped: Tapped?
@@ -171,6 +173,22 @@ struct NoteView: View {
     /// その種類の小窓が出ているか ── 閉じたら憶えも空にする。
     private func showing(_ kind: String) -> Binding<Bool> {
         Binding(get: { tapped?.kind == kind }, set: { if !$0 { tapped = nil } })
+    }
+
+    /// 選ばれた大きさを、**ノートの字に書く**（依頼 420）。
+    ///
+    /// 押して選んだ結果が `![猫 w:200px](…)` という**打てる字**として残る ──
+    /// あとから記法で直せるし、amber の外でも読める（芯の 1）。
+    ///
+    /// 書き換えるのは**その一行だけ** ── 同じ絵を二度貼っている人の、
+    /// もう一方まで変えない（`held.at` は押された絵の元の字）。
+    private func size(_ width: String?) {
+        guard let was = held?.at, !was.isEmpty else { return }
+        do {
+            let now = try store.sized(was, width: width)
+            guard now != was else { return }
+            tab.text = tab.text.replacingOccurrences(of: was, with: now)
+        } catch { trouble = error.localizedDescription }
     }
 
     /// 絵文字を、いま打っているところへ（依頼 418）。
@@ -348,7 +366,20 @@ struct NoteView: View {
                 }
                 .confirmationDialog("絵", isPresented: showing("img"),
                                     titleVisibility: .visible) {
+                    // **絵の大きさは、押して選べる**（依頼 420）── 記法を
+                    // 覚えていない人が、いちばん変えたがるのがこれ。
+                    Button("大きさ…") { sizing = true }
                     Button("消す", role: .destructive) { hand.did("drop") }
+                    Button("やめる", role: .cancel) {}
+                }
+                .confirmationDialog("絵の大きさ", isPresented: $sizing,
+                                    titleVisibility: .visible) {
+                    // 数は訊かない ── 打てる人は記法で書く（`![w:200px]`）。
+                    // ここに来るのは打てない人なので、言葉で選ばせる。
+                    Button("小さめ（横 200px）") { size("200px") }
+                    Button("中くらい（横 400px）") { size("400px") }
+                    Button("大きめ（横 640px）") { size("640px") }
+                    Button("はばいっぱい") { size(nil) }
                     Button("やめる", role: .cancel) {}
                 }
                 .confirmationDialog(held?.at ?? "リンク", isPresented: showing("link"),
