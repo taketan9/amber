@@ -290,7 +290,9 @@ struct Paper: UIViewRepresentable {
         const n = here();
         const now = n && /^H[1-6]$/.test(n.tagName) ? Number(n.tagName[1]) : 0;
         document.execCommand('formatBlock', false, now >= 3 ? 'p' : 'h' + (now + 1));
-      } else if (what.startsWith('h')) document.execCommand('formatBlock', false, what);
+      } else if (what === 'in') checkTab(box, false);
+      else if (what === 'out') checkTab(box, true);
+      else if (what.startsWith('h')) document.execCommand('formatBlock', false, what);
       box.dispatchEvent(new Event('input'));
     };
 
@@ -330,6 +332,40 @@ struct Paper: UIViewRepresentable {
       if (!n || !box.contains(n)) return;
       const li = n.closest('li');
       if (!(li ? checkEnter(li) : false) && !quitEnter(n)) return;
+      e.preventDefault();
+      box.dispatchEvent(new Event('input'));
+    });
+
+    /// 行頭の Backspace は、窓と同じ関数（`checkBack`）に渡す。
+    ///
+    /// **押し心地を端末で分けない。** 既定に任せると、途中の項目は前の
+    /// 項目と繋がる ── 升が一つ黙って消え、二つの「やること」が一行に
+    /// なる。窓で直したものが、電話で直っていないのはいちばん悪い。
+    ///
+    /// **`beforeinput` でも受ける。** iPhone の鍵盤の delete は `keydown` を
+    /// 出さないことがあり（`keyCode` が 229 のまま来る）、そのときは
+    /// `deleteContentBackward` として `beforeinput` に出る。
+    const back = (e) => {
+      if (e.isComposing) return;
+      if (!checkBack(box)) return;
+      e.preventDefault();
+      box.dispatchEvent(new Event('input'));
+    };
+    box.addEventListener('keydown', (e) => {
+      if (e.key !== 'Backspace' || e.keyCode === 229) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      back(e);
+    });
+    box.addEventListener('beforeinput', (e) => {
+      if (e.inputType !== 'deleteContentBackward') return;
+      back(e);
+    });
+
+    /// 外付けの鍵盤の Tab。**電話に Tab は無い**（下の帯の釦が本線）が、
+    /// 繋いでおけば鍵盤を挿した人の手がそのまま動く。
+    box.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab' || e.isComposing || e.keyCode === 229) return;
+      if (!checkTab(box, e.shiftKey)) return;
       e.preventDefault();
       box.dispatchEvent(new Event('input'));
     });

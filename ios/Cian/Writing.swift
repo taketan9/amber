@@ -51,6 +51,14 @@ struct NoteView: View {
                     mark("箇条書き", "list.bullet") { hand.mark("ul") }
                     mark("チェック", "checklist") { hand.mark("check") }
                     mark("番号リスト", "list.number") { hand.mark("ol") }
+                    // **一覧の釦の隣に置く。** 電話に Tab は無いので、段を
+                    // 深く・浅くするのはこの二つが手になる（窓の
+                    // Tab / Shift+Tab と同じ。段落では字下げ／字下げ外し）。
+                    // 帯は横に流れるので、**使うものの隣に置かないと
+                    // 流れた先に埋もれる** ── 一度に見えるのは六つだけ。
+                    mark("一段深く", "increase.indent") { hand.mark("in") }
+                    mark("一段浅く", "decrease.indent") { hand.mark("out") }
+                    Divider().frame(height: 20)
                     mark("太字", "bold") { hand.mark("bold") }
                     mark("斜体", "italic") { hand.mark("italic") }
                     mark("取り消し線", "strikethrough") { hand.mark("strike") }

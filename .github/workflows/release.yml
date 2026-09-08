@@ -127,6 +127,7 @@ jobs:
           (cd gui && npm ci)
           node scripts/paper-test.js
           node scripts/round-test.js
+          node scripts/key-test.js
 
       - name: 一往復してみる（Windows）
         if: runner.os == 'Windows'

@@ -85,7 +85,6 @@ const grab = (head) => {
 };
 // eslint-disable-next-line no-eval
 (0, eval)(src.slice(from, to)
-    + grab('function keepMark(')
     + grab('function findPictures(')
     // 窓の持ちもの ── 絵の在りかを組むのに要るぶんだけ。**中身は見ない**
     // ので、道の組み立ては本物でなくてよい（`fileURL` は win-test が見る）。

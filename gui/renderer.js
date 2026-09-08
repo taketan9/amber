@@ -1542,6 +1542,21 @@ function richBlock(node) {
     return !!node.querySelector('pre, .mermaid');
 }
 
+/// 札を掛け替える。**元の行と元の字を、新しい節へ持たせる。**
+///
+/// 掛け替えるのは二か所 ── 絵を `<figure>` で包むとき（`findPictures`）と、
+/// 行の記号を外して段落にするとき（`asPara`）。持たせないと、次の書き戻しで
+/// **その一行が元の字を失う**（触れないかたまりなら `null` になり、保存が
+/// 止まる）。
+///
+/// **切り出しの中に置く。** 電話も同じ掛け替えをする ── 外に置いていた
+/// ときは、電話の束ねに `keepMark` が入っていなかった。
+function keepMark(from, to) {
+    for (const k of ['line', 'span', 'md']) {
+        if (from.dataset[k] !== undefined) to.dataset[k] = from.dataset[k];
+    }
+}
+
 /// 描いたあとの仕込み。
 ///
 /// **書いてあった字を、かたまりごとに持たせておく**（`data-md`）── 戻せない
@@ -1874,6 +1889,259 @@ function quitEnter(node) {
     return true;
 }
 
+/* ── 段を深くする・浅くする（Tab / Shift+Tab） ── */
+
+/// いま caret の居る「一行」。**箱の中の一行まで降りる** ── 引用の中の
+/// 段落は、引用ではなく段落が一行。
+function lineAt(box) {
+    const sel = getSelection();
+    let n = sel && sel.rangeCount ? sel.anchorNode : null;
+    if (n && n.nodeType === 3) n = n.parentElement;
+    if (!n || !box.contains(n)) return null;
+    // 一行として扱うもの ── 項目・段落・見出し。
+    return n.closest('li, p, div, h1, h2, h3, h4, h5, h6');
+}
+
+/// caret が、その節の**行頭**に居るか。
+///
+/// **字が一文字も前に無いことを見る。** 節の先頭の子が升（`.box`）の
+/// ことがあるので、`anchorOffset === 0` だけでは足りない。
+function atHead(node) {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
+    const r = sel.getRangeAt(0).cloneRange();
+    r.selectNodeContents(node);
+    try {
+        r.setEnd(sel.anchorNode, sel.anchorOffset);
+    } catch {
+        return false;                    // caret が節の外に居る
+    }
+    // **升の記号は、字ではない。** `☑` は操作の見た目で、人が打った字では
+    // ない ── 数えると、升のある行の行頭がいつまでも「行頭ではない」に
+    // なり、記号を外す一打が効かない。写しをとって、升を抜いてから測る。
+    const bit = r.cloneContents();
+    for (const b of bit.querySelectorAll('.box')) b.remove();
+    return bit.textContent.length === 0;
+}
+
+/// 段を深くする・浅くする。受けたら `true`。
+///
+/// **一覧の中は子リスト、外は字下げ。** Inkdrop も一覧の中の Tab は
+/// 子リストで、外は行の字下げ ── 向きは同じ（あちらは記号の面なので
+/// 半角で書ける）。この面は記号を見せないので、字下げは**全角空白**
+/// （`　`）を一つ置く。半角の空白と tab は、四つ揃うと Markdown が
+/// コード枠にするので使えない。`　` は**ただの字**で、何段でも枠に
+/// ならず、GitHub でも Obsidian でも同じ幅の空きとして出る。
+///
+/// **見出しでは何も起きない。焦点も動かさない** ── 見出しに字下げは
+/// 無く、焦点が面から飛ぶのは事故（`PAPER.ja.md` 六章の芯の 1）。
+function checkTab(box, back) {
+    const line = lineAt(box);
+    if (!line) return false;
+    if (/^H[1-6]$/.test(line.tagName)) return true;      // 受けるが、何もしない
+    if (line.closest('td, th')) return false;            // 表は表の道具が受ける
+    if (line.tagName === 'LI') return back ? outdent(line) : indent(line);
+    return back ? unpad(line) : pad(line);
+}
+
+/// 項目を一段深く。**上に項目が無ければ、深くしない。**
+///
+/// Markdown で親の無い入れ子は書けない（`  - あ` だけの一覧は段落になる）
+/// ので、一覧の最初の項目は深くできない ── 何も起きないのが正しい。
+function indent(li) {
+    const above = li.previousElementSibling;
+    if (!above || above.tagName !== 'LI') return true;
+    const list = li.parentElement;
+    // 上の項目が既に子を持っているなら、そこへ入る ── 新しい一覧を
+    // 作ると、同じ段に一覧が二つ並ぶ。
+    const there = [...above.children].find((x) => ['UL', 'OL'].includes(x.tagName));
+    const into = there || document.createElement(list.tagName);
+    if (!there) above.append(into);
+    const at = caretIn(li);
+    into.append(li);
+    landBackIn(li, at);
+    return true;
+}
+
+/// 項目を一段浅く。**いちばん浅い段なら、何もしない。**
+function outdent(li) {
+    const list = li.parentElement;
+    const up = list && list.parentElement;
+    if (!up || up.tagName !== 'LI') return true;
+    const at = caretIn(li);
+    // 下に残る兄弟は、この項目の子として連れていく ── 置いていくと
+    // 順番が入れ替わる。
+    const rest = [];
+    for (let x = li.nextElementSibling; x; x = x.nextElementSibling) rest.push(x);
+    up.after(li);
+    if (rest.length) {
+        const more = document.createElement(list.tagName);
+        more.append(...rest);
+        li.append(more);
+    }
+    if (!list.children.length) list.remove();
+    landBackIn(li, at);
+    return true;
+}
+
+/// 段落を一つ字下げる（全角空白を一つ、頭に置く）。
+function pad(line) {
+    const at = caretIn(line);
+    line.insertBefore(document.createTextNode('　'), line.firstChild);
+    line.normalize();
+    landBackIn(line, at + 1);
+    return true;
+}
+
+/// 字下げを一つ外す。**無ければ何もしない。**
+function unpad(line) {
+    const first = line.firstChild;
+    if (!first || first.nodeType !== 3 || !first.data.startsWith('　')) return true;
+    const at = caretIn(line);
+    first.data = first.data.slice(1);
+    landBackIn(line, Math.max(0, at - 1));
+    return true;
+}
+
+/// その節の中で、caret が何文字目か。
+function caretIn(node) {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount) return 0;
+    const r = sel.getRangeAt(0).cloneRange();
+    r.selectNodeContents(node);
+    r.setEnd(sel.anchorNode, sel.anchorOffset);
+    return r.toString().length;
+}
+
+/// その節の中の、何文字目かへ caret を戻す。
+///
+/// **段を動かすと節が別の親へ移る**ので、選び目は外れている ── 文字数で
+/// 数えて置き直す（`landAt` は先頭に置くだけで、居た場所には戻らない）。
+function landBackIn(node, at) {
+    const walk = document.createTreeWalker(node, 4 /* NodeFilter.SHOW_TEXT */);
+    let seen = 0;
+    let t;
+    while ((t = walk.nextNode())) {
+        if (seen + t.data.length >= at) {
+            const r = document.createRange();
+            r.setStart(t, Math.max(0, at - seen));
+            r.collapse(true);
+            const sel = getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            return;
+        }
+        seen += t.data.length;
+    }
+    landAt(node, null);
+}
+
+/* ── 行頭の Backspace ── */
+
+/// **行頭の Backspace は、この行の記号を一つ外す。**
+///
+/// `PAPER.ja.md` 六章の芯の 1 ── 面の上の一打は、字の上の一つの記号に
+/// 対応する。既定に任せると、途中の項目は**前の項目と繋がる**（升が一つ
+/// 黙って消える ── 二つの「やること」が一行になる）。どの位置の項目でも
+/// 同じでなければ、押すたびに結果を見る癖がつく。
+///
+/// 外すものが無くなったら、Backspace は字を消す鍵に戻る（`false` を返す）。
+/// 受けたら `true`。
+function checkBack(box) {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;   // 選びは選びの話
+    const line = lineAt(box);
+    if (!line || !atHead(line)) return false;
+
+    // **触れないかたまりの隣では、何も起きない。** caret の無いものが
+    // 一打で消えるのは事故（芯の 2）── 消す道は、押したときの吹き出し。
+    const before = line.previousElementSibling;
+    if (before && richBlock(before)) return true;
+
+    // **字下げには、何もしない。** `　` はただの字なので、caret がその
+    // 後ろに居れば既定の Backspace が一つ消す（芯の 1 がそのまま効く）。
+    // ここで外しにいくと、`　` の**前**で押した人の一打が、下の行を
+    // 巻き込まずに字下げだけ消す ── 押した場所と結果が合わない。
+
+    // 見出しは段落になる。**前の段落には繋がない** ── 見出しを前の段落の
+    // 字に繋ぎたい人は、まず居ない。
+    if (/^H[1-6]$/.test(line.tagName)) return asPara(line);
+
+    if (line.tagName === 'LI') {
+        // 入れ子なら、一段浅く（Tab と対にする）。
+        if (line.parentElement?.parentElement?.tagName === 'LI') return outdent(line);
+        return unlist(line);
+    }
+
+    // 引用・注記は、**最初の行の行頭だけ**出る。途中の行は前の行と繋がる
+    // （既定のまま）── 引用の中の行は自分の記号を持っていない（`>` は箱の
+    // 記号で、行の記号ではない）ので、二行目に外すものは見えていない。
+    const quote = line.closest('blockquote, .alert');
+    if (quote && box.contains(quote)) {
+        const head = [...quote.children].find((x) => !x.classList.contains('alert-h'));
+        if (head === line) return unquote(quote, line);
+    }
+    return false;
+}
+
+/// 見出しを段落にする（字はそのまま）。
+function asPara(line) {
+    const p = document.createElement('p');
+    p.append(...line.childNodes);
+    keepMark(line, p);
+    line.replaceWith(p);
+    landBackIn(p, 0);
+    return true;
+}
+
+/// 項目の記号を外して、段落にする。**一覧はそこで割れ、下の項目は残る。**
+function unlist(li) {
+    const list = li.parentElement;
+    if (!list || !['UL', 'OL'].includes(list.tagName)) return false;
+    const p = document.createElement('p');
+    // 升も一緒に外れる ── 記号を外すとは、そういうこと。
+    for (const x of [...li.childNodes]) {
+        if (x.nodeType === 1 && x.classList?.contains('box')) continue;
+        p.append(x);
+    }
+    if (!p.childNodes.length) p.append(document.createElement('br'));
+    const rest = [];
+    for (let x = li.nextElementSibling; x; x = x.nextElementSibling) rest.push(x);
+    list.after(p);
+    if (rest.length) {
+        const more = document.createElement(list.tagName);
+        more.append(...rest);
+        p.after(more);
+    }
+    li.remove();
+    if (!list.children.length) list.remove();
+    landBackIn(p, 0);
+    return true;
+}
+
+/// 引用・注記の最初の行を、箱から出す。**箱に何も残らなければ箱ごと消える**
+/// （注記なら種類の札も）。
+function unquote(quote, line) {
+    const p = document.createElement('p');
+    // **出すのは一行だけ。** 段落の中の改行は `<br>` なので、二行の引用は
+    // 一つの段落になっている ── 丸ごと出すと、一打で二行ぶんの `>` が
+    // 外れる（芯の 1 は「一打は一つの記号」）。最初の `<br>` で割る。
+    const at = [...line.childNodes].findIndex((x) => x.nodeName === 'BR');
+    if (at >= 0) {
+        p.append(...[...line.childNodes].slice(0, at));
+        line.childNodes[0].remove();            // 割れ目の `<br>` を落とす
+    } else {
+        p.append(...line.childNodes);
+        line.remove();
+    }
+    if (!p.childNodes.length) p.append(document.createElement('br'));
+    quote.before(p);
+    const left = [...quote.children].filter((x) => !x.classList.contains('alert-h'));
+    if (!left.length || !quote.textContent.trim()) quote.remove();
+    landBackIn(p, 0);
+    return true;
+}
+
 /// 飾りの終わりに caret があるなら、その外へ出す。
 ///
 /// **選んだ字を飾ったあと、続けて打った字まで太字になっていた。**
@@ -2028,6 +2296,21 @@ el('read').addEventListener('compositionstart', () => outOfDress());
 /// 打ち込みの表計算でも文書でも、そこは次の升に決まっている。
 ///
 /// 最後の升で押したら**行を一つ足す** ── 足し方を探しに行かせない。
+/// 行頭の Backspace ── 記号を一つ外す（`checkBack`）。
+///
+/// **変換中は IME に渡す。** 文節の区切りがこの鍵で動く（`PAPER.ja.md`
+/// 六章の丁）。
+el('read').addEventListener('keydown', (e) => {
+    if (e.code !== 'Backspace' || e.isComposing || e.keyCode === 229) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!checkBack(el('read'))) return;
+    e.preventDefault();
+    readChanged();
+});
+
+/// Tab / Shift+Tab ── 一覧の中は段、外は字下げ（`checkTab`）。
+///
+/// **表の中は、表の道具が先に受ける**（次のセルへ）。
 el('read').addEventListener('keydown', (e) => {
     if (e.code !== 'Tab' || e.isComposing || e.keyCode === 229) return;
     // caret の居場所は、字の節のことも升そのもののこともある ──
@@ -2035,7 +2318,13 @@ el('read').addEventListener('keydown', (e) => {
     let n = getSelection()?.anchorNode;
     if (n && n.nodeType === 3) n = n.parentElement;
     const cell = e.target.closest?.('td, th') || n?.closest?.('td, th');
-    if (!cell || !el('read').contains(cell)) return;
+    if (!cell || !el('read').contains(cell)) {
+        // **表の外。** 焦点を面から飛ばさない ── 受けたなら止める。
+        if (!checkTab(el('read'), e.shiftKey)) return;
+        e.preventDefault();
+        readChanged();
+        return;
+    }
     e.preventDefault();
     const table = cell.closest('table');
     const cells = [...table.querySelectorAll('th, td')];
@@ -4082,16 +4371,6 @@ async function paintCode() {
     }
 }
 
-/// ノートの隣にある絵を、ノートの隣から読む。
-///
-/// **`![](attachments/x.jpg)` はノートからの相対**で、窓の `index.html`
-/// からの相対ではない。直さないと、貼った絵がぜんぶ欠けた四角で出る。
-/// 掛け替えた札に、元の行と元の字を持たせる。
-function keepMark(from, to) {
-    for (const k of ['line', 'span', 'md']) {
-        if (from.dataset[k] !== undefined) to.dataset[k] = from.dataset[k];
-    }
-}
 
 function findPictures() {
     const dir = state.open ? dirOf(state.open.path) : '';
