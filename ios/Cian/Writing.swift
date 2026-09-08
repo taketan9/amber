@@ -63,6 +63,10 @@ struct NoteView: View {
                     mark("斜体", "italic") { hand.mark("italic") }
                     mark("取り消し線", "strikethrough") { hand.mark("strike") }
                     mark("引用", "text.quote") { hand.mark("quote") }
+                    // **新しい段落は、ここから。** 電話の Return は改行に
+                    // した（本人が決めた・2026-09-08「改行二回で段落」は
+                    // 取らない）ので、段落を分ける手をどこかに置く必要がある。
+                    mark("新しい段落", "text.insert") { hand.mark("para") }
                     Divider().frame(height: 20)
                     mark("画像", "photo", act: photo)
                     mark("表", "tablecells", act: table)
@@ -96,6 +100,7 @@ struct NoteView: View {
     }
     @Environment(\.colorScheme) private var scheme
     @AppStorage("cian.look") private var look = Look.auto
+    @AppStorage("amber.font") private var font = Size.system
 
     struct Fixing: Identifiable {
         let md: String
@@ -197,6 +202,7 @@ struct NoteView: View {
                     band
                     Paper(text: $tab.text, folder: folder,
                           dark: look == .dark || (look == .auto && scheme == .dark),
+                          size: font.px,
                           onCheck: tickLine, onAt: { tab.at = $0 },
                           came: tab.came, both: tab.both,
                           onFix: { fixingText = Fixing(md: $0) },

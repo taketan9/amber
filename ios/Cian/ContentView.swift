@@ -723,7 +723,11 @@ struct ContentView: View {
             if !stuck.isEmpty || (needle.isEmpty && store.at.isEmpty && !store.flat) {
                 Section {
                     if stuck.isEmpty {
-                        Text("まだありません（ノートを長押し →「ブックマークに登録する」）")
+                        // **どうすれば登録できるかを言う。** 「まだありません」だけでは、
+                        // 登録する道が画面のどこにも書いていない（本人の指摘・
+                        // 2026-09-08）。横払いは長押しより手数が少ないので、
+                        // そちらを先に言う。
+                        Text("ブックマークには何も登録されていません。ノートを右へ払って ★ を押すと登録できます。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                     ForEach(stuck) { row($0) }

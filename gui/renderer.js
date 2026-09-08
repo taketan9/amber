@@ -1898,8 +1898,14 @@ function lineAt(box) {
     let n = sel && sel.rangeCount ? sel.anchorNode : null;
     if (n && n.nodeType === 3) n = n.parentElement;
     if (!n || !box.contains(n)) return null;
-    // 一行として扱うもの ── 項目・段落・見出し。
-    return n.closest('li, p, div, h1, h2, h3, h4, h5, h6');
+    // 一行として扱うもの ── 項目・段落・見出し・表のセル。
+    //
+    // **箱そのものは返さない。** `div` を数えているので、行の見つからない
+    // ところ（表のセルの中など）では `#read` が返ってしまい、「行が
+    // 見つかった」ことになる ── セルの中の Enter が段落の Enter として
+    // 通り、表の中に `<br>` が入った（試験が捕まえた）。
+    const line = n.closest('li, p, div, h1, h2, h3, h4, h5, h6, td, th');
+    return line && line !== box ? line : null;
 }
 
 /// caret が、その節の**行頭**に居るか。
@@ -2034,6 +2040,104 @@ function landBackIn(node, at) {
         seen += t.data.length;
     }
     landAt(node, null);
+}
+
+/* ── Enter ── */
+
+/// 見出しと表の Enter。受けたら `true`。
+///
+/// **見出しの次は段落。** 見出しは一行のもので、見出しが二つ続くことは
+/// まず無い（Word も Docs も Notion もそうしている）。**途中で押しても
+/// 後ろは段落** ── 本人が決めた（2026-09-08「大きいままじゃない」）。
+/// 既定は見出しを二つに割るが、「見出しの途中で Enter」はたいてい
+/// 「見出しを打ち終えて本文に降りたい」のに caret が末尾に無かっただけで、
+/// 見出しが二つになるより後ろが本文になるほうが直しが少ない。
+///
+/// **表のセルの Enter は、下のセルへ。** セルの中に改行は書けない
+/// （Markdown の表は一行一行）── 既定に任せると、表を壊すか改行を黙って
+/// 落とすかのどちらかになる。最後の行なら、行を一つ足す。
+function checkReturn(box) {
+    const line = lineAt(box);
+    if (!line) return false;
+
+    const cell = line.closest ? line.closest('td, th') : null;
+    if (cell && box.contains(cell)) return nextCell(cell);
+
+    if (!/^H[1-6]$/.test(line.tagName)) return false;
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount) return false;
+    // 先頭で押したら、上に空の段落（既定と同じ）── 見出しは見出しのまま。
+    if (atHead(line)) return false;
+
+    // 後ろの字を、新しい段落へ連れていく（末尾で押したなら空の段落）。
+    const cut = sel.getRangeAt(0).cloneRange();
+    cut.setEndAfter(line.lastChild || line);
+    const tail = cut.extractContents();
+    const p = document.createElement('p');
+    p.append(tail);
+    if (!p.textContent) p.append(document.createElement('br'));
+    line.after(p);
+    landBackIn(p, 0);
+    return true;
+}
+
+/// 表の次のセルへ ── **下**（同じ列）。最後の行なら行を一つ足す。
+///
+/// 表計算はどれも Enter で下へ行く。横へ行くのは Tab（`tableDo` の側）。
+function nextCell(cell) {
+    const row = cell.parentElement;
+    const table = cell.closest('table');
+    if (!row || !table) return false;
+    const at = [...row.children].indexOf(cell);
+    const rows = [...table.querySelectorAll('tr')];
+    const n = rows.indexOf(row);
+    let below = rows[n + 1];
+    if (!below) {
+        // 最後の行 ── 行を一つ足す。**セルの数は上に合わせる**（数が
+        // 行ごとに違う表は、GFM では崩れる）。
+        const body = table.querySelector('tbody') || table;
+        below = document.createElement('tr');
+        for (let i = 0; i < row.children.length; i++) {
+            below.append(document.createElement('td'));
+        }
+        body.append(below);
+    }
+    const to = below.children[at] || below.children[below.children.length - 1];
+    if (to) landBackIn(to, 0);
+    return true;
+}
+
+/// 段落の中の改行（`Shift+Enter`）。
+///
+/// **Enter は新しい段落、`Shift+Enter` は段落の中の改行** ── 本人が決めた
+/// （2026-09-08「圧倒的に案 A」）。Word・Docs・Notion の手がそのまま動く。
+/// core が段落の中の一つの改行を改行として描くようになったので（依頼 384）、
+/// ここで入れる `<br>` は字の側でも改行として残る。
+///
+/// **見出し・項目の中では、ふつうの Enter と同じ** ── 見出しと項目は
+/// 一行のもの。表のセルには改行が書けないので、何も起きない。
+function checkSoftReturn(box) {
+    const line = lineAt(box);
+    if (!line) return false;
+    if (line.closest && line.closest('td, th')) return true;   // 受けて、止める
+    if (line.tagName === 'LI' || /^H[1-6]$/.test(line.tagName)) return false;
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount) return false;
+    const r = sel.getRangeAt(0);
+    r.deleteContents();
+    const br = document.createElement('br');
+    r.insertNode(br);
+    // **行末に置いたら、詰め物をもう一枚。** `<br>` が節の最後だと caret の
+    // 行き先が無く、置いた場所が前の行の末尾に見える（`contenteditable` の
+    // よくある形）。字に戻すときは**末尾の改行として落ちる**ので
+    // （`edges`）、ファイルには出ない。
+    if (!br.nextSibling) br.after(document.createElement('br'));
+    const to = document.createRange();
+    to.setStartAfter(br);
+    to.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(to);
+    return true;
 }
 
 /* ── 行頭の Backspace ── */
@@ -2267,12 +2371,20 @@ function readChanged() {
 /// 電話も同じ関数を呼ぶので、押し心地が端末で分かれない。
 el('read').addEventListener('keydown', (e) => {
     if (!isEnter(e) || e.isComposing || e.keyCode === 229) return;
-    if (e.shiftKey || e.metaKey || e.ctrlKey) return;
+    if (e.metaKey || e.ctrlKey) return;
     let n = getSelection()?.anchorNode;
     if (n && n.nodeType === 3) n = n.parentElement;
     if (!n || !el('read').contains(n)) return;
+    // **`⇧Enter` は段落の中の改行。** Enter は新しい段落 ── Word・Docs・
+    // Notion の手がそのまま動く（本人が決めた・2026-09-08）。
+    if (e.shiftKey) {
+        if (!checkSoftReturn(el('read'))) return;
+        e.preventDefault();
+        readChanged();
+        return;
+    }
     const li = n.closest('li');
-    if (!(li ? checkEnter(li) : false) && !quitEnter(n)) return;
+    if (!(li ? checkEnter(li) : false) && !quitEnter(n) && !checkReturn(el('read'))) return;
     e.preventDefault();
     readChanged();
 });

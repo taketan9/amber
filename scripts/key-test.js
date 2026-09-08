@@ -111,7 +111,7 @@ function caretAt(node, n) {
 
 /// 中の字で節を探す。**いちばん内側を掴む** ── 入れ子の一覧では、外側の
 /// 項目も中の字を持っている（`textContent` は子まで拾う）。
-const find = (text) => [...box.querySelectorAll('li, p, h1, h2, h3, blockquote > p, .alert > p')]
+const find = (text) => [...box.querySelectorAll('li, p, h1, h2, h3, td, th, blockquote > p, .alert > p')]
     .filter((n) => n.textContent.includes(text))
     .pop();
 
@@ -201,6 +201,50 @@ async function press(md, where, at, hit) {
 
         r = await press('ふつうの段落。', 'ふつう', 0, () => checkBack(box));
         ok(r.took === false, '外すものが無ければ、既定に任せる', r.took);
+    }
+
+    say('Enter ── 見出しの次は段落、表は下のセルへ');
+    {
+        let r = await press('## 見出し', '見出し', 3, () => checkReturn(box));
+        ok(r.md === '## 見出し\n', '末尾で押したら、見出しはそのまま', r.md);
+
+        r = await press('## 見出しの途中', '見出し', 3, () => checkReturn(box));
+        ok(r.md === '## 見出し\n\nの途中\n', '途中で押したら、後ろは段落', r.md);
+
+        r = await press('## 見出し', '見出し', 0, () => checkReturn(box));
+        ok(r.took === false, '先頭では既定に任せる（上に空の段落）', r.took);
+
+        r = await press('ふつうの段落。', 'ふつう', 3, () => checkReturn(box));
+        ok(r.took === false, '段落では既定に任せる', r.took);
+
+        const two = '| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |';
+        r = await press(two, '1', 0, () => checkReturn(box));
+        ok(r.took === true, '表のセルでは受ける（下のセルへ）', r.took);
+        ok(r.md === two + '\n', '下に行があるなら、行は増えない', r.md);
+
+        const one = '| a | b |\n| --- | --- |\n| 1 | 2 |';
+        r = await press(one, '1', 0, () => checkReturn(box));
+        ok(r.md === one + '\n| 　 | 　 |\n', '最後の行なら、行を一つ足す', r.md);
+    }
+
+    say('Shift+Enter ── 段落の中の改行');
+    {
+        let r = await press('一行目。', '一行目。', 4, () => checkSoftReturn(box));
+        ok(r.md === '一行目。\n', '段落の中に改行が入る（字は変わらない）', r.md);
+
+        r = await press('一行目。つづき', '一行目。', 4, () => checkSoftReturn(box));
+        ok(r.md === '一行目。\nつづき\n', '途中で押したら、後ろが次の行へ', r.md);
+
+        r = await press('# 見出し', '見出し', 2, () => checkSoftReturn(box));
+        ok(r.took === false, '見出しでは、ふつうの Enter に任せる', r.took);
+
+        r = await press('- あ', 'あ', 1, () => checkSoftReturn(box));
+        ok(r.took === false, '項目でも、ふつうの Enter に任せる', r.took);
+
+        const t = '| a | b |\n| --- | --- |\n| 1 | 2 |';
+        r = await press(t, '1', 1, () => checkSoftReturn(box));
+        ok(r.took === true, '表のセルでは、受けて止める（改行は書けない）', r.took);
+        ok(r.md === t + '\n', '表は一文字も変わらない', r.md);
     }
 
     say('触れないかたまりは、一打では消えない');

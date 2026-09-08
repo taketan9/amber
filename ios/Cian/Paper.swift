@@ -34,6 +34,10 @@ struct Paper: UIViewRepresentable {
     /// このノートのあるフォルダ ── 絵の道はここから測る。
     let folder: URL
     let dark: Bool
+    /// 「表示」の面の字の大きさ（px）。**SwiftUI の段はここに届かない**ので、
+    /// 同じ増え方を数で渡す ── 一覧だけ大きくなって本文が小さいままだと、
+    /// 「大きくした」が半分しか効いていない。
+    let size: Int
     /// 升を押したときなど、core を通したいことがある。
     var onCheck: ((Int, Bool) -> Void)?
     /// いま見ている（打っている）ファイルの行 ── 面を替えるときに使う。
@@ -82,7 +86,7 @@ struct Paper: UIViewRepresentable {
     func updateUIView(_ web: WKWebView, context: Context) {
         context.coordinator.parent = self
         context.coordinator.folder = folder
-        context.coordinator.show(text, dark: dark)
+        context.coordinator.show(text, dark: dark, size: size)
         // **組み直すたびに敷き直す。** 札は組み直しで消えるので、
         // 一度きり渡すと、次に打った瞬間に色が消える。
         let js = "window.paint(\(came),\(both)); true"
@@ -101,7 +105,7 @@ struct Paper: UIViewRepresentable {
       html[data-dark]{--paper:#14110c;--ink:#f0e7d6;--ink-2:#bcac91;--ink-3:#8a7d66;
         --line:#302a20;--line-2:#262017;--amber-deep:#e0a94e;--rail:#1d1913;--sel:#3b2f16;}
       html,body{margin:0;padding:0;background:transparent;color:var(--ink);
-        font:17px/1.85 -apple-system,"Hiragino Sans",sans-serif;
+        font:var(--size,17px)/1.85 -apple-system,"Hiragino Sans",sans-serif;
         -webkit-text-size-adjust:100%;}
       #paper{outline:none;padding:14px 16px 45vh;caret-color:var(--amber-deep);
         min-height:60vh;}
@@ -127,10 +131,19 @@ struct Paper: UIViewRepresentable {
       #paper th{background:var(--rail);font-weight:700}
       #paper img{max-width:100%;height:auto;border-radius:9px;
         border:1px solid var(--line)}
+      /* 升は**枠をこちらで描く**（指で押せる大きさが要る）。中身の字
+         （core が入れる `☑` / `☐`）は**出さない** ── 出すと、塗った枠の
+         中に小さいチェックがもう一つ見える（本人が「気持ち悪い」と言った
+         のはこれ・2026-09-08）。窓は枠を描かず字だけを出すので、あちらは
+         起きていなかった。 */
       #paper .box{appearance:none;width:19px;height:19px;margin:0 7px 0 -1.5em;
         border:1.6px solid var(--ink-3);border-radius:5px;background:none;
-        vertical-align:-4px}
+        vertical-align:-4px;font-size:0;position:relative;padding:0}
       #paper .box[aria-pressed=true]{background:var(--amber);border-color:var(--amber);}
+      /* 済みの印は、枠の上に自分で引く。 */
+      #paper .box[aria-pressed=true]::after{content:"";position:absolute;
+        left:5.5px;top:2px;width:4px;height:9px;border:solid #fff;
+        border-width:0 2.2px 2.2px 0;transform:rotate(45deg)}
       #paper li:has(>.box){list-style:none}
       #paper .alert{margin:.9em 0;padding:.1em .9em .1em .9em;border-radius:9px;
         border-left:3px solid var(--amber);background:var(--sel)}
@@ -290,6 +303,17 @@ struct Paper: UIViewRepresentable {
         const n = here();
         const now = n && /^H[1-6]$/.test(n.tagName) ? Number(n.tagName[1]) : 0;
         document.execCommand('formatBlock', false, now >= 3 ? 'p' : 'h' + (now + 1));
+      } else if (what === 'para') {
+        // **段落を割る。** 電話の Return は改行なので、ここが「新しい段落」。
+        // 窓の Enter と同じ答えを通す（升・引用・見出し・表 → それ以外は
+        // ブラウザの既定）。
+        const sel = getSelection();
+        let n = sel?.anchorNode;
+        if (n && n.nodeType === 3) n = n.parentElement;
+        const li = n?.closest?.('li');
+        if (!(li ? checkEnter(li) : false) && !quitEnter(n) && !checkReturn(box)) {
+          document.execCommand('insertParagraph');
+        }
       } else if (what === 'in') checkTab(box, false);
       else if (what === 'out') checkTab(box, true);
       else if (what.startsWith('h')) document.execCommand('formatBlock', false, what);
@@ -331,7 +355,14 @@ struct Paper: UIViewRepresentable {
       if (n && n.nodeType === 3) n = n.parentElement;
       if (!n || !box.contains(n)) return;
       const li = n.closest('li');
-      if (!(li ? checkEnter(li) : false) && !quitEnter(n)) return;
+      // **電話の Return は改行。** 新しい段落は下の帯から（本人が決めた・
+      // 2026-09-08）── iOS のメモも LINE も Return は改行で、電話に
+      // `Shift+Enter` は無い。升・引用・見出し・表は、窓と同じ答えを通す
+      // （`checkEnter` / `quitEnter` / `checkReturn`）。
+      if (li ? checkEnter(li) : false) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
+      if (quitEnter(n)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
+      if (checkReturn(box)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
+      if (!checkSoftReturn(box)) return;
       e.preventDefault();
       box.dispatchEvent(new Event('input'));
     });
@@ -452,21 +483,27 @@ struct Paper: UIViewRepresentable {
         private var ready = false
         private var shown = ""
         private var darkShown: Bool?
+        private var sizeShown: Int?
 
         init(_ parent: Paper) { self.parent = parent }
 
         func webView(_ web: WKWebView, didFinish: WKNavigation!) {
             ready = true
             shown = ""
-            show(parent.text, dark: parent.dark)
+            show(parent.text, dark: parent.dark, size: parent.size)
         }
 
         /// 組み上がった姿を渡す。**組むのは core** ── 見出しが何かを電話が
         /// 決めはじめると、`#仕事` というタグの行が見出しになる。
-        func show(_ text: String, dark: Bool) {
-            guard ready, let web, text != shown || dark != darkShown else { return }
+        func show(_ text: String, dark: Bool, size: Int) {
+            guard ready, let web,
+                  text != shown || dark != darkShown || size != sizeShown else { return }
             shown = text
             darkShown = dark
+            sizeShown = size
+            // 字の大きさは、組み直さずに変えられる ── 根に一つ置くだけ。
+            web.evaluateJavaScript(
+                "document.documentElement.style.setProperty('--size', '\(size)px'); true")
             guard let out = try? Cian.call("html", ["text": text]),
                   let html = out["html"] as? String
             else { return }

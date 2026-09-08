@@ -32,6 +32,7 @@ struct Where: View {
     @State private var zip: URL?
     @State private var trouble: String?
     @AppStorage("cian.look") private var look = Look.auto
+    @AppStorage("amber.font") private var font = Size.system
     @AppStorage("cian.autosave") private var autosave = true
 
     var body: some View {
@@ -172,6 +173,11 @@ struct Where: View {
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()
+                    // **字の大きさは、窓にもある**（⌘+ / ⌘−）── 電話にだけ
+                    // 無いと、同じノートが端末によって読みやすさで分かれる。
+                    Picker("字の大きさ", selection: $font) {
+                        ForEach(Size.allCases) { Text($0.label).tag($0) }
+                    }
                 } header: {
                     Text("見た目")
                 } footer: {
