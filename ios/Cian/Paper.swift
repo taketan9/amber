@@ -28,6 +28,8 @@ final class PaperHand: ObservableObject {
     func go(line: Int) { send?("go:\(line)") }
     /// 吹き出しで選ばれたことを、面の側でやらせる（依頼 403）。
     func did(_ what: String) { send?("did:\(what)") }
+    /// 絵文字を、いま打っているところへ（依頼 418）。
+    func put(_ ch: String) { send?("put:\(ch)") }
 }
 
 struct Paper: UIViewRepresentable {
@@ -80,6 +82,8 @@ struct Paper: UIViewRepresentable {
             if what.hasPrefix("go:") {
                 let n = what.dropFirst(3)
                 web?.evaluateJavaScript("window.go(\(n)); true")
+            } else if what.hasPrefix("put:") {
+                web?.evaluateJavaScript("window.putFace(\"\(what.dropFirst(4))\"); true")
             } else if what.hasPrefix("did:") {
                 web?.evaluateJavaScript("window.did(\"\(what.dropFirst(4))\"); true")
             } else {
@@ -350,6 +354,14 @@ struct Paper: UIViewRepresentable {
         kind, at: art.dataset.md || '', line: Number(art.dataset.line ?? -1),
       });
     });
+
+    /// 絵文字を caret のところへ（依頼 418）。**焦点が外れていても入れる**
+    /// ── 板を出した時点で面から手は離れているので、置き場所は面が
+    /// 憶えている最後の caret になる。
+    window.putFace = (ch) => {
+      box.focus();
+      document.execCommand('insertText', false, ch);
+    };
 
     /// 小窓で選ばれたことを、面の側でやる。
     window.did = (what) => {

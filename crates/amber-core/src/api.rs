@@ -820,6 +820,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
+        // 絵文字の表（依頼 418）。**一度受け取れば、あとは前端の仕事。**
+        // 外の何かを取りに行かない ── 会社の窓に閉じた機械でも出る。
+        "emoji" => Ok(crate::emoji::table()),
+
         // 同じ中身のノートをもう一つ（依頼 412）。
         "copy" => {
             let at = std::path::PathBuf::from(arg(p, "path"));

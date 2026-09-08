@@ -31,6 +31,8 @@ struct NoteView: View {
     @State private var trouble: String?
     /// 長押しされた図の、元の字（枠ごと）。
     @State private var fixingText: Fixing?
+    /// 絵文字の板を出しているか（依頼 418）。
+    @State private var facing = false
     /// 表示の面で叩かれた、触れないかたまり・リンク（依頼 403）。
     /// **どの小窓を出すか**を決めるのはこちら（閉じると空になる）。
     @State private var tapped: Tapped?
@@ -95,6 +97,14 @@ struct NoteView: View {
                     Divider().frame(height: 20)
                     mark("画像", "photo", act: photo)
                     mark("表", "tablecells", act: table)
+                    // **絵文字は一列目。** 毎日の返事に使うもので、畳んだ
+                    // ほうに入れるとあることに気づかれない（依頼 418）。
+                    //
+                    // 絵は SF Symbol の顔にする ── 帯はぜんぶ一色の記号で
+                    // 揃っていて、ここだけ色の付いた 😀 を置くと、記号の帯に
+                    // 絵が一つ落ちているように見える（窓の帯は字なので、
+                    // あちらは 😀 そのものを置いた）。
+                    mark("絵文字", "face.smiling") { facing = true }
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
@@ -161,6 +171,17 @@ struct NoteView: View {
     /// その種類の小窓が出ているか ── 閉じたら憶えも空にする。
     private func showing(_ kind: String) -> Binding<Bool> {
         Binding(get: { tapped?.kind == kind }, set: { if !$0 { tapped = nil } })
+    }
+
+    /// 絵文字を、いま打っているところへ（依頼 418）。
+    ///
+    /// **面ごとに入れ方が違う。** 表示の面は `WKWebView` の中の caret、
+    /// コードの面は `UITextView` の選び ── 同じ字を、それぞれの面が
+    /// 憶えている場所へ置く。
+    private func putFace(_ ch: String) {
+        // **段ではなく、字として入れる。** `Marks.block` は新しい行に置く
+        // ので、文の途中に絵文字を入れたい人には使えない。
+        if tab.reading { hand.put(ch) } else { put(Marks.insert(tab.text, tab.pick, ch)) }
     }
 
     /// 枠を「コード」の面のその行へ。**表示のまま直せないものは、記号を出す。**
@@ -348,6 +369,16 @@ struct NoteView: View {
                 }
             }
         }
+        // **絵文字の板は、どちらの面からも**（依頼 418）。表示でもコードでも
+        // 同じ板から同じ字が入る ── 面によって道具が違うと、面を替えた人が
+        // 「さっきのはどこへ行った」になる。
+        //
+        // 板は選んでも閉じない ── 顔文字は続けて置くもので（「👍✨」）、
+        // 一つ入れるたびに開き直させない。
+        .sheet(isPresented: $facing) {
+            Faces(put: putFace)
+                .presentationDetents([.medium, .large])
+        }
         .alert(
             "できません",
             isPresented: Binding(get: { trouble != nil }, set: { if !$0 { trouble = nil } })
@@ -378,6 +409,7 @@ struct NoteView: View {
             if more {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
+                        mark("絵文字", "face.smiling") { facing = true }
                         mark("斜体", "italic") { wrap("*") }
                         mark("取り消し線", "strikethrough") { wrap("~~") }
                         // **`</>` は面の切り替えが持っている**（上の帯）ので、

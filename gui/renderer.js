@@ -3210,6 +3210,9 @@ const MARKS = [
         // **フローは画像の隣。** 図は「使う人は使う」もので、二列目に
         // 畳んでおくと、あることに気づかれない。
         ['フロー', '', cmdDiagram],
+        // **絵文字は一列目。** 毎日の返事に使うもので、二列目に畳むと
+        // あることに気づかれない（依頼 418）。
+        ['絵文字', '', openEmoji, '😀'],
     ],
     [
         ['斜体', '⌘I', () => onRead() ? readDress('italic') : applyMark('wrap', '*')],
@@ -3256,7 +3259,7 @@ function drawMarks() {
         const scroll = document.createElement('div');
         scroll.className = 'rs';
         r.append(scroll);
-        for (const [name, key] of row) {
+        for (const [name, key, , icon] of row) {
             if (name === '|') {
                 const sep = document.createElement('div');
                 sep.className = 'sep';
@@ -3275,6 +3278,11 @@ function drawMarks() {
             // 分かる人はどの国にもいない）。絵も外したのは、名前が答えを
             // 言っているところに絵を添えても、目が二度読むだけだから。
             b.textContent = name;
+            // **例外は一つだけ**（依頼 419・本人が決めた・2026-09-09）──
+            // 絵文字の釦。「絵文字」と書くより 😀 のほうが速く、しかも
+            // **訳が要らない**: 押すと出てくるものの見本が絵そのもので、
+            // ここだけは絵が名前より多くを言っている。
+            if (icon) b.textContent = icon;
             b.title = key ? `${name}（${keyText(key)}）` : name;
             // 押した瞬間に焦点を奪わない ── 奪うと、どこに入れるかを
             // 決める手がかり（選んだところ）が先に消える。
@@ -3357,6 +3365,151 @@ async function applyMark(kind, withWhat) {
 /// `caret` は**置いた字の頭から数えた文字数** ── そこに入って打てるように
 /// する。省くと、置いた字の末尾に出る。**縦棒を数えるのは cian の仕事**で、
 /// 揃え方の行（`:---`）の形を人が覚えている必要は無い。
+/* ── 絵文字 ── */
+
+/// 表は core が持っている（依頼 418）。**一度だけ取りに行く。**
+let faces = null;
+/// 最近つかったもの。**憶えるのは字だけ** ── 名前は表から引ける。
+let usedFaces = [];
+/// いま見ている束（`0` は「最近つかったもの」）。
+let faceTab = 0;
+
+/// 絵文字の板を出す。
+///
+/// **押して入れるだけにする。** `:tada:` のような書き方は入れない
+/// （本人：「僕でも :tada とか打たない」・2026-09-09）── 覚える記法が
+/// 増えるだけで、ノートに残るのは同じ一文字。
+///
+/// **ノートに残るのは絵文字そのもの。** `:tada:` を書いて表示のときだけ
+/// 絵にする道は採らない ── amber の外では意味の分からない字が残るし、
+/// 「表示のまま書ける」との相性が悪い（絵から名前は一意に決まらない）。
+async function openEmoji() {
+    if (!faces) {
+        try {
+            faces = await ask('emoji', {});
+        } catch (e) {
+            say('絵文字が出せません: ' + why(e));
+            return;
+        }
+        if (!usedFaces.length) usedFaces = [...faces.first];
+    }
+    const box = el('emoji');
+    const find = el('emojifind');
+    find.value = '';
+    faceTab = 0;
+    drawFaceTabs();
+    drawFaces();
+    box.hidden = false;
+    // **帯の上に出す。** 板は下から生えるので、帯の真上に置かないと
+    // 押した釦と出てきたものが繋がって見えない。
+    const from = [...el('marks').querySelectorAll('button')]
+        .find((b) => b.title.startsWith('絵文字'));
+    const r = (from || el('marks')).getBoundingClientRect();
+    const w = box.offsetWidth;
+    const h = box.offsetHeight;
+    box.style.left = Math.max(8, Math.min(r.left - w / 2 + r.width / 2, innerWidth - w - 8)) + 'px';
+    box.style.top = Math.max(8, r.top - h - 8) + 'px';
+    find.focus();
+    setTimeout(() => document.addEventListener('mousedown', closeEmojiOnce), 0);
+}
+
+function closeEmoji() {
+    el('emoji').hidden = true;
+    document.removeEventListener('mousedown', closeEmojiOnce);
+}
+/// 外を押したら閉じる。**板の中と、帯の絵文字の釦は「外」ではない** ──
+/// 釦を押して閉じてしまうと、開け閉めが一打ぶんずれる。
+function closeEmojiOnce(e) {
+    if (el('emoji').contains(e.target)) return;
+    if (e.target.closest && e.target.closest('#marks button')?.title.startsWith('絵文字')) return;
+    closeEmoji();
+}
+
+el('emojifind').oninput = () => drawFaces();
+el('emojifind').onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.code === 'Escape') { e.preventDefault(); closeEmoji(); return; }
+    // **打って Enter で、いちばん上のものが入る。** 探せた人にもう一手
+    // （目で探して押す）を足させない。
+    if (isEnter(e) && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        const first = shownFaces()[0];
+        if (first) putFace(first.ch);
+    }
+};
+
+function drawFaceTabs() {
+    const tabs = el('emojitabs');
+    // 先頭は「最近つかったもの」── 二度目からは、ここだけで済む人が多い。
+    const all = [{ icon: '🕘', name: '最近つかったもの' },
+        ...faces.groups.map((g) => ({ icon: g.icon, name: g.name }))];
+    tabs.innerHTML = all.map((g, n) =>
+        '<button data-n="' + n + '"' + (n === faceTab ? ' class="on"' : '')
+        + ' title="' + escapeAttr(g.name) + '">' + g.icon + '</button>').join('');
+    for (const b of tabs.querySelectorAll('button')) {
+        b.onmousedown = (e) => e.preventDefault();
+        b.onclick = () => {
+            faceTab = Number(b.dataset.n);
+            el('emojifind').value = '';
+            drawFaceTabs();
+            drawFaces();
+        };
+    }
+}
+
+/// いま出す顔ぶれ。**探しているときは束を無視する** ── 打った人が
+/// 探しているのは字であって、どの束に居るかではない。
+function shownFaces() {
+    const q = el('emojifind').value.trim().toLowerCase();
+    const all = faces.groups.flatMap((g) => g.faces);
+    if (q) return all.filter((x) => x.ch === q || x.words.toLowerCase().includes(q));
+    if (faceTab === 0) {
+        return usedFaces.map((ch) => all.find((x) => x.ch === ch) || { ch, words: '' });
+    }
+    return faces.groups[faceTab - 1].faces;
+}
+
+function drawFaces() {
+    const grid = el('emojigrid');
+    const rows = shownFaces();
+    if (!rows.length) {
+        grid.innerHTML = '<div class="none">見つかりません</div>';
+        el('emojiname').textContent = '';
+        return;
+    }
+    grid.innerHTML = rows.map((x, n) =>
+        '<button data-n="' + n + '" title="' + escapeAttr(firstWord(x.words)) + '">'
+        + escapeHtml(x.ch) + '</button>').join('');
+    el('emojiname').textContent = firstWord(rows[0].words);
+    for (const b of grid.querySelectorAll('button')) {
+        const x = rows[Number(b.dataset.n)];
+        // 押し下げで焦点を奪わない ── 奪うと、入れる先（caret）が消える。
+        b.onmousedown = (e) => e.preventDefault();
+        b.onmouseenter = () => { el('emojiname').textContent = firstWord(x.words); };
+        b.onclick = () => putFace(x.ch);
+    }
+}
+
+/// 探し言葉の最初の一語 ── 板の下に出す名前。
+const firstWord = (words) => String(words || '').split(' ')[0] || '';
+
+/// 選ばれた絵文字を、いま打っているところへ。
+///
+/// **板は閉じない。** 顔文字は続けて置くもので（「👍✨」）、一つ入れる
+/// たびに開き直させない。閉じるのは Esc か、外を押したとき。
+function putFace(ch) {
+    if (onRead()) {
+        el('read').focus();
+        document.execCommand('insertText', false, ch);
+    } else {
+        put(ch);
+    }
+    // 最近つかったものへ。**同じものは前へ出す**（二つに増やさない）。
+    usedFaces = [ch, ...usedFaces.filter((x) => x !== ch)].slice(0, 24);
+    window.amber.remember({ faces: usedFaces });
+    if (faceTab === 0 && !el('emojifind').value.trim()) drawFaces();
+}
+
 function put(text, caret) {
     if (!editor || view === 'read') return;
     const sel = editor.getSelection();
@@ -5653,6 +5806,7 @@ document.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') {
         // **手前にあるものから閉じる。** 小窓が開いているのに大きい画面が
         // 戻ると、閉じたつもりのものが残る。
+        if (!el('emoji').hidden) { e.preventDefault(); closeEmoji(); return; }
         if (!el('more').hidden) { e.preventDefault(); closeMenu(); return; }
         if (!el('veil').hidden) { e.preventDefault(); closeSheet(null); return; }
         if (zen) { e.preventDefault(); setZen(false); return; }
@@ -7990,6 +8144,7 @@ const escapeAttr = escapeHtml;
     if (saved.listOff) { listOff = true; document.body.classList.add('nolist'); }
     // エディタはまだ無い ── 開いたときに入る（`makeEditor` の末尾）。
     if (saved.vim) vimOn = true;
+    if (Array.isArray(saved.faces)) usedFaces = saved.faces.slice(0, 24);
     if (typeof saved.fontStep === 'number') fontStep = saved.fontStep;
     if (saved.order) order = saved.order;
     if (saved.tocOn) tocOn = true;

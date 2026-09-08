@@ -9,6 +9,7 @@
 
 pub mod api;
 pub mod cloud;
+pub mod emoji;
 pub mod history;
 pub mod markdown;
 pub mod merge;
