@@ -2965,8 +2965,18 @@ function drawMarks() {
                 continue;
             }
             const b = document.createElement('button');
-            b.innerHTML = markIcon(name) + '<span>' + escapeHtml(name) + '</span>';
-            b.title = key ? `${name}（${key}）` : name;
+            // **絵だけ。名前は吹き出しへ。**
+            //
+            // 依頼 288 では「名前は消さない」と決めていた（絵だけで当て
+            // られるのは太字と斜体くらい、が理由）── 2026-09-08 に本人が
+            // 覆した。**いつか端末の言葉に合わせて配る**ので、訳の要る字を
+            // 帯に並べておきたくない。
+            //
+            // 消せるのは、**窓には指ではなく矢印が居る**から ── 乗せれば
+            // 名前が出る。電話にこの逃げ道は無いので、あちらは別に決める。
+            b.innerHTML = markIcon(name);
+            b.title = key ? `${name}（${keyText(key)}）` : name;
+            b.setAttribute('aria-label', name);
             // 押した瞬間に焦点を奪わない ── 奪うと、どこに入れるかを
             // 決める手がかり（選んだところ）が先に消える。
             b.onmousedown = (e) => e.preventDefault();
@@ -2977,13 +2987,25 @@ function drawMarks() {
             scroll.append(b);
         }
         if (n === 0) {
-            const sep = document.createElement('div');
-            sep.className = 'sep';
+            // **記号のすぐ右に置く。** 前は端に寄せていて、押した指から
+            // いちばん遠かった（本人の指摘・2026-09-08）── 記号の列の続きに
+            // 見えるほうが、「もっとある」も伝わる。
+            //
             // **vim の釦は置かない。** 使うのはたいてい一人で、毎日見る
             // 帯に居座る値打ちは無い ── ⚙ の中にある。
+            const sep = document.createElement('div');
+            sep.className = 'sep';
             const more = document.createElement('button');
-            more.textContent = moreMarks ? 'たたむ' : '…';
+            // **山形一つ。** 上を向いていれば畳める、下を向いていれば
+            // 開ける ── どの言葉の人にも同じ意味で、訳が要らない。
+            // 前は「…」と「たたむ」で、形も字も入れ替わっていた。
+            more.innerHTML = '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"'
+                + ' fill="none" stroke="currentColor" stroke-width="1.8"'
+                + ' stroke-linecap="round" stroke-linejoin="round"><path d="'
+                + (moreMarks ? 'M4 10l4-4 4 4' : 'M4 6l4 4 4-4') + '"/></svg>';
             more.title = moreMarks ? '畳む' : 'ほかの記号';
+            more.setAttribute('aria-label', more.title);
+            more.setAttribute('aria-expanded', String(moreMarks));
             more.classList.toggle('on', moreMarks);
             more.onclick = () => {
                 moreMarks = !moreMarks;
@@ -2991,7 +3013,7 @@ function drawMarks() {
                 window.amber.remember({ moreMarks });
                 if (editor) editor.layout();
             };
-            r.append(sep, more);
+            scroll.append(sep, more);
         }
         box.append(r);
     });
