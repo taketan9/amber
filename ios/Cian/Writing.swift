@@ -294,7 +294,10 @@ struct NoteView: View {
                     HStack(spacing: 6) {
                         mark("斜体", "italic") { wrap("*") }
                         mark("取り消し線", "strikethrough") { wrap("~~") }
-                        mark("コード", "chevron.left.forwardslash.chevron.right") { wrap("`") }
+                        // **`</>` は面の切り替えが持っている**（上の帯）ので、
+                        // ここは波括弧にする ── 同じ絵が二つの意味を持つと、
+                        // 押すまでどちらか分からない。
+                        mark("コード", "curlybraces") { wrap("`") }
                         Divider().frame(height: 20)
                         mark("リンク", "link") { block("[](https://)\n", caret: 1) }
                         mark("表", "tablecells", act: table)

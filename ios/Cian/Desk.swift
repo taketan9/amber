@@ -525,9 +525,26 @@ struct DeskView: View {
                 desk.tabs[n].reading.toggle()
                 if line >= 0 { desk.jumping = line }
             } label: {
-                Image(systemName: here?.reading == true ? "eye.slash" : "eye")
+                // **絵で、いま押すと何になるかを言う。**
+                //
+                // 前は `eye` / `eye.slash` だった ── あれは「隠す／見せる」に
+                // 読める。ここで替わるのは**組んだ姿と記号そのもの**で、
+                // 隠す話ではない（本人：「めっちゃわかりにくいね」・2026-09-08）。
+                //
+                // **字にしない。** いつか端末の言葉に合わせて配るときに、
+                // 訳の要らないところを増やしておく ── `</>` は世界のどこでも
+                // コードで、`doc.richtext` は組んだ文書。押すと何になるかを
+                // 出す（いま「表示」なら `</>`）。
+                // 「表示」側は `doc.richtext` を試したが、実機では**「あ」の
+                // 入った札**に見えて、字の入った絵になってしまった（絵で
+                // 案内する意味が薄れる）── 行の並んだ `text.alignleft` に
+                // する。`</>` と並べたときに「組んだ文書 / 記号そのもの」に
+                // 読める。
+                Image(systemName: here?.reading == true
+                      ? "chevron.left.forwardslash.chevron.right"
+                      : "text.alignleft")
             }
-            .accessibilityLabel(here?.reading == true ? "編集" : "表示")
+            .accessibilityLabel(here?.reading == true ? "コード" : "表示")
         }
         // The bell on the bar and not in the menu: whether a note is going
         // to ring is something you want to *see* without opening anything —
