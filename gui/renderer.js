@@ -604,6 +604,28 @@ el('title').addEventListener('contextmenu', (e) => {
 });
 
 /// 貼り付けた字から、新しいノートを一本。
+/// 同じ中身のノートをもう一つ（依頼 412）。
+///
+/// **先に保存する。** 打った字がまだファイルに無いうちに写すと、写しは
+/// 画面に見えているものと違うものになる ── 「複製したのに古い」は、
+/// 原因が画面のどこにも出ない。
+///
+/// 写したほうを開く ── 押した人がこれから触るのは写したほうで、元の
+/// ノートに残されると「効いたのか」が分からない（一覧の同じ題が二つに
+/// 増えただけに見える）。
+async function cmdDup() {
+    if (!state.open) return;
+    try {
+        await save();
+        const r = await ask('copy', { path: state.open.path });
+        await reload({ quiet: true });
+        await openNote(r.path);
+        say('複製しました');
+    } catch (e) {
+        say('複製できません: ' + why(e));
+    }
+}
+
 async function cmdPasteNote() {
     let text = '';
     try {
@@ -5805,6 +5827,8 @@ const CMDS = [
     // ── 同じことを頼む道が二つあると、片方を直した日にもう片方が
     // 古いまま残る。表には残す（⌘⇧P から名前で探せる）。
     { id: 'remind', name: '通知設定', need: 'note', run: cmdRemind },
+    { id: 'dup', name: '複製', sub: '同じ中身のノートをもう一つ', need: 'note', menu: true,
+      run: cmdDup },
     { id: 'export', name: 'エクスポート', need: 'note', menu: true, run: cmdExport },
     // **名前で出す。** 前は帯に ☰ と ⤢ が並んでいたが、どちらが目次で
     // どちらが拡大かは記号のどこにも書いていない ── 帯の幅を食っていた

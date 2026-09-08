@@ -562,24 +562,58 @@ pub fn create(
     today: &str,
     now: &str,
 ) -> anyhow::Result<std::path::PathBuf> {
-    use std::io::Write;
-    std::fs::create_dir_all(dir)?;
     let (name, body) = new_note(title, today, now);
-    let stem = name.trim_end_matches(".md").to_string();
-    let mut at = dir.join(&name);
+    let at = fresh_file(dir, name.trim_end_matches(".md"))?;
+    std::fs::write(&at, body.as_bytes())?;
+    Ok(at)
+}
+
+/// **同じ中身のノートをもう一つ。**
+///
+/// 下書きの型を持っている人が、毎回それを開いて全部写しているのを見た
+/// ── 写すのは道具の仕事で、人の仕事ではない。
+///
+/// 中身はそのまま写すが、`created` は**今日**にする（`updated` は落とす）
+/// ── 写しは今日できたもので、元の日付を名乗ると並べ替えが嘘をつく。
+/// 題は写したまま: Markdown の中の題は書いた人の言葉で、amber が
+/// 「（コピー）」を書き足す筋合いは無い（ノートはただの Markdown）。
+///
+/// 絵は写さない ── `attachments/` は同じフォルダの中で、二つのノートが
+/// 同じ一枚を指すだけ。ノートを消しても絵は残る（`delete` は `.md` しか
+/// 消さない）ので、片方を消してもう片方の絵が欠ける、は起きない。
+pub fn duplicate(at: &std::path::Path, today: &str) -> anyhow::Result<std::path::PathBuf> {
+    let dir = at.parent().unwrap_or(std::path::Path::new("."));
+    let file = crate::text::read(at)?;
+    let text = file.lines.join("\n");
+    let text = set_field(&text, "created", Some(today));
+    let text = set_field(&text, "updated", None);
+    let stem = at
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| today.to_string());
+    let made = fresh_file(dir, &stem)?;
+    std::fs::write(&made, text.as_bytes())?;
+    Ok(made)
+}
+
+/// まだ無い名前を一つ ── `名前.md`、埋まっていれば `名前-2.md`、…。
+///
+/// **上書きしない。** 同じ名前で作りにいく道が二つある（新規と写し）ので、
+/// 空いているかを見てから開くのではなく、`create_new` で取りにいく。
+fn fresh_file(dir: &std::path::Path, stem: &str) -> anyhow::Result<std::path::PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let mut at = dir.join(format!("{stem}.md"));
     let mut n = 2;
-    let mut file = loop {
+    loop {
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&at) {
-            Ok(f) => break f,
+            Ok(_) => return Ok(at),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n <= 99 => {
                 at = dir.join(format!("{stem}-{n}.md"));
                 n += 1;
             }
             Err(e) => return Err(e.into()),
         }
-    };
-    file.write_all(body.as_bytes())?;
-    Ok(at)
+    }
 }
 
 /// Put a picture beside a note, and say what to write in the text.
@@ -1405,6 +1439,34 @@ pub fn new_note(title: &str, today: &str, now: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn duplicate_keeps_the_words_and_takes_today() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = dir.path().join("段取り.md");
+        std::fs::write(
+            &at,
+            "---\ntitle: 段取り\ncreated: 2020-01-01\nupdated: 2020-02-02\ntags: [仕事]\n---\n\n# 段取り\n\n本文。\n",
+        )
+        .unwrap();
+        let made = super::duplicate(&at, "2026-09-08").unwrap();
+        // 元は触らない。
+        assert!(at.is_file());
+        assert_eq!(made.file_name().unwrap(), "段取り-2.md");
+        let got = std::fs::read_to_string(&made).unwrap();
+        // 書いた人の言葉は、そのまま。
+        assert!(got.contains("title: 段取り"), "{got}");
+        assert!(got.contains("tags: [仕事]"), "{got}");
+        assert!(got.contains("# 段取り"), "{got}");
+        assert!(got.contains("本文。"), "{got}");
+        // できたのは今日で、直した日はまだ無い。
+        assert!(got.contains("created: 2026-09-08"), "{got}");
+        assert!(!got.contains("2020-01-01"), "{got}");
+        assert!(!got.contains("updated:"), "{got}");
+        // もう一度写しても、上書きしない。
+        let again = super::duplicate(&at, "2026-09-08").unwrap();
+        assert_eq!(again.file_name().unwrap(), "段取り-3.md");
+    }
+
 
     /// 読みやすさのため、`Term` を `見出し:語` の一本の字に畳む。
     fn flat(q: &str) -> Vec<Vec<String>> {

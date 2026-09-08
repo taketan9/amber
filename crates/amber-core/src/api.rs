@@ -820,6 +820,13 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
+        // 同じ中身のノートをもう一つ（依頼 412）。
+        "copy" => {
+            let at = std::path::PathBuf::from(arg(p, "path"));
+            let made = crate::note::duplicate(&at, &crate::note::today())?;
+            Ok(serde_json::json!({ "path": made.display().to_string() }))
+        }
+
         // Move a note into another notebook, pictures and all.
         "move" => {
             let note = std::path::PathBuf::from(arg(p, "path"));

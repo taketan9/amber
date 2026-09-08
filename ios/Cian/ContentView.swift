@@ -410,6 +410,20 @@ struct ContentView: View {
                     } label: {
                         Label("新しいタブで開く", systemImage: "rectangle.stack.badge.plus")
                     }
+                    // **同じ中身のノートをもう一つ**（依頼 412）。下書きの型を
+                    // 持っている人が、毎回それを開いて全部写していた。
+                    //
+                    // 置くのは**この段**（仕切りの上）── 下の三つは
+                    // 「ブックマーク → フォルダへ移す → エクスポート」という
+                    // 手の伸びる順で並んでいて（依頼 90）、間に割り込ませると
+                    // その順が崩れる。複製は「もう一つ増やす」ほうの仲間で、
+                    // 「新しいタブで開く」と同じ段にあるのが素直。
+                    Button {
+                        do { _ = try store.duplicate(note) }
+                        catch { store.trouble = error.localizedDescription }
+                    } label: {
+                        Label("複製", systemImage: "plus.square.on.square")
+                    }
                     Divider()
                     // The order they are reached for. Favouriting is the one
                     // done in passing; moving is filing; exporting is the one

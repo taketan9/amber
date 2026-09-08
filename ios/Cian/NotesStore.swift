@@ -1109,6 +1109,18 @@ final class NotesStore: ObservableObject {
         reload()
     }
 
+    /// 同じ中身のノートをもう一つ（依頼 412）。できたほうを返す。
+    ///
+    /// 何を写して何を写さないかは core が決める（`created` は今日・題は
+    /// そのまま）── 窓と電話で別の写しができると、同じ操作の名前で
+    /// 別のものが二つの端末に増える。
+    @discardableResult
+    func duplicate(_ note: Note) throws -> String? {
+        let got = try Cian.call("copy", ["path": note.path])
+        reload()
+        return got["path"] as? String
+    }
+
     /// ルートからの道（`家族/買い物.md`）。憶えの見出しに使う ── core が
     /// `rel` として返しているのと同じ形。
     private func rel(of note: Note) -> String {
