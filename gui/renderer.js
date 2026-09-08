@@ -2074,6 +2074,73 @@ function landBackIn(node, at) {
     landAt(node, null);
 }
 
+/* ── 矢印 ── */
+
+/// 触れないかたまりを跨ぐ。受けたら `true`。
+///
+/// **図や枠の中に caret を置かない**（`PAPER.ja.md` 六章の芯の 3）── 中に
+/// 入ると「押せるものが打てるものに見える」。二つ続いていれば、二つとも跨ぐ。
+///
+/// **跨いだ先が無いなら、置き場所を作る** ── 図で始まるノートの上に一行
+/// 足す道が、いままで無かった（末尾には `tailStop` があるのに）。
+function checkArrow(box, dir) {
+    const line = lineAt(box);
+    if (!line) return false;
+    // 箱の直下のかたまりまで登る ── 跨ぐのは「行」ではなく「かたまり」。
+    let here = line;
+    while (here && here.parentElement !== box) here = here.parentElement;
+    if (!here) return false;
+
+    const back = dir === 'up' || dir === 'left';
+    // 端に居るときだけ跨ぐ。真ん中なら、ふつうに一文字ずつ動く。
+    if (back ? !atHead(here) : !atTail(here)) return false;
+
+    let to = back ? here.previousElementSibling : here.nextElementSibling;
+    if (!to || !richBlock(to)) return false;        // 隣が触れないものでなければ、既定のまま
+    while (to && richBlock(to)) to = back ? to.previousElementSibling : to.nextElementSibling;
+    if (!to) {
+        // 跨いだ先が無い ── そちらの端に、降りられる一行を置く。
+        to = document.createElement('p');
+        to.append(document.createElement('br'));
+        if (back) box.prepend(to); else box.append(to);
+    }
+    landBackIn(to, back ? String(to.textContent).length : 0);
+    return true;
+}
+
+/// caret が、その節の**末尾**に居るか（`atHead` の裏）。
+function atTail(node) {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
+    const r = sel.getRangeAt(0).cloneRange();
+    r.selectNodeContents(node);
+    try {
+        r.setStart(sel.anchorNode, sel.anchorOffset);
+    } catch {
+        return false;
+    }
+    const bit = r.cloneContents();
+    for (const b of bit.querySelectorAll('.box')) b.remove();
+    return bit.textContent.length === 0;
+}
+
+/// ノートの**先頭**が触れないかたまりなら、その上に降りられる一行を置く。
+///
+/// `tailStop` の対。**末尾には既にあった**（表や罫線で終わるノートに caret を
+/// 降ろす先が要る・依頼 203）が、先頭には無く、**図で始まるノートの上に
+/// 一行足す道がどこにも無かった**。
+///
+/// **常に置く。** 「caret が近づいたときだけ出す」もありうるが、増えたり
+/// 消えたりするものは往復の試験で数が合わなくなる ── 空のままなら字に
+/// 戻すとき落ちるので、ファイルは増えも減りもしない。
+function headStop(box) {
+    const first = box.firstElementChild;
+    if (!first || !richBlock(first)) return;
+    const p = document.createElement('p');
+    p.append(document.createElement('br'));
+    box.prepend(p);
+}
+
 /* ── Enter ── */
 
 /// 見出しと表の Enter。受けたら `true`。
@@ -2450,6 +2517,17 @@ el('read').addEventListener('keydown', (e) => {
     if (!checkBack(el('read'))) return;
     e.preventDefault();
     readChanged();
+});
+
+/// 矢印 ── 触れないかたまりを跨ぐ（`checkArrow`）。
+///
+/// **変換中は IME に渡す。** 文節の区切りがこの鍵で動く。
+el('read').addEventListener('keydown', (e) => {
+    const dir = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }[e.code];
+    if (!dir || e.isComposing || e.keyCode === 229) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;   // 選びと飛びは既定のまま
+    if (!checkArrow(el('read'), dir)) return;
+    e.preventDefault();
 });
 
 /// Tab / Shift+Tab ── 一覧の中は段、外は字下げ（`checkTab`）。
@@ -3288,6 +3366,8 @@ async function drawRead() {
     // 無い（表の外側は表の一部ではないので、矢印でも出られない）。
     // 空のままなら字に戻すときに落ちるので、増えも減りもしない。
     tailStop();
+    // 先頭が図や枠なら、その上にも降りられる一行を（`tailStop` の対）。
+    headStop(el('read'));
     // **札を配るのが先。** 絵や図はこのあと札を掛け替える（`<pre>` →
     // `<div class="mermaid">`、`<img>` → `<figure>`）ので、掛け替える前に
     // 元の字を持たせておかないと、引き継ぐものが無い ── 図を入れたノートで
@@ -4531,11 +4611,21 @@ el('read').addEventListener('click', async (e) => {
         }
         return;
     }
-    // 図は、押すと工房が開く ── 書く面へ送っても、そこにあるのは
-    // `flowchart LR` で、直せる人はもう工房を要らない。描けなかった枠
-    // （`pre.bad`）も同じ扉から ── **直したいのは、まさに壊れた図**。
+    // **触れないものは、押すと吹き出し。** 図・枠・絵で同じ形に揃える
+    // （`PAPER.ja.md` 六章の甲・本人が決めた）── 覚えることを一つにする。
+    //
+    // 前は図と枠で違うことが起きていた（図は工房、枠は並べて表示のその行へ）
+    // ── どちらも「押した」だけなのに、行き先が違った。**「消す」を置くのは、
+    // 図や枠を消すのに「コード」へ行かせないため**（表示のまま消せること）。
     const art = diagramAt(e.target);
-    if (art) { e.preventDefault(); studioOpen(art); return; }
+    if (art) {
+        e.preventDefault();
+        popMenu([
+            { name: '図を直す', sub: '工房が開きます', run: () => studioOpen(art) },
+            { name: '消す', sep: true, run: () => dropBlock(art) },
+        ], { x: e.clientX, y: e.clientY });
+        return;
+    }
     const a = e.target.closest('a');
     if (!a) {
         // **触れないかたまりは、書く面のその行へ送る。**
@@ -4544,14 +4634,11 @@ el('read').addEventListener('click', async (e) => {
         // 触れるようにしたはずの表を押した瞬間に書く面へ飛ぶ（実際に飛んだ）。
         const rich = e.target.closest('pre, figure, .mermaid');
         if (rich && el('read').contains(rich)) {
-            const at = Number(rich.dataset.line);
-            setView('split');
-            if (!Number.isNaN(at) && editor) {
-                const line = Math.max(at - headLines(), 0) + 1;
-                editor.revealLineNearTop(line);
-                editor.setPosition({ lineNumber: line, column: 1 });
-                editor.focus();
-            }
+            const pic = rich.tagName === 'FIGURE';
+            popMenu([
+                pic ? null : { name: 'コードで直す', sub: '書く面のその行へ', run: () => toSource(rich) },
+                { name: '消す', sep: !pic, run: () => dropBlock(rich) },
+            ], { x: e.clientX, y: e.clientY });
         }
         return;
     }
@@ -4559,6 +4646,8 @@ el('read').addEventListener('click', async (e) => {
     // 題字を窓の中に描いている以上、戻る道が無い。
     e.preventDefault();
     const href = a.getAttribute('href') || '';
+    // ノートの中の見出しへ飛ぶリンクは、そのまま飛ぶ ── 外へ出ないので、
+    // 「開く／直す」を訊く意味が無い。
     if (href.startsWith('#')) {
         let id = href.slice(1);
         try { id = decodeURIComponent(id); } catch { /* そのまま使う */ }
@@ -4566,8 +4655,42 @@ el('read').addEventListener('click', async (e) => {
             ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
     }
-    if (!(await window.amber.openLink(href))) say('この行き先は開けません: ' + href);
+    // **押すと吹き出し。** 打てる面で押した瞬間に外へ飛ぶと、字を直したい
+    // 人に道が無い（右押しを知らない人が多い）── Notion・Google Docs の型。
+    // 触れないかたまりと同じ「押すと吹き出し」に揃える。
+    popMenu([
+        { name: '開く', sub: href, run: () => openLink(href) },
+        { name: '字を直す', sub: 'ここに caret を置きます', run: () => landAt(a, null) },
+        { name: 'リンク先を写す', sep: true, run: () => copyText(href, 'リンク先') },
+    ], { x: e.clientX, y: e.clientY });
 });
+
+/// 外の行き先を開く。
+async function openLink(href) {
+    if (!(await window.amber.openLink(href))) say('この行き先は開けません: ' + href);
+}
+
+/// 触れないかたまりを、書く面のその行へ。
+function toSource(rich) {
+    const at = Number(rich.dataset.line);
+    setView('split');
+    if (!Number.isNaN(at) && editor) {
+        const line = Math.max(at - headLines(), 0) + 1;
+        editor.revealLineNearTop(line);
+        editor.setPosition({ lineNumber: line, column: 1 });
+        editor.focus();
+    }
+}
+
+/// 触れないかたまりを消す。**訊かない** ── 一つ戻すで戻せるし、押した人が
+/// 「消す」を選んでいる（選びは意思・`PAPER.ja.md` 六章の芯の 2）。
+function dropBlock(rich) {
+    if (!rich || !el('read').contains(rich)) return;
+    rich.remove();
+    // 何も残らないなら、打てる一行を置く ── 空の面には caret を置けない。
+    if (!el('read').children.length) tailStop();
+    readChanged();
+}
 
 // 右押しでも同じ扉。**押しても右押しでも開く** ── どちらだったかを
 // 覚えている人はいないので、両方に置く。

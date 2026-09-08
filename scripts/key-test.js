@@ -255,6 +255,35 @@ async function press(md, where, at, hit) {
         ok(r.md === md + '\n', '字は一文字も動いていない', r.md);
     }
 
+    say('矢印 ── 触れないかたまりを跨ぐ');
+    {
+        const md = '上の段落。\n\n```\nコード\n```\n\n下の段落。';
+        let r = await press(md, '上の段落', 5, () => checkArrow(box, 'down'));
+        ok(r.took === true, '枠の上の行の末尾で ↓ を押すと、跨ぐ', r.took);
+        ok(r.md === md + '\n', '字は一文字も動かない', r.md);
+
+        r = await press(md, '下の段落', 0, () => checkArrow(box, 'up'));
+        ok(r.took === true, '枠の下の行の頭で ↑ を押すと、跨ぐ', r.took);
+
+        r = await press(md, '上の段落', 2, () => checkArrow(box, 'down'));
+        ok(r.took === false, '行の途中では、ふつうに動く（既定に任せる）', r.took);
+
+        // 図で始まるノート ── 上に一行足す道が要る。
+        const top = '```\nコード\n```\n\n下の段落。';
+        await draw(top);
+        headStop(box);
+        const first = box.firstElementChild;
+        ok(first && first.tagName === 'P' && !first.textContent.trim(),
+           '枠で始まるノートの上に、降りられる一行が置かれる', first && first.tagName);
+        ok(paperToMd(box, '') === top + '\n',
+           'その一行は、字に戻すとき落ちる（ファイルは増えない）', paperToMd(box, ''));
+
+        await draw('ふつうの段落。');
+        headStop(box);
+        ok(box.firstElementChild.textContent.includes('ふつう'),
+           '先頭が触れるものなら、何も置かない', box.firstElementChild.textContent);
+    }
+
     say('注記の札は、行として数えない');
     {
         const r = await press('> [!NOTE]\n> 覚えておくこと。', '覚えて', 0, () => checkBack(box));

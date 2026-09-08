@@ -97,6 +97,9 @@ global.ask = async (method, params) => {
 // eslint-disable-next-line no-eval
 (0, eval)(line('function readDrawn(') + line('function readStale(') + line('function readCurrent(')
     + cut('function sameNote(')
+    // `drawRead` は組んだあと、先頭が図や枠なら降りられる一行を置く
+    // （`headStop`・依頼 402）── 本物を渡す（写すと、写した側だけが直る）。
+    + cut('function richBlock(') + cut('function headStop(')
     + cut('async function syncRead(') + cut('async function drawRead('));
 
 let bad = 0;
