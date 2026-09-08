@@ -255,6 +255,42 @@ async function press(md, where, at, hit) {
         ok(r.md === md + '\n', '字は一文字も動いていない', r.md);
     }
 
+    say('選んで消す ── 表のセルの数を変えない');
+    {
+        const t = '| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |';
+        // セルをまたいで選ぶ（1 → 4）。
+        await draw(t);
+        const cells = [...box.querySelectorAll('td')];
+        let r = document.createRange();
+        r.setStart(cells[0].firstChild || cells[0], 0);
+        r.setEnd(cells[3].firstChild || cells[3], (cells[3].textContent || '').length);
+        let sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        ok(checkCut(box) === true, 'セルをまたいだ選びは、受けて止める');
+        const md = paperToMd(box, '');
+        ok(md === '| a | b |\n| --- | --- |\n| 　 | 　 |\n| 　 | 　 |\n',
+           '中身は空になるが、セルの数は変わらない', md);
+
+        // 一つのセルの中だけの選びは、既定に任せる。
+        await draw(t);
+        const one = box.querySelector('td');
+        r = document.createRange();
+        r.selectNodeContents(one);
+        sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        ok(checkCut(box) === false, '一つのセルの中は、ふつうに消える');
+
+        // 表の外から中へ跨ぐ ── 何も起きない。
+        const mix = '段落。\n\n| a | b |\n| --- | --- |\n| 1 | 2 |';
+        await draw(mix);
+        const para = [...box.children].find((n) => n.tagName === 'P');
+        const cell = box.querySelector('td');
+        r = document.createRange();
+        r.setStart(para.firstChild, 0);
+        r.setEnd(cell.firstChild || cell, 1);
+        sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        ok(checkCut(box) === true, '表の外から中へ跨ぐ選びは、受けて止める');
+        ok(paperToMd(box, '') === mix + '\n', '字は一文字も動かない', paperToMd(box, ''));
+    }
+
     say('矢印 ── 触れないかたまりを跨ぐ');
     {
         const md = '上の段落。\n\n```\nコード\n```\n\n下の段落。';

@@ -161,12 +161,20 @@ struct Paper: UIViewRepresentable {
     let head = '';
     let quiet = false;
     let hold = null;
+    /// いま変換の途中か。**確定するまで、面を触らない**（窓と同じ規則）。
+    let composing = false;
+    /// 変換中に来た「組み直して」を、確定まで預かる。
+    let drawAfter = false;
+    let drawAfter0 = null;
 
     window.onerror = (m, s, l) =>
       window.webkit.messageHandlers.trouble.postMessage(m + ' @' + l);
 
     /// 組み上がった姿を置いて、打てるようにする。
     window.show = (html, text, dark) => {
+      // **変換中は組み直さない。** 組み直すと未確定の字が消える ──
+      // 用事は預かって、確定してから通す（窓と同じ・`drawAfter`）。
+      if (composing) { drawAfter = true; drawAfter0 = { html, text, dark }; return; }
       document.documentElement.toggleAttribute('data-dark', !!dark);
       quiet = true;
       box.innerHTML = html;
@@ -181,16 +189,25 @@ struct Paper: UIViewRepresentable {
     };
 
     /// 打ったら、落ち着いてから字に戻して渡す。
+    ///
+    /// **変換の途中では渡さない。** `input` は変換の一字ごとに来るので、
+    /// 500ms の間合いが**変換の途中で切れうる** ── そこで渡すと、未確定の
+    /// 字が保存される。同期先に「あいう」が届き、次に「愛」が届く ──
+    /// 履歴が確定前の姿を積み、混ぜる側には「向こうが二度書いた」に見える。
+    /// 窓と同じ規則（`gui/renderer.js` の `composing`）。
     box.addEventListener('input', () => {
       if (quiet) return;
       clearTimeout(hold);
-      hold = setTimeout(() => {
+      const send = () => {
+        // 変換中に切れたら、待つ ── 数え直すだけで、渡しはしない。
+        if (composing) { hold = setTimeout(send, 500); return; }
         const md = paperToMd(box, head);
         // **戻せないときは渡さない。** 空を渡すと、そのかたまりが黙って
         // 消える ── 気づくのは何回か保存したあと。
         if (md === null) return;
         window.webkit.messageHandlers.wrote.postMessage(md);
-      }, 500);
+      };
+      hold = setTimeout(send, 500);
     });
 
     /// 来た行に、地色を敷く。**できるだけ細かい単位で。**
@@ -441,7 +458,14 @@ struct Paper: UIViewRepresentable {
       document.execCommand('insertText', false, e.data);
       box.dispatchEvent(new Event('input'));
     });
-    box.addEventListener('compositionstart', () => outOfDress());
+    box.addEventListener('compositionstart', () => { composing = true; outOfDress(); });
+    box.addEventListener('compositionend', () => {
+      composing = false;
+      // **確定した瞬間には組み直さない。** caret が飛ぶ ── いつもの
+      // 間合いで渡すだけ。預かっていた組み直しがあれば、そのあとで。
+      box.dispatchEvent(new Event('input'));
+      if (drawAfter) { drawAfter = false; window.show(drawAfter0.html, drawAfter0.text, drawAfter0.dark); }
+    });
 
     /// 図を描く。**要るときだけ読む** ── 3.4MB を、図の無いノートで払わない。
     let lib = null;

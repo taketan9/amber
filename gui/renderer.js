@@ -912,6 +912,19 @@ let saveTimer = null;
 /// 読み込み中は、変更を変更として数えない。
 let loading = false;
 
+/// いま変換の途中か。**確定するまで、面を触らない。**
+///
+/// `input` は変換の一字ごとに来るので、`readChanged` の 700ms が**変換の
+/// 途中で切れうる** ── そこで書き戻すと、未確定の字が保存される。同期先に
+/// 「あいう」が届き、次に「愛」が届く ── 履歴が確定前の姿を積み、混ぜる側
+/// には「向こうが二度書いた」に見える。
+///
+/// 組み直しも同じ。`syncRead` は箱そのものに `contentEditable` を掛け直す
+/// （`armPaper`）── 変換中に箱の属性を触ると、変換が落ちるおそれがある。
+let composing = false;
+/// 変換中に来た「組み直して」を、確定まで預かる。
+let drawAfter = false;
+
 function makeEditor() {
     return new Promise((resolve) => {
         // **絶対の道で渡す。**
@@ -959,6 +972,12 @@ function makeEditor() {
             editor.addCommand(KM.CtrlCmd | KC.KeyP, () => toggleSplit());
             editor.addCommand(KC.F12, () => setZen(!zen));
 
+            // **変換の途中かどうかを、エディタからも受ける。** 読む面は
+            // `compositionstart` を持っているが、Monaco は自分の中で
+            // 変換を扱うので、こちらから聞かないと分からない。
+            editor.onDidCompositionStart?.(() => { composing = true; });
+            editor.onDidCompositionEnd?.(() => { composing = false; });
+
             editor.onDidChangeModelContent(() => {
                 // **読み込みの `setValue` も変更として届く。** 守らないと、
                 // 開いただけで自動保存が走り、触っていないノートの更新時刻が
@@ -971,7 +990,13 @@ function makeEditor() {
                 el('state').textContent = '書きかけ';
                 drawStrip();
                 clearTimeout(saveTimer);
-                saveTimer = setTimeout(save, 900);
+                // **変換中に切れたら、待つ。** Monaco も変換の一字ごとに
+                // ここへ来るので、間合いが変換の途中で切れうる ── そこで
+                // 保存すると、未確定の字がファイルに入る（読む面と同じ話）。
+                saveTimer = setTimeout(function again() {
+                    if (composing) { saveTimer = setTimeout(again, 900); return; }
+                    save();
+                }, 900);
                 readSoon();
                 drawCount();
                 zonesSoon();
@@ -2239,6 +2264,45 @@ function checkSoftReturn(box) {
     return true;
 }
 
+/* ── 選んで消す ── */
+
+/// 選んだ範囲を消すとき、表を壊さないように受ける。受けたら `true`。
+///
+/// **セルの数が変わる操作は、表の道具だけ。** `blockToMd` は行ごとにセルを
+/// 数えて書くので、**列の数が行ごとに違う表は GFM で崩れる** ── `contenteditable`
+/// の既定は、セルをまたぐ選びを消すときにセルや行そのものを消したり繋げたり
+/// する。表計算の Delete と同じにする ── **中身を空にして、セルは残す。**
+///
+/// **表の外から中へ跨ぐ選びは、何も起きない** ── 「表の途中までを消す」に
+/// 正しい答えが無いので、答えないほうがよい。
+function checkCut(box) {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+    const r = sel.getRangeAt(0);
+    const from = cellOf(r.startContainer, box);
+    const to = cellOf(r.endContainer, box);
+    if (!from && !to) return false;                 // 表に関わらない選び
+    if (!from || !to || from.closest('table') !== to.closest('table')) {
+        // 片方だけ表の中 ── 跨いでいる。何も起きない。
+        return true;
+    }
+    if (from === to) return false;                  // 一つのセルの中は、既定のまま
+    // セルをまたいだ ── 中身だけ空にする。
+    const cells = [...from.closest('table').querySelectorAll('th, td')];
+    const a = cells.indexOf(from);
+    const b = cells.indexOf(to);
+    for (const c of cells.slice(Math.min(a, b), Math.max(a, b) + 1)) c.textContent = '';
+    landBackIn(from, 0);
+    return true;
+}
+
+/// その節が入っている表のセル（箱の中のものだけ）。
+function cellOf(node, box) {
+    let n = node && node.nodeType === 3 ? node.parentElement : node;
+    const cell = n && n.closest ? n.closest('td, th') : null;
+    return cell && box.contains(cell) ? cell : null;
+}
+
 /* ── 行頭の Backspace ── */
 
 /// **行頭の Backspace は、この行の記号を一つ外す。**
@@ -2463,7 +2527,12 @@ function readChanged() {
     el('state').textContent = '書きかけ';
     drawStrip();
     clearTimeout(readTimer);
-    readTimer = setTimeout(syncRead, 700);
+    // **変換中に切れたら、待つ。** 数え直すだけで、書き戻しはしない ──
+    // 未確定の字を保存しないため（`composing` の註）。
+    readTimer = setTimeout(function again() {
+        if (composing) { readTimer = setTimeout(again, 700); return; }
+        syncRead();
+    }, 700);
 }
 
 /// 升の行の Enter を、`checkEnter` に渡す。**判断は切り出しの側** ──
@@ -2498,7 +2567,19 @@ el('read').addEventListener('beforeinput', (e) => {
     document.execCommand('insertText', false, e.data);
     readChanged();
 });
-el('read').addEventListener('compositionstart', () => outOfDress());
+/* ── 日本語入力（変換中） ── */
+
+el('read').addEventListener('compositionstart', () => {
+    composing = true;
+    outOfDress();
+});
+el('read').addEventListener('compositionend', () => {
+    composing = false;
+    // **確定した瞬間には組み直さない。** caret が飛ぶ ──「打っている間は
+    // 組み直さない」の内側。いつもの間合いで書き戻すだけ。
+    readChanged();
+    if (drawAfter) { drawAfter = false; readSoon(); }
+});
 
 /// 表の中の Tab は、次の升へ。
 ///
@@ -2512,8 +2593,11 @@ el('read').addEventListener('compositionstart', () => outOfDress());
 /// **変換中は IME に渡す。** 文節の区切りがこの鍵で動く（`PAPER.ja.md`
 /// 六章の丁）。
 el('read').addEventListener('keydown', (e) => {
-    if (e.code !== 'Backspace' || e.isComposing || e.keyCode === 229) return;
+    if (!['Backspace', 'Delete'].includes(e.code) || e.isComposing || e.keyCode === 229) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // 選んで消すときは、表を壊さないほうが先に受ける。
+    if (checkCut(el('read'))) { e.preventDefault(); readChanged(); return; }
+    if (e.code !== 'Backspace') return;
     if (!checkBack(el('read'))) return;
     e.preventDefault();
     readChanged();
@@ -2581,6 +2665,9 @@ function landInCell(cell) {
 /// 見た目は既に打った通りになっているので、組み直す理由も無い。
 async function syncRead() {
     if (syncing || !state.open || !editor) return;
+    // **変換の途中なら、書き戻さない。** 未確定の字はまだ人の字ではない
+    // ── 確定してから数え直す（`composing` の註）。
+    if (composing) return;
     // **面の字が、いま開いているノートのものでなければ書き戻さない。**
     // 前のノートの字を、今のノートへ書くことになる（`readDrawn`）。
     //
@@ -3341,6 +3428,11 @@ function readSoon() {
 
 async function drawRead() {
     if (view === 'write' || !state.open) return;
+    // **変換中は組み直さない。** 組み直すと未確定の字が消える ── 用事は
+    // 預かって、確定してから通す（向こうから来た字の混ぜ込み・テーマ替え・
+    // 升の押し下げ）。混ぜ込みは待てる（ファイルは既に向こうの字で、
+    // こちらが書き戻すときに混ざる）。
+    if (composing) { drawAfter = true; return; }
     const seq = ++readSeq;
     // 組みはじめたときのノート。帰ってきたときに別のノートが開いていたら
     // 捨てる ── 「コード」の面へ替えてから別のノートを開くと組み直しが
