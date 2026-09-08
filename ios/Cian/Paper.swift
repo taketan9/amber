@@ -26,6 +26,8 @@ final class PaperHand: ObservableObject {
     /// 目次から、その行の見出しへ。行番号は core の言う**ファイルの行**
     /// （前書きを含む）── 組む側が `data-line` にそのまま差している。
     func go(line: Int) { send?("go:\(line)") }
+    /// 吹き出しで選ばれたことを、面の側でやらせる（依頼 403）。
+    func did(_ what: String) { send?("did:\(what)") }
 }
 
 struct Paper: UIViewRepresentable {
@@ -48,6 +50,8 @@ struct Paper: UIViewRepresentable {
     var both: [Int] = []
     /// 図を長押しされた（工房を開く）。
     var onFix: ((String) -> Void)?
+    /// 触れないかたまり・リンクを一叩きしたときの、選ばせる小窓。
+    var onMenu: ((String, String, Int) -> Void)?
     /// 道具の帯からの合図を受け取る糸。
     var hand: PaperHand?
 
@@ -58,6 +62,7 @@ struct Paper: UIViewRepresentable {
         config.userContentController.add(context.coordinator, name: "wrote")
         config.userContentController.add(context.coordinator, name: "tick")
         config.userContentController.add(context.coordinator, name: "fix")
+        config.userContentController.add(context.coordinator, name: "menu")
         config.userContentController.add(context.coordinator, name: "trouble")
         // **いまどこを見ているか。** 面を替えたときに同じ場所へ立つために
         // 要る ── 替えてから訊くのでは、もう前の面が無い。
@@ -75,6 +80,8 @@ struct Paper: UIViewRepresentable {
             if what.hasPrefix("go:") {
                 let n = what.dropFirst(3)
                 web?.evaluateJavaScript("window.go(\(n)); true")
+            } else if what.hasPrefix("did:") {
+                web?.evaluateJavaScript("window.did(\"\(what.dropFirst(4))\"); true")
             } else {
                 web?.evaluateJavaScript("window.mark(\"\(what)\"); true")
             }
@@ -184,6 +191,29 @@ struct Paper: UIViewRepresentable {
         if (!/^[a-z]+:/i.test(src)) img.src = 'amber://note/' + src;
       }
       armPaper(box, text, true);
+      // **絵は `<figure>` で包む ── 窓の `findPictures` と同じ形にする。**
+      //
+      // 包まないと `<img>` は段の中の札のままで、字に戻すとき
+      // `inlineToMd` が捨てる（`case 'IMG': out += ''`）── 窓は包んだ
+      // `<figure>` が元の字（`data-md`）を持っているので消えないが、電話は
+      // 包んでいなかったので、**表示の面で一度でも打つと絵が消えた**。
+      // 消えるのは保存のあとなので、消したつもりの無い人には理由が見えない。
+      //
+      // **札を配ったあとに包む**（窓と同じ順）── `keepMark` が元の字を
+      // `<figure>` へ移すので、先に `armPaper` が配っていないと引き継ぐ
+      // ものが無い。
+      for (const img of box.querySelectorAll('img')) {
+        const alt = (img.getAttribute('alt') || '').trim();
+        const fig = document.createElement('figure');
+        keepMark(img, fig);
+        img.replaceWith(fig);
+        fig.append(img);
+        if (alt) {
+          const cap = document.createElement('figcaption');
+          cap.textContent = alt;
+          fig.append(cap);
+        }
+      }
       draw();
       quiet = false;
     };
@@ -287,19 +317,69 @@ struct Paper: UIViewRepresentable {
       }
     });
 
-    /// 図は長押しで工房へ（窓は右押し）。
-    let pressed = null;
-    box.addEventListener('touchstart', (e) => {
-      const art = e.target.closest('.mermaid, pre');
-      if (!art || !art.dataset.md) return;
-      pressed = setTimeout(() => {
-        window.webkit.messageHandlers.fix.postMessage(art.dataset.md);
-        pressed = null;
-      }, 450);
-    }, { passive: true });
-    for (const ev of ['touchend', 'touchmove', 'touchcancel']) {
-      box.addEventListener(ev, () => { clearTimeout(pressed); }, { passive: true });
-    }
+    /// **触れないものとリンクは、一叩きで吹き出し**（窓と同じ・依頼 403）。
+    ///
+    /// 前は長押しでしか工房へ行けず、**一叩きでは何も起きなかった** ──
+    /// 押せるものが押しても何も起きないのは、壊れているのと同じに見える。
+    /// リンクは一叩きで外へ飛んでいて、字を直したい人に道が無かった。
+    ///
+    /// 選ばせるのは**iOS の小窓**（`confirmationDialog`）── 面の中に自前で
+    /// 描くと、鍵盤や選び目とぶつかる。押されたものはここで憶えておき、
+    /// 選ばれたら `window.did` が戻ってくる。
+    let picked = null;
+    box.addEventListener('click', (e) => {
+      if (e.target.closest('.box')) return;            // 升は升の道
+      const a = e.target.closest('a[href]');
+      if (a) {
+        const href = a.getAttribute('href') || '';
+        if (href.startsWith('#')) return;              // ノートの中へ飛ぶのは、そのまま
+        e.preventDefault();
+        picked = a;
+        window.webkit.messageHandlers.menu.postMessage({ kind: 'link', at: href });
+        return;
+      }
+      // **絵は `<img>` そのもの。** 窓は `<figure>` で包むが、電話は包んで
+      // いない ── ここで `figure` だけ見ていると、絵を押しても何も起きない。
+      const art = e.target.closest('.mermaid, pre, figure, img');
+      if (!art || !box.contains(art)) return;
+      e.preventDefault();
+      picked = art;
+      const kind = art.tagName === 'IMG' ? 'img'
+        : (art.classList.contains('mermaid') || art.querySelector('code.language-mermaid') ? 'fig' : 'pre');
+      window.webkit.messageHandlers.menu.postMessage({
+        kind, at: art.dataset.md || '', line: Number(art.dataset.line ?? -1),
+      });
+    });
+
+    /// 小窓で選ばれたことを、面の側でやる。
+    window.did = (what) => {
+      const n = picked;
+      picked = null;
+      if (!n) return;
+      if (what === 'drop') {
+        // 絵を抜いた段が空になったら、段ごと片づける ── 空の段が残ると、
+        // ノートに要らない空行が増えていく。
+        const par = n.parentElement;
+        n.remove();
+        if (par && par !== box && !par.children.length && !par.textContent.trim()) par.remove();
+        // 何も残らないなら、打てる一行を置く。
+        if (!box.children.length) {
+          const p = document.createElement('p');
+          p.append(document.createElement('br'));
+          box.append(p);
+        }
+        box.dispatchEvent(new Event('input'));
+      } else if (what === 'edit') {
+        // リンクの字を直す ── そこに caret を置くだけ。
+        const r = document.createRange();
+        r.selectNodeContents(n);
+        r.collapse(false);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+        box.focus();
+      }
+    };
 
     /// caret のいるかたまり。
     function here() {
@@ -604,6 +684,15 @@ struct Paper: UIViewRepresentable {
                 parent.onCheck?(line, done)
             case "fix":
                 if let md = m.body as? String { parent.onFix?(md) }
+            // **面の中で起きた落ちは、ここへ出る。** 出さないと、`window.onerror`
+            // が投げた先が無く、`paper.js` の落ちが誰にも見えない。
+            case "trouble":
+                NSLog("amber paper: %@", String(describing: m.body))
+            case "menu":
+                guard let d = m.body as? [String: Any],
+                      let kind = d["kind"] as? String else { return }
+                parent.onMenu?(kind, d["at"] as? String ?? "",
+                               (d["line"] as? NSNumber)?.intValue ?? -1)
             default:
                 print("[表示] \(m.body)")
             }

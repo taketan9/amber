@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// One note on screen, reading or writing.
 ///
@@ -30,6 +31,12 @@ struct NoteView: View {
     @State private var trouble: String?
     /// 長押しされた図の、元の字（枠ごと）。
     @State private var fixingText: Fixing?
+    /// 表示の面で叩かれた、触れないかたまり・リンク（依頼 403）。
+    /// **どの小窓を出すか**を決めるのはこちら（閉じると空になる）。
+    @State private var tapped: Tapped?
+    /// **何を叩いたか**はこちらに残す ── 小窓は「閉じてから」釦の用事を
+    /// 走らせるので、`tapped` を読みに行くともう空になっている。
+    @State private var held: Tapped?
     /// 「表示」の面へ合図を渡す糸。
     @StateObject private var hand = PaperHand()
     /// 表示の面で鍵盤が出ているか ── 帯を出すかどうかの目安。
@@ -139,6 +146,48 @@ struct NoteView: View {
         var id: String { md }
     }
 
+    /// **押されたもの。** 窓は面の中に吹き出しを描くが、電話は iOS の小窓で
+    /// 訊く ── 面の中に自前で描くと、鍵盤や選び目の丸とぶつかる。
+    struct Tapped: Identifiable {
+        /// `fig`（図）・`pre`（枠）・`img`（絵）・`link`。
+        let kind: String
+        /// 図と枠は元の字、リンクは行き先。
+        let at: String
+        /// ファイルの行（前書きを含む）。リンクは -1。
+        let line: Int
+        var id: String { kind + "\u{1}" + at + "\u{1}" + String(line) }
+    }
+
+    /// その種類の小窓が出ているか ── 閉じたら憶えも空にする。
+    private func showing(_ kind: String) -> Binding<Bool> {
+        Binding(get: { tapped?.kind == kind }, set: { if !$0 { tapped = nil } })
+    }
+
+    /// 枠を「コード」の面のその行へ。**表示のまま直せないものは、記号を出す。**
+    private func toCode(_ line: Int) {
+        // **小窓が閉じ切ってから替える。** 同じ拍で面を入れ替えると、
+        // SwiftUI は小窓を畳む処理の途中で下の view を作り直すことになり、
+        // 替えたはずの面が表示のまま残った（押しても何も起きないように
+        // 見える）。次の拍に回すと、畳んでから替わる。
+        DispatchQueue.main.async {
+            tab.reading = false
+            // **面が入れ替わってから飛ぶ。** 同じ拍で行を渡すと、受け取る
+            // コードの面がまだ建っていない ── 頭のまま止まる。
+            if line >= 0 { DispatchQueue.main.async { desk.jumping = line } }
+        }
+    }
+
+    /// 行き先を外で開く ── **amber の中では開かない**。題字を面の中に
+    /// 描いている以上、持っていかれると戻る道が無い（窓と同じ）。
+    private func open(_ href: String) {
+        guard let u = URL(string: href), u.scheme != nil,
+              UIApplication.shared.canOpenURL(u) else {
+            trouble = "この行き先は開けません: " + href
+            return
+        }
+        UIApplication.shared.open(u)
+    }
+
     /// ` ```mermaid ` の中身。
     private func fence(_ md: String) -> String {
         var lines = md.components(separatedBy: "\n")
@@ -238,6 +287,11 @@ struct NoteView: View {
                           onCheck: tickLine, onAt: { tab.at = $0 },
                           came: tab.came, both: tab.both,
                           onFix: { fixingText = Fixing(md: $0) },
+                          onMenu: {
+                              let t = Tapped(kind: $0, at: $1, line: $2)
+                              held = t
+                              tapped = t
+                          },
                           hand: hand)
                     // **道具の帯は、表示の面にも要る。** 打てる面なのに
                     // 記号の入れ方が無いと、`#` や `- [ ]` を覚えている人に
@@ -250,6 +304,38 @@ struct NoteView: View {
                     Studio(source: f.md) { now in
                         tab.text = swapFence(tab.text, was: fence(f.md), now: now)
                     }
+                }
+                // **触れないものとリンクは、叩くと訊く**（窓の吹き出しと同じ
+                // 顔ぶれ・依頼 403）。前は一叩きで何も起きず、450 ミリ秒の
+                // 長押しだけが工房へ行っていた ── 押せるものを押して何も
+                // 起きないのは、壊れているのと見分けがつかない。
+                //
+                // **押されたものごとに、別の小窓を書き下す。** 一つの小窓の
+                // 中で釦を組み替えるより、どれを押すと何が並ぶかがその場で
+                // 読める ── 顔ぶれは四つしかない。
+                .confirmationDialog("枠", isPresented: showing("pre"),
+                                    titleVisibility: .visible) {
+                    Button("コードで直す") { toCode(held?.line ?? -1) }
+                    Button("消す", role: .destructive) { hand.did("drop") }
+                    Button("やめる", role: .cancel) {}
+                }
+                .confirmationDialog("図", isPresented: showing("fig"),
+                                    titleVisibility: .visible) {
+                    Button("図を直す") { if let md = held?.at { fixingText = Fixing(md: md) } }
+                    Button("消す", role: .destructive) { hand.did("drop") }
+                    Button("やめる", role: .cancel) {}
+                }
+                .confirmationDialog("絵", isPresented: showing("img"),
+                                    titleVisibility: .visible) {
+                    Button("消す", role: .destructive) { hand.did("drop") }
+                    Button("やめる", role: .cancel) {}
+                }
+                .confirmationDialog(held?.at ?? "リンク", isPresented: showing("link"),
+                                    titleVisibility: .visible) {
+                    Button("開く") { open(held?.at ?? "") }
+                    Button("字を直す") { hand.did("edit") }
+                    Button("リンク先を写す") { UIPasteboard.general.string = held?.at }
+                    Button("やめる", role: .cancel) {}
                 }
             } else {
                 VStack(spacing: 0) {
