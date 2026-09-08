@@ -308,13 +308,24 @@ struct Paper: UIViewRepresentable {
     /// 道具の帯から。窓と同じ `execCommand`。
     window.mark = (what) => {
       box.focus();
+      // **同じ釦で、付けると外す**（窓と同じ・依頼 406）── 中で押したら
+      // 外れる。長い引用を一行ずつ外すのは、指では手が疲れる。
+      //
+      // **一行は、見出しか項目か、どちらか一つ** ── 点を付ける前に見出しを
+      // 落とす（`- ## 見出し` は `blockToMd` が知らず、保存すると黙って落ちる）。
       if (what === 'bold') document.execCommand('bold');
       else if (what === 'italic') document.execCommand('italic');
       else if (what === 'strike') document.execCommand('strikeThrough');
-      else if (what === 'ul') document.execCommand('insertUnorderedList');
-      else if (what === 'ol') document.execCommand('insertOrderedList');
-      else if (what === 'quote') document.execCommand('formatBlock', false, 'blockquote');
-      else if (what === 'check') check();
+      else if (what === 'ul' || what === 'ol') {
+        if (inside(box, what.toUpperCase())) unwrapList(box);
+        else {
+          flattenHeads(box);
+          document.execCommand(what === 'ul' ? 'insertUnorderedList' : 'insertOrderedList');
+        }
+      } else if (what === 'quote') {
+        if (inside(box, 'blockquote')) unwrapBlock(box, 'blockquote');
+        else document.execCommand('formatBlock', false, 'blockquote');
+      } else if (what === 'check') check();
       else if (what === 'head') {
         // 押すたびに深くなる ── 窓と同じ（`#` → `##` → `###` → 無し）。
         const n = here();

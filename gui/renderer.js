@@ -2264,6 +2264,83 @@ function checkSoftReturn(box) {
     return true;
 }
 
+/// 選んだ範囲（無ければ caret の行）が、その札の中に居るか。
+function inside(box, tag) {
+    for (const line of pickedLines(box)) {
+        const n = line.closest ? line.closest(tag) : null;
+        if (!n || !box.contains(n)) return false;
+    }
+    return true;
+}
+
+/// 選んだ範囲にかかっている「行」たち。選んでいなければ caret の一行だけ。
+function pickedLines(box) {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount) return [];
+    const r = sel.getRangeAt(0);
+    const all = [...box.querySelectorAll('li, p, h1, h2, h3, h4, h5, h6')]
+        .filter((n) => r.intersectsNode(n));
+    if (all.length) {
+        // 入れ子は、いちばん内側だけ ── 外側の項目も範囲に当たる。
+        return all.filter((n) => !all.some((m) => m !== n && n.contains(m)));
+    }
+    const one = lineAt(box);
+    return one ? [one] : [];
+}
+
+/// 選んだ行の見出しを、段落に落とす（点を付ける前に）。
+function flattenHeads(box) {
+    for (const line of pickedLines(box)) {
+        if (!/^H[1-6]$/.test(line.tagName)) continue;
+        const p = document.createElement('p');
+        p.append(...line.childNodes);
+        keepMark(line, p);
+        line.replaceWith(p);
+    }
+}
+
+/// 引用・注記の箱から、選んだ行を出す。**範囲を選んでいれば、選んだ行ぜんぶ。**
+function unwrapBlock(box, tag) {
+    const lines = pickedLines(box);
+    for (const line of lines) {
+        const wrap = line.closest(tag);
+        if (!wrap || !box.contains(wrap)) continue;
+        wrap.before(line);
+        if (!wrap.textContent.trim()) wrap.remove();
+    }
+    if (lines[0]) landBackIn(lines[0], 0);
+    return true;
+}
+
+/// 一覧から、選んだ項目を出して段落にする。
+function unwrapList(box) {
+    const lines = pickedLines(box).filter((n) => n.tagName === 'LI');
+    let last = null;
+    for (const li of lines) {
+        const list = li.parentElement;
+        if (!list || !['UL', 'OL'].includes(list.tagName)) continue;
+        const p = document.createElement('p');
+        for (const x of [...li.childNodes]) {
+            if (x.nodeType === 1 && x.classList?.contains('box')) continue;
+            p.append(x);
+        }
+        if (!p.childNodes.length) p.append(document.createElement('br'));
+        list.before(p);
+        li.remove();
+        if (!list.children.length) list.remove();
+        last = p;
+    }
+    if (last) landBackIn(last, 0);
+    return true;
+}
+
+/// 見出しは押すたびに深くなる ── 書く面と同じ（`#` → `##` → `###` → 無し）。
+function readHeading() {
+    const n = caretBlock();
+    const now = n && /^H[1-6]$/.test(n.tagName) ? Number(n.tagName[1]) : 0;
+    readBlockAs(now >= 3 ? 'p' : 'h' + (now + 1));
+}
+
 /* ── 選んで消す ── */
 
 /// 選んだ範囲を消すとき、表を壊さないように受ける。受けたら `true`。
@@ -2848,9 +2925,29 @@ function caretBlock() {
 /// 飾りを付ける道は、いまも実質これしかない**。付くのは `<b>` や `<i>` で、
 /// 字に戻すときに `**` や `*` になる（`inlineToMd`）。
 function readDress(cmd) {
-    el('read').focus();
+    const box = el('read');
+    box.focus();
     const sel = getSelection();
     const had = sel && !sel.isCollapsed;
+    // **見出しは飛ばす。** 見出しは既に太い ── 見た目が変わらないのに
+    // `## **見出し**` と記号だけ増えるのは、次の組み直しで「何も変わって
+    // いない」ように見えて、同期先では差分になる。
+    //
+    // 選んだ範囲が見出しだけなら、何もしない。混ざっているなら、見出しを
+    // 外した範囲に掛け直す。
+    if (had && cmd === 'bold') {
+        const lines = pickedLines(box);
+        const heads = lines.filter((n) => /^H[1-6]$/.test(n.tagName));
+        if (heads.length) {
+            const rest = lines.filter((n) => !heads.includes(n));
+            if (!rest.length) return;               // 見出しだけ ── 何もしない
+            const r = document.createRange();
+            r.setStartBefore(rest[0]);
+            r.setEndAfter(rest[rest.length - 1]);
+            sel.removeAllRanges();
+            sel.addRange(r);
+        }
+    }
     document.execCommand(cmd);
     // **飾りの外へ caret を出す。**
     //
@@ -2877,18 +2974,33 @@ function readDress(cmd) {
 
 /// かたまりの種類を変える道具（見出し・箇条書き・引用）。
 function readBlockAs(what) {
-    el('read').focus();
+    const box = el('read');
+    box.focus();
+    // **一行は、見出しか項目か、どちらか一つ。** `- ## 見出し` は書けはする
+    // が、読む人にも書く人にも意味が無い ── しかも `blockToMd` は一覧の中の
+    // 見出しを知らないので、**見た目は見出しのまま、保存すると黙って落ちる**。
+    // 落とすなら**押した瞬間に見えて落ちる**（本人：「自分で選んだ操作だから
+    // 驚かない」・2026-09-08）。
+    if (what === 'ul' || what === 'ol') flattenHeads(box);
+
+    // **同じ釦で、付けると外す。** 引用の中で「引用」を押したら外れる ──
+    // 行頭の Backspace で出るのは一行ずつで、長い引用では手が疲れる
+    // （本人が求めた道・2026-09-08）。Word の太字と同じ手触り。
+    if (what === 'blockquote' && inside(box, 'blockquote')) {
+        unwrapBlock(box, 'blockquote');
+        readChanged();
+        return;
+    }
+    if ((what === 'ul' || what === 'ol') && inside(box, what.toUpperCase())) {
+        unwrapList(box);
+        readChanged();
+        return;
+    }
+
     if (what === 'ul') document.execCommand('insertUnorderedList');
     else if (what === 'ol') document.execCommand('insertOrderedList');
     else document.execCommand('formatBlock', false, what);
     readChanged();
-}
-
-/// 見出しは押すたびに深くなる ── 書く面と同じ（`#` → `##` → `###` → 無し）。
-function readHeading() {
-    const n = caretBlock();
-    const now = n && /^H[1-6]$/.test(n.tagName) ? Number(n.tagName[1]) : 0;
-    readBlockAs(now >= 3 ? 'p' : 'h' + (now + 1));
 }
 
 /// 字そのものを書き換える道具（チェック・リンク・表…）。

@@ -255,6 +255,45 @@ async function press(md, where, at, hit) {
         ok(r.md === md + '\n', '字は一文字も動いていない', r.md);
     }
 
+    say('選んで飾る ── 一行は見出しか項目か、どちらか一つ');
+    {
+        // 見出しの行を箇条書きにすると、見出しは落ちる（押した瞬間に見える）。
+        await draw('## 見出し\n\n段落。');
+        const h = box.querySelector('h2');
+        caretAt(h, 0);
+        flattenHeads(box);
+        ok(!box.querySelector('h2'), '見出しが段落に落ちる');
+        ok(paperToMd(box, '') === '見出し\n\n段落。\n',
+           '字はそのまま残る（`#` だけが落ちる）', paperToMd(box, ''));
+
+        // 触れる行が無ければ、何もしない。
+        await draw('段落だけ。');
+        caretAt(box.firstElementChild, 0);
+        flattenHeads(box);
+        ok(paperToMd(box, '') === '段落だけ。\n', '見出しでなければ、触らない', paperToMd(box, ''));
+    }
+
+    say('選んで飾る ── 中で押したら外れる');
+    {
+        await draw('> 一行目\n> 二行目');
+        const q = box.querySelector('blockquote p');
+        caretAt(q, 0);
+        ok(inside(box, 'blockquote') === true, '引用の中に居ることが分かる');
+        unwrapBlock(box, 'blockquote');
+        ok(paperToMd(box, '') === '一行目\n二行目\n', '引用がまとめて外れる', paperToMd(box, ''));
+
+        await draw('- あ\n- い');
+        const li = box.querySelector('li');
+        caretAt(li, 0);
+        ok(inside(box, 'UL') === true, '一覧の中に居ることが分かる');
+        unwrapList(box);
+        ok(paperToMd(box, '') === 'あ\n\n- い\n', '押した項目だけ外れる', paperToMd(box, ''));
+
+        await draw('段落。');
+        caretAt(box.firstElementChild, 0);
+        ok(inside(box, 'blockquote') === false, '外に居るなら、付けるほうへ');
+    }
+
     say('選んで消す ── 表のセルの数を変えない');
     {
         const t = '| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |';
