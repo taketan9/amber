@@ -68,6 +68,9 @@ global.loading = false;
 global.syncing = false;
 global.tocOn = false;
 global.readSeq = 0;
+// 変換中は組み直さない（依頼 404）── ここでは変換していないので偽のまま。
+global.composing = false;
+global.drawAfter = false;
 global.writes = [];
 global.told = [];
 global.say = (s) => told.push(s);
