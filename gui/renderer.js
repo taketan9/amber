@@ -1527,7 +1527,19 @@ function richBlock(node) {
     // 無い ── 触れないままだと「読む面だけで完結できる」が嘘になる。
     // 枠（コード）と図と絵だけは、戻せないので書く面へ送る。
     if (['PRE', 'FIGURE'].includes(node.tagName)) return true;
-    return node.classList.contains('mermaid');
+    if (node.classList.contains('mermaid')) return true;
+    // **中に枠や図を抱えたかたまりも、触らせない。**
+    //
+    // `> ``` ` のような引用は、外は引用・中は枠。外を触れるままにすると、
+    // 中を字に戻すのは `blockToMd` の仕事になり、あちらは枠を知らない
+    // （知らない札は中身だけ取る）── `` ` `` が行の途中のコードとして
+    // 読み直され、**保存のたびに形が変わり続けた**（一周目で `> ` + 中身、
+    // 二周目でさらに `` ` `` が増える）。同期していれば毎回差分になる。
+    //
+    // 元の字は外のかたまりが持っている（`data-md`）ので、外ごと返せば
+    // 一文字も失わない。中を直したい人は「コード」の面へ ── 触れない
+    // ものが一つ増えるが、**壊れるより狭いほうがよい**。
+    return !!node.querySelector('pre, .mermaid');
 }
 
 /// 描いたあとの仕込み。
@@ -1636,14 +1648,25 @@ function blockToMd(node, depth = 0) {
             //
             // 読むだけで済むものを、動かして読む理由は無い。
             const rows = [];
-            let n = 0;
+            // **始まりの番号は、書いた人のもの。** `3. 4.` と書いた一覧を
+            // `1. 2.` に振り直さない（core は `<ol start>` で憶えている）。
+            let n = (Number(node.getAttribute('start')) || 1) - 1;
             for (const li of node.children) {
                 if (li.tagName !== 'LI') continue;
                 n += 1;
                 const mark = li.querySelector(':scope > .box');
+                // **書いた印を、そのまま返す。** `* ` を `- ` に、`1) ` を
+                // `1. ` に、`1. 1. 1.` を `1. 2. 3.` に丸めない ── どれも
+                // 見え方は同じだが、人の書いた行を書き換えることになる
+                // （同期していれば、開くたびに向こうへ差分が飛ぶ）。
+                // 憶えていないもの（前の版で組んだ面・面の上で作った行）は、
+                // これまで通りの形で書く。
+                const was = li.dataset ? li.dataset.mark : '';
+                const bullet = was || (node.tagName === 'OL' ? n + '. ' : '- ');
+                const done = mark && mark.getAttribute('aria-pressed') === 'true';
                 const head = mark
-                    ? '- [' + (mark.getAttribute('aria-pressed') === 'true' ? 'x' : ' ') + '] '
-                    : (node.tagName === 'OL' ? n + '. ' : '- ');
+                    ? bullet + '[' + (done ? (li.dataset.box === 'X' ? 'X' : 'x') : ' ') + '] '
+                    : bullet;
                 rows.push(pad + head + inlineToMd(li).trim());
                 // 入れ子は項目の中に居る。字の上では、その項目の下に付く。
                 for (const x of li.children) {
@@ -1657,7 +1680,12 @@ function blockToMd(node, depth = 0) {
             if (!rows.length) return null;
             const cells = (tr) => [...tr.children]
                 .map((c) => inlineToMd(c).trim().replace(/\|/g, '\\|') || '　');
+            // **元の字があるなら、それを返す。** `:---` と `---` は
+            // core の `Align` では同じ値になる（見え方は同じでよい）が、
+            // 字に戻すときに丸めると**人の書いた行が書き換わる**。
+            // 憶えていないもの（前の版で組んだ面）は、見え方から作る。
             const aligns = [...rows[0].children].map((c) => {
+                if (c.dataset && c.dataset.sep) return c.dataset.sep;
                 const a = c.getAttribute('style') || '';
                 return a.includes('center') ? ':---:' : (a.includes('right') ? '---:' : '---');
             });
@@ -1669,11 +1697,12 @@ function blockToMd(node, depth = 0) {
         case 'BLOCKQUOTE':
             return blockLines(node).map((l) => (l ? '> ' + l : '>')).join('\n');
         case 'HR':
-            return '---';
+            // 書いた形をそのまま（`---` `***` `___`）。
+            return (node.dataset && node.dataset.mark) || '---';
         case 'BR':
             return null;
         default: {
-            const t = inlineToMd(node).trim();
+            const t = edges(inlineToMd(node));
             return t === '' ? null : pad + t;
         }
     }
@@ -1686,11 +1715,16 @@ function blockLines(node) {
         if (md !== null) out.push(...md.split('\n'));
     }
     if (!out.length) {
-        const t = inlineToMd(node).trim();
+        const t = edges(inlineToMd(node));
         if (t) out.push(t);
     }
     return out;
 }
+
+/// 前後を落とす。**全角空白（`　`）は落とさない** ── あれは字下げで、人が
+/// 打った字。JavaScript の `trim()` は `　` も削るので、削るものを半角の
+/// 空白と tab と改行だけに絞る（core の `mark_break` と揃えてある）。
+const edges = (s) => String(s).replace(/^[ \t\n]+/, '').replace(/[ \t\n]+$/, '');
 
 /// 一つのかたまりの中を、Markdown の字に戻す。
 ///
@@ -1713,7 +1747,11 @@ function inlineToMd(node) {
             case 'DEL': case 'S': case 'STRIKE': out += inner.trim() ? '~~' + inner + '~~' : ''; break;
             case 'CODE': out += '`' + c.textContent + '`'; break;
             case 'A': out += '[' + inner + '](' + (c.getAttribute('href') || '') + ')'; break;
-            case 'BR': out += '\n'; break;
+            // **行末の印は、そのまま戻す。** 空白二つと `\` はどちらも
+            // 「ここで改行」の印で、amber は改行をそのまま描くので**見え方は
+            // 同じ**だが、人が打った字なので落とさない（`markdown.rs` の
+            // `mark_break` が `data-hard` に憶えさせている）。
+            case 'BR': out += (c.dataset && c.dataset.hard ? c.dataset.hard : '') + '\n'; break;
             case 'IMG': out += ''; break;
             case 'FONT': case 'SPAN': {
                 // 色だけは記法に戻す ── ほかの飾りは字だけ取る。

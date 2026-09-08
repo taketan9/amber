@@ -230,9 +230,21 @@ pub fn is_rule(line: &str) -> bool {
 }
 
 /// ` ```rust ` → `Some("rust")`; ` ``` ` → `Some("")`.
+/// **`~~~` も枠。** GFM は三つ以上の `` ` `` と `~` のどちらも枠にする。
+/// `~~~` を知らないと、中の字が段落として組まれる ── `~~` が取り消し線に
+/// 読まれ、中に `- ` があれば点になる。**コードが Markdown として解釈
+/// される**ので、見え方だけの話では済まない（2026-09-08 の往復の試験で出た）。
 pub fn fence_lang(line: &str) -> Option<String> {
     let t = line.trim_start();
-    t.strip_prefix("```").map(|rest| rest.trim().to_string())
+    for mark in ["```", "~~~"] {
+        if let Some(rest) = t.strip_prefix(mark) {
+            // 印そのものが続くのは、四つ以上の枠（``````）── 印を全部
+            // 落としてから言語を読む。
+            let rest = rest.trim_start_matches(mark.chars().next().unwrap());
+            return Some(rest.trim().to_string());
+        }
+    }
+    None
 }
 
 /// `- item` / `1. item` → `(marker, text, indent)`.
@@ -345,6 +357,41 @@ fn safe_url(url: &str) -> Option<String> {
         return Some(esc(u));
     }
     None
+}
+
+/// 段落の一行を、前後を落として、**行末の改行の印を憶えたまま**返す。
+///
+/// **行頭の空白は落とさない。** 全角空白（`　`）は字下げで、人が打ったもの
+/// ── `trim()` は全角空白も削るので、半角の空白と tab だけを落とす。
+///
+/// **行末の印は、二種類ある。** 空白二つと `\` は、どちらも「ここで改行」の
+/// 印（CommonMark の hard break）。amber は改行をそのまま改行として描くので
+/// **見え方は同じ**だが、人が打った字なので**そのまま戻せるように**印を
+/// 覚えておく（制御文字を一つ挟む ── ふつうの Markdown には出てこない）。
+fn mark_break(line: &str) -> String {
+    let head = line.trim_start_matches([' ', '\t']);
+    let body = head.trim_end_matches([' ', '\t']);
+    // `\` が二つ以上並んでいるなら、最後の一つは逃がされた `\` であって
+    // 改行の印ではない ── 数えて奇数のときだけ印にする。
+    let slashes = body.len() - body.trim_end_matches('\\').len();
+    if slashes % 2 == 1 {
+        return format!("{}\u{2}", &body[..body.len() - 1]);
+    }
+    if head.len() >= body.len() + 2 {
+        return format!("{body}\u{1}");
+    }
+    body.to_string()
+}
+
+/// 段落の中の改行を `<br>` にする。**印のあったところは、印ごと憶えさせる。**
+///
+/// GitHub（CommonMark）は段落の中の一つの改行を空白にして繋ぐが、amber は
+/// そうしない ── 2026-09-08 に決めた（`PAPER.ja.md` 六章）。理由は見え方では
+/// なく、**字が消えるから**（`to_html` の段落の註）。
+fn breaks(html: &str) -> String {
+    html.replace("\u{1}\n", "<br data-hard=\"  \">")
+        .replace("\u{2}\n", "<br data-hard=\"\\\">")
+        .replace('\n', "<br>")
 }
 
 fn inline_html(text: &str) -> String {
@@ -721,7 +768,10 @@ fn render(lines: &[String], stamp: bool) -> String {
 
         if is_rule(raw) {
             close_all_lists(&mut out, &mut open_lists, &mut li_open);
-            out.push_str("<hr>\n");
+            // **書いた形をそのまま憶える。** `---` `***` `___` はどれも
+            // 水平線で、見え方も同じ ── けれど字に戻すときに丸めると、
+            // 人の書いた行が書き換わる（同期先では差分になる）。
+            out.push_str(&format!("<hr data-mark=\"{}\">\n", esc(t)));
             i += 1;
             continue;
         }
@@ -751,9 +801,21 @@ fn render(lines: &[String], stamp: bool) -> String {
                 Align::Center => " style=\"text-align:center\"",
                 Align::Right => " style=\"text-align:right\"",
             };
+            // **揃えの行は、元の字のまま憶えさせる。**
+            //
+            // `Align` は三つしか無く、`:---` と `---` はどちらも `Left` に
+            // なる ── 見え方は同じでよいが、**字に戻すときに `:---` が
+            // `---` になる**（人の書いた行が書き換わる）。長さ（`-----`）も
+            // 同じ話。見え方は `style` が、戻し方はこちらが受け持つ。
+            let seps = split_cells(&lines[i + 1]);
+            let sep = |n: usize| {
+                seps.get(n)
+                    .map(|c| format!(" data-sep=\"{}\"", esc(c.trim())))
+                    .unwrap_or_default()
+            };
             out.push_str("<table>\n<thead><tr>");
             for (n, c) in head.iter().enumerate() {
-                out.push_str(&format!("<th{}>{}</th>", at(n), inline_html(c)));
+                out.push_str(&format!("<th{}{}>{}</th>", at(n), sep(n), inline_html(c)));
             }
             out.push_str("</tr></thead>\n<tbody>\n");
             i += 2;
@@ -865,6 +927,13 @@ fn render(lines: &[String], stamp: bool) -> String {
                     out.push_str(&open_tag(ord));
                 }
             }
+            // **行の印を、そのまま憶える。** `- ` `* ` `+ ` はどれも点で、
+            // `1. ` `1) ` はどれも番号 ── 見え方は同じだが、字に戻すときに
+            // 丸めると人の書いた行が書き換わる。番号そのものも憶える
+            // （`1. 1. 1.` と書いた一覧を `1. 2. 3.` に振り直さない）。
+            let head = raw.trim_start();
+            let mark_raw = &head[..head.len() - text.len()];
+            let mark_at = format!(" data-mark=\"{}\"", esc(mark_raw));
             match task_item(&text) {
                 // The line it came from travels with it. A checkbox you can
                 // see and not press is a checkbox that makes you go and find
@@ -876,14 +945,21 @@ fn render(lines: &[String], stamp: bool) -> String {
                 // ただの字として読み、Tab では辿り着けず、キーボードだけの
                 // 人には「無い」のと同じになる。押せる升が一つ出せない
                 // だけで、ノートの半分が触れなくなる。
-                Some((done, rest)) => out.push_str(&format!(
-                    "<li class=\"task\"><button type=\"button\" class=\"box\" data-line=\"{}\" aria-pressed=\"{}\">{}</button>{}",
-                    i,
-                    done,
-                    if done { "☑" } else { "☐" },
-                    inline_html(&rest),
-                )),
-                None => out.push_str(&format!("<li>{}", inline_html(&text))),
+                Some((done, rest)) => {
+                    // 升の字（`[x]` か `[X]`）も、そのまま憶える。
+                    let box_at = text.trim_start();
+                    let up = box_at.starts_with("[X]");
+                    out.push_str(&format!(
+                        "<li class=\"task\"{}{}><button type=\"button\" class=\"box\" data-line=\"{}\" aria-pressed=\"{}\">{}</button>{}",
+                        mark_at,
+                        if up { " data-box=\"X\"" } else { "" },
+                        i,
+                        done,
+                        if done { "☑" } else { "☐" },
+                        inline_html(&rest),
+                    ));
+                }
+                None => out.push_str(&format!("<li{}>{}", mark_at, inline_html(&text))),
             }
             li_open = true;
             i += 1;
@@ -891,8 +967,29 @@ fn render(lines: &[String], stamp: bool) -> String {
         }
 
         // A paragraph: this line and the ones after it that are not something
-        // else. Joined with a space, because a hard-wrapped paragraph is one
-        // paragraph and a window can wrap it itself.
+        // else.
+        //
+        // **改行は、改行として描く。** GitHub（CommonMark）は段落の中の
+        // 一つの改行を空白にして繋ぐが、amber はそうしない ── 2026-09-08 に
+        // 決めた（`PAPER.ja.md` 六章）。
+        //
+        // 理由は見え方ではなく、**字が消えるから**。「表示」の面は組んだ
+        // 姿から字に戻す（`paperToMd`）ので、空白で繋いだ段落は**空白で
+        // 繋がれたまま保存される** ── 三行で書いた段落が、面で一文字
+        // 打った瞬間に一行になる。同期しているフォルダなら、それが全部
+        // むこうへ差分として飛ぶ（実物で踏んだ）。
+        //
+        // **ファイルは一文字も変わらない**（`\n` のまま）── 描き方だけの話。
+        // GitHub へ持っていくと繋がって見えるが、日本語の間に半角の空白が
+        // 入る今の描き方は、記号を知らない人には「打った改行が消えた」に
+        // しか見えない。行末の空白二つと `\` は、これまで通り改行
+        // （`inline_html` が見る）。
+        //
+        // **行頭の空白は落とさない。** 全角空白（`　`）は字下げで、人が
+        // 打ったもの ── `trim()` は全角空白も削るので、`trim_matches` で
+        // 半角の空白と制御文字だけを落とす。行末は落としてよい（行末の
+        // 空白二つは `inline_html` が改行に直したあとなので、ここでは
+        // もう意味を持たない）。
         close_all_lists(&mut out, &mut open_lists, &mut li_open);
         let mut para = Vec::new();
         while i < lines.len() {
@@ -908,10 +1005,10 @@ fn render(lines: &[String], stamp: bool) -> String {
             {
                 break;
             }
-            para.push(pt.to_string());
+            para.push(mark_break(p));
             i += 1;
         }
-        out.push_str(&format!("<p>{}</p>\n", inline_html(&para.join(" "))));
+        out.push_str(&format!("<p>{}</p>\n", breaks(&inline_html(&para.join("\n")))));
     }
     close_all_lists(&mut out, &mut open_lists, &mut li_open);
     if stamp {
@@ -1073,7 +1170,7 @@ mod tests {
         // なる（一度そうなった）。
         let out = super::to_html(&lines("- あ\n- い\n"));
         assert!(!out.contains("</li data-line"), "閉じ札に差さっている: {out}");
-        assert!(out.contains("<li data-line=\"1\""), "二つ目に差さっていない: {out}");
+        assert!(out.contains("data-line=\"1\""), "二つ目に差さっていない: {out}");
 
         // 引用の中で数え直さない ── 中の行番号はファイルの行番号ではない。
         let out = super::to_html(&lines("> 引用\n> の中\n"));
@@ -1148,7 +1245,12 @@ mod tests {
     fn a_table_keeps_its_alignment() {
         let html = to_html(&lines("| a | b |\n| :- | --: |\n| 1 | 2 |"));
         assert!(html.contains("<table>"), "{html}");
-        assert!(html.contains(r#"<th style="text-align:right">b</th>"#), "{html}");
+        assert!(html.contains(r#"text-align:right"#), "{html}");
+        // **揃えの行は、元の字のまま憶えさせる。** `Align` は三つしか無く、
+        // `:-` と `-` はどちらも `Left` になる ── 見え方は同じでよいが、
+        // 字に戻すときに `:-` が `---` になると、人の書いた行が書き換わる。
+        assert!(html.contains(r#"data-sep=":-""#), "{html}");
+        assert!(html.contains(r#"data-sep="--:""#), "{html}");
     }
 
     #[test]
@@ -1156,7 +1258,10 @@ mod tests {
         let html = to_html(&lines("- one\n  - deep\n- two"));
         assert_eq!(html.matches("<ul>").count(), 2, "{html}");
         assert_eq!(html.matches("</ul>").count(), 2, "{html}");
-        assert_eq!(html.matches("<li>").count(), 3, "{html}");
+        // **`<li` で数える。** 印を憶えるようになって `<li data-mark=…>`
+        // になったので、`<li>` で数えると 0 になる（振る舞いは変わって
+        // いない）。`</li>` は `<` の次が `/` なので、これには当たらない。
+        assert_eq!(html.matches("<li").count(), 3, "{html}");
         assert_eq!(html.matches("</li>").count(), 3, "{html}");
     }
 
@@ -1166,7 +1271,7 @@ mod tests {
         // tolerated by browsers and then indented as though the nesting were
         // not there.
         let html = to_html(&lines("- one\n  - deep"));
-        let li = html.find("<li>one").unwrap();
+        let li = html.find(">one").unwrap();
         let ul = html[li..].find("<ul>").unwrap();
         let close = html[li..].find("</li>").unwrap();
         assert!(ul < close, "nested <ul> must come before its parent's </li>\n{html}");
@@ -1195,7 +1300,42 @@ mod tests {
     fn a_hard_wrapped_paragraph_is_one_paragraph() {
         let html = to_html(&lines("one\ntwo\n\nthree"));
         assert_eq!(html.matches("<p>").count(), 2, "{html}");
-        assert!(html.contains("<p>one two</p>"), "{html}");
+        // **段落は一つ。ただし、改行は改行として描く**（2026-09-08 に決めた）。
+        // 前は `one two` と空白で繋いでいた ── 「表示」の面はこの姿から
+        // 字に戻すので、**繋いだまま保存され、三行の段落が一行になった**。
+        assert!(html.contains("<p>one<br>two</p>"), "{html}");
+    }
+
+    #[test]
+    fn 行末の改行の印は_そのまま憶える() {
+        // 空白二つと `\` は、どちらも「ここで改行」の印。amber は改行を
+        // そのまま描くので**見え方は同じ**だが、人が打った字なので、
+        // 字に戻すときにそのまま戻せるように憶えておく。
+        let two = to_html(&lines("one  \ntwo"));
+        assert!(two.contains(r#"<br data-hard="  ">"#), "{two}");
+        let slash = to_html(&lines("one\\\ntwo"));
+        assert!(slash.contains(r#"<br data-hard="\">"#), "{slash}");
+        // 印の無い改行は、ただの `<br>`。
+        let bare = to_html(&lines("one\ntwo"));
+        assert!(bare.contains("<br>") && !bare.contains("data-hard"), "{bare}");
+    }
+
+    #[test]
+    fn 行頭の全角空白は_落とさない() {
+        // 字下げは人が打った字。`trim()` は全角空白も削るので、削るものを
+        // 半角の空白と tab に絞ってある。
+        let html = to_html(&lines("　字下げた段落。"));
+        assert!(html.contains("<p>　字下げた段落。</p>"), "{html}");
+    }
+
+    #[test]
+    fn 波線の枠も_枠として組む() {
+        // `~~~` を知らないと、中の字が段落として組まれる ── `~~` が
+        // 取り消し線に読まれ、**コードが Markdown として解釈される**。
+        let html = to_html(&lines("~~~\n- これは点ではない\n~~~"));
+        assert!(html.contains("<pre><code>"), "{html}");
+        assert!(!html.contains("<del>"), "{html}");
+        assert!(!html.contains("<li>"), "{html}");
     }
 
     #[test]

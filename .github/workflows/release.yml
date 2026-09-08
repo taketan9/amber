@@ -112,6 +112,22 @@ jobs:
           node scripts/win-test.js
           node scripts/diagram-test.js
 
+      # **「表示」の面が、打っても字を失わないか。**
+      #
+      # 組む側は core（いま組んだばかりの実行ファイル）、戻す側は窓と電話が
+      # 共有している切り出し ── 二つの言語をまたぐので、ここでしか回せない
+      # （`cargo test` は Rust の側しか見ない）。
+      #
+      # 依存が要る（jsdom）ので、窓の `node_modules` がある mac だけで走らせる
+      # ── 判断そのものは土台に依らないので、一台で足りる。
+      - name: 字 → 面 → 字 が、元に戻るか
+        if: runner.os == 'macOS'
+        run: |
+          cp target/release/amber-server gui/amber-server || true
+          (cd gui && npm ci)
+          node scripts/paper-test.js
+          node scripts/round-test.js
+
       - name: 一往復してみる（Windows）
         if: runner.os == 'Windows'
         shell: pwsh

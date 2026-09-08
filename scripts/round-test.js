@@ -25,6 +25,10 @@
  * `null`（戻せない）は落第にしない ── 「戻せないなら書かない」が正しい。
  * ただし**どの形で出たかは数えて出す**。
  *
+ * **決めて丸めているものは、丸めた字で書いておく。** 表の空のセルは全角
+ * 空白で埋まって戻る（依頼 94・190）── ここに元の字を書くと、決めごとが
+ * 落第として出続け、そのうち誰も見なくなる。
+ *
  *     node scripts/round-test.js          # 落第だけ出す
  *     node scripts/round-test.js --all    # ぜんぶ出す
  */
@@ -68,9 +72,31 @@ global.window = dom.window;
 global.document = dom.window.document;
 global.Node = dom.window.Node;
 global.getSelection = () => dom.window.getSelection();
+// **絵の掛け替えも、本物を通す。** `drawRead` は組んだあとに
+// `findPictures` を呼び、`<img>` を `<figure>` に包んで札を移す
+// （`keepMark`）── これを通さずに回すと「絵が丸ごと消える」という
+// 嘘の落第が出る（実際に出して、実機で確かめて分かった）。
+// 切り出しの外にあるので、名前で抜いて同じ環境を用意する。
+const grab = (head) => {
+    const at = src.indexOf(head);
+    if (at < 0) { console.error(head + ' が見つかりません'); process.exit(2); }
+    const end = src.indexOf('\n}\n', at);
+    return src.slice(at, end + 3);
+};
 // eslint-disable-next-line no-eval
-(0, eval)(src.slice(from, to));
+(0, eval)(src.slice(from, to)
+    + grab('function keepMark(')
+    + grab('function findPictures(')
+    // 窓の持ちもの ── 絵の在りかを組むのに要るぶんだけ。**中身は見ない**
+    // ので、道の組み立ては本物でなくてよい（`fileURL` は win-test が見る）。
+    + 'function fileURL(at) { return "file://" + at; }\n'
+    + 'const dirOf = (at) => String(at || "").replace(/[^/\\\\]*$/, "");\n'
+    + 'const escapeHtml = (s) => String(s);\n');
 const box = document.getElementById('paper');
+// `findPictures` は `el('read')` と `state.open` を見る。**同じ箱を渡す。**
+global.el = () => box;
+global.state = { open: { path: '/notes/試し.md' } };
+global.window.amber = { fileBytes: async () => null };
 
 /* ── エンジンに組んでもらう ── */
 
@@ -103,9 +129,10 @@ const toHtml = async (text) => {
 /// 一周まわす。面に組んで、字に戻す。
 async function trip(md) {
     box.innerHTML = await toHtml(md);
-    // **`data-md` は組んだときに持たせる。** 本物と同じ順（`drawRead` は
-    // `innerHTML` → `armRead` → `armPaper`）。
+    // **本物と同じ順。** `drawRead` は `innerHTML` → `armRead`（＝`armPaper`）
+    // → `findPictures`。順を変えると、札を持たせる前に掛け替えることになる。
     armPaper(box, md, true);
+    findPictures();
     return paperToMd(box, '');
 }
 
@@ -161,7 +188,10 @@ const ONE = {
     '表 揃え 左': '| 名前 | 値 |\n| :--- | --- |\n| あ | 1 |',
     '表 揃え 右': '| 名前 | 値 |\n| ---: | --- |\n| あ | 1 |',
     '表 揃え 中': '| 名前 | 値 |\n| :---: | --- |\n| あ | 1 |',
-    '表 空のセル': '| 名前 | 値 |\n| --- | --- |\n| あ |  |',
+    // **空のセルは、全角空白で埋まって戻る。** 依頼 94・190 で二度決めた
+    // こと ── 中身が空の升は描く側によっては消え、消えた表は「作れなかった」
+    // に見える。丸めているのではなく、**そう決めた**（だから戻る字で書く）。
+    '表 空のセル': '| 名前 | 値 |\n| --- | --- |\n| あ | 　 |',
     '表 三行': '| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |',
     '枠 言語なし': '```\nそのままの字\n```',
     '枠 言語あり': '```rust\nfn main() {}\n```',
