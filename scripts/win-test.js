@@ -28,12 +28,12 @@ const from = src.indexOf('const isEnter =');
 const to = src.indexOf('const ask =');
 if (from < 0 || to < 0 || to < from) {
     console.error('gui/renderer.js から道と鍵の道具を切り出せません'
-        + '（`isEnter` から `dirOf` までの並びが変わりました）');
+        + '（`isEnter` から `fileURL` までの並びが変わりました）');
     process.exit(2);
 }
 // eslint-disable-next-line no-eval
-const { isEnter, baseOf, dirOf } = (0, eval)(
-    src.slice(from, to) + '\n({ isEnter, baseOf, dirOf })'
+const { isEnter, baseOf, dirOf, fileURL } = (0, eval)(
+    src.slice(from, to) + '\n({ isEnter, baseOf, dirOf, fileURL })'
 );
 
 let bad = 0;
@@ -71,6 +71,40 @@ console.log('鍵盤の右の Enter も、Enter として受けるか');
     ok(isEnter({ code: 'NumpadEnter' }) === true, '数字の脇の Enter');
     ok(isEnter({ code: 'Space' }) === false, 'ほかの鍵は受けない');
     ok(isEnter({ code: 'NumpadAdd' }) === false, '数字の脇のほかの鍵も受けない');
+
+    // ── 絵の在りか ──
+    //
+    // 会社の Windows で「この絵は読めません」と出た。`'file://' + 道` は
+    // mac の道（`/` で始まる）だと**たまたま**斜線が三本になって通るが、
+    // Windows の道（`C:\…`）では `C:` が機械の名前として読まれ、円記号は
+    // `%5C` に化ける ── mac では一生出ない。
+    console.log('絵の在りかを、絵に渡せる形にする');
+    ok(fileURL('/Users/t/Documents/amber/attachments/01.png')
+        === 'file:///Users/t/Documents/amber/attachments/01.png',
+        'mac の道は、斜線三本');
+    ok(fileURL('C:\\Users\\t502960\\Documents\\amber\\attachments\\01_rag_start.png')
+        === 'file:///C:/Users/t502960/Documents/amber/attachments/01_rag_start.png',
+        'Windows の道は、円記号を斜線に直して頭に一本足す',
+        fileURL('C:\\Users\\t502960\\Documents\\amber\\attachments\\01_rag_start.png'));
+    ok(!fileURL('C:\\Users\\t\\絵.png').includes('%5C'),
+        '円記号は %5C のまま残さない',
+        fileURL('C:\\Users\\t\\絵.png'));
+    ok(fileURL('\\\\server\\share\\絵.png').startsWith('file://server/share/'),
+        'ネットワークの置き場所は、斜線二本のまま（機械の名前が入る）',
+        fileURL('\\\\server\\share\\絵.png'));
+    ok(fileURL('/Users/t/あ い/絵.png') === 'file:///Users/t/%E3%81%82%20%E3%81%84/%E7%B5%B5.png',
+        '空白と日本語は、逃がす',
+        fileURL('/Users/t/あ い/絵.png'));
+    ok(fileURL('') === 'file:///', '道が無くても落ちない');
+
+    // 道を繋いだうえで、ちゃんと URL になるか（実物と同じ順で通す）。
+    console.log('ノートの隣の絵を、道からたどる');
+    const dir = dirOf('C:\\Users\\t502960\\Documents\\amber\\手順.md');
+    ok(dir === 'C:\\Users\\t502960\\Documents\\amber\\', '道の頭が取れる', dir);
+    ok(fileURL(dir + 'attachments/01_rag_start.png')
+        === 'file:///C:/Users/t502960/Documents/amber/attachments/01_rag_start.png',
+        'ノートの隣の attachments へ繋がる',
+        fileURL(dir + 'attachments/01_rag_start.png'));
 }
 
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');

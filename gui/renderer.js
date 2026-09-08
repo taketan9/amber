@@ -29,6 +29,23 @@ const isEnter = (e) => e.code === 'Enter' || e.code === 'NumpadEnter';
 const baseOf = (at) => String(at || '').split(/[/\\]/).pop();
 /// その一片を落とした残り（末尾の区切りは残す ── 後ろに名前を繋ぐため）。
 const dirOf = (at) => String(at || '').replace(/[^/\\]*$/, '');
+
+/// ファイルの道を、絵に渡せる `file:` の形にする。
+///
+/// **Windows の道は、そのままでは URL にならない。**
+/// `'file://' + encodeURI('C:\\Users\\…\\絵.png')` は
+/// `file://C:%5CUsers%5C…` になる ── `C:` が**機械の名前**として読まれ、
+/// 円記号は `%5C` に化ける。会社の端末で「この絵は読めません」と出たのは
+/// これ（mac の道は `/` で始まるので、たまたま斜線が三本になっていた）。
+///
+/// 正しい形は `file:///C:/Users/…`。円記号を `/` に直し、頭に一本足す。
+/// **`\\\\server\\share` は別**（機械の名前が入るので、斜線は二本のまま）
+/// ── 会社の置き場所はネットワークの向こうのことがある。
+const fileURL = (at) => {
+    const p = String(at || '').replace(/\\/g, '/');
+    if (p.startsWith('//')) return 'file:' + encodeURI(p);
+    return 'file://' + encodeURI(p.startsWith('/') ? p : '/' + p);
+};
 const ask = (method, params) => window.amber.call(method, params || {});
 
 /// **この画面を開いているアプリが、その口を持っていないとき。**
@@ -1408,15 +1425,16 @@ function drawZones() {
             const box = document.createElement('div');
             box.className = 'zoneimg';
             const img = document.createElement('img');
-            img.src = /^file:/i.test(w.src) ? w.src
-                : 'file://' + encodeURI(w.src.startsWith('/') ? w.src : dir + w.src);
             img.alt = w.alt;
             // **読めない絵は、黙って空けない。** 貼り間違いに気づけるように、
-            // 何が読めなかったのかを出す。
-            img.onerror = () => {
+            // 何が読めなかったのかを出す ── ただし、**手を尽くしてから**。
+            // 前はここだけ助け船（`fileBytes`）を持っておらず、読む面では
+            // 出る絵が、コードの面でだけ「読めません」と言っていた。
+            if (/^file:/i.test(w.src)) img.src = w.src;
+            else showPicture(img, absPath(w.src, dir), () => {
                 box.classList.add('bad');
                 box.textContent = 'この絵は読めません: ' + w.src;
-            };
+            });
             box.append(img);
             zones.push(acc.addZone({
                 afterLineNumber: w.line,
@@ -1871,6 +1889,40 @@ function landAt(node, after) {
     const sel = getSelection();
     sel.removeAllRanges();
     sel.addRange(r);
+}
+
+/// ノートの隣に置かれた絵の、ほんとうの在りか。
+function absPath(src, dir) {
+    return src.startsWith('/') || /^[a-z]:[/\\]/i.test(src) ? src : dir + src;
+}
+
+/// 絵を出す。**読めなかったら、開いているアプリに読んでもらう。**
+///
+/// この画面は crmaine の `<webview>` の中でも動く。あちらでは `file://` の
+/// 絵が届かず、**見本のノートの絵だけが出ない**ことになっていた（amber 自身
+/// の窓では出るので、撮っても分からない ── 向こうで開くまで分からない）。
+///
+/// `fileBytes` は同梱する側も持っている口で、読んだ中身をそのまま返す ──
+/// `data:` なら、どの入れ物でも出る。**先に `file:` を試すのは、そちらが
+/// 安いから**（大きな絵を毎回 base64 にして持ち歩く理由は、出るなら無い）。
+///
+/// **一本にしてある。** 前は読む面とコードの面で別々に書いていて、助け船が
+/// 片方にしか無かった ── 会社の Windows で「この絵は読めません」と出たのは
+/// そこ（道の直し方も、片方だけ直せば済んでしまう形だった）。
+function showPicture(img, at, onFail) {
+    img.src = fileURL(at);
+    img.addEventListener('error', async () => {
+        // 助け船で入れ替えた絵も出なかったら、もう手が無い ── そのとき言う。
+        if (onFail) img.addEventListener('error', onFail, { once: true });
+        try {
+            const got = await window.amber.fileBytes(at);
+            if (got && got.b64) {
+                img.src = 'data:image/' + (got.ext || 'png') + ';base64,' + got.b64;
+                return;
+            }
+        } catch { /* 読めないものは読めない */ }
+        if (onFail) onFail();
+    }, { once: true });
 }
 
 /// この窓の「表示」の面を、上の切り出しに繋ぐ薄い包み。
@@ -4003,27 +4055,7 @@ function findPictures() {
     for (const img of el('read').querySelectorAll('img')) {
         const src = img.getAttribute('src') || '';
         if (src && !/^[a-z][a-z0-9+.-]*:/i.test(src) && !src.startsWith('//')) {
-            const at = src.startsWith('/') ? src : dir + src;
-            img.src = 'file://' + encodeURI(at);
-            // **読めなかったら、開いているアプリに読んでもらう。**
-            //
-            // この画面は crmaine の `<webview>` の中でも動く。あちらでは
-            // `file://` の絵が届かず、**見本のノートの絵だけが出ない**
-            // ことになっていた（amber 自身の窓では出るので、撮っても
-            // 分からない ── 向こうで開くまで分からない）。
-            //
-            // `fileBytes` は同梱する側も持っている口で、読んだ中身を
-            // そのまま返す ── `data:` なら、どの入れ物でも出る。
-            // **先に `file://` を試すのは、そちらが安いから**（大きな絵を
-            // 毎回 base64 にして持ち歩く理由は、出るなら無い）。
-            img.addEventListener('error', async () => {
-                if (img.dataset.asked) return;
-                img.dataset.asked = '1';
-                try {
-                    const got = await window.amber.fileBytes(at);
-                    if (got && got.b64) img.src = 'data:image/' + (got.ext || 'png') + ';base64,' + got.b64;
-                } catch { /* 読めないものは読めない ── 枠だけ残る */ }
-            }, { once: true });
+            showPicture(img, absPath(src, dir));
         }
         // **`alt` は書いた人の言葉。** 出せば説明になり、出さなければ
         // 読み上げにしか届かない字になる。書いていなければ何も足さない
