@@ -24,6 +24,18 @@ const fs = require('fs');
 const path = require('path');
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'gui', 'renderer.js'), 'utf8');
+
+// **鍵の言い換えは、土台のふりをして試す。** `MAC` は `navigator` を見て
+// 決まるので、Windows のふりをしてから切り出す ── mac で走らせても
+// Windows の答えが出る（この試験の値打ちはそこ）。
+// `navigator` は新しい node では書き換えられない（読むだけ）ので、
+// 切り出しの中だけで名前を隠す。
+const keySrc = src.slice(src.indexOf('const MAC ='), src.indexOf('const ask ='));
+// eslint-disable-next-line no-eval
+const { keyText } = (0, eval)(
+    '(function (navigator) {\n' + keySrc + '\nreturn { keyText };\n})'
+)({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' });
+
 const from = src.indexOf('const isEnter =');
 const to = src.indexOf('const ask =');
 if (from < 0 || to < 0 || to < from) {
@@ -71,6 +83,28 @@ console.log('鍵盤の右の Enter も、Enter として受けるか');
     ok(isEnter({ code: 'NumpadEnter' }) === true, '数字の脇の Enter');
     ok(isEnter({ code: 'Space' }) === false, 'ほかの鍵は受けない');
     ok(isEnter({ code: 'NumpadAdd' }) === false, '数字の脇のほかの鍵も受けない');
+
+    // ── 鍵の並び ──
+    //
+    // 会社の Windows で **`⌘` が出ていた**（本人が見た・2026-09-08）。
+    // あちらに `⌘` という鍵は無いので、**押しようがない案内**が出ていた
+    // ことになる ── mac では一生出ない。表には mac の記号で書いておき、
+    // 出すときに言い換える。
+    console.log('鍵の並びを、その土台の言葉で');
+    ok(keyText('⌘N') === 'Ctrl+N', '⌘ は Ctrl', keyText('⌘N'));
+    ok(keyText('⌘⇧O') === 'Ctrl+Shift+O', '重ねた鍵は + で繋ぐ', keyText('⌘⇧O'));
+    ok(keyText('⌥') === 'Alt', '⌥ は Alt', keyText('⌥'));
+    ok(keyText('⌃') === 'Ctrl', '⌃ も Ctrl', keyText('⌃'));
+    ok(keyText('F12') === 'F12', '記号の無いものは、そのまま', keyText('F12'));
+    ok(keyText('Esc') === 'Esc', 'Esc もそのまま', keyText('Esc'));
+    ok(keyText('⌘←') === 'Ctrl+←', '矢印はどちらの土台でも矢印', keyText('⌘←'));
+    ok(keyText('⌥ 押し') === 'Alt 押し',
+        '記号のあとの言葉は、+ で繋がない（説明であって鍵ではない）', keyText('⌥ 押し'));
+    ok(keyText('') === '' && keyText(undefined) === '', '鍵が無くても落ちない');
+    ok(!/[⌘⌃⇧⌥]/.test(
+        ['⌘N', '⌘⇧O', '⌘/', '⌘⇧/', '⌘←', '⌘→', '⌘⇧P', '⌘E', '⌘D', '⌘S']
+            .map(keyText).join(' ')),
+        'mac の記号が一つも残らない');
 
     // ── 絵の在りか ──
     //

@@ -46,6 +46,38 @@ const fileURL = (at) => {
     if (p.startsWith('//')) return 'file:' + encodeURI(p);
     return 'file://' + encodeURI(p.startsWith('/') ? p : '/' + p);
 };
+/// この窓が乗っている土台。**画面に出す言葉が、ここで変わる。**
+const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent);
+
+/// 鍵の並びを、その土台の言葉で。
+///
+/// **表には mac の記号で書いておく**（`⌘⇧O`）── 一つの書き方に揃えておけば、
+/// 増やす人が迷わない。出すときにここで言い換える。
+///
+/// Windows で `⌘` が出ていた（本人が会社の端末で見た・2026-09-08）。
+/// あちらに `⌘` という鍵は無いので、**押しようがない案内**が出ていたことになる。
+/// 記号だけでなく**繋ぎ方も違う** ── mac は詰めて書き（`⌘⇧O`）、Windows は
+/// `+` で繋ぐ（`Ctrl+Shift+O`）のが、それぞれの土地の書き方。
+const keyText = (k) => {
+    if (!k || MAC) return k || '';
+    const map = { '⌘': 'Ctrl', '⌃': 'Ctrl', '⇧': 'Shift', '⌥': 'Alt' };
+    const parts = [];
+    let rest = '';
+    for (const c of k) {
+        if (map[c]) parts.push(map[c]);
+        else rest += c;
+    }
+    if (!parts.length) return k;
+    // `←` `→` はそのまま（矢印はどちらの土台でも矢印）。
+    //
+    // **記号のあとの言葉は、`+` で繋がない。** 「⌥ 押し」は鍵の並びでは
+    // なく説明なので、`Alt+ 押し` になると読めない ── 空白で始まるなら
+    // そのまま後ろに置く。
+    const tail = rest.trim();
+    if (!tail) return parts.join('+');
+    return /^\s/.test(rest) ? parts.join('+') + ' ' + tail : parts.concat(tail).join('+');
+};
+
 const ask = (method, params) => window.amber.call(method, params || {});
 
 /// **この画面を開いているアプリが、その口を持っていないとき。**
@@ -5544,14 +5576,14 @@ async function cmdKeys() {
     rows.push({ name: '── 窓のこと', sub: 'どこを打っていても効きます' });
     for (const c of CMDS) {
         if (!c.key || !canRun(c)) continue;
-        put(c.name, c.key, '', () => c.run());
+        put(c.name, keyText(c.key), '', () => c.run());
     }
 
     rows.push({ name: '── そのほか' });
     for (const [name, key, sub] of LOOSE_KEYS) put(name, key, sub);
 
     const pick = await askPick('ショートカット一覧',
-        rows.map((r, n) => ({ name: r.name, sub: r.sub || '', key: r.key || '', value: n })),
+        rows.map((r, n) => ({ name: r.name, sub: r.sub || '', key: keyText(r.key), value: n })),
         '選ぶと、その場で実行します');
     if (pick === null) return;
     const hit = rows[pick];
@@ -5563,7 +5595,7 @@ const canRun = (c) => c.need !== 'note' || !!state.open;
 /// 命令のパレット（⌘⇧P）。**名前で探せれば、覚えなくていい。**
 async function palette() {
     const items = CMDS.filter(canRun).map((c) => ({
-        name: c.name, key: c.key || '', value: c.id,
+        name: c.name, key: keyText(c.key), value: c.id,
     }));
     const id = await askPick('何をしますか', items, '↑↓ で選び、Enter で実行');
     if (id === null) return;
@@ -5629,7 +5661,7 @@ function popMenu(items, at) {
         + '<button data-n="' + n + '"' + (c.dim ? ' disabled' : '') + '>'
         + (c.html || escapeHtml(c.name))
         + (c.sub ? '<span class="sub">' + escapeHtml(c.sub) + '</span>' : '')
-        + (c.key ? '<span class="k">' + escapeHtml(c.key) + '</span>' : '')
+        + (c.key ? '<span class="k">' + escapeHtml(keyText(c.key)) + '</span>' : '')
         + '</button>').join('');
     for (const b of box.querySelectorAll('button')) {
         b.onclick = async () => {
@@ -7363,7 +7395,7 @@ function sheet({ title, value, placeholder, items, foot, bare, brand }) {
             '<div class="it' + (n === at ? ' on' : '') + '" data-n="' + n + '">'
             + '<span>' + escapeHtml(i.name) + '</span>'
             + (i.sub ? '<span class="sub">' + escapeHtml(i.sub) + '</span>' : '')
-            + (i.key ? '<span class="k">' + escapeHtml(i.key) + '</span>' : '')
+            + (i.key ? '<span class="k">' + escapeHtml(keyText(i.key)) + '</span>' : '')
             + '</div>').join('');
         for (const row of list.querySelectorAll('.it')) {
             row.onclick = () => closeSheet(hit[Number(row.dataset.n)].value);
@@ -7439,7 +7471,19 @@ const escapeAttr = escapeHtml;
 /* ── 起動 ── */
 
 (async function boot() {
-    if (navigator.userAgent.includes('Mac')) document.body.classList.add('mac');
+    if (MAC) document.body.classList.add('mac');
+    // **釦の吹き出しに書いてある鍵も、土台の言葉に。**
+    //
+    // `index.html` に `title="言葉で探す（⌘F）"` と直に書いてあるものが
+    // ある ── Windows には `⌘` という鍵が無いので、**押しようがない案内**が
+    // 出ていた。一度だけ舐めて言い換える（`keyText` と同じ一本を通す）。
+    if (!MAC) {
+        for (const n of document.querySelectorAll('[title]')) {
+            const t = n.getAttribute('title');
+            if (!/[⌘⌃⇧⌥]/.test(t)) continue;
+            n.setAttribute('title', t.replace(/[⌘⌃⇧⌥][^\s（）()]*/g, (m) => keyText(m)));
+        }
+    }
     el('blankmark').innerHTML = mark(54);
     const saved = await window.amber.recall();
     state.root = saved.root;
