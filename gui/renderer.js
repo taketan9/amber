@@ -2882,54 +2882,6 @@ const MARKS = [
     ],
 ];
 
-/// 道具の絵。**名前は消さない。**
-///
-/// 太字と斜体は Office でも Inkdrop でも同じ形をしているので、絵のほうが
-/// 先に読める ── けれど「注記」や「フロー」は絵だけでは当てられない。
-/// 絵を足して、名前は残す（絵は入口、名前は答え合わせ）。
-///
-/// 一枚 16 の枠に線で描く。字（B・I・H）は塗り、それ以外は線。
-const GLYPH = (t, extra) => '<text x="8" y="12.2" text-anchor="middle" font-size="12.4"'
-    + ' font-family="Georgia, \'Times New Roman\', serif" fill="currentColor"'
-    + ' stroke="none"' + (extra || '') + '>' + t + '</text>';
-
-const MARK_ICONS = {
-    見出し: GLYPH('H'),
-    箇条書き: '<path d="M3 4.4h.01M3 8h.01M3 11.6h.01" stroke-width="2"/>'
-        + '<path d="M6.6 4.4h6.6M6.6 8h6.6M6.6 11.6h6.6"/>',
-    番号リスト: '<text x="1.6" y="6.6" font-size="6.2" font-family="Georgia, serif"'
-        + ' fill="currentColor" stroke="none">1</text>'
-        + '<text x="1.6" y="13.8" font-size="6.2" font-family="Georgia, serif"'
-        + ' fill="currentColor" stroke="none">2</text>'
-        + '<path d="M7 4.6h6.4M7 11.8h6.4"/>',
-    チェックリスト: '<path d="M2.4 3.1h4.5v4.5H2.4z"/><path d="M3.5 5.4 4.5 6.4 6 4.6"/>'
-        + '<path d="M9.3 5.4h4.3"/><path d="M2.4 9.4h4.5v4.5H2.4z"/><path d="M9.3 11.7h4.3"/>',
-    太字: GLYPH('B', ' font-weight="700"'),
-    斜体: GLYPH('I', ' font-style="italic"'),
-    取り消し線: GLYPH('S') + '<path d="M2.6 8h10.8"/>',
-    画像: '<path d="M2 3.4h12v9.2H2z"/><path d="m2 10.6 3.4-3.2 2.5 2.3 2.7-2.9L14 10.2"/>'
-        + '<path d="M5.6 6.1h.01" stroke-width="1.8"/>',
-    フロー: '<path d="M1.8 2.3h4.9v3.4H1.8z"/><path d="M9.3 10.3h4.9v3.4H9.3z"/>'
-        + '<path d="M4.25 5.7v6.3h4.2"/><path d="m7.4 10.9 1.3 1.1-1.3 1.1"/>',
-    リンク: '<path d="M6.7 9.3a3 3 0 0 1 0-4.2l1.6-1.6a3 3 0 1 1 4.2 4.2l-.8.8"/>'
-        + '<path d="M9.3 6.7a3 3 0 0 1 0 4.2l-1.6 1.6a3 3 0 1 1-4.2-4.2l.8-.8"/>',
-    表: '<path d="M1.9 3.3h12.2v9.4H1.9z"/><path d="M1.9 6.5h12.2M1.9 9.6h12.2M7.6 6.5v6.2"/>',
-    水平線: '<path d="M2.4 8h11.2" stroke-width="1.8"/>'
-        + '<path d="M3.2 4.4h9.6M3.2 11.6h6.2" opacity=".38"/>',
-    引用: '<path d="M3.3 3.6v8.8" stroke-width="2"/>'
-        + '<path d="M6.7 5.4h6.6M6.7 8h6.6M6.7 10.6h4.2"/>',
-    注記: '<circle cx="8" cy="8" r="6.1"/><path d="M8 4.9v3.7M8 11h.01" stroke-width="1.7"/>',
-};
-
-/// 一つぶんの絵。持っていない道具は、名前だけで出す。
-function markIcon(name) {
-    const d = MARK_ICONS[name];
-    if (!d) return '';
-    return '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true" fill="none"'
-        + ' stroke="currentColor" stroke-width="1.35" stroke-linecap="round"'
-        + ' stroke-linejoin="round">' + d + '</svg>';
-}
-
 /// いま打っているのは読む面か。
 ///
 /// **見えている面ではなく、焦点で決める。** 並べているときは両方見えて
@@ -2965,18 +2917,18 @@ function drawMarks() {
                 continue;
             }
             const b = document.createElement('button');
-            // **絵だけ。名前は吹き出しへ。**
+            // **名前だけ。絵は置かない。**
             //
-            // 依頼 288 では「名前は消さない」と決めていた（絵だけで当て
-            // られるのは太字と斜体くらい、が理由）── 2026-09-08 に本人が
-            // 覆した。**いつか端末の言葉に合わせて配る**ので、訳の要る字を
-            // 帯に並べておきたくない。
+            // 一度は絵だけにした（2026-09-08 の午前）── 訳の要る字を帯に
+            // 並べたくない、が理由だった。**その日のうちに戻している**：
+            // 「かっこよくなったが、ビギナーには何がなんだか分からない」。
             //
-            // 消せるのは、**窓には指ではなく矢印が居る**から ── 乗せれば
-            // 名前が出る。電話にこの逃げ道は無いので、あちらは別に決める。
-            b.innerHTML = markIcon(name);
+            // **分かることを、訳の都合で捨てない。** 外へ配る日は、字を
+            // その国の言葉に置き換えればいい（絵にしても、`⌗` が「注記」だと
+            // 分かる人はどの国にもいない）。絵も外したのは、名前が答えを
+            // 言っているところに絵を添えても、目が二度読むだけだから。
+            b.textContent = name;
             b.title = key ? `${name}（${keyText(key)}）` : name;
-            b.setAttribute('aria-label', name);
             // 押した瞬間に焦点を奪わない ── 奪うと、どこに入れるかを
             // 決める手がかり（選んだところ）が先に消える。
             b.onmousedown = (e) => e.preventDefault();
@@ -2996,15 +2948,10 @@ function drawMarks() {
             const sep = document.createElement('div');
             sep.className = 'sep';
             const more = document.createElement('button');
-            // **山形一つ。** 上を向いていれば畳める、下を向いていれば
-            // 開ける ── どの言葉の人にも同じ意味で、訳が要らない。
-            // 前は「…」と「たたむ」で、形も字も入れ替わっていた。
-            more.innerHTML = '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"'
-                + ' fill="none" stroke="currentColor" stroke-width="1.8"'
-                + ' stroke-linecap="round" stroke-linejoin="round"><path d="'
-                + (moreMarks ? 'M4 10l4-4 4 4' : 'M4 6l4 4 4-4') + '"/></svg>';
-            more.title = moreMarks ? '畳む' : 'ほかの記号';
-            more.setAttribute('aria-label', more.title);
+            // **字で書く。** 前は「…」で、押すまで何が出るか分からなかった
+            // ── 「ほかの記号」なら、押す前に分かる。
+            more.textContent = moreMarks ? 'たたむ' : 'ほかの記号';
+            more.title = more.textContent;
             more.setAttribute('aria-expanded', String(moreMarks));
             more.classList.toggle('on', moreMarks);
             more.onclick = () => {
