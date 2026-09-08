@@ -13,6 +13,11 @@ struct Making: View {
     /// Called with the title and the tags when 作成 is pressed.
     let make: (String, [String]) -> Void
     let known: [String]
+    /// いま置いてある型（依頼 417）。**一つも無ければ、その段は出ない** ──
+    /// 使っていない人の画面に、空の入れ物を見せない。
+    let stencils: [Note]
+    /// 型が選ばれたとき。ここで作って、この小窓は閉じる。
+    let fromStencil: (Note) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var tags: [String] = []
@@ -31,6 +36,23 @@ struct Making: View {
                         .onSubmit { naming = false }
                     Text("空のままでかまいません。本文の1行目が、そのまま題になります")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+                // **型は、作るところに置く。** 「新しいノート」を押した人が
+                // 探しているのがまさにこれで、献立の奥に置くと見つからない。
+                // 選んだ瞬間に作る ── 型を選んでから題とタグを訊くと、
+                // 型の中に書いてあるものをもう一度訊くことになる。
+                if !stencils.isEmpty {
+                    Section("型から") {
+                        ForEach(stencils, id: \.path) { t in
+                            Button {
+                                fromStencil(t)
+                                dismiss()
+                            } label: {
+                                Label(t.title.isEmpty ? "（タイトルなし）" : t.title,
+                                      systemImage: "doc.on.doc")
+                            }
+                        }
+                    }
                 }
                 Section("タグ") {
                     if !tags.isEmpty {

@@ -823,7 +823,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // 同じ中身のノートをもう一つ（依頼 412）。
         "copy" => {
             let at = std::path::PathBuf::from(arg(p, "path"));
-            let made = crate::note::duplicate(&at, &crate::note::today())?;
+            // `dir` を渡されたら、そこへ写す（テンプレートから作る道）。
+            let into = p["dir"].as_str().map(std::path::PathBuf::from);
+            let made = crate::note::duplicate(&at, into.as_deref(), &crate::note::today())?;
             Ok(serde_json::json!({ "path": made.display().to_string() }))
         }
 

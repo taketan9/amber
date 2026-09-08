@@ -604,6 +604,54 @@ el('title').addEventListener('contextmenu', (e) => {
 });
 
 /// 貼り付けた字から、新しいノートを一本。
+/// **型を置くフォルダの名前。**
+///
+/// 決め打ちの一語 ── 設定にしない。設定にすると「どこに置けば型になるか」
+/// が人によって違い、見本ノートにも書けない（読んだ人の amber では違う
+/// 名前かもしれない）。**ただのフォルダ**なので、中のノートは一覧にも
+/// 普通に出るし、開いて直せる ── 型のための新しい入れ物は作らない。
+const TEMPLATES = 'テンプレート';
+
+/// 型から新しいノートを作る（依頼 417）。
+///
+/// **写す仕組みは「複製」と同じ**（core の `duplicate`）── 行き先だけが
+/// 違う。別の道にすると、`created` を今日にするのを片方だけ直した日に、
+/// 二つの作り方が食い違う。
+///
+/// できたノートは**いま見ているフォルダ**へ（「新しいノート」と同じ）──
+/// どこに出来たか分からない、がいちばん困る。
+async function cmdTemplate() {
+    const rows = state.notes.filter(
+        (n) => n.book === TEMPLATES || n.book.startsWith(TEMPLATES + '/'));
+    if (!rows.length) {
+        // **どうすれば使えるかを言う。** 「ありません」だけだと、
+        // 作れないのか置き場所が違うのかが分からない。
+        say('「' + TEMPLATES + '」フォルダを作って、中にノートを置くと型になります');
+        return;
+    }
+    const path = await askPick('どの型から',
+        sortNotes(rows).map((n) => ({
+            name: n.title || '（タイトルなし）',
+            sub: n.book === TEMPLATES ? '' : n.book.slice(TEMPLATES.length + 1),
+            value: n.path,
+        })), '選ぶと、その中身で新しいノートを作ります');
+    if (path === null) return;
+    // **型のフォルダを見ているときは、いちばん上に作る。** そこに作ると
+    // 型が増えていくだけで、書いたものがどこにも出てこない。
+    const here = state.dest.kind === 'book' && state.dest.what !== TEMPLATES
+        && !state.dest.what.startsWith(TEMPLATES + '/')
+        ? state.root + '/' + state.dest.what
+        : state.root;
+    try {
+        const r = await ask('copy', { path, dir: here });
+        await reload({ quiet: true });
+        await openNote(r.path);
+        if (editor) editor.focus();
+    } catch (e) {
+        say('作れません: ' + why(e));
+    }
+}
+
 /// 同じ中身のノートをもう一つ（依頼 412）。
 ///
 /// **先に保存する。** 打った字がまだファイルに無いうちに写すと、写しは
@@ -5798,6 +5846,8 @@ function walk(step) {
 /// 置き場所（いつもある）。`menu` が真なら、⋯ の献立にも出る。
 const CMDS = [
     { id: 'new', name: '新しいノート', key: '⌘N', run: () => newNote() },
+    { id: 'tmpl', name: 'テンプレートから新しいノート', sub: '「' + TEMPLATES + '」フォルダの中身',
+      run: cmdTemplate },
     { id: 'outside', name: 'ambər フォルダ以外のノートを開く', key: '⌘O', app: true,
       run: cmdOpenOutside },
     // **`⌘S` は「現状バージョン保存」が持っている**（受け口は捕捉の段）。

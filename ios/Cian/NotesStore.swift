@@ -1109,6 +1109,27 @@ final class NotesStore: ObservableObject {
         reload()
     }
 
+    /// **型を置くフォルダの名前**（窓と同じ一語・依頼 417）。
+    ///
+    /// 決め打ちにする ── 設定にすると「どこに置けば型になるか」が人に
+    /// よって違い、見本ノートにも書けない。ただのフォルダなので、中の
+    /// ノートは一覧にも普通に出るし、開いて直せる。
+    static let templates = "テンプレート"
+
+    /// いま置いてある型。**無ければ空** ── フォルダが無いのは普通のこと。
+    var stencils: [Note] {
+        notes.filter { $0.book == Self.templates || $0.book.hasPrefix(Self.templates + "/") }
+    }
+
+    /// 型から新しいノートを作る。**写す仕組みは「複製」と同じ**（core の
+    /// `duplicate`）で、行き先だけが違う ── いちばん上へ置く。
+    func fromStencil(_ note: Note) throws -> String? {
+        guard let root else { return nil }
+        let got = try Cian.call("copy", ["path": note.path, "dir": root.path])
+        reload()
+        return got["path"] as? String
+    }
+
     /// 同じ中身のノートをもう一つ（依頼 412）。できたほうを返す。
     ///
     /// 何を写して何を写さないかは core が決める（`created` は今日・題は

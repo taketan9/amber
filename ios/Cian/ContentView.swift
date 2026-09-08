@@ -295,7 +295,14 @@ struct ContentView: View {
                     desk.open(note, store)
                     showing = true
                 }
-            }, known: store.allTags)
+            }, known: store.allTags, stencils: store.stencils, fromStencil: { t in
+                do {
+                    guard let made = try store.fromStencil(t),
+                          let note = store.notes.first(where: { $0.path == made }) else { return }
+                    desk.open(note, store)
+                    showing = true
+                } catch { store.trouble = error.localizedDescription }
+            })
         }
 
     }

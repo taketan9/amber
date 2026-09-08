@@ -581,8 +581,16 @@ pub fn create(
 /// 絵は写さない ── `attachments/` は同じフォルダの中で、二つのノートが
 /// 同じ一枚を指すだけ。ノートを消しても絵は残る（`delete` は `.md` しか
 /// 消さない）ので、片方を消してもう片方の絵が欠ける、は起きない。
-pub fn duplicate(at: &std::path::Path, today: &str) -> anyhow::Result<std::path::PathBuf> {
-    let dir = at.parent().unwrap_or(std::path::Path::new("."));
+///
+/// `into` を渡せば、そこへ写す（テンプレートから作るとき・依頼 417）──
+/// **写す仕組みは一つ**にする。「型から作る」を別の道にすると、`created`
+/// を今日にするのを片方だけ直した日に、二つの作り方が食い違う。
+pub fn duplicate(
+    at: &std::path::Path,
+    into: Option<&std::path::Path>,
+    today: &str,
+) -> anyhow::Result<std::path::PathBuf> {
+    let dir = into.unwrap_or_else(|| at.parent().unwrap_or(std::path::Path::new(".")));
     let file = crate::text::read(at)?;
     let text = file.lines.join("\n");
     let text = set_field(&text, "created", Some(today));
@@ -1448,7 +1456,7 @@ mod tests {
             "---\ntitle: 段取り\ncreated: 2020-01-01\nupdated: 2020-02-02\ntags: [仕事]\n---\n\n# 段取り\n\n本文。\n",
         )
         .unwrap();
-        let made = super::duplicate(&at, "2026-09-08").unwrap();
+        let made = super::duplicate(&at, None, "2026-09-08").unwrap();
         // 元は触らない。
         assert!(at.is_file());
         assert_eq!(made.file_name().unwrap(), "段取り-2.md");
@@ -1463,8 +1471,14 @@ mod tests {
         assert!(!got.contains("2020-01-01"), "{got}");
         assert!(!got.contains("updated:"), "{got}");
         // もう一度写しても、上書きしない。
-        let again = super::duplicate(&at, "2026-09-08").unwrap();
+        let again = super::duplicate(&at, None, "2026-09-08").unwrap();
         assert_eq!(again.file_name().unwrap(), "段取り-3.md");
+
+        // 行き先を渡せば、そこへ。**同じ名前で置ける**（別のフォルダなので）。
+        let other = dir.path().join("仕事");
+        let there = super::duplicate(&at, Some(&other), "2026-09-08").unwrap();
+        assert_eq!(there.parent().unwrap(), other);
+        assert_eq!(there.file_name().unwrap(), "段取り.md");
     }
 
 
