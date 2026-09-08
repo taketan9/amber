@@ -5491,7 +5491,7 @@ function readMenu(e) {
     const box = t.closest('.box');
     if (box) { popMenu([
         { name: '済み／未済を入れ替える', run: () => box.click() },
-        { name: 'この下に一つ足す', run: () => { landAfter(box); readMark('line', '- [ ] ', true); } },
+        { name: 'この下に一つ足す', run: () => { landOnBox(box); readMark('line', '- [ ] ', true); } },
     ], at); return; }
 
     // リンクの上。
@@ -5530,7 +5530,14 @@ function readMenu(e) {
 
 /// 升のある行へ caret を置く（`landAt` は切り出しの側にある一本を使う ──
 /// 同じことをする関数を二つ持たない）。
-function landAfter(box) {
+///
+/// **名前を分けてある**（依頼 424）。前は `landAfter` という名前で、
+/// **`readSourceEdit` の末尾にある同じ名前の関数を上書きしていた** ──
+/// 関数の宣言は後ろが勝つので、記号（チェックリスト・リンク・表・水平線）や
+/// 絵の大きさを表示の面から直すたびに、ここへ番号が渡って落ちていた。
+/// 落ちるのは書き終えた**あと**なので、字は入る ── caret だけがどこかへ
+/// 行き、`console` にだけ跡が残る。総ざらいで見つけた。
+function landOnBox(box) {
     const li = box.closest('li') || box.parentElement;
     if (li) landAt(li);
 }

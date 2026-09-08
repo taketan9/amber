@@ -43,3 +43,7 @@ gui/electron.txt
 ios/build/
 ios/*.xcodeproj/xcuserdata/
 ios/*.xcodeproj/project.xcworkspace/
+
+# 手元の設定と、作りかけの枝（スキルは共有する）
+.claude/settings.local.json
+.claude/worktrees/
