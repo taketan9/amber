@@ -210,6 +210,13 @@ const ONE = {
     'リンク 題が空': '[](https://example.com/)',
     '絵': '![題](attachments/あ.png)',
     '絵 題が空': '![](attachments/あ.png)',
+    // **生の HTML は、字として戻ること。** core は札を逃がして字にするので
+    // （`esc`）、面に知らない札は現れない ── 人が書いた `<details>` が、
+    // 保存のたびに削られたりしないことを、ここで見張る。
+    '生の HTML': '<details>\n<summary>ひらく</summary>\n中身\n</details>',
+    '行の中の札': 'これは <sup>上付き</sup> です。',
+    'script も字': '<script>alert(1)</script>',
+    '記号を逃がした字': 'a &lt; b &amp; c',
     '字下げ 全角空白': '　字下げた段落です。',
     '字下げ 二つ': '　　二段さがり。',
 };

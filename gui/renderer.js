@@ -4796,10 +4796,15 @@ function findPictures() {
 el('read').addEventListener('click', async (e) => {
     const box = e.target.closest('.box');
     if (box) {
-        // **打ち込みと同じ道を通す。** `check` は字を返すだけで、保存は
-        // いつもの `save()` ── だから衝突の検査も同じものが効く。
+        // **押した瞬間に裏返す。** 字を待たない ── 100ms 後に変わるのは
+        // 「効いたか分からない」の入口（`PAPER.ja.md` 六章の己）。升の
+        // 状態は DOM が既に持っている（`aria-pressed`）ので、そこを先に。
         const line = Number(box.dataset.line);
         const done = box.textContent.trim() === '☐';
+        box.textContent = done ? '☑' : '☐';
+        box.setAttribute('aria-pressed', String(done));
+        // **判断は core。** `check` は字を返すだけで、保存はいつもの
+        // `save()` ── だから衝突の検査も同じものが効く。
         try {
             const r = await ask('check', { text: whole(), line, done });
             const cut = await ask('split', { text: r.text });
@@ -4809,8 +4814,17 @@ el('read').addEventListener('click', async (e) => {
             state.head = cut.head || '';
             state.dirty = true;
             await save();
-            await drawRead();
+            // **組み直さない**（`PAPER.ja.md` 六章の己）── 見た目は既に
+            // 裏返っていて、組み直す理由が無い。組み直せば caret が飛び、
+            // 長いノートでは一瞬止まる。行番号は動いていない（升の一文字が
+            // 変わっただけ）ので、札を持たせ直すだけでよい。
+            armRead();
+            drawCount();
+            if (tocOn) drawToc();
         } catch (err) {
+            // 効かなかった ── 見た目を戻す（裏返したままにしない）。
+            box.textContent = done ? '☐' : '☑';
+            box.setAttribute('aria-pressed', String(!done));
             say('直せません: ' + err.message);
         }
         return;

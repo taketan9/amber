@@ -275,8 +275,13 @@ struct Paper: UIViewRepresentable {
       const mark = e.target.closest('.box');
       if (mark) {
         e.preventDefault();
+        const done = mark.getAttribute('aria-pressed') !== 'true';
+        // **押した瞬間に裏返す**（窓と同じ・依頼 408）── 指で押したものが
+        // 何拍か置いて変わるのは「効いたか分からない」の入口。core の答えは
+        // このあと来るが、升の状態は DOM が既に持っている。
+        mark.setAttribute('aria-pressed', String(done));
         window.webkit.messageHandlers.tick.postMessage({
-          line: Number(mark.dataset.line), done: mark.getAttribute('aria-pressed') !== 'true',
+          line: Number(mark.dataset.line), done,
         });
         return;
       }
@@ -538,6 +543,8 @@ struct Paper: UIViewRepresentable {
         private var shown = ""
         private var darkShown: Bool?
         private var sizeShown: Int?
+        /// 升を押したところ ── 次に来る字は、面の上に既に出ている。
+        private var ticking = false
 
         init(_ parent: Paper) { self.parent = parent }
 
@@ -552,6 +559,12 @@ struct Paper: UIViewRepresentable {
         func show(_ text: String, dark: Bool, size: Int) {
             guard ready, let web,
                   text != shown || dark != darkShown || size != sizeShown else { return }
+            // 升を押したぶんの字なら、**憶えるだけで組み直さない**。
+            if ticking {
+                ticking = false
+                shown = text
+                return
+            }
             shown = text
             darkShown = dark
             sizeShown = size
@@ -583,6 +596,11 @@ struct Paper: UIViewRepresentable {
                 guard let d = m.body as? [String: Any],
                       let line = (d["line"] as? NSNumber)?.intValue,
                       let done = d["done"] as? Bool else { return }
+                // **組み直さない。** 升は面の上で既に裏返っていて、core が
+                // 返すのは同じ姿 ── 組み直せば caret が飛び、長いノートでは
+                // 一瞬止まる（窓と同じ直し・依頼 408）。次に来る字は
+                // 「もう出してある」ものとして受ける。
+                ticking = true
                 parent.onCheck?(line, done)
             case "fix":
                 if let md = m.body as? String { parent.onFix?(md) }
