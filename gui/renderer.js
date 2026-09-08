@@ -604,6 +604,97 @@ el('title').addEventListener('contextmenu', (e) => {
 });
 
 /// 貼り付けた字から、新しいノートを一本。
+/// **一本の Web ページを、一本のノートに**（依頼 421・乙）。
+///
+/// 甲（ブラウザで選んでコピー → 貼る）が「要るところだけ」なら、
+/// こちらは「まるごと」── あとで読むために丸ごと置いておきたいとき。
+///
+/// **本文らしいところだけ採る。** ページには案内も広告も足もあるので、
+/// `article` があればそれを、無ければ**いちばん字の多いかたまり**を。
+/// 完全ではないが、全部貼るよりは読める（要らない行は消せばよい）。
+async function cmdClip() {
+    // コピーしてあるなら、最初から入れておく ── URL は打つものではなく、
+    // たいてい既に手元にある。
+    let seed = '';
+    try {
+        const t = (await navigator.clipboard.readText()).trim();
+        if (/^https?:\/\//i.test(t)) seed = t;
+    } catch { /* 読めなくても、打てばよい */ }
+    const url = await askText('Web から取り込む', seed, 'ページの URL を貼ってください');
+    if (url === null || !url.trim()) return;
+    say('取りに行っています…');
+    const got = await window.amber.fetchPage(url.trim());
+    if (!got || got.error) { say('取り込めません: ' + (got?.error || '返事がありません')); return; }
+    let md = '';
+    let title = '';
+    try {
+        const body = webClean(got.html, got.url);
+        title = clipTitle(got.html);
+        md = webToMd(bestPart(body).outerHTML, got.url);
+    } catch (e) {
+        say('読めません: ' + why(e));
+        return;
+    }
+    if (!md.trim()) { say('本文が見つかりませんでした'); return; }
+    // **出どころは本文の最後に、字として。** 前書きに `source:` を足す道は
+    // 採らない ── amber の都合をノートに書かない（芯の 1）。この一行なら、
+    // メモ帳で開いた人にもそのまま読める。
+    const from = (() => {
+        try { return new URL(got.url).host + new URL(got.url).pathname; } catch { return got.url; }
+    })();
+    // **その機械の今日。** `toISOString()` は世界標準時なので、日本の
+    // 朝に取り込むと前の日の日付が入る（前書きの `created` は core が
+    // 入れた今日で、そこと一日ずれた）。
+    const day = new Date();
+    const today = day.getFullYear() + '-'
+        + String(day.getMonth() + 1).padStart(2, '0') + '-'
+        + String(day.getDate()).padStart(2, '0');
+    const body = md + '\n\n---\n\n出典: [' + from + '](' + got.url + ')（'
+        + today + ' に取り込み）\n';
+    try {
+        const made = await newNote(title);
+        if (!made || !editor) return;
+        loading = true;
+        // 前書きの後ろに一行空ける ── 新しいノートがそう作られるので、
+        // ここで詰めると、取り込んだだけのノートが**同期先で差分**になる
+        // （`readSourceEdit` と同じ理由）。
+        editor.setValue(state.head ? '\n' + body : body);
+        loading = false;
+        state.dirty = true;
+        await save();
+        await drawRead();
+    } catch (e) {
+        say('作れません: ' + why(e));
+    }
+}
+
+/// ページの題。**`<title>` から、サイト名の尻尾を落とす** ──
+/// 「段取りの決め方 | example」の `| example` は、ノートの題には要らない。
+function clipTitle(html) {
+    const raw = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] || '';
+    const t = new DOMParser().parseFromString('<p>' + raw + '</p>', 'text/html')
+        .body.textContent.trim();
+    return edges(t.split(/\s+[|｜–—-]\s+/)[0] || t).slice(0, 120);
+}
+
+/// 本文らしいところ。**`article` が名乗っていれば、それを信じる。**
+///
+/// 無ければ、いちばん字の多いかたまり ── 案内も足も、字の量では本文に
+/// 勝てない。勝てないところまでしか当てられないので、外れたら人が消す。
+function bestPart(body) {
+    const named = body.querySelector('article, [role="main"], main');
+    if (named && named.textContent.trim().length > 200) return named;
+    let best = body;
+    let most = body.textContent.trim().length;
+    for (const n of body.querySelectorAll('*')) {
+        const len = n.textContent.trim().length;
+        // **半分より少なくなるところまでは降りない。** 降りすぎると、
+        // 長い一段落だけを採って前後を捨てることになる。
+        if (len > most * 0.6 && len < most) { best = n; most = len; }
+    }
+    return best;
+}
+
 /// **型を置くフォルダの名前。**
 ///
 /// 決め打ちの一語 ── 設定にしない。設定にすると「どこに置けば型になるか」
@@ -1045,6 +1136,20 @@ function makeEditor() {
             // **変換の途中かどうかを、エディタからも受ける。** 読む面は
             // `compositionstart` を持っているが、Monaco は自分の中で
             // 変換を扱うので、こちらから聞かないと分からない。
+            // **コードの面に貼るときも、HTML は Markdown に**（依頼 421）。
+            //
+            // 面によって貼れるものが違う、を作らない ── ブラウザで
+            // コピーした人は、どちらの面に貼っても同じものが入ると思う。
+            // Monaco の `onDidPaste` は入ったあとなので間に合わない:
+            // 素の `paste` を先に捕まえて、自分で入れる。
+            el('ed').addEventListener('paste', (e) => {
+                if (!e.clipboardData) return;
+                const md = clipText(e.clipboardData);
+                if (md === e.clipboardData.getData('text/plain')) return;   // 直すものが無い
+                e.preventDefault();
+                e.stopPropagation();
+                put(md);
+            }, true);
             editor.onDidCompositionStart?.(() => { composing = true; });
             editor.onDidCompositionEnd?.(() => { composing = false; });
 
@@ -1624,17 +1729,64 @@ document.addEventListener('selectionchange', () => {
 });
 el('read').addEventListener('blur', () => { clearTimeout(readTimer); syncRead(); }, true);
 
-/// 貼り付けは**字だけ**入れる。
+/// 貼り付けは**字だけ**入れる ── ただし、よそから来た HTML は
+/// **Markdown の字に直してから**（依頼 421）。
 ///
-/// よそから来た HTML をそのまま入れると、`inlineToMd` が知らない札が
-/// 混ざり、字に戻したときに消える ── 貼ったつもりのものが無い、が
-/// いちばん悪い。絵の貼り付けは別に拾っている。
+/// HTML をそのまま面に入れると、`inlineToMd` が知らない札が混ざり、
+/// 字に戻したときに消える ── 貼ったつもりのものが無い、がいちばん悪い。
+/// かといって字だけにすると、**見出しも一覧もリンクも落ちる**（ブラウザで
+/// 選んでコピーした人が欲しかったのは、まさにそこ）。
+///
+/// だから途中に一枚挟む: `webToMd` が均して、`blockToMd` が字にする。
+/// 絵の貼り付けは別に拾っている。
 el('read').addEventListener('paste', (e) => {
     if (!e.clipboardData) return;
     if ([...e.clipboardData.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'))) return;
     e.preventDefault();
+    const html = e.clipboardData.getData('text/html');
+    const clean = html && html.trim() ? webClean(html, clipBase(html)) : null;
+    // **読む面には、組んだ形のまま入れる。** 字（`## 段取り`）を入れると
+    // そのまま `##` という字が出る ── 実際にそうなった。均したあとの札は
+    // amber が知っているものだけなので、そのまま食える。
+    if (clean && edges(clean.textContent)) {
+        document.execCommand('insertHTML', false, clean.innerHTML);
+        // **貼られた枠に、元の字を持たせる。** 枠は触れないかたまりで、
+        // `paperToMd` は元の字（`data-md`）が無いと**何も書き戻さない**
+        // ── 貼った瞬間から保存が黙って止まる。
+        for (const n of el('read').querySelectorAll('pre')) {
+            if (n.dataset.md === undefined) n.dataset.md = blockToMd(n);
+        }
+        armRead();
+        readChanged();
+        return;
+    }
     document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
 });
+
+/// 貼られたものを、**書く面に入れる字**にする。
+///
+/// **字のほうが長ければ、字を採る。** ブラウザによっては `text/html` に
+/// 飾りだけの殻を入れてくることがあり、均すと中身がほとんど残らない ──
+/// そのとき HTML を採ると、貼ったものが消えたように見える。
+function clipText(data) {
+    const plain = data.getData('text/plain');
+    const html = data.getData('text/html');
+    if (!html || !html.trim()) return plain;
+    let md = '';
+    try {
+        md = webToMd(html, clipBase(html));
+    } catch { /* 読めない HTML は、字として貼る */ }
+    return md && md.length >= plain.trim().length / 2 ? md : plain;
+}
+
+/// コピー元のページ。**ブラウザが書いてくれることがある** ── Chrome と
+/// Safari は `text/html` の頭に `<!--StartFragment-->` と一緒に元の URL を
+/// 添える。無ければ相対のままにする（何も無いよりは、そのほうがまし）。
+function clipBase(html) {
+    return /<html[^>]*\ssourceurl=["']([^"']+)["']/i.exec(html)?.[1]
+        || /<!--\s*sourceURL:\s*(\S+?)\s*-->/i.exec(html)?.[1]
+        || '';
+}
 
 /// Enter で `<div>` ではなく `<p>` を作らせる。
 ///
@@ -1835,6 +1987,17 @@ function blockToMd(node, depth = 0) {
                          '| ' + aligns.join(' | ') + ' |'];
             for (const tr of rows.slice(1)) out.push('| ' + cells(tr).join(' | ') + ' |');
             return out.join('\n');
+        }
+        case 'PRE': {
+            // **読む面からはここへ来ない**（枠は触れないかたまりで、
+            // `paperToMd` が元の字をそのまま返す）── ここへ来るのは
+            // よそから貼られた HTML だけ（依頼 421）。
+            const body = node.textContent.replace(/\n+$/, '');
+            // 中に ``` があるなら、囲みを長くする ── 短いと途中で閉じる。
+            const fence = '`'.repeat(Math.max(3, ...(body.match(/`+/g) || []).map((x) => x.length + 1)));
+            const lang = (node.querySelector('code')?.className || '')
+                .match(/language-([\w+-]+)/)?.[1] || '';
+            return fence + lang + '\n' + body + '\n' + fence;
         }
         case 'BLOCKQUOTE':
             return blockLines(node).map((l) => (l ? '> ' + l : '>')).join('\n');
@@ -2643,6 +2806,117 @@ function showPicture(img, at, onFail) {
         } catch { /* 読めないものは読めない */ }
         if (onFail) onFail();
     }, { once: true });
+}
+
+/* ── よそから来た HTML を、ノートの字に ── */
+
+/// **捨てる札。** 読むためのものではないもの ── 中身ごと落とす。
+const WEB_DROP = 'script,style,noscript,template,svg,canvas,iframe,object,embed,'
+    + 'form,input,button,select,textarea,label,nav,header,footer,aside,'
+    + 'video,audio,source,track,map,area,dialog,menu';
+
+/// **ほどく札。** 入れ物でしかないもの ── 中身は残して、皮だけ剥ぐ。
+///
+/// ほどかないと `blockToMd` の既定に落ち、`<div>` 一枚の中の段落・見出し・
+/// 一覧が**ぜんぶ一行の字**になる（既定は中の字だけ取るので）。
+const WEB_PEEL = 'div,section,article,main,header,footer,figure,figcaption,'
+    + 'details,summary,center,font,small,mark,ins,abbr,time,cite,q,dfn,'
+    + 'picture,tbody,thead,tfoot,colgroup,col,noscript';
+
+/// よそから来た HTML を、**amber が知っている形へ均してから**字にする。
+///
+/// **字に直すのは `blockToMd` 一本**（依頼 421）── 面の書き戻しと同じ道を
+/// 通す。ここでやるのは「均す」ことだけ: 要らない札を落とし、入れ物を
+/// ほどき、絵とリンクの行き先を**絶対の道**にする。二本目の変換器を
+/// 書かないので、片方だけ直した日に貼り付けと書き戻しがずれない。
+///
+/// `base` はコピー元のページの URL（分かるとき）── 相対の行き先は
+/// そのままだと、貼ったノートからは**どこも指していない字**になる。
+function webToMd(html, base) {
+    const body = webClean(html, base);
+    if (!body) return '';
+    // 均したあとの、いちばん上の並びを字にする。
+    const out = [];
+    for (const n of [...body.childNodes]) {
+        const md = n.nodeType === 3
+            ? (edges(n.data) || null)
+            : (n.nodeType === 1 ? blockToMd(n) : null);
+        if (md !== null && md !== '') out.push(md);
+    }
+    // 空行は詰める ── よそのページは空の入れ物が多く、そのままだと
+    // 貼ったノートが隙間だらけになる。
+    return out.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/// よそから来た HTML を、**amber が知っている札だけの形に均す。**
+///
+/// 均した先は「表示」の面がそのまま食える形なので、**読む面に貼るときは
+/// これをそのまま入れる**（字にしてから入れると `##` が字として出る ──
+/// 実際にそうなった）。書く面に貼るときだけ、`webToMd` で字にする。
+function webClean(html, base) {
+    const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+    const body = doc.body;
+    if (!body) return null;
+    for (const n of body.querySelectorAll(WEB_DROP)) n.remove();
+    // 隠してあるものは、読む人に見えていない ── 貼らない。
+    for (const n of body.querySelectorAll('[hidden],[aria-hidden="true"]')) n.remove();
+
+    const abs = (u) => {
+        const t = String(u || '').trim();
+        if (!t || t.startsWith('#') || /^javascript:/i.test(t)) return '';
+        try { return readableUrl(base ? new URL(t, base).href : t); } catch { return t; }
+    };
+
+    // **絵は、字にしてから均す。** `inlineToMd` は `<img>` を捨てる
+    // （読む面では包み（`<figure>`）が元の字を持っているので、それでよい）
+    // ── よそから来た絵はその包みが無いので、ここで `![](…)` に直す。
+    //
+    // **落としてくるのではなく、リンクのまま**（本人が決めた・2026-09-09）
+    // ── `attachments/` へ落とすと、一本取り込むたびにフォルダが重くなり、
+    // 消す道も無い。要る絵だけ、あとで貼り直せる。
+    for (const img of [...body.querySelectorAll('img')]) {
+        const src = abs(img.getAttribute('src'));
+        // 一辺が 1px の絵は、たいてい数を数えるためのもの ── 読む字ではない。
+        const tiny = Number(img.getAttribute('width')) === 1
+            || Number(img.getAttribute('height')) === 1;
+        const alt = (img.getAttribute('alt') || '').trim();
+        img.replaceWith(doc.createTextNode(
+            !src || tiny || src.startsWith('data:') ? '' : `![${alt}](${src})`));
+    }
+    for (const a of [...body.querySelectorAll('a')]) {
+        const href = abs(a.getAttribute('href'));
+        if (href) a.setAttribute('href', href);
+        // 行き先の無いリンクは、リンクではない ── 皮を剥いで字だけ残す。
+        else peel(a);
+    }
+
+    // 入れ物をほどく。**内側から**（外から剥ぐと、剥いだ先をもう一度
+    // 見に行くことになる）。
+    for (const n of [...body.querySelectorAll(WEB_PEEL)].reverse()) peel(n);
+    return body;
+}
+
+/// **人が読める形の行き先。**
+///
+/// `new URL()` は日本語を `%E6%AC%A1` に直す ── 機械には正しいが、
+/// ノートに残る字としては読めない（ノートはただの Markdown なので、
+/// メモ帳で開いた人もこの行を読む）。
+///
+/// **戻して困る字だけは、戻さない** ── 空白と丸括弧は Markdown の
+/// `[字](道)` を途中で閉じてしまう。一つでも混ざっていたら、逃がした
+/// ままの形を返す（読みにくいが、壊れているよりよい）。
+function readableUrl(url) {
+    let plain;
+    try { plain = decodeURI(url); } catch { return url; }
+    return /[\s()<>"'\\]/.test(plain) ? url : plain;
+}
+
+/// 札を外して、中身をその場に残す。
+function peel(node) {
+    const at = node.parentNode;
+    if (!at) return;
+    while (node.firstChild) at.insertBefore(node.firstChild, node);
+    at.removeChild(node);
 }
 
 /// この窓の「表示」の面を、上の切り出しに繋ぐ薄い包み。
@@ -5696,12 +5970,14 @@ async function save() {
     }
 }
 
-async function newNote() {
+/// 新しいノート。`title` を渡すと、その題で作る（Web から取り込むとき ──
+/// **ページの題がそのままファイルの名前になる**ほうが、あとで探せる）。
+async function newNote(title) {
     // いまフォルダを見ているなら、そこに作る ── 「どこに出来たか分からない」
     // のがいちばん困る。
     const dir = state.dest.kind === 'book' ? state.root + '/' + state.dest.what : state.root;
     try {
-        const r = await ask('new', { dir, title: '' });
+        const r = await ask('new', { dir, title: title || '' });
         await reload({ quiet: true });
         await openNote(r.path);
         if (editor) editor.focus();
@@ -6041,6 +6317,7 @@ const CMDS = [
     { id: 'new', name: '新しいノート', key: '⌘N', run: () => newNote() },
     { id: 'tmpl', name: 'テンプレートから新しいノート', sub: '「' + TEMPLATES + '」フォルダの中身',
       run: cmdTemplate },
+    { id: 'clip', name: 'Web から取り込む', sub: 'URL を渡すと、一本のノートに', run: cmdClip },
     { id: 'outside', name: 'ambər フォルダ以外のノートを開く', key: '⌘O', app: true,
       run: cmdOpenOutside },
     // **`⌘S` は「現状バージョン保存」が持っている**（受け口は捕捉の段）。

@@ -463,6 +463,60 @@ app.whenReady().then(() => {
             return false;
         }
     });
+    /// **一本の Web ページを取りに行く**（依頼 421・乙）。
+    ///
+    /// 描く側（renderer）ではなく、ここで取る ── あちらから外へ出ると、
+    /// ノートの中の字が外へ出ていく道を一つ増やすことになる。ここなら
+    /// **人が打った URL のときしか動かない**（呼ぶ道が一つしかない）。
+    ///
+    /// `http`/`https` だけ。`file:` を許すと、ノートの中に書いた道で
+    /// 機械の中のファイルを読み出せることになる。
+    ///
+    /// **大きすぎるものは途中でやめる。** 取り込むのは読む字で、
+    /// 何十 MB もあるページはたいてい読む字ではない。
+    ipcMain.handle('amber:fetchPage', async (_e, url) => {
+        let u;
+        try {
+            u = new URL(String(url));
+        } catch {
+            return { error: '道の形になっていません' };
+        }
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+            return { error: 'http か https の道だけ取り込めます' };
+        }
+        const stop = AbortSignal.timeout(15000);
+        try {
+            const r = await fetch(u.href, {
+                signal: stop,
+                redirect: 'follow',
+                headers: {
+                    // **名乗る。** 名乗らないものを断る先がある。
+                    'User-Agent': 'amber/' + app.getVersion() + ' (+markdown clipper)',
+                    Accept: 'text/html,application/xhtml+xml',
+                },
+            });
+            if (!r.ok) return { error: r.status + ' ' + (r.statusText || '') };
+            const kind = r.headers.get('content-type') || '';
+            if (!/html|xml/i.test(kind)) return { error: 'ページではありません（' + kind + '）' };
+            const buf = await r.arrayBuffer();
+            const CAP = 8 * 1024 * 1024;
+            if (buf.byteLength > CAP) return { error: '大きすぎます（8MB まで）' };
+            // 文字の種類はページが名乗るものを優先する ── 日本語の古い
+            // ページは Shift_JIS のことがあり、UTF-8 で読むと全部化ける。
+            const said = /charset=["']?([\w-]+)/i.exec(kind)?.[1];
+            const head = new TextDecoder('utf-8').decode(buf.slice(0, 4096));
+            const meta = /charset=["']?([\w-]+)/i.exec(head)?.[1];
+            let html;
+            try {
+                html = new TextDecoder(said || meta || 'utf-8').decode(buf);
+            } catch {
+                html = new TextDecoder('utf-8').decode(buf);
+            }
+            return { html, url: r.url || u.href };
+        } catch (e) {
+            return { error: e.name === 'TimeoutError' ? '待っても返事がありません' : e.message };
+        }
+    });
     /// 選んでもらったファイルの中身。**開く側が選んだものだけ** ──
     /// 描く側から好きな道を読ませない（ノートは人が書いたもので、その中身が
     /// ファイルを読む力を持つ理由は無い）。

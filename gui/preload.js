@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('amber', {
     /// ノートの中には書かない ── ノートはただの Markdown のままにする。
     recall: () => ipcRenderer.invoke('amber:recall'),
     remember: (patch) => ipcRenderer.invoke('amber:remember', patch),
+    /// 一本の Web ページを取りに行く（依頼 421・乙）。
+    fetchPage: (url) => ipcRenderer.invoke('amber:fetchPage', url),
     /// OS のダイアログ。描く側からは開けない。
     pickFolder: () => ipcRenderer.invoke('amber:pickFolder'),
     clouds: () => ipcRenderer.invoke('amber:clouds'),
