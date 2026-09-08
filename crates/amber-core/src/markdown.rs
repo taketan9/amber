@@ -837,10 +837,14 @@ fn render(lines: &[String], stamp: bool) -> String {
         if let Some(crate::note::Block::Image { alt, link }) = crate::note::lone_image(t) {
             close_all_lists(&mut out, &mut open_lists, &mut li_open);
             match safe_url(&link) {
-                Some(src) => out.push_str(&format!(
-                    "<img src=\"{src}\" alt=\"{}\">\n",
-                    esc(&alt)
-                )),
+                Some(src) => {
+                    // **大きさは題の中に書く**（Marp と同じ・依頼 413）。
+                    let (alt, size) = picture_size(&alt);
+                    out.push_str(&format!(
+                        "<img src=\"{src}\" alt=\"{}\"{size}>\n",
+                        esc(&alt)
+                    ));
+                }
                 // 出せない先なら、書いてあったものをそのまま字で。
                 // **隠して失うより、出して残す。**
                 None => out.push_str(&format!("<p>{}</p>\n", esc(t))),
@@ -1017,8 +1021,96 @@ fn render(lines: &[String], stamp: bool) -> String {
     out
 }
 
+
+/// **絵の大きさを、題の中の指示から読む**（依頼 413）。
+///
+/// `![width:200px](猫.png)` ── Marp と同じ書き方にした。新しい記法を
+/// 作らないのは、**ここで作った書き方は他のどこでも通じない**から:
+/// GitHub でも VS Code でも、この行はただの絵に見えるだけで壊れない。
+///
+/// 読むのは `width:` `w:` `height:` `h:` の四つ。**残りは題のまま**返す
+/// ので、`![猫 w:200px](…)` は「猫」という説明の付いた 200px の絵になる。
+///
+/// 長さは**数と単位だけ**しか通さない ── `style` に人の書いた字を
+/// そのまま入れる道になるので、`}` や `;` の混ざったものは指示と見なさず、
+/// 題の一部として置いておく（見えなくなるより、見えるほうがよい）。
+fn picture_size(alt: &str) -> (String, String) {
+    let mut words = Vec::new();
+    let (mut w, mut h) = (None, None);
+    for word in alt.split(' ') {
+        let got = match word.split_once(':') {
+            Some(("width", v) | ("w", v)) => length(v).map(|v| (&mut w, v)),
+            Some(("height", v) | ("h", v)) => length(v).map(|v| (&mut h, v)),
+            _ => None,
+        };
+        match got {
+            Some((slot, v)) => *slot = Some(v),
+            None => words.push(word),
+        }
+    }
+    // **片方だけ言われたら、もう片方は釣り合わせる。** `width` だけ指して
+    // 高さを CSS のままにすると、`height:auto` を持たない土台で絵が歪む。
+    let css = match (w, h) {
+        (None, None) => String::new(),
+        (Some(w), None) => format!("width:{w};height:auto"),
+        (None, Some(h)) => format!("height:{h};width:auto"),
+        (Some(w), Some(h)) => format!("width:{w};height:{h}"),
+    };
+    let size = if css.is_empty() { String::new() } else { format!(" style=\"{css}\"") };
+    (words.join(" ").trim().to_string(), size)
+}
+
+/// `200` `200px` `50%` `10em` ── 数と、知っている単位だけ。
+fn length(v: &str) -> Option<String> {
+    let (num, unit) = match v.find(|c: char| !c.is_ascii_digit() && c != '.') {
+        Some(at) => (&v[..at], &v[at..]),
+        None => (v, ""),
+    };
+    if num.is_empty() || !num.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return None;
+    }
+    match unit {
+        // 単位を書かなければ px（Marp と同じ）。
+        "" => Some(format!("{num}px")),
+        "px" | "%" | "em" | "rem" | "vw" | "vh" => Some(format!("{num}{unit}")),
+        _ => None,
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn picture_size_reads_marp_and_keeps_the_words() {
+        let one = |md: &str| super::to_html(&[md.to_string()]);
+
+        let out = one("![width:200px](猫.png)");
+        assert!(out.contains(r#"style="width:200px;height:auto""#), "{out}");
+        assert!(out.contains(r#"alt="""#), "題まで残っている: {out}");
+
+        // 短い書き方と、説明の同居。
+        let out = one("![猫 w:200](猫.png)");
+        assert!(out.contains(r#"style="width:200px;height:auto""#), "{out}");
+        assert!(out.contains(r#"alt="猫""#), "説明が落ちた: {out}");
+
+        // 縦横そろえて言われたら、そのまま。
+        let out = one("![w:200px h:80%](猫.png)");
+        assert!(out.contains(r#"style="width:200px;height:80%""#), "{out}");
+
+        // 大きさを言われていない絵は、いままでどおり。
+        let out = one("![猫](猫.png)");
+        assert!(!out.contains("style="), "{out}");
+        assert!(out.contains(r#"alt="猫""#), "{out}");
+
+        // **指示に見えないものは、指示にしない。** `style` に人の字を
+        // そのまま入れる道を作らない。
+        for bad in ["w:200}", "w:red", "w:", "w:1;color:red", "width:2em;x"] {
+            let out = one(&format!("![{bad}](猫.png)"));
+            assert!(!out.contains("style="), "{bad} が通った: {out}");
+            assert!(out.contains("alt="), "{bad}: {out}");
+        }
+    }
+
 
     /// 組み方を確かめるときは、**行の印を外して見る。**
     ///

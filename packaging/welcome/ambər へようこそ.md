@@ -116,6 +116,9 @@ flowchart LR
 
 窓は**貼り付け**（⌘V）でそのまま入ります。iPhone は下の道具の帯の 🖼 から。
 
+大きさは、題のところに書きます ── `![w:200px](attachments/amber.png)` で
+横 200px。`w:` `h:` のほかに `width:` `height:` も読みます。
+
 ---
 
 ## この先
