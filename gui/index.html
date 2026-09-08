@@ -897,6 +897,12 @@ body.vim #vim { display: block; }
 }
 #sheet .it .k { margin-left: auto; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 #sheet .it .sub { font-size: 11.5px; color: var(--ink-3); }
+/* 描ききれなかったぶんの一行。**押せない** ── 行き先ではなく、断り書き。 */
+#sheet .more { padding: 7px 12px; font-size: 11.5px; color: var(--ink-3); }
+/* 束の見出し。押せないので、行としての床（背景・当たり）を持たない。 */
+#sheet .gp { display: flex; gap: .6em; padding: 11px 12px 3px;
+  font-size: 11.5px; color: var(--ink-3); }
+#sheet .gp .sub { color: var(--ink-3); opacity: .75; }
 #sheet .it.on { background: var(--sel); }
 /* **改行をそのまま出す。** `textContent` に入れた `\n` は既定では
    ただの空白に潰れる ── 二行のつもりで書いた添え書きが一本の長い行に

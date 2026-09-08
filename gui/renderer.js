@@ -5897,7 +5897,7 @@ async function cmdKeys() {
     const rows = [];
     const put = (name, key, sub, run) => rows.push({ name, key, sub, run });
 
-    rows.push({ name: '── 書く道具（記号）', sub: '「表示」でも「コード」でも' });
+    rows.push({ name: '── 書く道具（記号）', sub: '「表示」でも「コード」でも', head: true });
     for (const [name, key, run] of MARKS.flat()) {
         if (name === '|' || !run) continue;
         // 見出しだけ、鍵と釦で振る舞いが違う ── 一打はその深さに直し、
@@ -5907,17 +5907,17 @@ async function cmdKeys() {
     }
     put('マークダウンの書き方', '', '記号そのものを見る', cmdSyntax);
 
-    rows.push({ name: '── 窓のこと', sub: 'どこを打っていても効きます' });
+    rows.push({ name: '── 窓のこと', sub: 'どこを打っていても効きます', head: true });
     for (const c of CMDS) {
         if (!c.key || !canRun(c)) continue;
         put(c.name, keyText(c.key), '', () => c.run());
     }
 
-    rows.push({ name: '── そのほか' });
+    rows.push({ name: '── そのほか', head: true });
     for (const [name, key, sub] of LOOSE_KEYS) put(name, key, sub);
 
     const pick = await askPick('ショートカット一覧',
-        rows.map((r, n) => ({ name: r.name, sub: r.sub || '', key: keyText(r.key), value: n })),
+        rows.map((r, n) => ({ name: r.name, sub: r.sub || '', key: keyText(r.key), head: r.head, value: n })),
         '選ぶと、その場で実行します');
     if (pick === null) return;
     const hit = rows[pick];
@@ -5927,14 +5927,84 @@ async function cmdKeys() {
 const canRun = (c) => c.need !== 'note' || !!state.open;
 
 /// 命令のパレット（⌘⇧P）。**名前で探せれば、覚えなくていい。**
+///
+/// **命令だけではない**（依頼 414）。ここに来る人が探しているのは
+/// 「やること」ではなく「行き先」のことが多い ── ノート・フォルダ・タグ・
+/// いま開いているノートの見出し。名前を打てば全部ここに出る、が
+/// いちばん覚えることが少ない（Inkdrop も VS Code もそうしている）。
+///
+/// **一つの箱に混ぜる。** 種類ごとに別の窓を割り当てると、打つ前に
+/// 「これは何を探すところか」を思い出す仕事が増える ── 打った字が
+/// どれに当たるかは、こちらが数えればよい。
+///
+/// **並びは、近いものから。** 命令 → いま開いているノートの見出し →
+/// ノート → フォルダ → タグ。見出しが上なのは、いま見ているものの中の
+/// 話だから ── 手元の話が画面の下にあると、そこまで目が降りない。
 async function palette() {
-    const items = CMDS.filter(canRun).map((c) => ({
-        name: c.name, key: keyText(c.key), value: c.id,
-    }));
-    const id = await askPick('何をしますか', items, '↑↓ で選び、Enter で実行');
-    if (id === null) return;
-    const c = CMDS.find((x) => x.id === id);
-    if (c) await c.run();
+    const rows = [];
+    const head = (name, sub) => rows.push({ name, sub, head: true });
+
+    head('── すること');
+    for (const c of CMDS.filter(canRun)) {
+        rows.push({ name: c.name, key: keyText(c.key), run: () => c.run() });
+    }
+
+    // いま開いているノートの見出し ── 長いノートの中を歩く道。
+    if (state.open) {
+        let heads = [];
+        try {
+            heads = ((await ask('blocks', { text: whole() })).blocks || [])
+                .filter((b) => b.kind === 'heading');
+        } catch { /* 読めなければ、出さないだけ */ }
+        if (heads.length) {
+            head('── このノートの見出し', state.open.title || '');
+            for (const h of heads) {
+                rows.push({
+                    // 深さを字下げで見せる ── `##` の下の `###` が同じ列に
+                    // 並ぶと、目次に見えない。
+                    name: '　'.repeat(Math.max(0, (h.level || 1) - 1)) + h.text,
+                    run: () => gotoHead(h),
+                });
+            }
+        }
+    }
+
+    head('── ノートを開く', state.notes.length + ' 件');
+    for (const n of sortNotes(state.notes)) {
+        rows.push({
+            name: n.title || '（タイトルなし）',
+            sub: n.book || '',
+            run: () => openNote(n.path),
+        });
+    }
+
+    const go = (kind, what) => () => {
+        state.dest = { kind, what };
+        drawRail();
+        drawList();
+    };
+    if (state.books.length) {
+        head('── フォルダへ');
+        for (const b of state.books) {
+            rows.push({
+                name: b,
+                sub: state.notes.filter((x) => x.book === b || x.book.startsWith(b + '/')).length + ' 件',
+                run: go('book', b),
+            });
+        }
+    }
+    const tags = tagsOf(state.notes);
+    if (tags.length) {
+        head('── タグで絞る');
+        for (const [t, c] of tags) rows.push({ name: t, sub: c + ' 件', run: go('tag', t) });
+    }
+
+    const pick = await askPick('何をしますか',
+        rows.map((r, n) => ({ name: r.name, sub: r.sub || '', key: r.key || '', head: r.head, value: n })),
+        '↑↓ で選び、Enter で実行');
+    if (pick === null) return;
+    const hit = rows[pick];
+    if (hit && hit.run) await hit.run();
 }
 
 /// ⋯ の献立。**パレットと同じ表の、ノートに関わるところだけ。**
@@ -7688,6 +7758,9 @@ let sheetDone = null;
 /// 名札はこちらが書いた決め打ちなので、そこだけ通してよい。
 const BRAND = 'amb<span class="s">ə</span>r';
 
+/// 一度に描く行の上限。**絞る数ではなく、描く数。**
+const SHEET_ROWS = 200;
+
 function sheet({ title, value, placeholder, items, foot, bare, brand }) {
     closeSheet(null);
     const veil = el('veil');
@@ -7724,15 +7797,39 @@ function sheet({ title, value, placeholder, items, foot, bare, brand }) {
         // 打った字を、名前のどこかに含むもの。**部分一致** ── 覚えている
         // のはたいてい真ん中の一語で、頭ではない。
         const hit = items.filter((i) => !q || (i.name + ' ' + (i.sub || '')).toLowerCase().includes(q));
-        at = Math.min(at, Math.max(hit.length - 1, 0));
-        list.innerHTML = hit.map((i, n) =>
-            '<div class="it' + (n === at ? ' on' : '') + '" data-n="' + n + '">'
-            + '<span>' + escapeHtml(i.name) + '</span>'
-            + (i.sub ? '<span class="sub">' + escapeHtml(i.sub) + '</span>' : '')
-            + (i.key ? '<span class="k">' + escapeHtml(keyText(i.key)) + '</span>' : '')
-            + '</div>').join('');
+        // **絞るのは全部から、描くのは頭だけ。**
+        //
+        // 「何をしますか」がノートも行き先も抱えるようになった（依頼 414）
+        // ので、ここに来る数は人のノートの数になった ── 千本のノートを
+        // 持っている人は、一打ごとに千行を組み直すことになる。
+        // **探す範囲は狭めない**（打てば下のものも上がってくる）。
+        const shown = hit.slice(0, SHEET_ROWS);
+        // **見出しの行は、選び目が止まらない。** 押しても何も起きない行に
+        // 選び目が乗っていると、開いた瞬間の Enter が空振りする（「何を
+        // しますか」の一行目がまさにそれだった）。
+        const pickable = shown.filter((i) => !i.head);
+        at = Math.min(at, Math.max(pickable.length - 1, 0));
+        let n = 0;
+        list.innerHTML = shown.map((i) => {
+            if (i.head) {
+                return '<div class="gp"><span>' + escapeHtml(i.name) + '</span>'
+                    + (i.sub ? '<span class="sub">' + escapeHtml(i.sub) + '</span>' : '')
+                    + '</div>';
+            }
+            const k = n++;
+            return '<div class="it' + (k === at ? ' on' : '') + '" data-n="' + k + '">'
+                + '<span>' + escapeHtml(i.name) + '</span>'
+                + (i.sub ? '<span class="sub">' + escapeHtml(i.sub) + '</span>' : '')
+                + (i.key ? '<span class="k">' + escapeHtml(keyText(i.key)) + '</span>' : '')
+                + '</div>';
+        }).join('')
+            // **隠したことを言う。** 黙って切ると「無い」に見える。
+            + (hit.length > shown.length
+                ? '<div class="more">ほか ' + (hit.length - shown.length)
+                  + ' 件 ── 打つと絞れます</div>'
+                : '');
         for (const row of list.querySelectorAll('.it')) {
-            row.onclick = () => closeSheet(hit[Number(row.dataset.n)].value);
+            row.onclick = () => closeSheet(pickable[Number(row.dataset.n)].value);
         }
         list.querySelector('.it.on')?.scrollIntoView({ block: 'nearest' });
         return hit;
@@ -7754,10 +7851,13 @@ function sheet({ title, value, placeholder, items, foot, bare, brand }) {
             if (isEnter(e)) { e.preventDefault(); closeSheet(input.value); }
             return;
         }
+        // **矢印と Enter が歩くのは、描いてある行。** 描いていない行へ
+        // 下りると、選び目が画面の外へ消えたように見える（描く数には
+        // 上限がある ── `SHEET_ROWS`）。
         const hit = items.filter((i) => {
             const q = input.value.trim().toLowerCase();
             return !q || (i.name + ' ' + (i.sub || '')).toLowerCase().includes(q);
-        });
+        }).slice(0, SHEET_ROWS).filter((i) => !i.head);
         if (e.code === 'ArrowDown') { e.preventDefault(); at = Math.min(at + 1, hit.length - 1); draw(); }
         else if (e.code === 'ArrowUp') { e.preventDefault(); at = Math.max(at - 1, 0); draw(); }
         else if (isEnter(e)) {
