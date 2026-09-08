@@ -44,6 +44,24 @@ struct NoteView: View {
             // **戻す・やり直すは流れない。** 記号は横に流れる帯だが、この
             // 二つは押し続けるものなので、端に固定して指の下から逃げない
             // ようにする（窓の「ほかの記号」の釦と同じ考え）。
+            // **caret を動かす矢印。** 「コード」の面は `UITextView` なので
+            // iOS が鍵盤の上に純正の帯（∧ ∨）を出すが、「表示」の面は
+            // `WKWebView` なので出ない ── iPhone で caret を一文字動かすのは
+            // 指では難しい（本人の指摘・2026-09-08）。
+            //
+            // **流れない一列にする。** 打っている間ずっと使うものなので、
+            // 記号の帯に混ぜると流れた先へ行ってしまう（本人が「下の帯が
+            // 二列になってもよい」と言ったのはここ）。
+            HStack(spacing: 2) {
+                arrow("chevron.left", "mv:left")
+                arrow("chevron.up", "mv:up")
+                arrow("chevron.down", "mv:down")
+                arrow("chevron.right", "mv:right")
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 5)
+            Divider()
             HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -87,6 +105,20 @@ struct NoteView: View {
     /// 升のように面を組み直したところで積み木ごと消えるし、「表示」の面には
     /// そもそも届かない。同じ名前の道具が二つあって片方だけ効かないのは、
     /// 見分けの付かない差になる。
+    /// caret を動かす一つ。**絵だけ** ── 四つ並ぶので、名前を付けると
+    /// 一列に収まらない（意味は形で分かる）。
+    private func arrow(_ icon: String, _ what: String) -> some View {
+        Button { hand.mark(what) } label: {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 46, height: 30)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.tint)
+        .accessibilityLabel(["mv:left": "左へ", "mv:up": "上へ",
+                             "mv:down": "下へ", "mv:right": "右へ"][what] ?? "")
+    }
+
     private var steps: some View {
         HStack(spacing: 6) {
             Divider().frame(height: 20)

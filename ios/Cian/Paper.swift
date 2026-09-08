@@ -314,10 +314,29 @@ struct Paper: UIViewRepresentable {
         if (!(li ? checkEnter(li) : false) && !quitEnter(n) && !checkReturn(box)) {
           document.execCommand('insertParagraph');
         }
-      } else if (what === 'in') checkTab(box, false);
+      } else if (what.startsWith('mv:')) move(what.slice(3));
+      else if (what === 'in') checkTab(box, false);
       else if (what === 'out') checkTab(box, true);
       else if (what.startsWith('h')) document.execCommand('formatBlock', false, what);
       box.dispatchEvent(new Event('input'));
+    };
+
+    /// caret を一つ動かす。
+    ///
+    /// **`WKWebView` には、iOS の矢印が付かない。** 「コード」の面は
+    /// `UITextView` なので鍵盤の上に純正の帯（∧ ∨）が出るが、「表示」の面は
+    /// 出ない ── iPhone で caret を一文字動かすのは、指では難しい（本人の
+    /// 指摘・2026-09-08「死ぬほどやりにくい」）。
+    ///
+    /// **`selection.modify` に任せる。** 自分で節を渡り歩くと、升や飾りの
+    /// 境目で止まる ── あちらは字の並びを知っている。
+    const move = (dir) => {
+      box.focus();
+      const sel = getSelection();
+      if (!sel || !sel.modify) return;
+      const by = (dir === 'up' || dir === 'down') ? 'line' : 'character';
+      const to = (dir === 'up' || dir === 'left') ? 'backward' : 'forward';
+      sel.modify('move', to, by);
     };
 
     /// いまの行を、押せる升の付いた一行にする。
