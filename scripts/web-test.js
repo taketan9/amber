@@ -154,7 +154,19 @@ const PARTS = [
         '## 本題\n\n' + 'は'.repeat(200) + '\n\n' + 'に'.repeat(200)],
 ];
 
+// **切り出しが caret の憶えを持っていること**（依頼 461）。
+//
+// 電話の「表示」の面は、絵文字を入れる前にここへ caret を戻す ── 窓の
+// 走査は実際に押して見張っているが、電話は押せないので、**一組が
+// 切り出しの中に居ること**だけでも見ておく（`clipTitle` が外へ出て
+// 電話だけ取り込めなくなった、と同じ形を防ぐ）。
 let bad = 0;
+for (const name of ['markCaret', 'caretBack']) {
+    if (typeof globalThis[name] !== 'function') {
+        bad += 1;
+        console.log('✗ 切り出しに ' + name + ' がありません（電話が caret を戻せません）');
+    }
+}
 for (const [name, html, want] of CASES) {
     const got = webToMd(html, BASE);
     if (got === want) continue;

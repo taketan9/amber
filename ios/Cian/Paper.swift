@@ -164,6 +164,19 @@ struct Paper: UIViewRepresentable {
       #paper .alert{margin:.9em 0;padding:.1em .9em .1em .9em;border-radius:9px;
         border-left:3px solid var(--amber);background:var(--sel)}
       #paper .alert-h{font-weight:700;color:var(--amber-deep);margin:.7em 0 .2em}
+      /* **五つを色で分ける（窓と同じ色）。** 名前が違うだけで見た目が
+         同じだと、警告と備忘が並んだときに見分けられない ── 窓は分けて
+         いて電話だけ一色だった（依頼 465）。 */
+      #paper .alert.note{border-left-color:#3D7FA8}
+      #paper .alert.tip{border-left-color:#5E8C42}
+      #paper .alert.important{border-left-color:#9A6FB5}
+      #paper .alert.warning{border-left-color:#D07A2E}
+      #paper .alert.caution{border-left-color:#C4564E}
+      #paper .alert.note .alert-h{color:#3D7FA8}
+      #paper .alert.tip .alert-h{color:#5E8C42}
+      #paper .alert.important .alert-h{color:#9A6FB5}
+      #paper .alert.warning .alert-h{color:#D07A2E}
+      #paper .alert.caution .alert-h{color:#C4564E}
       #paper .mermaid{margin:1.2em 0;text-align:center;overflow-x:auto}
       #paper .mermaid svg{max-width:100%;height:auto}
       /* 入ってきたもの ── **淡く敷く**（窓と同じ。濃く敷くと字が沈む）。
