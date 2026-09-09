@@ -12,8 +12,8 @@ import WebKit
 /// 取り込むときだけ**で、終われば捨てる ── 常に居るものではない。
 @MainActor
 final class Clipping: NSObject {
-    /// 取りに行ける道か。**`http`/`https` だけ** ── `file:` を許すと、
-    /// 打った道で機械の中のファイルを読み出せることになる（窓と同じ）。
+    /// 取りに行ける URL か。**`http`/`https` だけ** ── `file:` を許すと、
+    /// 打った URL で機械の中のファイルを読み出せることになる（窓と同じ）。
     static func reach(_ text: String) -> URL? {
         var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.isEmpty { return nil }
@@ -28,12 +28,12 @@ final class Clipping: NSObject {
         case road, reply(String), notPage(String), tooBig, empty, js(String)
         var errorDescription: String? {
             switch self {
-            case .road: return "道の形になっていません"
+            case .road: return "URL の形になっていません"
             case .reply(let why): return why
             case .notPage(let kind): return "ページではありません（\(kind)）"
             case .tooBig: return "大きすぎます（8MB まで）"
             case .empty: return "本文が見つかりませんでした"
-            case .js(let why): return "字にできませんでした（\(why)）"
+            case .js(let why): return "本文を読み取れませんでした（\(why)）"
             }
         }
     }

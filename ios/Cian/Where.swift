@@ -25,7 +25,7 @@ struct Where: View {
     /// 判断はぜんぶ `Clipping` と core にあり、ここは繋ぐだけ。
     private func clip() {
         guard let url = Clipping.reach(clipUrl) else {
-            trouble = "道の形になっていません"
+            trouble = "URL の形になっていません"
             return
         }
         clipBusy = true
@@ -52,6 +52,59 @@ struct Where: View {
         }
     }
 
+    /// **URL を訊く紙**（依頼 442 の丙）。
+    ///
+    /// 小窓（`alert`）ではなく紙にしてあるのは、**貼り付けの釦を置けるのが
+    /// 紙だけ**だから。クリップボードを amber から覗くと iOS が毎回
+    /// 「ペーストしてよいか」と訊いてくるが、**人が貼り付けの釦を押した
+    /// こと自体がその答えになる**ので、訊かれない（iOS がそのために
+    /// 用意した釦）。
+    ///
+    /// 釦に出る字（「ペースト」）は iOS が決めるもので、amber からは
+    /// 変えられない ── なので、何をする釦かは下の一行で言う。
+    @ViewBuilder private var clipSheet: some View {
+        NavigationStack {
+            Form {
+                Section("URL を入力する") {
+                    TextField("https://…", text: $clipUrl)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                }
+                Section {
+                    PasteButton(payloadType: String.self) { got in
+                        guard let text = got.first,
+                              let url = Clipping.reach(text) else { return }
+                        clipUrl = url.absoluteString
+                    }
+                    .labelStyle(.titleAndIcon)
+                    .frame(maxWidth: .infinity)
+                } footer: {
+                    Text("クリップボードの URL を貼り付ける")
+                }
+                Section {
+                    Text("ページの本文だけを、一本のノートにします。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Web から取り込む")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("やめる") { clipping = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("取り込む") { clipping = false; clip() }
+                        // **形になっていない間は押させない。** 押してから
+                        // 「URL の形になっていません」と言うより早い。
+                        .disabled(Clipping.reach(clipUrl) == nil)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
     /// 名前を `sheet(item:)` に渡すための包み。
     struct Named: Identifiable {
         let name: String
@@ -64,7 +117,7 @@ struct Where: View {
     @Environment(\.dismiss) private var dismiss
     @State private var zip: URL?
     @State private var trouble: String?
-    /// Web から取り込むときの、道と最中かどうか（依頼 421 の乙）。
+    /// Web から取り込むときの、URL と最中かどうか（依頼 421 の乙）。
     @State private var clipping = false
     @State private var clipUrl = ""
     @State private var clipBusy = false
@@ -127,12 +180,13 @@ struct Where: View {
 
                 Section {
                     // **Web から取り込む**（依頼 421 の乙・窓と同じ）。
-                    // 電話で「これ残しておきたい」と思うのはたいてい
-                    // Safari の中なので、道を打つのではなく**写してから
-                    // ここを押す**形にしてある（欄には既に入っている）。
+                    //
+                    // **押しただけでクリップボードを覗かない**（依頼 442）。
+                    // 覗くと iOS が毎回「ペーストしてよいか」と訊いてきて、
+                    // amber の言葉ではない小窓が先に一枚出る ── 貼るかどうかは
+                    // 人が中で決める。
                     Button {
-                        clipUrl = UIPasteboard.general.string
-                            .flatMap { Clipping.reach($0) != nil ? $0 : nil } ?? ""
+                        clipUrl = ""
                         clipping = true
                     } label: {
                         Label("Web から取り込む", systemImage: "safari")
@@ -258,17 +312,9 @@ struct Where: View {
             } message: {
                 Text(trouble ?? "")
             }
-            // **Web から取り込む**（依頼 421 の乙）。道を一つ訊いて、
+            // **Web から取り込む**（依頼 421 の乙）。URL を一つ訊いて、
             // 取ってきて、一本のノートにする。
-            .alert("Web から取り込む", isPresented: $clipping) {
-                TextField("https://…", text: $clipUrl)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                Button("取り込む") { clip() }
-                Button("やめる", role: .cancel) {}
-            } message: {
-                Text("ページの道を貼ってください。本文だけを一本のノートにします。")
-            }
+            .sheet(isPresented: $clipping) { clipSheet }
             .alert("取り込みました", isPresented: Binding(
                 get: { clipDone != nil }, set: { if !$0 { clipDone = nil } }
             )) {
