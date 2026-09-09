@@ -13,6 +13,7 @@ pub mod emoji;
 pub mod history;
 pub mod markdown;
 pub mod merge;
+pub mod month;
 pub mod note;
 pub mod notebook;
 pub mod spare;

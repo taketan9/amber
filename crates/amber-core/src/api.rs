@@ -864,6 +864,41 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 "unsure": got.unsure,
             }))
         }
+        // **ひと月ぶんの予定**（依頼 453）。カレンダーの画面が要るのは
+        // 「この月の、どの日に、何があるか」だけなので、一度で返す。
+        //
+        // いま乗るのは amber が既に知っているものだけ（前書きの `remind:`
+        // と `repeat:`、それとノートを書いた日）── **語彙を増やさない**。
+        // よそのカレンダーは、ここに足す形で入る。
+        "month" => {
+            let dir = std::path::PathBuf::from(arg(p, "path"));
+            if !dir.is_dir() {
+                anyhow::bail!("{} を開けません", dir.display());
+            }
+            let year = p["year"].as_i64().unwrap_or(0) as i32;
+            let month = p["month"].as_u64().unwrap_or(0) as u32;
+            if !(1..=12).contains(&month) {
+                anyhow::bail!("月が 1〜12 ではありません: {month}");
+            }
+            let limits = crate::survey::Limits {
+                depth: p["depth"].as_u64().unwrap_or(6) as usize,
+                rows: 4000,
+                hidden: false,
+                ..Default::default()
+            };
+            let stop = std::sync::atomic::AtomicBool::new(false);
+            let walk = crate::survey::survey(&dir, limits, &stop);
+            let slots = crate::month::of(&walk.rows, year, month);
+            Ok(serde_json::json!({
+                "days": slots.iter().map(|s| serde_json::json!({
+                    "day": s.day.to_string(),
+                    "at": s.at.map(|t| t.format("%H:%M").to_string()),
+                    "title": s.title,
+                    "path": s.path,
+                    "kind": s.kind.word(),
+                })).collect::<Vec<_>>(),
+            }))
+        }
         "emoji" => Ok(crate::emoji::table()),
 
         // 同じ中身のノートをもう一つ（依頼 412）。
