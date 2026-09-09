@@ -105,7 +105,7 @@ struct Sifted: View {
                   tap: { if store.onlyBooks.contains($0) { store.onlyBooks.remove($0) }
                          else { store.onlyBooks.insert($0) } })
         case .span:
-            Calendaring(store: store)
+            Spanning(store: store)
         }
     }
 
@@ -145,7 +145,12 @@ struct Sifted: View {
 /// 「7日以内」のような決め打ちは**去年の秋**を探せない。押した日が範囲の端に
 /// なり、片方だけでもよい（「この日から先ぜんぶ」が言えないと範囲は使いもの
 /// にならない）。次に押した日がどちらへ入るかは、先に見せる。
-struct Calendaring: View {
+/// **期間を選ぶ月表**（本物のカレンダーではない）。
+///
+/// 名前を `Calendaring` から変えた（依頼 424）── 本物のカレンダーが
+/// 同じ名前を名乗ろうとして、コンパイラに止められた。ここがやるのは
+/// 「いつからいつまで」を押して決めることだけ。
+struct Spanning: View {
     @ObservedObject var store: NotesStore
     /// いま見ている月。**開くたびに今月へ戻さない** ── 去年の秋を探して
     /// いる人は、閉じて開くたびに今月へ連れ戻されると探せない。

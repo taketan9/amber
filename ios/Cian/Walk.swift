@@ -241,6 +241,34 @@ enum Walk {
                 ? "消えていません" : nil
         }
 
+        // ── 三の三。カレンダー（依頼 454）────────────────
+        step("カレンダーに、一度きりと繰り返しが並ぶ") {
+            guard let n = try store.make(titled: "面談") else { return "作れませんでした" }
+            let (text, stamp) = try store.open(n)
+            let one = try Cian.call("setfield", [
+                "text": text, "key": "remind", "value": "2026-09-09 14:00",
+            ])
+            _ = try store.save(n, text: one["text"] as? String ?? text, stamp: stamp)
+
+            guard let w = try store.make(titled: "週報") else { return "作れませんでした" }
+            let (wt, ws) = try store.open(w)
+            let many = try Cian.call("setfield", [
+                "text": wt, "key": "repeat", "value": "weekly wed 09:00",
+            ])
+            _ = try store.save(w, text: many["text"] as? String ?? wt, stamp: ws)
+
+            let got = try Cian.call("month", [
+                "path": store.rootPath, "year": 2026, "month": 9,
+            ])
+            let rows = got["days"] as? [[String: Any]] ?? []
+            let once = rows.filter { ($0["kind"] as? String) == "once" && ($0["title"] as? String) == "面談" }
+            let rep = rows.filter { ($0["kind"] as? String) == "repeat" && ($0["title"] as? String) == "週報" }
+            if once.count != 1 { return "一度きりが \(once.count) 件です" }
+            if rep.count != 5 { return "毎週水曜が \(rep.count) 回です" }
+            if (once[0]["at"] as? String) != "14:00" { return "時刻が違います" }
+            return nil
+        }
+
         // ── 四。よそから来るもの ────────────────────────
         if let site = ProcessInfo.processInfo.environment["SITE"],
            let url = Clipping.reach(site) {

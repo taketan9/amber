@@ -31,6 +31,8 @@ struct ContentView: View {
     @State private var moving: URL?
     @State private var moved: String?
     @State private var showing = false
+    /// カレンダーが出ているか（依頼 454）。
+    @State private var showCal = false
     /// Which folder row the finger is over, and whether it is over `..`.
     @State private var into: String?
     @State private var outside = false
@@ -137,6 +139,12 @@ struct ContentView: View {
         }
         .sheet(item: $past) { w in
             Past(store: store, at: w.at, isBook: w.book)
+        }
+        .sheet(isPresented: $showCal) {
+            Calendaring(store: store, open: { note in
+                desk.open(note, store)
+                showing = true
+            })
         }
         .sheet(isPresented: $picking) {
             // The sheet closes itself first; these open a beat later, from
@@ -727,6 +735,13 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(store.flat ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+
+                    // **カレンダー**（依頼 454）── 窓では左の列にあるので、
+                    // 電話でも同じ場所（ノートの段の中）に置く。
+                    Button { showCal = true } label: {
+                        Label("カレンダー", systemImage: "calendar")
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             // ブックマーク。**窓と同じ名前**（依頼 212 で「お気に入り」から
