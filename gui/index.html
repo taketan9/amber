@@ -1268,6 +1268,11 @@ body.dropping::after {
   border-left: 2px solid var(--amber); border-radius: 2px; background: var(--sel);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #calbox .d .ev.note { background: none; border-left-color: transparent; color: var(--ink3) }
+/* **よその予定表のものは、別の色。** 自分が直せるものと、読むだけの
+   ものが同じ顔をしていると、押してから分かることになる。 */
+#calbox .d .ev.away { border-left-color: #6f9fd8;
+  background: color-mix(in srgb, #6f9fd8 16%, transparent) }
+#calbox .side .slot.away .w b { color: #4a7fbd }
 #calbox .d .more { font-size: .66em; color: var(--ink3); padding-left: 3px }
 #calbox .side { border-left: 1px solid var(--line); padding: .7rem .8rem;
   overflow-y: auto; background: var(--rail); }

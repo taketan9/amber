@@ -690,6 +690,58 @@ await step('カレンダー：予定を足すと、ノートが一本できる',
     return true;
 `, true);
 
+/* ── 十六の五。**よその予定表**（依頼 456） ── */
+
+if (process.env.SITE) {
+    await step('よその予定表：読むようにする', `
+        // **何も読んでいないところから始める。** 設定は本物のほうに
+        // 書かれる（macOS の Electron は appData に $HOME を見ない）ので、
+        // 前に手で試したものが残っていることがある ── 実際に残っていた。
+        away = [];
+        window.amber.remember({ away });
+        setTimeout(() => closeSheet(${JSON.stringify(process.env.SITE + 'away.ics')}), 250);
+        await cmdSubscribe();
+        await new Promise((g) => setTimeout(g, 1200));
+        if (away.length !== 1) return '購読が ' + away.length + ' 件です';
+        return away[0].name === '家の予定' ? true : '名前が ' + away[0].name + ' です';
+    `, true);
+
+    await step('よその予定表：一度きり・またぐもの・毎週が並ぶ', `
+        calMonth = { y: 2026, m: 9 };
+        calDay = '2026-09-21';
+        await cmdCalendar();
+        await new Promise((g) => setTimeout(g, 1500));
+        const out = calSlots.filter((s) => s.kind === 'away');
+        const trip = out.filter((s) => s.title === '旅行').map((s) => s.day);
+        const bin = out.filter((s) => s.title === 'ごみ出し');
+        if (trip.length !== 3) return '終日でまたぐものが ' + trip.length + ' 日です';
+        if (trip[0] !== '2026-09-21') return 'またぐ初日が ' + trip[0] + ' です';
+        if (bin.length !== 4) return '毎週月曜が ' + bin.length + ' 回です';
+        const one = out.find((s) => s.title === '歯医者');
+        if (!one || one.at !== '18:30') return '時刻が読めていません';
+        return true;
+    `, true);
+
+    await step('よその予定表：押しても、直せるふりをしない', `
+        calDay = '2026-09-21';
+        drawCalDay();
+        const slot = el('cal').querySelector('.slot.away');
+        if (!slot) return 'よその予定が出ていません';
+        if (slot.dataset.at) return 'ノートが無いのに、開く先を持っています';
+        slot.click();
+        await new Promise((g) => setTimeout(g, 200));
+        return el('say').textContent.includes('直せません') ? true : '何も言いません';
+    `, true);
+
+    await step('よその予定表：読むのをやめる', `
+        setTimeout(() => closeSheet(away[0].url), 250);
+        await cmdUnsubscribe();
+        await new Promise((g) => setTimeout(g, 600));
+        el('cal').hidden = true;
+        return away.length === 0 ? true : 'まだ ' + away.length + ' 件あります';
+    `, true);
+}
+
 /* ── 十七。**触ったあと、壊れていないか** ──
  *
  * ここがこの走査のいちばんの目当て。**面を行き来しただけで字が変わる**、

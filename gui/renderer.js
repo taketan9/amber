@@ -6479,6 +6479,13 @@ async function drawCal() {
         calSlots = [];
         say('カレンダーを読めません: ' + why(e));
     }
+    // よその予定表は、あとから足す ── 一つも読めなくても、自分のぶんは出る。
+    awaySlots = await awayFor(calMonth.y, calMonth.m);
+    calSlots = calSlots.concat(awaySlots).sort((a, b) =>
+        a.day.localeCompare(b.day)
+        || (a.at ? 0 : 1) - (b.at ? 0 : 1)
+        || String(a.at).localeCompare(String(b.at))
+        || a.title.localeCompare(b.title));
     box.querySelector('.mo').textContent = calMonth.y + '年 ' + calMonth.m + '月';
     const plans = calSlots.filter((s) => s.kind !== 'note').length;
     box.querySelector('.sum').textContent = plans ? plans + ' 件の予定' : '予定はありません';
@@ -6503,7 +6510,7 @@ async function drawCal() {
         const sorted = plans.concat(
             mine.filter((s) => s.kind === 'note' && !shown.has(s.path)));
         const chips = sorted.slice(0, 3).map((s) =>
-            '<span class="ev' + (s.kind === 'note' ? ' note' : '') + '">'
+            '<span class="ev ' + s.kind + '">'
             + (s.at ? escapeHtml(s.at) + ' ' : '') + escapeHtml(s.title) + '</span>').join('');
         const rest = sorted.length > 3 ? '<span class="more">ほか ' + (sorted.length - 3) + '</span>' : '';
         const marks = (day === today ? ' today' : '') + (day === calDay ? ' on' : '');
@@ -6528,15 +6535,20 @@ function drawCalDay() {
     const d = new Date(calDay + 'T00:00:00');
     // **道は出さない。** 読めない長さになるうえ、知りたいのは中身のほう
     // ── そのノートの一行目を添える。
-    const under = (at) => {
-        const n = (state.notes || []).find((x) => x.path === at);
+    // 添える一行。**自分のノートは一行目、よその予定は場所と出どころ。**
+    const under = (s) => {
+        if (s.kind === 'away') {
+            return escapeHtml([s.place, s.from].filter(Boolean).join('・'));
+        }
+        const n = (state.notes || []).find((x) => x.path === s.path);
         return n && n.excerpt ? escapeHtml(n.excerpt.slice(0, 40)) : '';
     };
     const rows = (list, none, timed) => list.length
-        ? list.map((s) => '<div class="slot" data-at="' + escapeHtml(s.path) + '">'
+        ? list.map((s) => '<div class="slot ' + s.kind + '"'
+            + (s.path ? ' data-at="' + escapeHtml(s.path) + '"' : '') + '>'
             + (timed ? '<span class="t">' + escapeHtml(s.at || '終日') + '</span>' : '')
             + '<span class="w"><b>' + escapeHtml(s.title) + '</b>'
-            + '<span>' + under(s.path) + '</span></span></div>').join('')
+            + '<span>' + under(s) + '</span></span></div>').join('')
         : '<div class="none">' + none + '</div>';
     side.innerHTML =
         '<div class="h">' + Number(calDay.slice(5, 7)) + '月' + Number(calDay.slice(8)) + '日'
@@ -6598,6 +6610,9 @@ el('cal').addEventListener('click', async (e) => {
     if (e.target.closest('.add')) { await calAdd(calDay); return; }
     const slot = e.target.closest('.slot');
     if (slot) {
+        // **よその予定にはノートが無い。** 押しても何も起きないより、
+        // なぜ開かないかを言う。
+        if (!slot.dataset.at) { say('よその予定表のものなので、ここでは直せません'); return; }
         box.hidden = true;
         await openNote(slot.dataset.at);
         return;
@@ -6605,6 +6620,72 @@ el('cal').addEventListener('click', async (e) => {
     const cell = e.target.closest('.d[data-day]');
     if (cell) { calDay = cell.dataset.day; await drawCal(); }
 });
+
+
+/* ── よその予定表（依頼 456） ── */
+
+/// 購読している予定表（`[{ url, name }]`）。**この機械の中だけに持つ。**
+///
+/// アドレスは、それを知っている人が予定を全部読めるもの ── 鍵と同じ扱い。
+/// ノートにも `.amber/` にも書かない（あそこはフォルダと一緒に旅をする）。
+let away = [];
+/// 取ってきた予定（月ごとに憶える。閉じれば消える）。
+let awaySlots = [];
+
+/// 予定表を一つ増やす。
+async function cmdSubscribe() {
+    const url = await askText('よその予定表を読む', '',
+        'Google カレンダーなら「設定 → カレンダーの統合 → 非公開 URL（iCal 形式）」');
+    if (url === null || !url.trim()) return;
+    say('取りに行っています…');
+    const got = await window.amber.fetchPage(url.trim(), 'calendar');
+    if (!got || got.error) { say('取り込めません: ' + (got?.error || '返事がありません')); return; }
+    let name = '';
+    try {
+        const out = await window.amber.call('ics', {
+            text: got.html, year: 2026, month: 1,
+        });
+        name = out.name || '';
+    } catch (e) {
+        say('予定表ではないようです: ' + why(e));
+        return;
+    }
+    away = away.filter((a) => a.url !== url.trim());
+    away.push({ url: url.trim(), name: name || readableUrl(url.trim()).slice(0, 40) });
+    window.amber.remember({ away });
+    say('「' + (name || 'よその予定表') + '」を読むようにしました');
+    if (!el('cal').hidden) await drawCal();
+}
+
+/// 購読しているものを見て、やめる。
+async function cmdUnsubscribe() {
+    if (!away.length) { say('読んでいる予定表はありません'); return; }
+    const pick = await askPick('読むのをやめる予定表',
+        away.map((a) => ({ name: a.name, sub: readableUrl(a.url).slice(0, 60), value: a.url })),
+        '選ぶと、読むのをやめます（向こうの予定表は何も変わりません）', true);
+    if (pick === null) return;
+    away = away.filter((a) => a.url !== pick);
+    window.amber.remember({ away });
+    say('読むのをやめました');
+    if (!el('cal').hidden) await drawCal();
+}
+
+/// その月ぶんを、購読しているところから取ってくる。
+///
+/// **一つ取れなくても、ほかは出す。** 網の向こうの都合で全部が出ないのは、
+/// カレンダーとして使いものにならない。
+async function awayFor(y, m) {
+    const out = [];
+    for (const a of away) {
+        try {
+            const got = await window.amber.fetchPage(a.url, 'calendar');
+            if (!got || got.error) continue;
+            const rows = await window.amber.call('ics', { text: got.html, year: y, month: m });
+            for (const r of rows.days || []) out.push({ ...r, from: a.name });
+        } catch { /* この一つは飛ばす */ }
+    }
+    return out;
+}
 
 /* ── 窓ができること、ひとつの表 ── */
 
@@ -6638,6 +6719,9 @@ const CMDS = [
     // 別にあると、同じことを頼む道が二つになる。
     { id: 'cal', name: 'カレンダー', sub: '予定と、その日のノートを一枚で',
       app: true, run: cmdCalendar },
+    { id: 'sub', name: 'よその予定表を読む', sub: 'Google カレンダーなどの iCal の URL',
+      app: true, run: cmdSubscribe },
+    { id: 'unsub', name: 'よその予定表を読むのをやめる', app: true, run: cmdUnsubscribe },
     { id: 'when', name: '期間で絞る', run: () => openDrawer('when') },
 
     // ── このノートにすること（⋯ と、ノートの右押し）
@@ -8773,6 +8857,7 @@ const escapeAttr = escapeHtml;
     el('blankmark').innerHTML = mark(54);
     const saved = await window.amber.recall();
     state.root = saved.root;
+    away = Array.isArray(saved.away) ? saved.away : [];
     noBins = Array.isArray(saved.noBins) ? saved.noBins : [];
     incomings = (saved.incomings && typeof saved.incomings === 'object') ? saved.incomings : {};
     // 外から動いたら教えてもらう ── 同じフォルダを二つの端末で触るのが

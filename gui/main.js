@@ -474,12 +474,12 @@ app.whenReady().then(() => {
     ///
     /// **大きすぎるものは途中でやめる。** 取り込むのは読む字で、
     /// 何十 MB もあるページはたいてい読む字ではない。
-    ipcMain.handle('amber:fetchPage', async (_e, url) => {
+    ipcMain.handle('amber:fetchPage', async (_e, url, want) => {
         let u;
         try {
             u = new URL(String(url));
         } catch {
-            return { error: '道の形になっていません' };
+            return { error: 'URL の形になっていません' };
         }
         if (u.protocol !== 'http:' && u.protocol !== 'https:') {
             return { error: 'http か https の道だけ取り込めます' };
@@ -492,12 +492,23 @@ app.whenReady().then(() => {
                 headers: {
                     // **名乗る。** 名乗らないものを断る先がある。
                     'User-Agent': 'amber/' + app.getVersion() + ' (+markdown clipper)',
-                    Accept: 'text/html,application/xhtml+xml',
+                    Accept: want === 'calendar'
+                        ? 'text/calendar,text/plain'
+                        : 'text/html,application/xhtml+xml',
                 },
             });
             if (!r.ok) return { error: r.status + ' ' + (r.statusText || '') };
             const kind = r.headers.get('content-type') || '';
-            if (!/html|xml/i.test(kind)) return { error: 'ページではありません（' + kind + '）' };
+            // **何を待っているかで、断る相手が変わる。** 予定表（iCal）は
+            // `text/calendar` で来るが、ただの `text/plain` で寄越す先も
+            // ある ── 形が違うかどうかは、中身を読む側（core）が言う。
+            const ok = want === 'calendar'
+                ? /calendar|text\/plain|octet-stream/i.test(kind) || !kind
+                : /html|xml/i.test(kind);
+            if (!ok) {
+                return { error: (want === 'calendar' ? '予定表ではありません（' : 'ページではありません（')
+                    + kind + '）' };
+            }
             const buf = await r.arrayBuffer();
             const CAP = 8 * 1024 * 1024;
             if (buf.byteLength > CAP) return { error: '大きすぎます（8MB まで）' };

@@ -899,6 +899,31 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 })).collect::<Vec<_>>(),
             }))
         }
+        // **よその予定表を読む**（依頼 456）。取りに行くのは呼んだ側
+        // （窓は `fetchPage`、電話は `URLSession`）── 核は網に触らない。
+        // 返す形は `month` と同じなので、画面は混ぜて並べるだけでよい。
+        "ics" => {
+            let text = arg(p, "text");
+            if !crate::ics::looks_like(&text) {
+                anyhow::bail!("予定表の形をしていません");
+            }
+            let year = p["year"].as_i64().unwrap_or(0) as i32;
+            let month = p["month"].as_u64().unwrap_or(0) as u32;
+            if !(1..=12).contains(&month) {
+                anyhow::bail!("月が 1〜12 ではありません: {month}");
+            }
+            let got = crate::ics::month(&text, year, month);
+            Ok(serde_json::json!({
+                "name": crate::ics::name(&text),
+                "days": got.iter().map(|e| serde_json::json!({
+                    "day": e.day.to_string(),
+                    "at": e.at.map(|t| t.format("%H:%M").to_string()),
+                    "title": e.title,
+                    "place": e.place,
+                    "kind": "away",
+                })).collect::<Vec<_>>(),
+            }))
+        }
         "emoji" => Ok(crate::emoji::table()),
 
         // 同じ中身のノートをもう一つ（依頼 412）。

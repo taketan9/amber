@@ -11,6 +11,7 @@ pub mod api;
 pub mod cloud;
 pub mod emoji;
 pub mod history;
+pub mod ics;
 pub mod markdown;
 pub mod merge;
 pub mod month;
