@@ -28,3 +28,18 @@ body = (
     body.format(t="日本語SJIS").replace("\n", "\r\n").encode("shift_jis"))
 
 print("よそから来た形のノートを三つ置きました")
+
+# **大きいノート。** 一万行 ── 面の組み直しと保存が保つか（依頼 431）。
+# 「速いこと」は一度測ったきりで、遅くなったことに気づく仕掛けが無かった。
+rows = []
+for i in range(1, 2001):
+    rows.append("## 見出し %d" % i)
+    rows.append("")
+    rows.append("段落 %d です。**太字**と[リンク](https://example.com/%d)。" % (i, i))
+    rows.append("")
+    rows.append("- 項目 %d" % i)
+    rows.append("")
+(at / "大きいノート.md").write_text(
+    "---\ntitle: 大きいノート\ncreated: 2026-09-04\n---\n\n# 大きいノート\n\n"
+    + "\n".join(rows) + "\n", encoding="utf-8")
+print("一万行のノートを置きました")

@@ -108,7 +108,12 @@ async function step(name, src, want) {
     if (r.bad) why.push(r.bad);
     if (said.length) why.push(...said);
     if (back.value && back.value !== 'ok' && back.value !== 'skip') why.push(back.value);
-    if (want !== undefined && r.value !== want) {
+    if (typeof want === 'function') {
+        // 見張り方を渡された ── 速さのように、値そのものではなく
+        // 「その範囲か」を見たいとき。
+        const said2 = want(r.value);
+        if (said2 !== true) why.push(String(said2));
+    } else if (want !== undefined && r.value !== want) {
         why.push(`返り値が ${JSON.stringify(r.value)}（ほしいのは ${JSON.stringify(want)}）`);
     }
     if (why.length) bad.push({ name, why });
@@ -656,7 +661,50 @@ for (const [name, ok, why] of SHAPES) {
     }
 }
 
-// 十九。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
+/* ── 十九。**大きいノートでも保つか**（依頼 431）──
+ *
+ * 一万二千行。開く・面を替える・打つ・保存する、それぞれに**時間の上限**を
+ * 置く ── 速さは一度測ったきりで、遅くなったことに気づく仕掛けが無かった。
+ * 上限は「人が待てるか」で決める（開くのに三秒かかったら、もう道具ではない）。
+ */
+/// 測った時間。**通っても出す** ── 遅くなっていく気配は、落第になる前に
+/// 見えていたほうがよい。
+const times = [];
+const timed = (name, limit, src) => step('大きいノート：' + name, `
+    const t0 = performance.now();
+    ${src}
+    return Math.round(performance.now() - t0);`, (ms) => {
+    if (typeof ms !== 'number') return String(ms);
+    times.push(`${name}: ${ms} ミリ秒（${limit} まで）`);
+    return ms < limit ? true : `${ms} ミリ秒かかりました（${limit} まで）`;
+});
+
+await timed('開く', 3000, `
+    await openNote(${path('大きいノート.md')});
+    if (!state.open || !state.open.path.endsWith('大きいノート.md')) return '開けません';
+    setView('read');
+    await new Promise((g) => setTimeout(g, 100));`);
+await timed('コードの面へ', 2000, `setView('write'); await new Promise((g) => setTimeout(g, 100));`);
+await timed('表示の面へ', 3000, `setView('read'); await new Promise((g) => setTimeout(g, 100));`);
+await step('大きいノート：打って保存する', `
+    const p = [...el('read').children].find((n) => n.tagName === 'P');
+    const r = document.createRange(); r.selectNodeContents(p); r.collapse(false);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    el('read').focus();
+    const t0 = performance.now();
+    document.execCommand('insertText', false, 'あ');
+    await new Promise((g) => setTimeout(g, 2500));
+    const ms = Math.round(performance.now() - t0);
+    if (!whole().includes('あ')) return '打った字が残っていません';
+    return ms < 2600 ? true : ms + ' ミリ秒かかりました';`, true);
+await step('大きいノート：目次も出る', `
+    if (!tocOn) toggleToc();
+    await new Promise((g) => setTimeout(g, 1500));
+    const n = el('toc').querySelectorAll('.h').length;
+    if (tocOn) toggleToc();
+    return n > 100;`, true);
+
+// 二十。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => x.book === '歩き試し'
             || /複製|新しいノート|週報/.test(x.title || ''))) {
@@ -668,6 +716,11 @@ await step('片づける', `
 /* ── 報せ ── */
 
 console.log('');
+if (times.length) {
+    console.log('大きいノート（一万二千行）で測ったもの:');
+    for (const t of times) console.log('  ' + t);
+    console.log('');
+}
 if (!bad.length) {
     console.log(`${ran} とおり動かして、落ちたものはありません`);
     ws.close();
