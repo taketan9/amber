@@ -6443,6 +6443,169 @@ el('spare').addEventListener('click', async (e) => {
     }
 });
 
+
+/* ── カレンダー（依頼 453） ── */
+
+/// いま出している月と、選んでいる日。**開くたびに今月へ戻さない** ──
+/// 先の予定を見にきた人を、閉じて開くたびに今日へ連れ戻さない。
+let calMonth = null;
+let calDay = null;
+/// その月ぶんの予定（core の `month` が返したまま）。
+let calSlots = [];
+
+/// カレンダーを開く。
+///
+/// **ノートを見るところは奪わない。** 面（表示／コード）はノートのもので、
+/// カレンダーはノートではない ── 上に重ねて出し、ノートを開くときに閉じる。
+async function cmdCalendar() {
+    if (!state.root) { say('置き場所がありません'); return; }
+    if (!calMonth) {
+        const now = new Date();
+        calMonth = { y: now.getFullYear(), m: now.getMonth() + 1 };
+        calDay = ymd(now.getFullYear(), now.getMonth(), now.getDate());
+    }
+    el('cal').hidden = false;
+    await drawCal();
+}
+
+async function drawCal() {
+    const box = el('cal');
+    try {
+        const got = await window.amber.call('month', {
+            path: state.root, year: calMonth.y, month: calMonth.m,
+        });
+        calSlots = got.days || [];
+    } catch (e) {
+        calSlots = [];
+        say('カレンダーを読めません: ' + why(e));
+    }
+    box.querySelector('.mo').textContent = calMonth.y + '年 ' + calMonth.m + '月';
+    const plans = calSlots.filter((s) => s.kind !== 'note').length;
+    box.querySelector('.sum').textContent = plans ? plans + ' 件の予定' : '予定はありません';
+
+    // **月曜はじまり。** 一覧の並びも週も、ここでは月曜から。
+    const first = new Date(calMonth.y, calMonth.m - 1, 1);
+    const lead = (first.getDay() + 6) % 7;
+    const days = new Date(calMonth.y, calMonth.m, 0).getDate();
+    const today = ymd(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+    const cells = [];
+    for (let i = 0; i < lead; i += 1) cells.push(null);
+    for (let d = 1; d <= days; d += 1) cells.push(ymd(calMonth.y, calMonth.m - 1, d));
+    while (cells.length % 7) cells.push(null);
+
+    box.querySelector('.days').innerHTML = cells.map((day) => {
+        if (!day) return '<div class="d dim"></div>';
+        const mine = calSlots.filter((s) => s.day === day);
+        const plans = mine.filter((s) => s.kind !== 'note');
+        const shown = new Set(plans.map((s) => s.path));
+        // **予定が先、ノートは後。** 数が溢れたときに残したいのは予定。
+        // 予定として出ているノートは、重ねて出さない。
+        const sorted = plans.concat(
+            mine.filter((s) => s.kind === 'note' && !shown.has(s.path)));
+        const chips = sorted.slice(0, 3).map((s) =>
+            '<span class="ev' + (s.kind === 'note' ? ' note' : '') + '">'
+            + (s.at ? escapeHtml(s.at) + ' ' : '') + escapeHtml(s.title) + '</span>').join('');
+        const rest = sorted.length > 3 ? '<span class="more">ほか ' + (sorted.length - 3) + '</span>' : '';
+        const marks = (day === today ? ' today' : '') + (day === calDay ? ' on' : '');
+        return '<div class="d' + marks + '" data-day="' + day + '">'
+            + '<div class="n">' + Number(day.slice(8)) + '</div>' + chips + rest + '</div>';
+    }).join('');
+
+    drawCalDay();
+}
+
+/// 選んだ日の中身。**押したらノートへ** ── 予定は入口で、書くのはノート。
+function drawCalDay() {
+    const side = el('cal').querySelector('.side');
+    if (!calDay) { side.innerHTML = ''; return; }
+    const mine = calSlots.filter((s) => s.day === calDay);
+    const plans = mine.filter((s) => s.kind !== 'note');
+    // **予定に出ているノートを、下でもう一度出さない。** 同じ一本が
+    // 二度並ぶと、二つあるように見える（実際にそう見えた）。
+    const said = new Set(plans.map((s) => s.path));
+    const notes = mine.filter((s) => s.kind === 'note' && !said.has(s.path));
+    const w = ['月', '火', '水', '木', '金', '土', '日'];
+    const d = new Date(calDay + 'T00:00:00');
+    // **道は出さない。** 読めない長さになるうえ、知りたいのは中身のほう
+    // ── そのノートの一行目を添える。
+    const under = (at) => {
+        const n = (state.notes || []).find((x) => x.path === at);
+        return n && n.excerpt ? escapeHtml(n.excerpt.slice(0, 40)) : '';
+    };
+    const rows = (list, none, timed) => list.length
+        ? list.map((s) => '<div class="slot" data-at="' + escapeHtml(s.path) + '">'
+            + (timed ? '<span class="t">' + escapeHtml(s.at || '終日') + '</span>' : '')
+            + '<span class="w"><b>' + escapeHtml(s.title) + '</b>'
+            + '<span>' + under(s.path) + '</span></span></div>').join('')
+        : '<div class="none">' + none + '</div>';
+    side.innerHTML =
+        '<div class="h">' + Number(calDay.slice(5, 7)) + '月' + Number(calDay.slice(8)) + '日'
+        + '<small>' + w[(d.getDay() + 6) % 7] + '</small></div>'
+        + rows(plans, '予定はありません', true)
+        + (notes.length ? '<div class="h" style="margin-top:.8rem">この日に書いたノート</div>'
+            + rows(notes, '', false) : '')
+        + '<button class="add">＋ この日に予定を足す</button>';
+}
+
+/// **その日に予定を足す。** 足すのは新しいノートで、日付は前書きに書く
+/// ── 「ノートに日付を書くと予定になる」（依頼 73）が既にあるので、
+/// カレンダーのためだけの置き場所を作らない。
+async function calAdd(day) {
+    const title = await askText('予定を足す（' + dayName(day) + '）', '',
+        'ノートが一本できます。時刻は次に訊きます');
+    if (title === null || !title.trim()) return;
+    const at = await askText('何時から', '09:00', '空のままなら終日');
+    if (at === null) return;
+    const when = at.trim() ? day + ' ' + at.trim() : day;
+    try {
+        const made = await window.amber.call('new', {
+            dir: state.root, title: title.trim(),
+        });
+        const got = await window.amber.call('read', { path: made.path });
+        const out = await window.amber.call('setfield', {
+            text: got.text, key: 'remind', value: when,
+        });
+        await window.amber.call('write', {
+            path: made.path, text: out.text, stamp: got.stamp,
+        });
+        await reload({ quiet: true });
+        await drawCal();
+        say('「' + title.trim() + '」を ' + dayName(day) + ' に足しました');
+    } catch (e) {
+        say('足せません: ' + why(e));
+    }
+}
+
+el('cal').addEventListener('click', async (e) => {
+    const box = el('cal');
+    if (e.target === box || e.target.closest('.x')) { box.hidden = true; return; }
+    const step = (n) => {
+        let m = calMonth.m + n;
+        let y = calMonth.y;
+        if (m < 1) { m = 12; y -= 1; }
+        if (m > 12) { m = 1; y += 1; }
+        calMonth = { y, m };
+    };
+    if (e.target.closest('.prev')) { step(-1); await drawCal(); return; }
+    if (e.target.closest('.next')) { step(1); await drawCal(); return; }
+    if (e.target.closest('.today')) {
+        const now = new Date();
+        calMonth = { y: now.getFullYear(), m: now.getMonth() + 1 };
+        calDay = ymd(now.getFullYear(), now.getMonth(), now.getDate());
+        await drawCal();
+        return;
+    }
+    if (e.target.closest('.add')) { await calAdd(calDay); return; }
+    const slot = e.target.closest('.slot');
+    if (slot) {
+        box.hidden = true;
+        await openNote(slot.dataset.at);
+        return;
+    }
+    const cell = e.target.closest('.d[data-day]');
+    if (cell) { calDay = cell.dataset.day; await drawCal(); }
+});
+
 /* ── 窓ができること、ひとつの表 ── */
 
 /// **パレットも ⋯ の献立も、ここを見る。**
@@ -6473,6 +6636,8 @@ const CMDS = [
     // **絞り込みは、命令ではなくなった。** タグ・フォルダ・期間の三つは
     // 一覧の頭に引き出しとして常に出ている ── 命令の表から呼ぶものが
     // 別にあると、同じことを頼む道が二つになる。
+    { id: 'cal', name: 'カレンダー', sub: '予定と、その日のノートを一枚で',
+      app: true, run: cmdCalendar },
     { id: 'when', name: '期間で絞る', run: () => openDrawer('when') },
 
     // ── このノートにすること（⋯ と、ノートの右押し）

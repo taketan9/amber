@@ -650,6 +650,46 @@ await step('使われていない画像：小さく並ぶ', `
     return cells > 0 && cells === shots;
 `, true);
 
+/* ── 十六の四。**カレンダー**（依頼 453） ── */
+
+await step('カレンダー：ひと月ぶんが出る', `
+    calMonth = { y: 2026, m: 9 };
+    calDay = '2026-09-09';
+    await cmdCalendar();
+    await new Promise((g) => setTimeout(g, 400));
+    if (el('cal').hidden) return '開きません';
+    const cells = el('cal').querySelectorAll('.d[data-day]').length;
+    if (cells !== 30) return '九月なのに ' + cells + ' 日あります';
+    const one = calSlots.filter((s) => s.kind === 'once' && s.title === '面談');
+    const rep = calSlots.filter((s) => s.kind === 'repeat' && s.title === '週報');
+    if (one.length !== 1) return '一度きりが ' + one.length + ' 件です';
+    if (rep.length !== 5) return '毎週水曜が ' + rep.length + ' 回です';
+    return true;
+`, true);
+
+await step('カレンダー：予定に出ているノートを、下でもう一度出さない', `
+    calDay = '2026-09-09';
+    drawCalDay();
+    const side = el('cal').querySelector('.side').textContent;
+    const hits = side.split('面談').length - 1;
+    return hits === 1 ? true : '面談が ' + hits + ' 回出ています';
+`, true);
+
+await step('カレンダー：予定を足すと、ノートが一本できる', `
+    const was = state.notes.length;
+    calDay = '2026-09-11';
+    setTimeout(() => closeSheet('走査の予定'), 300);
+    setTimeout(() => closeSheet('11:00'), 700);
+    calAdd(calDay);
+    await new Promise((g) => setTimeout(g, 3000));
+    if (state.notes.length !== was + 1) return 'ノートが増えていません';
+    const made = calSlots.filter((s) => s.day === '2026-09-11' && s.title === '走査の予定');
+    if (made.length !== 1) return '足した日に出ていません';
+    if (made[0].at !== '11:00') return '時刻が ' + made[0].at + ' です';
+    el('cal').hidden = true;
+    return true;
+`, true);
+
 /* ── 十七。**触ったあと、壊れていないか** ──
  *
  * ここがこの走査のいちばんの目当て。**面を行き来しただけで字が変わる**、

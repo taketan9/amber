@@ -1230,6 +1230,61 @@ body.dropping::after {
   border-color: color-mix(in srgb, var(--amber) 70%, black);
   color: #3a2408; font-weight: 700;
 }
+
+/* ── カレンダー（依頼 453）──
+   月の表と、その日の中身。**ノートを組んだまま出せるのが、この道具で
+   カレンダーを持つ意味** ── 予定表とノートが別のアプリなら作れない。 */
+#cal { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center; }
+#calbox { width: min(66rem, 94vw); height: min(44rem, 88vh); display: flex;
+  flex-direction: column; background: var(--paper); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+#calbox .hd { display: flex; align-items: center; gap: .5rem;
+  padding: .6rem .9rem; border-bottom: 1px solid var(--line); }
+#calbox .hd .mo { font-size: 1.05rem; min-width: 7.5rem; }
+#calbox .hd .grow { flex: 1; }
+#calbox .hd .sum { color: var(--ink2); font-size: .82em; }
+#calbox .hd button { padding: 4px 11px; border-radius: 8px; font-size: 12.5px;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+#calbox .hd button:hover { background: var(--hover); }
+#calbox .body { flex: 1; display: grid; grid-template-columns: 1fr 17rem; min-height: 0; }
+#calbox .month { padding: .6rem .7rem; display: flex; flex-direction: column; min-height: 0; }
+#calbox .dow { display: grid; grid-template-columns: repeat(7,1fr); gap: 3px; }
+#calbox .dow i { font-style: normal; text-align: center; font-size: .72em;
+  color: var(--ink3); padding-bottom: 3px; }
+#calbox .dow i.sat { color: #6f9fd8 } #calbox .dow i.sun { color: var(--bad) }
+#calbox .days { flex: 1; display: grid; grid-template-columns: repeat(7,1fr);
+  grid-auto-rows: 1fr; gap: 3px; min-height: 0; }
+#calbox .d { background: var(--rail); border: 1px solid transparent;
+  border-radius: 6px; padding: 2px 3px; overflow: hidden; cursor: pointer;
+  display: flex; flex-direction: column; min-height: 0; }
+#calbox .d:hover { border-color: var(--line) }
+#calbox .d.dim { opacity: .45 }
+#calbox .d.on { border-color: var(--line); background: var(--hover) }
+#calbox .d.today { border-color: var(--amber) }
+#calbox .d .n { font-size: .72em; color: var(--ink2); font-variant-numeric: tabular-nums }
+#calbox .d.today .n { color: var(--amber); font-weight: 700 }
+#calbox .d .ev { font-size: .68em; line-height: 1.5; margin-top: 1px; padding: 0 3px;
+  border-left: 2px solid var(--amber); border-radius: 2px; background: var(--sel);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#calbox .d .ev.note { background: none; border-left-color: transparent; color: var(--ink3) }
+#calbox .d .more { font-size: .66em; color: var(--ink3); padding-left: 3px }
+#calbox .side { border-left: 1px solid var(--line); padding: .7rem .8rem;
+  overflow-y: auto; background: var(--rail); }
+#calbox .side .h { font-weight: 700; margin-bottom: .4rem }
+#calbox .side .h small { color: var(--ink3); font-weight: 400; margin-left: .4em }
+#calbox .side .slot { display: flex; gap: .5rem; padding: 3px 0; cursor: pointer;
+  border-radius: 5px; font-size: .84em; }
+#calbox .side .slot:hover { background: var(--hover) }
+#calbox .side .slot .t { color: var(--ink3); min-width: 3rem;
+  font-variant-numeric: tabular-nums; }
+#calbox .side .slot .w b { display: block; font-weight: 600 }
+#calbox .side .slot .w span { color: var(--ink3); font-size: .9em }
+#calbox .side .none { color: var(--ink3); font-size: .84em; padding: .3rem 0 }
+#calbox .side .add { margin-top: .7rem; width: 100%; padding: 5px;
+  border: 1px dashed var(--line); border-radius: 8px; color: var(--ink2);
+  font-size: .84em; background: none; }
+#calbox .side .add:hover { border-color: var(--amber); color: var(--amber) }
 </style>
 </head>
 <body>
@@ -1334,6 +1389,26 @@ body.dropping::after {
     </div>
     <div class="warn" hidden></div>
     <div class="grid"></div>
+  </div></div>
+  <!-- **カレンダー**（依頼 453）。ひと月ぶんを一度で取り、日を押すと
+       右にその日が開く。よそのカレンダーは、あとでここに足す。 -->
+  <div id="cal" hidden><div id="calbox">
+    <div class="hd">
+      <button class="prev" title="前の月">‹</button>
+      <b class="mo"></b>
+      <button class="next" title="次の月">›</button>
+      <button class="today">今日</button>
+      <span class="grow"></span>
+      <span class="sum"></span>
+      <button class="x">閉じる</button>
+    </div>
+    <div class="body">
+      <div class="month">
+        <div class="dow"><i>月</i><i>火</i><i>水</i><i>木</i><i>金</i><i class="sat">土</i><i class="sun">日</i></div>
+        <div class="days"></div>
+      </div>
+      <div class="side"></div>
+    </div>
   </div></div>
   <div id="studio" hidden><div id="studiobox">
     <div class="hd">

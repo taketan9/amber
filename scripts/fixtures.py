@@ -73,3 +73,13 @@ _png(pics / "絵のノート-1788000002.png", 40, 40, (90, 140, 200))
     "---\ntitle: 絵のノート\ncreated: 2026-09-09\n---\n\n# 絵のノート\n\n"
     "![](attachments/絵のノート-1788000001.png)\n", encoding="utf-8")
 print("使われている画像と、使われていない画像を置きました")
+
+# **カレンダーに乗るもの**（依頼 453）。一度きりと、繰り返しと、
+# その日に書いたノート ── 三つとも月の表に出るか。
+(at / "面談.md").write_text(
+    "---\ntitle: 面談\ncreated: 2026-09-09\nremind: 2026-09-09 14:00\n---\n\n"
+    "# 面談\n\n会議室 A。\n", encoding="utf-8")
+(at / "週報.md").write_text(
+    "---\ntitle: 週報\ncreated: 2026-08-01\nrepeat: weekly wed 09:00\n---\n\n"
+    "# 週報\n", encoding="utf-8")
+print("カレンダーに乗る二本を置きました")
