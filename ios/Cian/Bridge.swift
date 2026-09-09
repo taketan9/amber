@@ -22,6 +22,47 @@ enum Cian {
     /// on every path out, including the throwing ones, which is the whole
     /// reason the free is not written at the end.
     static func call(_ method: String, _ params: [String: Any] = [:]) throws -> [String: Any] {
+        // **クラウドと同じフォルダを触るときは、一言通す**（PLANS 一）。
+        guard let at = coordinated(method, params) else { return try raw(method, params) }
+        var answer: Result<[String: Any], Error>!
+        var trouble: NSError?
+        let hand = NSFileCoordinator()
+        let take = { (_: URL) in answer = Result { try raw(method, params) } }
+        if writers.contains(method) {
+            hand.coordinate(writingItemAt: at, options: .forMerging,
+                            error: &trouble, byAccessor: take)
+        } else {
+            hand.coordinate(readingItemAt: at, options: [],
+                            error: &trouble, byAccessor: take)
+        }
+        // **通せなかったことを、読み書きの失敗にしない。** 作法は同期の
+        // ためのもので、手元のフォルダなら通らなくても読める。
+        if let answer { return try answer.get() }
+        _ = trouble
+        return try raw(method, params)
+    }
+
+    /// 作法を通す操作と、その相手のファイル。
+    ///
+    /// **全部に通さない。** 一覧（`notes`）はフォルダを歩くだけで、
+    /// あちらを止める意味が無いうえ、毎回まるごと待たされる。通すのは
+    /// **一本のノートを読むところと書くところ**だけ。
+    ///
+    /// 読むほうを通すと、iOS は**まだ降りてきていないファイルを降ろして
+    /// から**渡してくれる ── 札（`.名前.md.icloud`）しか無いノートを
+    /// 開いたときに、「無い」ではなく中身が返る。
+    /// 書くほうを通すと、書いている間だけあちらが止まる。
+    private static let writers: Set<String> = ["write", "keep"]
+    private static let readers: Set<String> = ["read", "blocks", "html", "oldtext"]
+
+    private static func coordinated(_ method: String, _ params: [String: Any]) -> URL? {
+        guard writers.contains(method) || readers.contains(method),
+              let path = params["path"] as? String, !path.isEmpty
+        else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    private static func raw(_ method: String, _ params: [String: Any]) throws -> [String: Any] {
         let body = String(
             data: try JSONSerialization.data(withJSONObject: params),
             encoding: .utf8

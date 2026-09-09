@@ -561,10 +561,30 @@ pub fn list(
         if !md {
             continue;
         }
+        if scratch(&r.path) {
+            continue;
+        }
         let Some(note) = read(&r.path, 60) else { continue };
         out.push(Found { rel: r.rel.clone(), note });
     }
     (out, found)
+}
+
+/// **書きかけの置き土産か。** 人の書いたノートではないので、一覧に出さない。
+///
+/// 隠しファイル（`.` で始まるもの）は歩く側が既に落としている ── iCloud の
+/// まだ降りていない札（`.名前.md.icloud`）も、macOS の相棒（`._名前.md`）も、
+/// LibreOffice の錠（`.~lock.名前.md#`）もそこで落ちる。**落ちないのは
+/// Windows 側の作法**で、Office と同じ `~$` で始まる置き土産は隠しに
+/// ならない ── 会社の端末で同じフォルダを開いた人の一覧に、`x` という
+/// 題のノートが一本増えていた。
+///
+/// **同期がぶつかった控えは落とさない**（`段取り (競合コピー…).md`）──
+/// あれは人の書いた字で、消えていいものではない。
+fn scratch(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("~$"))
 }
 
 /// Make a note in `dir` and say where it went.
@@ -1492,6 +1512,38 @@ mod tests {
         assert_eq!(bom.title, "前書き");
         assert!(!bom.excerpt.contains('\u{feff}'), "BOM が本文に残っています: {:?}", bom.excerpt);
         assert!(!bom.excerpt.contains("---"), "前書きが本文に漏れています: {:?}", bom.excerpt);
+    }
+
+    /// **同期が置いていくものと、人が書いたものを分ける。**
+    ///
+    /// 同じフォルダを Windows からも開くので、Office 系の置き土産
+    /// （`~$…`）が一覧に紛れ込んでいた。逆に、**同期がぶつかった控えは
+    /// 人の字**なので、落としてはいけない。
+    #[test]
+    fn the_listing_drops_scratch_files_but_keeps_conflicted_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let put = |name: &str, body: &str| {
+            std::fs::write(dir.path().join(name), body).unwrap();
+        };
+        put("段取り.md", "---\ntitle: 段取り\n---\n\n# 段取り\n");
+        put("~$段取り.md", "x");
+        put("段取り (競合コピー 2026-09-09).md", "---\ntitle: 競合\n---\n\n# 競合\n");
+        // 隠しのものは歩く側が落とす ── ここでも消えていることだけ見る。
+        put(".段取り.md.icloud", "x");
+        put("._段取り.md", "x");
+        std::fs::create_dir(dir.path().join("フォルダ.md")).unwrap();
+
+        let limits = crate::survey::Limits { depth: 4, rows: 100, hidden: false, ..Default::default() };
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let (found, _) = super::list(dir.path(), limits, &stop);
+        let mut names: Vec<&str> = found.iter().map(|f| f.rel.as_str()).collect();
+        names.sort_unstable();
+
+        assert_eq!(
+            names,
+            vec!["段取り (競合コピー 2026-09-09).md", "段取り.md"],
+            "一覧に出るのは人の書いたものだけ",
+        );
     }
 
     #[test]
