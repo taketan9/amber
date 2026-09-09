@@ -415,7 +415,7 @@ struct Paper: UIViewRepresentable {
     /// 道具の帯から。窓と同じ `execCommand`。
     window.mark = (what) => {
       box.focus();
-      // **同じ釦で、付けると外す**（窓と同じ・依頼 406）── 中で押したら
+      // **同じボタンで、付けると外す**（窓と同じ・依頼 406）── 中で押したら
       // 外れる。長い引用を一行ずつ外すのは、指では手が疲れる。
       //
       // **一行は、見出しか項目か、どちらか一つ** ── 点を付ける前に見出しを
@@ -546,7 +546,7 @@ struct Paper: UIViewRepresentable {
       back(e);
     });
 
-    /// 外付けの鍵盤の Tab。**電話に Tab は無い**（下の帯の釦が本線）が、
+    /// 外付けの鍵盤の Tab。**電話に Tab は無い**（下の帯のボタンが本線）が、
     /// 繋いでおけば鍵盤を挿した人の手がそのまま動く。
     box.addEventListener('keydown', (e) => {
       if (e.key !== 'Tab' || e.isComposing || e.keyCode === 229) return;

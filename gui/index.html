@@ -179,7 +179,7 @@ body.mac #railtop { height: 34px; padding-left: 88px; }
 }
 /* 名札と同じ差し方（`--brand-s`）── 明るい地では濃い琥珀、暗い地では明るい琥珀。 */
 #railtop .wm .s { color: var(--brand-s); }
-/* **一つだけの、押させたい釦 ── ただし塊にはしない。**
+/* **一つだけの、押させたいボタン ── ただし塊にはしない。**
    前は琥珀のべた塗りに階調と、琥珀色に光る影を二枚。古く見えていたのは
    色ではなく**塊であること**で、階調と影はその塊を立体に見せるための飾り
    だった。塊をやめ、琥珀は 22px の丸だけに残す ── 面積が小さいぶん色は
@@ -475,8 +475,8 @@ body.zen #strip { display: none; }
 /* ── 右: 中身 ── */
 #pane { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--paper); }
 /* **帯には、幅の要るものだけ置く。** 1180px（既定の窓）だと中の列が
-   636px しかなく、面の札と釦を並べただけで一杯になる ── 右端の字数と
-   状態は縮んで消えていた（「保存しました」が見えるのに押した釦が動く、
+   636px しかなく、面の札とボタンを並べただけで一杯になる ── 右端の字数と
+   状態は縮んで消えていた（「保存しました」が見えるのに押したボタンが動く、
    の裏側はこれ）。目次（☰）と拡大（⤢）は名前の付いた命令として
    「ノート ▾」へ移した ── 名無しの記号二つより、名前のほうが見つかる。 */
 #top {
@@ -492,7 +492,7 @@ body.mac #top { padding-top: 30px; }
 #title {
   font-size: 17px; font-weight: 700; flex: 1 1 auto; min-width: 9ch;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  /* 押せば直せる。**ふだんは釦に見せない** ── 帯の題は読むものが先で、
+  /* 押せば直せる。**ふだんはボタンに見せない** ── 帯の題は読むものが先で、
      直すのはたまに。触れたときだけ、直せることが分かればいい。 */
   border: 1px solid transparent; border-radius: 5px;
   margin: -2px -6px; padding: 2px 6px;
@@ -507,13 +507,13 @@ body.mac #top { padding-top: 30px; }
 #title[hidden] ~ #gear { margin-left: auto; }
 /* **字数と状態は、幅の決まった枠に住む。**
    前はどちらも中身の長さぶんの幅を取っていた ── 「保存しました」が出た
-   瞬間に帯じゅうが左へずれ、いま押した釦がカーソルの下から逃げる。
+   瞬間に帯じゅうが左へずれ、いま押したボタンがカーソルの下から逃げる。
    取り消しを続けて二回押せないのはこれで、一覧の行が一度で開けなかった
    のと同じ「押した先が動く」不具合。**枠を先に取っておけば動かない。** */
 #meta {
   /* **幅は中身で決まらない。** `0 1 132px` は「132px から、足りなければ
      縮む」── 縮むかどうかは窓の広さで決まり、中の字の長さでは決まらない。
-     だから「保存しました」が出ても釦は動かない。 */
+     だから「保存しました」が出てもボタンは動かない。 */
   flex: 0 1 112px; min-width: 0; display: flex; flex-direction: column;
   align-items: flex-end; gap: 1px; -webkit-app-region: no-drag; overflow: hidden;
 }
@@ -834,7 +834,7 @@ body.vim #vim { display: block; }
   -webkit-app-region: no-drag;
 }
 #marks .r { display: flex; gap: 4px; padding: 5px 8px; align-items: center; }
-/* 流れるのは記号だけ ── 「ほかの記号」の釦は端に残す。 */
+/* 流れるのは記号だけ ── 「ほかの記号」のボタンは端に残す。 */
 #marks .rs { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; }
 #marks .r + .r { border-top: 1px solid var(--line-2); }
 #marks button {
@@ -1218,7 +1218,7 @@ body.dropping::after {
   color: var(--ink2); line-height: 1.4; word-break: break-all; }
 #sparebox .cell .cap b { color: var(--ink); font-weight: 600; }
 #sparebox .none { padding: 2rem; text-align: center; color: var(--ink2); }
-/* 釦は工房と同じ形 ── 同じ見た目のものは、同じ意味であってほしい。 */
+/* ボタンは工房と同じ形 ── 同じ見た目のものは、同じ意味であってほしい。 */
 #sparebox .hd button {
   padding: 5px 13px; border-radius: 8px; font-size: 12.5px;
   border: 1px solid var(--line); background: var(--paper); color: var(--ink);
@@ -1269,7 +1269,7 @@ body.dropping::after {
         <button data-view="split" title="並べて表示（⌘P）">並べて表示</button>
         <button data-view="write" title="コード ── Markdown そのもの（⌘E）">コード</button>
       </div>
-      <!-- **目次は釦で出す。** 一度、帯の幅を空けるために献立へ引っ込めた
+      <!-- **目次はボタンで出す。** 一度、帯の幅を空けるために献立へ引っ込めた
            ことがある（依頼 297）── 献立の中では見つからず、「消えた」と
            言われた。幅は `#meta` を固定してから空いている。 -->
       <button id="tocbtn" title="目次（⌘⇧O）">☰</button>

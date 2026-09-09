@@ -88,7 +88,7 @@ struct ContentView: View {
                 }
                 // **最上段は歯車だけ。** 前は新しいフォルダ・新しいノート・
                 // 並びの三つが並んでいて、窓の左の列とは別のものになって
-                // いた。作るのは一覧の頭の釦、並べ替えとフィルタはその下 ──
+                // いた。作るのは一覧の頭のボタン、並べ替えとフィルタはその下 ──
                 // 窓がそうしているので、二つの amber で同じ場所を探せる。
                 if store.up == nil {
                     ToolbarItem(placement: .topBarLeading) {
@@ -598,7 +598,7 @@ struct ContentView: View {
             if needle.isEmpty {
                 Section {
                     if store.at.isEmpty {
-                        // **一つだけの、押させたい釦。** 窓と同じ形 ── 塊に
+                        // **一つだけの、押させたいボタン。** 窓と同じ形 ── 塊に
                         // せず、琥珀は丸だけに残す。名前とアイコンの大きな
                         // 見出しはやめた（アプリの名前は窓の外が言っている
                         // ので、中で二度言うぶんだけノートが下がる）。
@@ -632,7 +632,7 @@ struct ContentView: View {
                 .listRowSeparator(.hidden)
 
                 // 並べ替えとフィルタ。**窓と同じ場所** ── 一覧のすぐ上に
-                // 二つ並ぶ。最上段に置くと、作る釦と同じ高さに座って
+                // 二つ並ぶ。最上段に置くと、作るボタンと同じ高さに座って
                 // 「よく使うもの」に見えてしまう（前はそうなっていた）。
                 if store.at.isEmpty {
                     HStack(spacing: 14) {
@@ -673,8 +673,8 @@ struct ContentView: View {
                         }
                     }
                     // **右の余白は、何でもない場所。** 段のどこを触っても
-                    // 最初の釦が鳴っていて、右端を触るとフォルダを作る小窓が
-                    // 出た ── 一覧の段は、中に釦があっても段ごと押せる。
+                    // 最初のボタンが鳴っていて、右端を触るとフォルダを作る小窓が
+                    // 出た ── 一覧の段は、中にボタンがあっても段ごと押せる。
                     .contentShape(Rectangle())
                     .onTapGesture {}
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 2, trailing: 16))
@@ -911,7 +911,7 @@ struct ContentView: View {
                 }
             }
         }
-        // 段のあいだを詰める。既定のままだと、釦と絞りと見出しだけで
+        // 段のあいだを詰める。既定のままだと、ボタンと絞りと見出しだけで
         // 画面の三分の一が空き、ノートが下に押し出される。
         .listSectionSpacing(.compact)
         // 探す欄のすぐ下から始める ── 一覧が自分で取る上の余白は、
@@ -965,7 +965,7 @@ struct ContentView: View {
         .onChange(of: store.at, initial: true) { _, now in if walked != now { walked = now } }
         // **畳んでおく。** 絞り込みの帯と並べて置きっぱなしにすると、一覧の
         // 頭が毎回二段ぶん要る ── 言葉で探すのは、絞るより回数が少ない
-        // （窓も同じ形にした）。「ノートを探す」の釦から開く。
+        // （窓も同じ形にした）。「ノートを探す」のボタンから開く。
         .modifier(Seeking(needle: $needle, on: $seeking, tags: store.tagsHere))
         .onChange(of: needle) { _, now in
             store.read(now)
@@ -997,7 +997,7 @@ extension String: @retroactive Identifiable {
 /// `isPresented:` だけでは畳めない ── あの糸が決めるのは「いま打っている
 /// か」であって、欄が場所を取るかどうかではない。`.navigationBarDrawer` は
 /// 一覧の頭に居座り、`displayMode: .automatic` にしても**上まで戻れば必ず
-/// 出てくる**。そこに自前の「ノートを探す」釦も並ぶと、同じことを頼む入口が
+/// 出てくる**。そこに自前の「ノートを探す」ボタンも並ぶと、同じことを頼む入口が
 /// 二つになる（この窓がいちばん嫌う形）。
 ///
 /// なので `searchable` そのものを付け外しする。閉じるとき（取り消しを押した

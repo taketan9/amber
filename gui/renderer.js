@@ -2060,7 +2060,7 @@ function inlineToMd(node) {
 /// 違っていた**: 既定は升を持たない `<li>` を作るので、押した人は升を
 /// 足したつもりで、出てきたのは点だった。前はそれを嫌って「何も無い行」に
 /// 降ろしていたが、それだと**やることを続けて三つ書けない** ── 一つ書く
-/// たびに帯の釦へ手が戻る。
+/// たびに帯のボタンへ手が戻る。
 ///
 /// 揃えるのは形ではなく**押し心地**: 三つとも「次も同じ、空なら降りる」。
 function checkEnter(li) {
@@ -3245,7 +3245,7 @@ function tableDo(what) {
 /// caret の居る、いちばん外のかたまり。
 /// 最後に caret が居たかたまり。
 ///
-/// **押した瞬間には、もう分からない。** 帯の釦を押すと焦点は釦へ移り、
+/// **押した瞬間には、もう分からない。** 帯のボタンを押すと焦点はボタンへ移り、
 /// 選択も消える ── そのとき `getSelection()` を訊いても「どこでもない」
 /// としか返らず、末尾に落ちる（「図がノートのいちばん下に入った」はこれ）。
 /// だから**動いたときに憶えておく**。
@@ -3342,7 +3342,7 @@ function readBlockAs(what) {
     // 驚かない」・2026-09-08）。
     if (what === 'ul' || what === 'ol') flattenHeads(box);
 
-    // **同じ釦で、付けると外す。** 引用の中で「引用」を押したら外れる ──
+    // **同じボタンで、付けると外す。** 引用の中で「引用」を押したら外れる ──
     // 行頭の Backspace で出るのは一行ずつで、長い引用では手が疲れる
     // （本人が求めた道・2026-09-08）。Word の太字と同じ手触り。
     if (what === 'blockquote' && inside(box, 'blockquote')) {
@@ -3543,8 +3543,8 @@ function drawMarks() {
         r.className = 'r';
         // **「…」は流されない。** 帯は狭い画面で横に流れるので、絵を足した
         // ぶん「ほかの記号」が右へ押し出されて**画面の外**へ行った ──
-        // 畳んだり開いたりする釦が見えないと、二列目があること自体が
-        // 分からない。流れるのは記号だけにして、釦は端に残す。
+        // 畳んだり開いたりするボタンが見えないと、二列目があること自体が
+        // 分からない。流れるのは記号だけにして、ボタンは端に残す。
         const scroll = document.createElement('div');
         scroll.className = 'rs';
         r.append(scroll);
@@ -3568,7 +3568,7 @@ function drawMarks() {
             // 言っているところに絵を添えても、目が二度読むだけだから。
             b.textContent = name;
             // **例外は一つだけ**（依頼 419・本人が決めた・2026-09-09）──
-            // 絵文字の釦。「絵文字」と書くより 😀 のほうが速く、しかも
+            // 絵文字のボタン。「絵文字」と書くより 😀 のほうが速く、しかも
             // **訳が要らない**: 押すと出てくるものの見本が絵そのもので、
             // ここだけは絵が名前より多くを言っている。
             if (icon) b.textContent = icon;
@@ -3587,7 +3587,7 @@ function drawMarks() {
             // いちばん遠かった（本人の指摘・2026-09-08）── 記号の列の続きに
             // 見えるほうが、「もっとある」も伝わる。
             //
-            // **vim の釦は置かない。** 使うのはたいてい一人で、毎日見る
+            // **vim のボタンは置かない。** 使うのはたいてい一人で、毎日見る
             // 帯に居座る値打ちは無い ── ⚙ の中にある。
             const sep = document.createElement('div');
             sep.className = 'sep';
@@ -3690,7 +3690,7 @@ async function openEmoji() {
     drawFaces();
     box.hidden = false;
     // **帯の上に出す。** 板は下から生えるので、帯の真上に置かないと
-    // 押した釦と出てきたものが繋がって見えない。
+    // 押したボタンと出てきたものが繋がって見えない。
     const from = [...el('marks').querySelectorAll('button')]
         .find((b) => b.title.startsWith('絵文字'));
     const r = (from || el('marks')).getBoundingClientRect();
@@ -3706,8 +3706,8 @@ function closeEmoji() {
     el('emoji').hidden = true;
     document.removeEventListener('mousedown', closeEmojiOnce);
 }
-/// 外を押したら閉じる。**板の中と、帯の絵文字の釦は「外」ではない** ──
-/// 釦を押して閉じてしまうと、開け閉めが一打ぶんずれる。
+/// 外を押したら閉じる。**板の中と、帯の絵文字のボタンは「外」ではない** ──
+/// ボタンを押して閉じてしまうと、開け閉めが一打ぶんずれる。
 function closeEmojiOnce(e) {
     if (el('emoji').contains(e.target)) return;
     if (e.target.closest && e.target.closest('#marks button')?.title.startsWith('絵文字')) return;
@@ -3985,7 +3985,7 @@ el('gear').onclick = (e) => {
     else closeMenu();
 };
 // 目次の開け閉め。**押せる場所は一つでいい** ── 献立の「目次」と同じ
-// ものを呼ぶ（`toggleToc`）。一度この釦を外して献立だけにしたら、
+// ものを呼ぶ（`toggleToc`）。一度このボタンを外して献立だけにしたら、
 // 見つからず「消えた」と言われた（依頼 297 の幅の都合だったが、
 // 幅は `#meta` を固定してから空いている）。
 el('tocbtn').onclick = () => toggleToc();
@@ -6258,8 +6258,8 @@ function keyName(e) {
     return '⌘' + (e.shiftKey ? '⇧' : '') + base;
 }
 
-/// 見出しの深さは、鍵盤からは一打で。**帯の釦は押すたびに深くなる**まま
-/// ── 一つの考えに三つの名前を付けない、は釦の話で、鍵盤には当てはまらない
+/// 見出しの深さは、鍵盤からは一打で。**帯のボタンは押すたびに深くなる**まま
+/// ── 一つの考えに三つの名前を付けない、はボタンの話で、鍵盤には当てはまらない
 /// （Inkdrop も `toggle-heading-1` … `-4` を別々に持っている）。
 const HEAD_KEYS = { '⌘1': 1, '⌘2': 2, '⌘3': 3, '⌘4': 4 };
 
@@ -6559,10 +6559,10 @@ async function cmdKeys() {
     rows.push({ name: '── 書く道具（記号）', sub: '「表示」でも「コード」でも', head: true });
     for (const [name, key, run] of MARKS.flat()) {
         if (name === '|' || !run) continue;
-        // 見出しだけ、鍵と釦で振る舞いが違う ── 一打はその深さに直し、
-        // 釦は押すたびに深くなる。一覧では両方言う。
-        if (name === '見出し') { put(name, '⌘1 ⌘2 ⌘3 ⌘4', '一打でその深さに（帯の釦は押すたび深く）', run); continue; }
-        put(name, key || '', key ? '' : '帯の釦から', run);
+        // 見出しだけ、鍵とボタンで振る舞いが違う ── 一打はその深さに直し、
+        // ボタンは押すたびに深くなる。一覧では両方言う。
+        if (name === '見出し') { put(name, '⌘1 ⌘2 ⌘3 ⌘4', '一打でその深さに（帯のボタンは押すたび深く）', run); continue; }
+        put(name, key || '', key ? '' : '帯のボタンから', run);
     }
     put('マークダウンの書き方', '', '記号そのものを見る', cmdSyntax);
 
@@ -6714,7 +6714,7 @@ function openMenu(at, which) {
 /// まま、が起こる形。右押しを十か所に増やすので、先に一本にする。
 ///
 /// `items` は `{ name, sub, key, sep, dim, html, run }` の並び。`at` は
-/// 押した場所（`{x, y}`）か、釦の四角（`{right, bottom}` ── 右端に揃える）。
+/// 押した場所（`{x, y}`）か、ボタンの四角（`{right, bottom}` ── 右端に揃える）。
 function popMenu(items, at) {
     const box = el('more');
     const rows = items.filter(Boolean);
@@ -7388,7 +7388,7 @@ function drawCloud() {
 
 /// **絞れることが、絞る前から見えている。**
 ///
-/// 前は「フィルタ」という一つの釦で、押すと小窓が開き、タグかフォルダか
+/// 前は「フィルタ」という一つのボタンで、押すと小窓が開き、タグかフォルダか
 /// 期間の**どれか一つ**を選んで閉じる作りだった ── 重ねられないうえ、
 /// 選んだ結果は `tag:仕事` という字になって探す欄に流れ込んだ。押しただけ
 /// なのに機械の言葉が現れ、外すには字を消すことになる。
@@ -8593,7 +8593,7 @@ const escapeAttr = escapeHtml;
 
 (async function boot() {
     if (MAC) document.body.classList.add('mac');
-    // **釦の吹き出しに書いてある鍵も、土台の言葉に。**
+    // **ボタンの吹き出しに書いてある鍵も、土台の言葉に。**
     //
     // `index.html` に `title="言葉で探す（⌘F）"` と直に書いてあるものが
     // ある ── Windows には `⌘` という鍵が無いので、**押しようがない案内**が
