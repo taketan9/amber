@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- **実行ファイルの中に埋める名札**（依頼 466）。
+	     macOS は、これを持っていない素の実行ファイルに予定表を触らせない
+	     ── しかも**小窓を出さずに、いきなり断る**。だから「許可しますか」
+	     が一度も出ないまま「許可がありません」になっていた。 -->
+	<key>CFBundleIdentifier</key>
+	<string>com.taketan.amber.cal</string>
+	<key>CFBundleName</key>
+	<string>ambər</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>この Mac の予定表を、ambər のカレンダーに並べます。予定を足すときにも使います。</string>
+</dict>
+</plist>
