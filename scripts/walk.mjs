@@ -21,7 +21,7 @@
  * ── 三度踏んだ（2026-09-09）。註にも書けない。改行が要るなら
  * String.fromCharCode(10)。
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 const PORT = process.env.PORT || 9333;
 /// 試し場のノートが置いてある道（`walk.sh` が渡す）。
@@ -704,7 +704,64 @@ await step('大きいノート：目次も出る', `
     if (tocOn) toggleToc();
     return n > 100;`, true);
 
-// 二十。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
+/* ── 二十。**同じノートを二か所から書き換える**（依頼 433）──
+ *
+ * クラウドで同じ棚を触っていると起きること。amber は**どちらも捨てない**
+ * ── 分かれる前・こちら・向こうの三つを core に渡して混ぜる。ここまでは
+ * core の試験が見ているが、**窓を通した本物**は誰も通していなかった。
+ *
+ * 走査が「向こうの端末」の役をやる: 窓が開いたままのノートを、横から
+ * 書き換える。
+ */
+await step('混ぜる：開く', `
+    await openNote(${path('混ぜる.md')});
+    if (!state.open || !state.open.path.endsWith('混ぜる.md')) return '開けません';
+    setView('write');
+    await new Promise((g) => setTimeout(g, 400));
+    return whole().includes('はじめの行');`, true);
+
+if (NOTES) {
+    // **向こうの端末が、末尾に一行足した。**
+    ran += 1;
+    try {
+        const at = NOTES + '/混ぜる.md';
+        const was = readFileSync(at, 'utf8');
+        writeFileSync(at, was.replace('おわりの行。', 'おわりの行。\n\n向こうが足した行。'));
+    } catch (e) {
+        bad.push({ name: '混ぜる：横から書き換える', why: [e.message] });
+    }
+    await sleep(900);
+}
+
+await step('混ぜる：こちらでも打って、両方残る', `
+    // こちらは頭のほうに足す ── 同じ行を取り合わない形。
+    const was = whole();
+    const now = was.replace('はじめの行。', 'はじめの行。こちらが足した字。');
+    loading = true;
+    editor.setValue(state.head ? now.slice(state.head.length) : now);
+    loading = false;
+    state.dirty = true;
+    await save();
+    await new Promise((g) => setTimeout(g, 1200));
+    const out = whole();
+    if (!out.includes('こちらが足した字')) return 'こちらの字が消えました';
+    if (!out.includes('向こうが足した行')) return '向こうの行が消えました';
+    return true;`, true);
+
+if (NOTES) {
+    ran += 1;
+    try {
+        const got = readFileSync(NOTES + '/混ぜる.md', 'utf8');
+        if (!got.includes('こちらが足した字') || !got.includes('向こうが足した行')) {
+            bad.push({ name: '混ぜる：ファイルにも両方ある',
+                why: ['ファイルには片方しかありません: ' + JSON.stringify(got.slice(0, 200))] });
+        }
+    } catch (e) {
+        bad.push({ name: '混ぜる：ファイルにも両方ある', why: [e.message] });
+    }
+}
+
+// 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => x.book === '歩き試し'
             || /複製|新しいノート|週報/.test(x.title || ''))) {

@@ -49,8 +49,13 @@ try {
 
 // 組む側は core。**実行ファイルが無ければ飛ばす** ── この試験のためだけに
 // `cargo build` を強いない（`paper-test.js` が jsdom を強いないのと同じ）。
+// **Windows では `.exe`。** ここを見落とすと、Windows の runner では
+// 「エンジンがありません」と言って**黙って飛ばす** ── 通ったように見えて、
+// 何も見ていない（依頼 434）。
 const engine = [
+    path.join(root, 'target', 'release', 'amber-server.exe'),
     path.join(root, 'target', 'release', 'amber-server'),
+    path.join(root, 'gui', 'amber-server.exe'),
     path.join(root, 'gui', 'amber-server'),
 ].find((at) => fs.existsSync(at));
 if (!engine) {

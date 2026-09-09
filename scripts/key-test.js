@@ -30,8 +30,13 @@ try {
     console.log('jsdom がありません（gui で npm install すると走ります）── 飛ばします');
     process.exit(0);
 }
+// **Windows では `.exe`。** ここを見落とすと、Windows の runner では
+// 「エンジンがありません」と言って**黙って飛ばす** ── 通ったように見えて、
+// 何も見ていない（依頼 434）。
 const engine = [
+    path.join(root, 'target', 'release', 'amber-server.exe'),
     path.join(root, 'target', 'release', 'amber-server'),
+    path.join(root, 'gui', 'amber-server.exe'),
     path.join(root, 'gui', 'amber-server'),
 ].find((at) => fs.existsSync(at));
 if (!engine) {

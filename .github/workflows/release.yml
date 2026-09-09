@@ -131,6 +131,20 @@ jobs:
           node scripts/web-test.js
           node scripts/agree-test.js
 
+      # **Windows でも core の試験を回す。**
+      #
+      # 上の往復（`round-test` ほか）は**字を渡すだけ**なので一台で足りるが、
+      # `cargo test` はそうではない ── core はファイルを開き、道を組み立て、
+      # 改行と文字コードを見る。そこは機械によって振る舞いが変わるところで、
+      # 「mac では一生出ない」類を**四度**踏んでいる（`file://`・鍵の名前・
+      # 絵の道・改行）。組めることだけ見て通していたので、**判断そのもの**を
+      # あちらの機械でも一度通す（依頼 434）。
+      - name: core の試験（Windows）
+        if: runner.os == 'Windows'
+        run: cargo test --workspace
+        env:
+          RUSTFLAGS: '-C target-feature=+crt-static'
+
       - name: 一往復してみる（Windows）
         if: runner.os == 'Windows'
         shell: pwsh
