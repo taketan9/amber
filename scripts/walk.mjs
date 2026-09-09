@@ -493,6 +493,143 @@ if (process.env.SITE) {
         return md.includes('#') && md.length > 20;`, true);
 }
 
+/* ── 十六の二。**鍵だけで一周できるか**（依頼 447） ──
+ *
+ * 鍵は二か所に書いてある ── **見せる側**（CMDS の key）と、**効かせる側**
+ * （keydown の if の並び）。別々なので、片方だけ直る日が来る: 献立にも
+ * パレットにも出ているのに、押しても何も起きない鍵ができあがる。
+ *
+ * 見るのは二つ。**同じ鍵を二つの命令が名乗っていないこと**（先に書いた
+ * ほうが勝ち、あとのほうは永久に押せない）と、**表に載っている鍵を押すと
+ * 窓の姿が変わること**。
+ */
+
+await step('鍵：同じ鍵を、二つの命令が名乗っていない', `
+    const seen = new Map();
+    const dup = [];
+    for (const c of CMDS) {
+        if (!c.key) continue;
+        if (seen.has(c.key)) dup.push(c.key + ' は ' + seen.get(c.key) + ' と ' + c.id);
+        else seen.set(c.key, c.id);
+    }
+    return dup.length ? dup.join(' / ') : true;
+`, true);
+
+// **ここだけ長く待つ。** 四十本の鍵を一本ずつ、押す前に姿を戻して
+// から押すので、既定の待ちでは足りない（待ちきれずに落第になった）。
+const patience = process.env.PATIENCE;
+process.env.PATIENCE = '60000';
+await step('鍵：表に載っている鍵が、ぜんぶ効く', `
+    // たどれる跡を作っておく ── 跡が無いと、前へ戻る鍵は正しく何もしない。
+    for (const n of state.notes.slice(0, 2)) {
+        await openNote(n.path);
+        await new Promise((g) => setTimeout(g, 120));
+    }
+    const CODE = { '/': 'Slash', '←': 'ArrowLeft', '→': 'ArrowRight',
+                   '+': 'Equal', '−': 'Minus', '0': 'Digit0', 'Esc': 'Escape' };
+    const spec = (label) => {
+        const meta = label.includes('⌘');
+        const shift = label.includes('⇧');
+        const alt = label.includes('⌥');
+        const rest = label.replace(/[⌘⇧⌥ ]/g, '');
+        const fkey = rest.charCodeAt(0) === 70 && rest.length > 1
+            && !isNaN(Number(rest.slice(1)));
+        if (fkey) return { code: rest, key: rest, meta, shift, alt };
+        return { code: CODE[rest] || ('Key' + rest.toUpperCase()),
+                 key: rest.toLowerCase(), meta, shift, alt };
+    };
+    const press = (label) => {
+        const s = spec(label);
+        document.dispatchEvent(new KeyboardEvent('keydown', {
+            code: s.code, key: s.key, metaKey: s.meta, ctrlKey: false,
+            shiftKey: s.shift, altKey: s.alt, bubbles: true, cancelable: true,
+        }));
+    };
+    // **窓の姿。** 何が起きたかまでは見ない ── 見ようとすると命令ごとの
+    // 見張りを四十本書くことになり、そちらが先に腐る。
+    const snap = () => JSON.stringify({
+        view, zen, fontStep, railOff, listOff, tocOn,
+        veil: !el('veil').hidden, more: !el('more').hidden,
+        emoji: !el('emoji').hidden, open: state.open,
+        tabs: (state.tabs || []).length, notes: state.notes.length,
+        find: document.activeElement === el('find'),
+        said: el('say').classList.contains('on') ? el('say').textContent : '',
+        len: (state.open && editor) ? editor.getValue().length : 0,
+    });
+    const reset = () => {
+        if (!el('emoji').hidden) closeEmoji();
+        if (!el('more').hidden) closeMenu();
+        if (!el('veil').hidden) closeSheet(null);
+        if (zen) setZen(false);
+        setFont(0, true);
+        if (railOff) toggleRail();
+        if (listOff) toggleList();
+        if (tocOn) toggleToc();
+        setView('read');
+        if (document.activeElement === el('find')) el('find').blur();
+        el('say').classList.remove('on');
+    };
+    // **押す前に、効く余地を作る。** 押しても姿が変わらないのは
+    // 「鍵が死んでいる」ときと「もう そうなっている」ときの二通りある
+    // ── 後者で鳴らすと、この検査はすぐ信じられなくなる。
+    const pause = (ms) => new Promise((g) => setTimeout(g, ms));
+    const NOTE = ${path('よくばり.md')};
+    await openNote(NOTE);
+    await pause(150);
+    const first = editor ? editor.getValue() : '';
+    // 戻す先を積む。**開き直すと消える**ので、その鍵の直前にまく
+    // （前へ戻る鍵が先に走って、ノートを開き直している）。
+    // **二回いる** ── 一回目は「いまの姿」を憶えるだけで、積まれるのは
+    // 二回目から（keepStep）。**書く面で**まかないと、保存は面の側の字を
+    // 採るので、エディタに入れた字が書き込まれない。
+    const seed = async () => {
+        await openNote(NOTE);
+        await pause(150);
+        setView('write');
+        await pause(150);
+        for (const tail of ['x', 'xy']) {
+            editor.setValue(first + tail);
+            state.dirty = true;
+            await save();
+            await pause(200);
+        }
+    };
+    const ready = {
+        // 字の大きさは reset で 0 に戻るので、0 に戻す鍵だけ余地が要る。
+        font0: async () => { setFont(2, true); },
+        undo: seed,
+        redo: async () => { await seed(); press('⌘Z'); await pause(240); },
+    };
+    const dead = [];
+    for (const c of CMDS) {
+        if (!c.key) continue;
+        // **OS の小窓を開ける鍵は押さない** ── 閉じる人がいないので、
+        // ここで総ざらいが止まる（頭の注意書きと同じ理由）。
+        if (c.id === 'outside') continue;
+        reset();
+        if (ready[c.id]) await ready[c.id]();
+        await new Promise((g) => setTimeout(g, 90));
+        const before = snap();
+        press(c.key);
+        await new Promise((g) => setTimeout(g, 220));
+        if (snap() === before) dead.push(c.id + ' ' + c.key);
+    }
+    reset();
+    // 触った字は戻す ── このあとの往復が、崩れたノートで始まらないように。
+    await openNote(NOTE);
+    await pause(150);
+    setView('write');
+    await pause(120);
+    if (editor && editor.getValue() !== first) {
+        editor.setValue(first);
+        state.dirty = true;
+        await save();
+        await pause(200);
+    }
+    return dead.length ? dead.join(' / ') : true;
+`, true);
+if (patience === undefined) delete process.env.PATIENCE; else process.env.PATIENCE = patience;
+
 /* ── 十七。**触ったあと、壊れていないか** ──
  *
  * ここがこの走査のいちばんの目当て。**面を行き来しただけで字が変わる**、

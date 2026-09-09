@@ -575,7 +575,7 @@ el('list').addEventListener('contextmenu', (e) => {
             drawList();
         } },
         { name: 'すべて選ぶ', key: '⌘A', sep: true, run: pickAll },
-        { name: '一覧を畳む', key: '⌘⇧/', run: toggleList },
+        { name: '一覧を畳む', key: '⌘⌥/', run: toggleList },
     ], at);
 });
 
@@ -6193,9 +6193,14 @@ document.addEventListener('keydown', (e) => {
     // 左の列を畳む（Inkdrop の ⌘/）。狭い画面では二列ぶんが効く。
     if ((e.metaKey || e.ctrlKey) && e.code === 'Slash') {
         e.preventDefault();
-        // `⇧` を足すと二枚目。**同じ鍵の並びに揃える** ── 畳むことは
+        // `⌥` を足すと二枚目。**同じ鍵の並びに揃える** ── 畳むことは
         // 一つの動きで、畳む相手が違うだけ。
-        if (e.shiftKey) toggleList(); else toggleRail();
+        //
+        // **`⇧` ではない。** `⌘⇧/` は mac では `⌘?` ── どのアプリでも
+        // 「ショートカット一覧」で、一つ上の枝がそれを先に取る。表には
+        // 二つとも `⌘⇧/` と書いてあったので、**一覧を畳むは鍵から一度も
+        // 押せなかった**（献立にもパレットにも出ているのに・依頼 447）。
+        if (e.altKey) toggleList(); else toggleRail();
         return;
     }
     // **まとめて選ぶ。** 打っている最中は取らない ── エディタと探す欄の
@@ -6355,7 +6360,7 @@ const CMDS = [
     // **⚙ にも出す。** 鍵（`⌘/`）を覚えていない人には、畳む道がどこにも
     // 無かった ── Inkdrop は献立に並べている。
     { id: 'rail', name: '左の列を畳む', key: '⌘/', app: true, run: () => toggleRail() },
-    { id: 'list', name: '一覧を畳む', key: '⌘⇧/', app: true, run: () => toggleList() },
+    { id: 'list', name: '一覧を畳む', key: '⌘⌥/', app: true, run: () => toggleList() },
     { id: 'back', name: '前に見たノート', key: '⌘←', run: () => walk(-1) },
     { id: 'fwd', name: '次に見たノート', key: '⌘→', run: () => walk(1) },
     { id: 'find', name: 'ノートを探す', key: '⌘F', run: () => openFind() },
