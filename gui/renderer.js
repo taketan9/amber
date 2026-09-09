@@ -33,7 +33,7 @@ const dirOf = (at) => String(at || '').replace(/[^/\\]*$/, '');
 /// ファイルの道を、絵に渡せる `file:` の形にする。
 ///
 /// **Windows の道は、そのままでは URL にならない。**
-/// `'file://' + encodeURI('C:\\Users\\…\\絵.png')` は
+/// `'file://' + encodeURI('C:\\Users\\…\\画像.png')` は
 /// `file://C:%5CUsers%5C…` になる ── `C:` が**機械の名前**として読まれ、
 /// 円記号は `%5C` に化ける。会社の端末で「この絵は読めません」と出たのは
 /// これ（mac の道は `/` で始まるので、たまたま斜線が三本になっていた）。
@@ -1637,7 +1637,7 @@ function drawZones() {
             if (/^file:/i.test(w.src)) img.src = w.src;
             else showPicture(img, absPath(w.src, dir), () => {
                 box.classList.add('bad');
-                box.textContent = 'この絵は読めません: ' + w.src;
+                box.textContent = 'この画像は読めません: ' + w.src;
             });
             box.append(img);
             zones.push(acc.addZone({
@@ -3463,7 +3463,7 @@ async function cmdSyntax() {
         ['コード', '`コード`', '前後を ` で挟む'],
         ['コードの枠', '```\nここに何行でも\n```', '``` の行で挟む'],
         ['リンク', '[見せる字](https://)', '角括弧が字、丸括弧が行き先'],
-        ['画像', '![説明](絵の場所)', '頭に ! を付けるとリンクではなく絵'],
+        ['画像', '![説明](画像の場所)', '頭に ! を付けるとリンクではなく画像'],
         ['引用', '> 引いてきた字', '行の頭に > と空白'],
         ['注記', '> [!NOTE]\n> 覚えておくこと', 'NOTE / TIP / IMPORTANT / WARNING / CAUTION'],
         ['区切り線', '---', 'ハイフン三つだけの行'],
@@ -3825,7 +3825,7 @@ async function pickPicture() {
         [{ name: '画像', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'] }]);
     if (!file) return;
     const got = await window.amber.fileBytes(file);
-    if (!got) { say('その絵は読めません'); return; }
+    if (!got) { say('その画像は読めません'); return; }
     await attach(got.b64, got.ext);
 }
 
@@ -3840,7 +3840,7 @@ async function attach(b64, ext) {
         else put(`![](${r.link})\n`);
         zonesSoon();
     } catch (e) {
-        say('絵を置けません: ' + why(e));
+        say('画像を置けません: ' + why(e));
     }
 }
 
@@ -5164,7 +5164,7 @@ function studioRaw() {
     if (!studio.data) {
         wrap.append(tag('div', 'note',
             'この図は表にできない形（手で書いたか、ambər の知らない書き方）です。'
-            + '右の絵を見ながら、ここで直してください。'));
+            + '右の図を見ながら、ここで直してください。'));
     }
     return wrap;
 }
@@ -5431,7 +5431,7 @@ function sizeNow(fig) {
 /// あとから記法で直せるし、amber の外でも読める（芯の 1）。
 async function askSize(fig) {
     const now = fig.querySelector('img')?.style.width || '';
-    const px = await askPick('絵の大きさ',
+    const px = await askPick('画像の大きさ',
         SIZES.map((s) => ({ name: s.name, sub: s.sub, value: s.px === null ? '' : s.px })),
         SIZES.find((s) => s.px === now)
             ? 'いま ' + SIZES.find((s) => s.px === now).name
@@ -6291,7 +6291,7 @@ document.addEventListener('paste', async (e) => {
     e.preventDefault();
     e.stopPropagation();
     const got = await window.amber.clipboardImage();
-    if (!got) { say('その絵は読めません'); return; }
+    if (!got) { say('その画像は読めません'); return; }
     await attach(got.b64, got.ext);
 }, true);
 
@@ -6336,6 +6336,112 @@ function walk(step) {
     // たどっている間は積み直さない ── 積むと前へ戻れなくなる。
     openNote(trail[to], { walking: true });
 }
+
+
+/* ── ノートから使われていない画像（依頼 449） ── */
+
+/// いま出している一覧と、選ばれているもの。
+let spareRows = [];
+let sparePicked = new Set();
+
+/// **数えるのは core、消すのは OS のゴミ箱。**
+///
+/// 「使われていない」はぜんぶのノートを読み切って初めて言えることなので、
+/// 読めなかったノートがあれば、消す前にそう言う ── 黙って少なく数えるのが
+/// いちばん危ない。
+async function cmdSpare() {
+    if (!state.root) { say('置き場所がありません'); return; }
+    let got;
+    try {
+        got = await window.amber.call('spare', { path: state.root });
+    } catch (e) {
+        say('数えられません: ' + why(e));
+        return;
+    }
+    spareRows = got.pictures || [];
+    sparePicked = new Set();
+    const box = el('spare');
+    const warn = box.querySelector('.warn');
+    const unsure = got.unsure || [];
+    warn.hidden = !unsure.length;
+    warn.textContent = unsure.length
+        ? '読めなかったノートが ' + unsure.length + ' 本あります（' + unsure.slice(0, 3).join('・')
+          + (unsure.length > 3 ? ' ほか' : '') + '）。そのノートが使っている画像も、'
+          + 'ここに出ているかもしれません。'
+        : '';
+    box.hidden = false;
+    drawSpare();
+}
+
+function drawSpare() {
+    const box = el('spare');
+    const grid = box.querySelector('.grid');
+    const sum = box.querySelector('.sum');
+    if (!spareRows.length) {
+        grid.innerHTML = '<div class="none">使われていない画像はありません。</div>';
+        sum.textContent = '';
+        box.querySelector('.go').disabled = true;
+        box.querySelector('.all').disabled = true;
+        return;
+    }
+    const bytes = spareRows.reduce((n, r) => n + (r.bytes || 0), 0);
+    sum.textContent = spareRows.length + ' 枚・' + spareSize(bytes)
+        + (sparePicked.size ? '（' + sparePicked.size + ' 枚を選んでいます）' : '');
+    box.querySelector('.go').disabled = !sparePicked.size;
+    box.querySelector('.all').disabled = false;
+    box.querySelector('.all').textContent =
+        sparePicked.size === spareRows.length ? 'ぜんぶやめる' : 'ぜんぶ選ぶ';
+    grid.innerHTML = spareRows.map((r) => {
+        const on = sparePicked.has(r.path) ? ' on' : '';
+        // もとのノートの名前は「らしい」だけ ── 言い切らない。
+        const from = r.note ? escapeHtml(r.note) + ' のもの' : '出どころは分かりません';
+        return '<div class="cell' + on + '" data-at="' + escapeHtml(r.path) + '">'
+            + '<div class="shot"><img loading="lazy" src="' + fileURL(r.path) + '" alt=""></div>'
+            + '<div class="cap"><b>' + (sparePicked.has(r.path) ? '選んでいます' : from) + '</b><br>'
+            + spareSize(r.bytes || 0) + '・' + (when(r.when) || '日付なし') + '</div></div>';
+    }).join('');
+}
+
+/// バイトを、人の読む字に。**名前を広く取らない**（依頼 424）── `size` の
+/// ような名前は、あとから誰かがもう一つ書く。
+function spareSize(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+    return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+el('spare').addEventListener('click', async (e) => {
+    const box = el('spare');
+    if (e.target === box || e.target.closest('.x')) { box.hidden = true; return; }
+    const cell = e.target.closest('.cell');
+    if (cell) {
+        const at = cell.dataset.at;
+        if (sparePicked.has(at)) sparePicked.delete(at); else sparePicked.add(at);
+        drawSpare();
+        return;
+    }
+    if (e.target.closest('.all')) {
+        if (sparePicked.size === spareRows.length) sparePicked = new Set();
+        else sparePicked = new Set(spareRows.map((r) => r.path));
+        drawSpare();
+        return;
+    }
+    if (e.target.closest('.go')) {
+        const n = sparePicked.size;
+        if (!n) return;
+        // **ゴミ箱へ。** 消すのではないので戻せるが、それでも一度は訊く。
+        if (!await askYes(n + ' 枚をゴミ箱へ入れますか')) return;
+        let done = 0;
+        const left = [];
+        for (const at of sparePicked) {
+            const ok = await window.amber.trash(at);
+            if (ok === true) done += 1; else left.push(at);
+        }
+        box.hidden = true;
+        say(done + ' 枚をゴミ箱へ入れました'
+            + (left.length ? '（' + left.length + ' 枚は入れられませんでした）' : ''));
+    }
+});
 
 /* ── 窓ができること、ひとつの表 ── */
 
@@ -6405,6 +6511,8 @@ const CMDS = [
     // 下まで来ない ── 同じ行い（ノートを入れる）は同じ場所に。
     { id: 'bring', name: 'ノートを取り込む', app: true, sep: true, run: cmdBring },
     { id: 'welcome', name: '見本のノートを入れる', app: true, run: cmdWelcome },
+    { id: 'spare', name: 'ノートから使われていない画像を削除', app: true,
+      sub: '小さく見て、選んでゴミ箱へ', run: cmdSpare },
     { id: 'backup', name: 'バックアップ', app: true, run: cmdBackup },
     { id: 'restore', name: 'バックアップから戻す', app: true, run: cmdRestore },
     { id: 'root', name: 'ambər 保存ディレクトリ変更', app: true, run: cmdRoot },
@@ -8022,7 +8130,7 @@ async function cmdColor(folder) {
 async function cmdBackup() {
     const here = state.dest.kind === 'book' ? state.dest.what : '';
     const items = [
-        { name: 'すべて', sub: 'ノートも絵も、まるごと一つに', value: ['all', ''] },
+        { name: 'すべて', sub: 'ノートも画像も、まるごと一つに', value: ['all', ''] },
     ];
     for (const b of state.books || []) {
         items.push({ name: 'フォルダ: ' + b, sub: b === here ? 'いま見ているところ' : '', value: ['book', b] });
@@ -8152,7 +8260,7 @@ async function cmdRoot() {
             // ファイルの数（絵も履歴も `.amber` も入る）で、6 件のノートが
             // 「14 件を移しました」になる ── 何が 14 なのか誰も分からない。
             await ask('migrate', { from: was, to: dir });
-            say('ノート ' + had + ' 件を、絵と履歴ごと移しました');
+            say('ノート ' + had + ' 件を、画像と履歴ごと移しました');
         } catch (e) {
             // **移せなくても、置き場所は変えない。** 半分だけ移った状態で
             // 向こうを見せると、残りが消えたようにしか見えない。

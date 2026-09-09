@@ -630,6 +630,26 @@ await step('鍵：表に載っている鍵が、ぜんぶ効く', `
 `, true);
 if (patience === undefined) delete process.env.PATIENCE; else process.env.PATIENCE = patience;
 
+/* ── 十六の三。**ノートから使われていない画像**（依頼 449） ── */
+
+await step('使われていない画像：指されている一枚は巻き込まない', `
+    const got = await window.amber.call('spare', { path: state.root });
+    const names = (got.pictures || []).map((p) => p.rel);
+    if (names.some((n) => n.includes('1788000001'))) return '使っている画像が出ています';
+    if (!names.some((n) => n.includes('1788000002'))) return '使っていない画像が出ていません';
+    if ((got.unsure || []).length) return '読めないノートがあります: ' + got.unsure.join('・');
+    return true;
+`, true);
+
+await step('使われていない画像：小さく並ぶ', `
+    await cmdSpare();
+    await new Promise((g) => setTimeout(g, 300));
+    const cells = el('spare').querySelectorAll('.cell').length;
+    const shots = el('spare').querySelectorAll('.cell img').length;
+    el('spare').hidden = true;
+    return cells > 0 && cells === shots;
+`, true);
+
 /* ── 十七。**触ったあと、壊れていないか** ──
  *
  * ここがこの走査のいちばんの目当て。**面を行き来しただけで字が変わる**、

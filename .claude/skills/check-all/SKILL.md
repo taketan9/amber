@@ -36,7 +36,7 @@ python3 scripts/shipped.py      # 未リリースの数
 
 | 検査 | 見ているもの |
 | --- | --- |
-| `cargo test` | core の判断（題・前書き・混ぜる・履歴・絵の大きさ・絵文字の表） |
+| `cargo test` | core の判断（題・前書き・混ぜる・履歴・画像の大きさ・絵文字の表・使われていない画像） |
 | `paper-test` | 面 → 字（手で書いた HTML から） |
 | `round-test` | **字 → 面 → 字の往復**（core と切り出しをまたぐ・81 件） |
 | `key-test` | 鍵を押してからの往復（Backspace・Tab・Enter・矢印） |

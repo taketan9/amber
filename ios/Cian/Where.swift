@@ -122,6 +122,8 @@ struct Where: View {
     @State private var clipUrl = ""
     @State private var clipBusy = false
     @State private var clipDone: String?
+    /// 使われていない画像の片づけ（依頼 449）。
+    @State private var sparing = false
     @AppStorage("cian.look") private var look = Look.auto
     @AppStorage("amber.font") private var font = Size.system
     @AppStorage("cian.autosave") private var autosave = true
@@ -205,6 +207,14 @@ struct Where: View {
                         restore()
                     } label: {
                         Label("バックアップから戻す", systemImage: "clock.arrow.circlepath")
+                    }
+                    // **片づけ**（依頼 449）── 貼ったノートを消しても、
+                    // 画像は `attachments/` に残る。消す道がどこにも
+                    // 無かったので、フォルダだけが重くなっていた。
+                    Button {
+                        sparing = true
+                    } label: {
+                        Label("ノートから使われていない画像を削除", systemImage: "photo.badge.checkmark")
                     }
                     // The scope is a choice because backing up is
                     // something people do *before* something — before a
@@ -315,6 +325,7 @@ struct Where: View {
             // **Web から取り込む**（依頼 421 の乙）。URL を一つ訊いて、
             // 取ってきて、一本のノートにする。
             .sheet(isPresented: $clipping) { clipSheet }
+            .sheet(isPresented: $sparing) { Sparing(store: store) }
             .alert("取り込みました", isPresented: Binding(
                 get: { clipDone != nil }, set: { if !$0 { clipDone = nil } }
             )) {

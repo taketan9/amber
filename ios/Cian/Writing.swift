@@ -364,7 +364,7 @@ struct NoteView: View {
                     Button("消す", role: .destructive) { hand.did("drop") }
                     Button("やめる", role: .cancel) {}
                 }
-                .confirmationDialog("絵", isPresented: showing("img"),
+                .confirmationDialog("画像", isPresented: showing("img"),
                                     titleVisibility: .visible) {
                     // **絵の大きさは、押して選べる**（依頼 420）── 記法を
                     // 覚えていない人が、いちばん変えたがるのがこれ。
@@ -372,7 +372,7 @@ struct NoteView: View {
                     Button("消す", role: .destructive) { hand.did("drop") }
                     Button("やめる", role: .cancel) {}
                 }
-                .confirmationDialog("絵の大きさ", isPresented: $sizing,
+                .confirmationDialog("画像の大きさ", isPresented: $sizing,
                                     titleVisibility: .visible) {
                     // 数は訊かない ── 打てる人は記法で書く（`![w:200px]`）。
                     // ここに来るのは打てない人なので、言葉で選ばせる。

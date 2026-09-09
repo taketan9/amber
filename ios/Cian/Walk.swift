@@ -137,8 +137,8 @@ enum Walk {
             let out = try store.checked("- [ ] 牛乳\n", line: 0, done: true)
             return out.contains("- [x]") ? nil : "升が入りません: \(out)"
         }
-        step("絵の大きさを変える") {
-            let out = try store.sized("![絵](a.png)", width: "200")
+        step("画像の大きさを変える") {
+            let out = try store.sized("![画像](a.png)", width: "200")
             if !out.contains("w:200") { return "大きさが入りません: \(out)" }
             let off = try store.sized(out, width: nil)
             return off.contains("w:") ? "大きさが外れません: \(off)" : nil
@@ -206,6 +206,39 @@ enum Walk {
             try store.remove(n)
             return store.notes.contains { $0.path == n.path }
                 ? "まだ一覧にいます" : nil
+        }
+
+        // ── 三の二。使われていない画像（依頼 449）────────
+        step("使われていない画像だけを数える") {
+            guard let root = store.rootURL else { return "置き場所がありません" }
+            let pics = root.appendingPathComponent("attachments")
+            try FileManager.default.createDirectory(at: pics, withIntermediateDirectories: true)
+            let used = pics.appendingPathComponent("走査-1.png")
+            let idle = pics.appendingPathComponent("走査-2.png")
+            try Data([0x89, 0x50, 0x4E, 0x47]).write(to: used)
+            try Data([0x89, 0x50, 0x4E, 0x47, 0x00]).write(to: idle)
+            guard let n = try store.make(titled: "画像のノート") else { return "作れませんでした" }
+            let (text, stamp) = try store.open(n)
+            _ = try store.save(n, text: text + "\n![](attachments/走査-1.png)\n", stamp: stamp)
+
+            let got = try Cian.call("spare", ["path": root.path])
+            let rows = (got["pictures"] as? [[String: Any]] ?? [])
+                .compactMap { $0["rel"] as? String }
+            if rows.contains(where: { $0.contains("走査-1") }) {
+                return "使っている画像が出ています"
+            }
+            if !rows.contains(where: { $0.contains("走査-2") }) {
+                return "使っていない画像が出ていません"
+            }
+            if let unsure = got["unsure"] as? [String], !unsure.isEmpty {
+                return "読めないノートがあります: \(unsure.joined(separator: "・"))"
+            }
+            // 消せることも見る ── 数えるだけでは、片づけにならない。
+            let at = (got["pictures"] as? [[String: Any]] ?? [])
+                .first { ($0["rel"] as? String ?? "").contains("走査-2") }?["path"] as? String
+            _ = try Cian.call("delete", ["path": at ?? ""])
+            return FileManager.default.fileExists(atPath: idle.path)
+                ? "消えていません" : nil
         }
 
         // ── 四。よそから来るもの ────────────────────────

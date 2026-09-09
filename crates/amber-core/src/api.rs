@@ -832,6 +832,38 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
 
         // 絵文字の表（依頼 418）。**一度受け取れば、あとは前端の仕事。**
         // 外の何かを取りに行かない ── 会社の窓に閉じた機械でも出る。
+        // **ノートから使われていない画像。**（依頼 449）
+        //
+        // 数えるだけで、消さない ── 消すのは呼んだ側（窓はゴミ箱へ入れる）。
+        // 読めなかったノートがあれば `unsure` で言う: 「使われていない」は
+        // ぜんぶ読み切って初めて言えることで、黙って少なく数えるのが
+        // いちばん危ない。
+        "spare" => {
+            let dir = std::path::PathBuf::from(arg(p, "path"));
+            if !dir.is_dir() {
+                anyhow::bail!("{} を開けません", dir.display());
+            }
+            let limits = crate::survey::Limits {
+                depth: p["depth"].as_u64().unwrap_or(6) as usize,
+                rows: 4000,
+                hidden: false,
+                ..Default::default()
+            };
+            let stop = std::sync::atomic::AtomicBool::new(false);
+            let walk = crate::survey::survey(&dir, limits, &stop);
+            let got = crate::spare::find(&dir, &walk.rows);
+            Ok(serde_json::json!({
+                "pictures": got.spare.iter().map(|s| serde_json::json!({
+                    "path": s.path.to_string_lossy(),
+                    "rel": s.rel,
+                    "bytes": s.bytes,
+                    "when": s.when,
+                    "note": s.note,
+                })).collect::<Vec<_>>(),
+                "bytes": got.spare.iter().map(|s| s.bytes).sum::<u64>(),
+                "unsure": got.unsure,
+            }))
+        }
         "emoji" => Ok(crate::emoji::table()),
 
         // 同じ中身のノートをもう一つ（依頼 412）。

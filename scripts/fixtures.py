@@ -50,3 +50,26 @@ print("一万行のノートを置きました")
     "---\ntitle: 混ぜる\ncreated: 2026-09-05\n---\n\n# 混ぜる\n\n"
     "はじめの行。\n\nおわりの行。\n", encoding="utf-8")
 print("混ぜるための一本を置きました")
+
+# **使われていない画像**（依頼 449）。一枚は本文から指し、一枚は
+# どこからも指さない ── 数える側が、指しているほうを巻き込まないか。
+import zlib as _z, struct as _s
+def _png(path, w, h, rgb):
+    raw = b"".join(b"\x00" + bytes(rgb) * w for _ in range(h))
+    def chunk(t, d):
+        c = t + d
+        return _s.pack(">I", len(d)) + c + _s.pack(">I", _z.crc32(c) & 0xffffffff)
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", _s.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", _z.compress(raw))
+        + chunk(b"IEND", b""))
+
+pics = at / "attachments"
+pics.mkdir(exist_ok=True)
+_png(pics / "絵のノート-1788000001.png", 60, 40, (240, 165, 43))
+_png(pics / "絵のノート-1788000002.png", 40, 40, (90, 140, 200))
+(at / "絵のノート.md").write_text(
+    "---\ntitle: 絵のノート\ncreated: 2026-09-09\n---\n\n# 絵のノート\n\n"
+    "![](attachments/絵のノート-1788000001.png)\n", encoding="utf-8")
+print("使われている画像と、使われていない画像を置きました")

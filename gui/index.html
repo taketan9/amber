@@ -1190,6 +1190,46 @@ body.dropping::after {
   transition: opacity .18s; pointer-events: none; z-index: 20;
 }
 #say.on { opacity: .94; }
+
+/* ── ノートから使われていない画像 ──
+   **小さく並べて、目で見て決める。** 名前だけの一覧では、消していいか
+   どうかを誰も判断できない（消すのは戻せる形とはいえ、判断が要る）。 */
+#spare { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center; }
+#sparebox { width: min(56rem, 92vw); max-height: 86vh; display: flex;
+  flex-direction: column; background: var(--paper); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+#sparebox .hd { display: flex; align-items: center; gap: .6rem;
+  padding: .7rem .9rem; border-bottom: 1px solid var(--line); }
+#sparebox .grow { flex: 1; }
+#sparebox .sum { color: var(--ink2); font-size: .85em; }
+#sparebox .warn { padding: .6rem .9rem; color: var(--ink);
+  background: var(--sel); font-size: .85em; }
+#sparebox .grid { overflow-y: auto; padding: .8rem;
+  display: grid; gap: .7rem;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); }
+#sparebox .cell { border: 1px solid var(--line); border-radius: 9px;
+  overflow: hidden; cursor: pointer; background: var(--rail); }
+#sparebox .cell.on { border-color: var(--amber); }
+#sparebox .cell .shot { height: 6.5rem; display: flex; align-items: center;
+  justify-content: center; background: var(--bg); }
+#sparebox .cell img { max-width: 100%; max-height: 6.5rem; display: block; }
+#sparebox .cell .cap { padding: .4rem .5rem; font-size: .78em;
+  color: var(--ink2); line-height: 1.4; word-break: break-all; }
+#sparebox .cell .cap b { color: var(--ink); font-weight: 600; }
+#sparebox .none { padding: 2rem; text-align: center; color: var(--ink2); }
+/* 釦は工房と同じ形 ── 同じ見た目のものは、同じ意味であってほしい。 */
+#sparebox .hd button {
+  padding: 5px 13px; border-radius: 8px; font-size: 12.5px;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+}
+#sparebox .hd button:hover:not(:disabled) { background: var(--hover); }
+#sparebox .hd button:disabled { opacity: .45; cursor: default; }
+#sparebox .hd .go:not(:disabled) {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--amber) 88%, white), var(--amber));
+  border-color: color-mix(in srgb, var(--amber) 70%, black);
+  color: #3a2408; font-weight: 700;
+}
 </style>
 </head>
 <body>
@@ -1280,6 +1320,21 @@ body.dropping::after {
     <div id="emojigrid"></div>
     <div id="emojiname"></div>
   </div>
+  <!-- **ノートから使われていない画像**（依頼 449）。小さく見せて、選んで
+       ゴミ箱へ。数えるのは core、消すのは OS のゴミ箱 ── 見誤って消した
+       ときに取り返しがつかないのが、いちばん悪い。 -->
+  <div id="spare" hidden><div id="sparebox">
+    <div class="hd">
+      <b>ノートから使われていない画像</b>
+      <span class="sum"></span>
+      <span class="grow"></span>
+      <button class="all">ぜんぶ選ぶ</button>
+      <button class="go">ゴミ箱へ入れる</button>
+      <button class="x">閉じる</button>
+    </div>
+    <div class="warn" hidden></div>
+    <div class="grid"></div>
+  </div></div>
   <div id="studio" hidden><div id="studiobox">
     <div class="hd">
       <span class="what">図を直す</span>
