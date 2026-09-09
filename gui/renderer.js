@@ -6507,6 +6507,7 @@ async function cmdCalendar() {
         calDay = ymd(now.getFullYear(), now.getMonth(), now.getDate());
     }
     el('cal').hidden = false;
+    await hereAsk();
     await drawCal();
 }
 
@@ -6521,9 +6522,11 @@ async function drawCal() {
         calSlots = [];
         say('カレンダーを読めません: ' + why(e));
     }
-    // よその予定表は、あとから足す ── 一つも読めなくても、自分のぶんは出る。
+    // この機械の予定表と、よその予定表を足す ── どちらか読めなくても、
+    // 自分のぶんは出る。
+    const mine = await hereFor(calMonth.y, calMonth.m);
     awaySlots = await awayFor(calMonth.y, calMonth.m);
-    calSlots = calSlots.concat(awaySlots).sort((a, b) =>
+    calSlots = calSlots.concat(mine, awaySlots).sort((a, b) =>
         a.day.localeCompare(b.day)
         || (a.at ? 0 : 1) - (b.at ? 0 : 1)
         || String(a.at).localeCompare(String(b.at))
@@ -6605,11 +6608,21 @@ function drawCalDay() {
 /// ── 「ノートに日付を書くと予定になる」（依頼 73）が既にあるので、
 /// カレンダーのためだけの保存場所を作らない。
 async function calAdd(day) {
+    // **この機械の予定表が使えるなら、そちらへ**（依頼 462）── 普通の
+    // カレンダーとして期待されるのはそれ。使えないときだけノートを作る。
     const title = await askText('予定を足す（' + dayName(day) + '）', '',
-        'ノートが一本できます。時刻は次に訊きます');
+        hereOn ? 'この機械の予定表に入ります。時刻は次に訊きます'
+               : 'ノートが一本できます。時刻は次に訊きます');
     if (title === null || !title.trim()) return;
     const at = await askText('何時から', '09:00', '空のままなら終日');
     if (at === null) return;
+    if (hereOn) {
+        const got = await window.amber.cal(['add', title.trim(), day, at.trim()]);
+        if (!got || got.error) { say('足せません: ' + (got?.error || '返事がありません')); return; }
+        await drawCal();
+        say('「' + title.trim() + '」を ' + dayName(day) + ' に足しました');
+        return;
+    }
     const when = at.trim() ? day + ' ' + at.trim() : day;
     try {
         const made = await window.amber.call('new', {
@@ -6628,6 +6641,26 @@ async function calAdd(day) {
     } catch (e) {
         say('足せません: ' + why(e));
     }
+}
+
+/// この機械の予定を、直すか消すか。
+async function hereEdit(id) {
+    const one = calSlots.find((s) => s.kind === 'here' && s.path === id);
+    const pick = await askPick('この予定をどうしますか',
+        [{ name: '題を直す', value: 'rename' }, { name: '消す', value: 'drop' }],
+        one ? one.title : '', true);
+    if (pick === null) return;
+    if (pick === 'rename') {
+        const to = await askText('題を直す', one ? one.title : '');
+        if (to === null || !to.trim()) return;
+        const got = await window.amber.cal(['rename', id, to.trim()]);
+        if (!got || got.error) { say('直せません: ' + (got?.error || '返事がありません')); return; }
+    } else {
+        if (!await askYes('この予定を消しますか')) return;
+        const got = await window.amber.cal(['drop', id]);
+        if (!got || got.error) { say('消せません: ' + (got?.error || '返事がありません')); return; }
+    }
+    await drawCal();
 }
 
 el('cal').addEventListener('click', async (e) => {
@@ -6652,6 +6685,8 @@ el('cal').addEventListener('click', async (e) => {
     if (e.target.closest('.add')) { await calAdd(calDay); return; }
     const slot = e.target.closest('.slot');
     if (slot) {
+        // この機械の予定表のものは、**押したら直せる**。
+        if (slot.classList.contains('here')) { await hereEdit(slot.dataset.at); return; }
         // **よその予定にはノートが無い。** 押しても何も起きないより、
         // なぜ開かないかを言う。
         if (!slot.dataset.at) { say('よその予定表のものなので、ここでは直せません'); return; }
@@ -6727,6 +6762,32 @@ async function awayFor(y, m) {
         } catch { /* この一つは飛ばす */ }
     }
     return out;
+}
+
+
+/// この機械の予定表（`here`）が使えるか。**訊いたことがあるか**も憶える
+/// ── 断られたあとに毎回訊きなおすのは、いちばん嫌われる。
+let hereOn = null;
+
+/// 許可を訊く。**開いたときに一度だけ** ── 起きた瞬間に訊くと、何のために
+/// 訊かれたのか分からないまま断られる。
+async function hereAsk() {
+    if (hereOn !== null) return hereOn;
+    const got = await window.amber.cal(['ask']);
+    hereOn = !!(got && got.ok);
+    return hereOn;
+}
+
+/// ひと月ぶん。**読めなくても、ほかは出す**（よその予定表と同じ扱い）。
+async function hereFor(y, m) {
+    if (!hereOn) return [];
+    const got = await window.amber.cal(['month', y, m]);
+    if (!got || got.error) return [];
+    return (got.days || []).map((r) => ({
+        day: r.day, at: r.at, title: r.title,
+        // **道の代わりに、OS の言う名札を持つ** ── 直すときに要る。
+        path: r.id, kind: 'here', place: r.place, from: r.from,
+    }));
 }
 
 /* ── 窓ができること、ひとつの表 ── */

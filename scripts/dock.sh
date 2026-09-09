@@ -46,6 +46,10 @@ set_it CFBundleName "ambər"
 set_it CFBundleDisplayName "ambər"
 set_it CFBundleIdentifier "com.taketan.amber"
 set_it CFBundleIconFile "amber.icns"
+# **なぜ予定表が要るのかを、その場で言う**（依頼 462）── mac はこの字を
+# そのまま小窓に出す。無いと「アクセスします」だけの小窓になる。
+/usr/libexec/PlistBuddy -c 'Delete :NSCalendarsFullAccessUsageDescription' "$plist" >/dev/null 2>&1 || true
+/usr/libexec/PlistBuddy -c 'Add :NSCalendarsFullAccessUsageDescription string この Mac の予定表を、ambər のカレンダーに並べます。予定を足すときにも使います。' "$plist"
 set_it CFBundleShortVersionString "$(node -p "require('$root/gui/package.json').version" 2>/dev/null || echo 0)"
 
 # **署名し直す。** 中身をいじったので、元の署名はもう合わない。

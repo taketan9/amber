@@ -817,6 +817,28 @@ await step('途中に書く：記号も、caret のところに効く', `
     return true;
 `, true);
 
+/* ── 十六の七。**この機械の予定表**（依頼 462） ── */
+
+await step('この機械の予定表：口が繋がっている', `
+    const got = await window.amber.cal(['month', 2026, 9]);
+    if (!got) return '返事がありません';
+    // 許可が無ければ「無い」と言うのが正しい姿 ── 落ちないことを見る。
+    if (got.error) return typeof got.error === 'string' ? true : '答えの形が違います';
+    return Array.isArray(got.days) ? true : '日の一覧がありません';
+`, true);
+
+await step('この機械の予定表：許可が無くても、カレンダーは開く', `
+    hereOn = false;
+    calMonth = { y: 2026, m: 9 };
+    await cmdCalendar();
+    await new Promise((g) => setTimeout(g, 700));
+    const open = !el('cal').hidden;
+    const mine = calSlots.filter((s) => s.kind !== 'here').length;
+    el('cal').hidden = true;
+    if (!open) return '開きませんでした';
+    return mine > 0 ? true : '自分の予定まで消えました';
+`, true);
+
 /* ── 十七。**触ったあと、壊れていないか** ──
  *
  * ここがこの走査のいちばんの目当て。**面を行き来しただけで字が変わる**、

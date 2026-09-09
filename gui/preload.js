@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('amber', {
     },
     /// ゴミ箱へ入れる（消さない）。
     trash: (at) => ipcRenderer.invoke('amber:trash', at),
+    cal: (args) => ipcRenderer.invoke('amber:cal', args),
     /// 書き出す。行き先は人が選ぶ。
     saveText: (name, text) => ipcRenderer.invoke('amber:saveText', name, text),
     /// 読むだけの一本を、その場に置いて道を返す（前の姿を見るのに使う）。

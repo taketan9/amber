@@ -27,6 +27,7 @@ for t in diagram-test paper-test win-test switch-test contract round-test key-te
 done
 python3 scripts/requests.py     # 台帳（依頼が守られているか）
 python3 scripts/shipped.py      # 未リリースの数
+./scripts/mac-build.sh            # mac の予定表に話しかける道具（依頼 462）
 ./scripts/ios-build.sh && xcodebuild -project ios/Cian.xcodeproj -scheme Cian \
   -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build \
   2>&1 | grep -E 'error:|\*\* BUILD'

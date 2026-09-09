@@ -76,7 +76,7 @@ enum Phone {
             // **ここでは道の代わりに、iOS の言う名札を持つ** ── あとで
             // その予定そのものを開く／直すときに要る。
             path: e.eventIdentifier ?? "",
-            kind: "phone",
+            kind: "here",
             place: e.location ?? "",
             from: e.calendar?.title ?? "")
     }

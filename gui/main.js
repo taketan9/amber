@@ -11,6 +11,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
+const { execFile } = require('node:child_process');
 const { Engine } = require('./engine');
 
 // **名前を先に決める。** これが `userData` の置き場所を決めるので、
@@ -71,6 +72,15 @@ const DOCK_ICON = path.join(__dirname, '..', 'packaging', 'amber-dock.png');
 
 let win = null;
 let engine = null;
+
+/// この機械の予定表に話しかける道具。**配ったものは窓の隣に居る。**
+/// ソースから走らせるときは `target/mac/` の下。
+function calPath() {
+    const beside = path.join(__dirname, 'amber-cal');
+    if (fs.existsSync(beside)) return beside;
+    const built = path.join(__dirname, '..', 'target', 'mac', 'amber-cal');
+    return fs.existsSync(built) ? built : null;
+}
 
 /// 憶えごとの置き場所。**ノートの中には書かない** ── ノートはただの Markdown
 /// で、同期先で別の端末と出会っても、窓の都合が混ざらない。
@@ -554,6 +564,31 @@ app.whenReady().then(() => {
     ///
     /// 返す形は増やすだけにする（`true` / `false` はそのまま）── 同梱して
     /// いる側は真偽で受けているので、そこを壊さない。
+    /// **この機械の予定表**（依頼 462・mac だけ）。
+    ///
+    /// 小さな道具（`amber-cal`）に一言だけ言って、一行の答えを受ける。
+    /// **Electron から EventKit は呼べない**ので、口を分けてある ──
+    /// 中身は電話とまったく同じ枠組みなので、同じ予定表を窓と電話から
+    /// 見ても、同じ予定が同じ日に並ぶ。
+    ///
+    /// mac 以外では「この機械には予定表が無い」と答える ── Windows の
+    /// 予定表は、まだ道が決まっていない。
+    ipcMain.handle('amber:cal', async (_e, args) => {
+        if (process.platform !== 'darwin') return { error: 'この機械には予定表がありません' };
+        const exe = calPath();
+        if (!exe) return { error: '予定表の道具が見つかりません' };
+        return new Promise((done) => {
+            execFile(exe, (args || []).map(String), { timeout: 60000 }, (bad, out) => {
+                if (bad && !out) { done({ error: bad.message }); return; }
+                try {
+                    done(JSON.parse(String(out).trim().split('\n').pop()));
+                } catch {
+                    done({ error: '答えを読めません' });
+                }
+            });
+        });
+    });
+
     ipcMain.handle('amber:trash', async (_e, at) => {
         try {
             await shell.trashItem(String(at));

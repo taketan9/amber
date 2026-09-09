@@ -190,6 +190,22 @@ jobs:
           path: out/${{ matrix.name }}
           if-no-files-found: error
 
+      # **mac の予定表に話しかける道具**（依頼 462）。Electron からは
+      # EventKit を呼べないので、小さな実行ファイルを一つ連れていく。
+      # mac でしか組めないし、mac でしか要らない。
+      - name: 予定表の道具を組む（mac）
+        if: matrix.os == 'macos-latest'
+        run: |
+          ./scripts/mac-build.sh
+          cp target/mac/amber-cal out/amber-cal-mac
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'macos-latest'
+        with:
+          name: amber-cal-mac
+          path: out/amber-cal-mac
+          if-no-files-found: error
+
   # 画面（`gui/`）を、そのまま置けば動く一枚に。
   #
   # **これは組んだものではなく、集めたもの。** `gui/` の中身は Electron が

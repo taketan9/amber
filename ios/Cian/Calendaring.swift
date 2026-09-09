@@ -29,9 +29,10 @@ struct Calendaring: View {
         var isPlan: Bool { kind != "note" }
         var isAway: Bool { kind == "away" }
         /// この iPhone の予定表のもの ── **こちらは直せる**。
-        var isPhone: Bool { kind == "phone" }
+        /// この端末の予定表のもの ── **こちらは直せる**。
+        var isPhone: Bool { kind == "here" }
         /// ノートを開く先を持たないもの（よそ・この iPhone）。
-        var noNote: Bool { kind == "away" || kind == "phone" }
+        var noNote: Bool { kind == "away" || kind == "here" }
     }
 
     /// **開くたびに今月へ戻さない。** 先の予定を見にきた人を、
