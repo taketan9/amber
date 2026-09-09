@@ -215,6 +215,14 @@ function drawRail() {
 
     rows.push('<div class="head">ノート</div>');
     rows.push(dest('all', '', 'すべてのノート', state.notes.length, on('all', '')));
+    // **カレンダー**（依頼 454）。ここに置かないと、パレットを知っている
+    // 人しか辿り着けない ── 電話は一覧の同じ段に出しているので、窓にも
+    // 同じ場所に置く（本人が「カレンダーってどこだろう？」・依頼 467）。
+    rows.push('<div class="dest" data-kind="cal" data-what="" data-depth="0">'
+        + '<svg class="mk" viewBox="0 0 16 16" aria-hidden="true">'
+        + '<g fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"'
+        + ' stroke-linejoin="round">' + RAIL_MARKS.cal + '</g></svg>'
+        + '<span class="nm">カレンダー</span></div>');
 
     const stars = state.notes.filter(starred);
     {
@@ -275,6 +283,10 @@ function drawRail() {
         d.onmousedown = (e) => {
             if (e.button !== 0) return;
             if (inNote(document.activeElement)) e.preventDefault();
+            // **カレンダーは行き先ではない。** 一覧を絞るのではなく、
+            // 月の表を開く ── 押したあとに一覧が空になったら、押した人は
+            // 何が起きたか分からない（依頼 467）。
+            if (d.dataset.kind === 'cal') { cmdCalendar(); return; }
             state.dest = { kind: d.dataset.kind, what: d.dataset.what };
             drawRail();
             drawList();
@@ -299,6 +311,10 @@ const RAIL_MARKS = {
     all: '<path d="M1.5 9.5h3.2l1 1.8h4.6l1-1.8h3.2M1.5 9.5 3.4 3.6h9.2l1.9 5.9'
         + 'v3.4a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1z"/>',
     star: '<path d="M8 1.9 10 6l4.5.6-3.3 3.1.8 4.4L8 12l-4 2.1.8-4.4L1.5 6.6 6 6z"/>',
+    // 月の表。**四角に横棒一本と、上の耳二つ** ── どの国の人も
+    // カレンダーだと分かる形（絵は世界のどこでも同じ意味のものを選ぶ）。
+    cal: '<path d="M2.2 4.4h11.6a1 1 0 0 1 1 1v7.2a1 1 0 0 1-1 1H2.2a1 1 0 0 1-1-1'
+        + 'V5.4a1 1 0 0 1 1-1zM1.2 7.4h13.6M5 2.2v2.6M11 2.2v2.6"/>',
     book: '<path d="M1.6 12.6V4.2a1 1 0 0 1 1-1h3.3l1.5 1.8h6a1 1 0 0 1 1 1v6.6'
         + 'a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/>',
     // **札の形。** ここは長らく「＃」を線で描いていたが、16px の枠に

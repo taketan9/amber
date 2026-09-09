@@ -663,6 +663,21 @@ await step('使われていない画像：小さく並ぶ', `
 
 /* ── 十六の四。**カレンダー**（依頼 453） ── */
 
+await step('カレンダー：左の列から開ける', `
+    const row = el('rail').querySelector('.dest[data-kind="cal"]');
+    if (!row) return '左の列にありません（パレットを知っている人しか辿り着けません）';
+    if (row.textContent.trim() !== 'カレンダー') return '名前が ' + row.textContent.trim() + ' です';
+    row.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }));
+    await new Promise((g) => setTimeout(g, 800));
+    const open = !el('cal').hidden;
+    // **一覧は動かない** ── カレンダーは行き先ではないので、押しても
+    // 一覧が空にならないこと。
+    const kept = state.dest.kind !== 'cal';
+    el('cal').hidden = true;
+    if (!open) return '開きませんでした';
+    return kept ? true : '一覧の行き先まで変わりました';
+`, true);
+
 await step('カレンダー：ひと月ぶんが出る', `
     calMonth = { y: 2026, m: 9 };
     calDay = '2026-09-09';
