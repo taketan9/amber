@@ -295,7 +295,7 @@ struct Where: View {
                     .labelsHidden()
                     // **字の大きさは、窓にもある**（⌘+ / ⌘−）── 電話にだけ
                     // 無いと、同じノートが端末によって読みやすさで分かれる。
-                    Picker("字の大きさ", selection: $font) {
+                    Picker("文字の大きさ", selection: $font) {
                         ForEach(Size.allCases) { Text($0.label).tag($0) }
                     }
                 } header: {

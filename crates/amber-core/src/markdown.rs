@@ -870,11 +870,11 @@ fn render(lines: &[String], stamp: bool) -> String {
                 i += 1;
             }
             let name = match kind.as_str() {
-                "note" => "ノート",
-                "tip" => "こつ",
-                "important" => "大事",
+                "note" => "備忘",
+                "tip" => "ヒント",
+                "important" => "重要",
                 "warning" => "注意",
-                _ => "危険",
+                _ => "警告",
             };
             out.push_str(&format!(
                 "<div class=\"alert {kind}\"><p class=\"alert-h\">{name}</p>\n"

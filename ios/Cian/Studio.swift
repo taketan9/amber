@@ -83,7 +83,7 @@ struct Studio: View {
                 Divider().padding(.top, 8)
                 form
             }
-            .navigationTitle(byText || model == nil ? "図を直す（字）" : "図を直す")
+            .navigationTitle(byText || model == nil ? "図を直す（コード）" : "図を直す")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -94,7 +94,7 @@ struct Studio: View {
                 }
                 if model != nil {
                     ToolbarItem(placement: .bottomBar) {
-                        Button(byText ? "表で直す" : "字で直す") { swap() }
+                        Button(byText ? "表で直す" : "コードで直す") { swap() }
                     }
                 }
             }

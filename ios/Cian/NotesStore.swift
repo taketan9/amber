@@ -1071,8 +1071,8 @@ final class NotesStore: ObservableObject {
         ])
         let stamp = out["stamp"] as? String ?? ""
         return stamp.isEmpty
-            ? "このバージョンはもう残してあります。"
-            : "いまのバージョンを残しました（これは消えません）。"
+            ? "このバージョンは、もう保護してあります。"
+            : "いまのバージョンを保護しました（古くなっても消えません）。"
     }
 
     /// Put a picture beside a note and hand back the Markdown link for it.

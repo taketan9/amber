@@ -233,13 +233,15 @@ struct Reading: View {
     }
 
     /// GitHub の五つ。**名前は日本語で出す** ── `NOTE` と `IMPORTANT` の
-    /// 違いを英語で読ませるより、「おぼえておく」「大事」のほうが早い。
+    /// **名前は三か所にある**（核・窓・ここ）ので、`words-test` が
+    /// 揃っているかを見張る ── 実際に、ここだけ「おぼえておく」
+    /// 「あぶない」のまま置いていかれていた（依頼 463）。
     private static let alerts: [String: (String, String, Color)] = [
-        "note": ("おぼえておく", "info.circle.fill", .blue),
-        "tip": ("こつ", "lightbulb.fill", .green),
-        "important": ("大事", "exclamationmark.circle.fill", .purple),
+        "note": ("備忘", "info.circle.fill", .blue),
+        "tip": ("ヒント", "lightbulb.fill", .green),
+        "important": ("重要", "exclamationmark.circle.fill", .purple),
         "warning": ("注意", "exclamationmark.triangle.fill", .orange),
-        "caution": ("あぶない", "hand.raised.fill", .red),
+        "caution": ("警告", "hand.raised.fill", .red),
     ]
 
     /// The picture beside the note.

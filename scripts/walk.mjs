@@ -131,7 +131,18 @@ const QUIET = [
 const path = (n) => `state.root + '/${n}'`;
 
 // 一。開いて、見る
-await step('読み込み直す', `await reload({ quiet: true }); return state.notes.length > 0;`, true);
+//
+// **エンジンが立ち上がるのを待つ。** 窓が出た直後の一回目は、まだ子が
+// 起きていないことがある ── 一度きりで見ると、たまに落ちる検査になる
+// （実際に何度か落ちた）。**時々鳴る検査は、無いより悪い。**
+await step('読み込み直す', `
+    for (let i = 0; i < 20; i += 1) {
+        await reload({ quiet: true });
+        if (state.notes.length > 0) return true;
+        await new Promise((g) => setTimeout(g, 250));
+    }
+    return 'ノートが一本も読めません';
+`, true);
 await step('ノートを開く（よくばり）', `await openNote(${path('よくばり.md')}); return !!state.open;`, true);
 await step('表示 → コード', `setView('write'); return view;`, 'write');
 await step('コード → 並べて表示', `setView('split'); return view;`, 'split');

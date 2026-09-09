@@ -596,7 +596,7 @@ struct DeskView: View {
                 // 打鍵の切れ目で決まる ── 「ここは残しておきたい」を人が
                 // 言える道が要る（窓の ⌘S と同じもの）。
                 Button { keepNow() } label: {
-                    Label("現状バージョン保存", systemImage: "square.and.arrow.down")
+                    Label("いまのバージョンを保護", systemImage: "square.and.arrow.down")
                 }
                 Divider()
                 Button(role: .destructive) { dropping = here?.note } label: {

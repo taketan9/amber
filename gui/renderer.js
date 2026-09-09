@@ -1276,7 +1276,7 @@ function drawStrip() {
                   run: () => { for (const o of tabs.slice()) if (o.path !== t.path) closeTab(o.path); } },
                 { name: '右のぜんぶを閉じる', dim: at >= tabs.length - 1,
                   run: () => { for (const o of tabs.slice(at + 1)) closeTab(o.path); } },
-                { name: '一覧でこの本を選ぶ', sep: true, run: () => openNote(t.path, { keep: true }) },
+                { name: '一覧でこのノートを選ぶ', sep: true, run: () => openNote(t.path, { keep: true }) },
                 { name: 'Finder で表示', run: () => window.amber.reveal(t.path) },
             ], { x: e.clientX, y: e.clientY });
         };
@@ -3190,11 +3190,11 @@ async function syncRead() {
 /// 少なく、覚えていなければ無いのと同じ。
 async function cmdAlert() {
     const kind = await askPick('どの注記', [
-        { name: 'ノート', sub: '覚えておくこと', value: 'NOTE' },
-        { name: 'こつ', sub: '知っていると楽なこと', value: 'TIP' },
-        { name: '大事', sub: '見落とすと困ること', value: 'IMPORTANT' },
+        { name: '備忘', sub: '覚えておくこと', value: 'NOTE' },
+        { name: 'ヒント', sub: '知っていると楽なこと', value: 'TIP' },
+        { name: '重要', sub: '見落とすと困ること', value: 'IMPORTANT' },
         { name: '注意', sub: '気をつけること', value: 'WARNING' },
-        { name: '危険', sub: '取り返しがつかないこと', value: 'CAUTION' },
+        { name: '警告', sub: '取り返しがつかないこと', value: 'CAUTION' },
     ], 'GitHub でも同じ形で出ます');
     if (kind === null) return;
     const body = '> [!' + kind + ']\n> ';
@@ -3499,12 +3499,12 @@ async function cmdSyntax() {
         ['チェック', '- [ ] やること', '押してチェックできるようになります'],
         ['太字', '**ここが太字**', '前後を ** で挟む'],
         ['斜体', '*ここが斜体*', '前後を * で挟む'],
-        ['取り消し線', '~~消した字~~', '前後を ~~ で挟む'],
+        ['取り消し線', '~~消す文字~~', '前後を ~~ で挟む'],
         ['コード', '`コード`', '前後を ` で挟む'],
         ['コードの枠', '```\nここに何行でも\n```', '``` の行で挟む'],
-        ['リンク', '[見せる字](https://)', '角括弧が字、丸括弧が行き先'],
+        ['リンク', '[リンクの文字](https://)', '角括弧が文字、丸括弧が行き先'],
         ['画像', '![説明](画像の場所)', '頭に ! を付けるとリンクではなく画像'],
-        ['引用', '> 引いてきた字', '行の頭に > と空白'],
+        ['引用', '> 引用する文章', '行の頭に > と空白'],
         ['注記', '> [!NOTE]\n> 覚えておくこと', 'NOTE / TIP / IMPORTANT / WARNING / CAUTION'],
         ['区切り線', '---', 'ハイフン三つだけの行'],
         ['表', '| a | b |\n|---|---|\n| 1 | 2 |', '縦棒で区切る'],
@@ -3547,7 +3547,7 @@ const MARKS = [
         ['斜体', '⌘I', () => onRead() ? readDress('italic') : applyMark('wrap', '*')],
         ['取り消し線', '⌘⇧X', () => onRead() ? readDress('strikeThrough') : applyMark('wrap', '~~')],
         ['|'],
-        ['リンク', '⌘K', () => onRead() ? readPut('[見せる字](https://)') : put('[](https://)', 1)],
+        ['リンク', '⌘K', () => onRead() ? readPut('[リンクの文字](https://)') : put('[](https://)', 1)],
         // **升を空で出さない。** 空の表は「これで合っているのか」が
         // 分からず、打つ前に一度立ち止まる ── 見本の字が入っていれば、
         // 上から順に置き換えるだけになる。
@@ -5197,7 +5197,7 @@ function freshId(used) {
 /// 字で直す面。**表にできない図の逃げ道**であり、書き方を覚えた人の近道。
 function studioRaw() {
     const wrap = tag('div', 'grp rawgrp');
-    wrap.append(tag('label', '', 'mermaid の字'));
+    wrap.append(tag('label', '', 'mermaid のコード'));
     const t = document.createElement('textarea');
     t.value = studio.text;
     t.spellcheck = false;
@@ -5263,7 +5263,7 @@ async function studioRender() {
         // 一文字のあいだ図が消えて、何を直していたのか分からなくなる。
         if (studio.good) view.innerHTML = studio.good;
         err.hidden = false;
-        err.textContent = 'いまの字では図になりません: ' + (e && why(e) ? why(e) : e);
+        err.textContent = 'いまの書き方では図になりません: ' + (e && why(e) ? why(e) : e);
     } finally {
         sweepMermaid(id);
     }
@@ -5439,7 +5439,7 @@ el('read').addEventListener('click', async (e) => {
     // 触れないかたまりと同じ「押すと吹き出し」に揃える。
     popMenu([
         { name: '開く', sub: href, run: () => openLink(href) },
-        { name: '字を直す', sub: 'ここに caret を置きます', run: () => landAt(a, null) },
+        { name: '文字を直す', sub: 'ここに caret を置きます', run: () => landAt(a, null) },
         { name: 'リンク先を写す', sep: true, run: () => copyText(href, 'リンク先') },
     ], { x: e.clientX, y: e.clientY });
 });
@@ -5455,7 +5455,7 @@ async function openLink(href) {
 /// ここに来るのは打てない人なので、**言葉で選ばせる**。
 /// 幅だけを指す: 縦横のどちらも訊くと、釣り合いを自分で守る仕事になる。
 const SIZES = [
-    { name: 'はばいっぱい', sub: '指示なし（もとの出かた）', px: null },
+    { name: '幅いっぱい', sub: '指示なし（もとの出かた）', px: null },
     { name: '大きめ', sub: '横 640px', px: '640px' },
     { name: '中くらい', sub: '横 400px', px: '400px' },
     { name: '小さめ', sub: '横 200px', px: '200px' },
@@ -5464,7 +5464,7 @@ const SIZES = [
 /// いまの大きさを、献立の右に添える一言。
 function sizeNow(fig) {
     const w = fig.querySelector('img')?.style.width || '';
-    return SIZES.find((s) => s.px === w)?.name || (w ? '横 ' + w : 'はばいっぱい');
+    return SIZES.find((s) => s.px === w)?.name || (w ? '横 ' + w : '幅いっぱい');
 }
 
 /// 絵の大きさを選んで、**ノートの字に書く**。
@@ -5560,7 +5560,7 @@ function readMenu(e) {
     if (a) { popMenu([
         { name: '開く', sub: a.getAttribute('href'), run: () => window.amber.openLink(a.href) },
         { name: 'リンク先を写す', run: () => copyText(a.getAttribute('href') || '', 'リンク先') },
-        { name: '字だけ残す', run: () => { landAt(a); readDress('unlink'); } },
+        { name: '文字だけ残す', run: () => { landAt(a); readDress('unlink'); } },
     ], at); return; }
 
     // 表の中 ── 道具帯と同じもの。**同じ命令を二度書かない。**
@@ -5582,7 +5582,7 @@ function readMenu(e) {
     // どこでもない字の上 ── 切り貼りと飾り。
     popMenu([
         { name: '切り取り', key: '⌘X', dim: !sel, run: () => document.execCommand('cut') },
-        { name: '写す', key: '⌘C', dim: !sel, run: () => document.execCommand('copy') },
+        { name: 'コピー', key: '⌘C', dim: !sel, run: () => document.execCommand('copy') },
         { name: '貼り付け', key: '⌘V', run: () => document.execCommand('paste') },
         ...MARKS.flat().filter(([n]) => n !== '|' && n !== '画像' && n !== 'フロー')
             .map(([name, key, run], i) => ({ name, key, sep: i === 0, run })),
@@ -6871,7 +6871,7 @@ const CMDS = [
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'ambər について', app: true, run: cmdAbout },
     { id: 'history', name: '過去バージョン', need: 'note', menu: true, run: () => cmdHistory() },
-    { id: 'keepnow', name: '現状バージョン保存', key: '⌘S', need: 'note', menu: true, run: cmdKeepNow },
+    { id: 'keepnow', name: 'いまのバージョンを保護', key: '⌘S', need: 'note', menu: true, run: cmdKeepNow },
     // **`back` / `fwd` は上の「前に見たノート」で使っている。** 同じ id を
     // 二つ置くと、パレットから選んだときに先に見つかったほうが走る。
     { id: 'undo', name: '一つ戻す', key: '⌘Z', need: 'note', run: () => stepBack(false) },
@@ -6880,9 +6880,9 @@ const CMDS = [
     // ── 表には要るが、献立には出さないもの
     { id: 'mkbook', name: '新しいフォルダを作る', run: () => cmdMkBook() },
     { id: 'color', name: 'フォルダに色を付ける', sub: 'フォルダを右押しでも', run: () => cmdColor() },
-    { id: 'bigger', name: '字を大きく', key: '⌘+', run: () => setFont(fontStep + 1) },
-    { id: 'smaller', name: '字を小さく', key: '⌘−', run: () => setFont(fontStep - 1) },
-    { id: 'font0', name: '字の大きさを戻す', key: '⌘0', run: () => setFont(0) },
+    { id: 'bigger', name: '文字を大きく', key: '⌘+', run: () => setFont(fontStep + 1) },
+    { id: 'smaller', name: '文字を小さく', key: '⌘−', run: () => setFont(fontStep - 1) },
+    { id: 'font0', name: '文字の大きさを戻す', key: '⌘0', run: () => setFont(0) },
 ];
 
 /// 命令の表にも、道具の帯にも出ない一打。**ここにしか無い鍵。**
@@ -7141,7 +7141,7 @@ async function drawToc() {
             const h = heads[Number(b.dataset.n)];
             popMenu([
                 { name: 'ここへ飛ぶ', run: () => gotoHead(h) },
-                { name: '見出しの字を写す', run: () => copyText(h.text, '見出し') },
+                { name: '見出しをコピー', run: () => copyText(h.text, '見出し') },
             ], { x: e.clientX, y: e.clientY });
         };
     }
@@ -8745,15 +8745,15 @@ async function cmdHistory(at, isBook) {
         return;
     }
     const go = await askPick(pick.when + ' の姿', [
-        { name: 'この姿を見る', sub: '読むだけ。いまのノートは動きません', value: 'peek' },
-        { name: 'この姿に戻す', sub: 'いまの姿も一世代として残ります', value: 'back' },
-        { name: pick.kept ? '「残す」の印を外す' : 'この姿に「残す」の印を付ける',
-          sub: '印の付いた姿は、古くなっても消えません', value: 'mark' },
+        { name: 'このバージョンを見る', sub: '読むだけ。いまのノートは動きません', value: 'peek' },
+        { name: 'このバージョンに戻す', sub: 'いまのバージョンも一つ残ります', value: 'back' },
+        { name: pick.kept ? '保護をやめる' : 'このバージョンを保護する',
+          sub: '保護したものは、古くなっても消えません', value: 'mark' },
     ], shortPath(note) + '  ·  ' + old.length + ' 字');
     if (go === null) return;
     if (go === 'mark') {
         await ask('keepmark', { root: state.root, path: note, stamp: pick.stamp, kept: !pick.kept });
-        say(pick.kept ? '印を外しました' : 'この姿は消えなくなりました');
+        say(pick.kept ? '保護をやめました' : '保護しました（古くなっても消えません）');
         return;
     }
     if (go === 'peek') {

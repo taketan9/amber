@@ -54,7 +54,7 @@ struct Past: View {
                                     }
                                 }
                                 Spacer()
-                                // 印の付いた姿は、古くなっても消えない。
+                                // 保護したものは、古くなっても消えない。
                                 if v["kept"] as? Bool == true {
                                     Image(systemName: "star.fill").foregroundStyle(.orange)
                                 }

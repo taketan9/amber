@@ -22,7 +22,7 @@ description: amber の全部の動作チェック。いつもの検査（Rust・
 cd ~/workspace/amber
 cargo test --workspace
 cargo clippy --workspace --all-targets
-for t in diagram-test paper-test win-test switch-test contract round-test key-test web-test agree-test; do
+for t in diagram-test paper-test win-test switch-test contract round-test key-test web-test agree-test words-test; do
   printf '%-14s ' "$t"; node scripts/$t.js 2>&1 | tail -1
 done
 python3 scripts/requests.py     # 台帳（依頼が守られているか）
@@ -46,6 +46,7 @@ python3 scripts/shipped.py      # 未リリースの数
 | `win-test` | Windows でだけ出るもの（`file://`・鍵の名前） |
 | `web-test` | よそから来た HTML → ノートの字・題・本文らしいところ（24 件）。**電話の取り込みもこの一組を呼ぶ**ので、`clipTitle` と `bestPart` が切り出しの外へ出た日にはここが落ちる |
 | `agree-test` | **窓と電話が、同じノートを同じ字に戻すか**（糊は別々に書いてある） |
+| `words-test` | **同じものを、同じ名前で呼んでいるか**（注記の見出しは核・窓・電話の三か所にある ── 実際にずれていた） |
 | `contract` | crmaine との約束（名前を黙って変えていないか） |
 | `requests.py` | 台帳 ── **人が頼んだことが、まだ守られているか** |
 

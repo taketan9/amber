@@ -385,7 +385,7 @@ struct NoteView: View {
                 .confirmationDialog(held?.at ?? "リンク", isPresented: showing("link"),
                                     titleVisibility: .visible) {
                     Button("開く") { open(held?.at ?? "") }
-                    Button("字を直す") { hand.did("edit") }
+                    Button("文字を直す") { hand.did("edit") }
                     Button("リンク先を写す") { UIPasteboard.general.string = held?.at }
                     Button("やめる", role: .cancel) {}
                 }

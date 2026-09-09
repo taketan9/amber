@@ -130,6 +130,7 @@ jobs:
           node scripts/key-test.js
           node scripts/web-test.js
           node scripts/agree-test.js
+          node scripts/words-test.js
 
       # **Windows でも core の試験を回す。**
       #
