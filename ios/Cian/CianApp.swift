@@ -16,7 +16,9 @@ struct CianApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            // **総ざらいのときは、画面を出さない**（依頼 448）── 出すと
+            // 一覧が勝手に読み直して、走査の見ている姿が動く。
+            content
                 // **選んでいないなら、iPhone の設定に従う。** 大きい字に
                 // している人の設定を、こちらが上書きしない ── 上書きすると
                 // 「iPhone を大きくしたのに amber だけ小さい」になる。
@@ -29,6 +31,18 @@ struct CianApp: App {
                 .tint(Color("AccentColor"))
                 .preferredColorScheme(look.scheme)
         }
+    }
+
+    @ViewBuilder private var content: some View {
+        #if DEBUG
+        if Walk.asked {
+            Color.clear.task { await Walk.run() }
+        } else {
+            ContentView()
+        }
+        #else
+        ContentView()
+        #endif
     }
 }
 
