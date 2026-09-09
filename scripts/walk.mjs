@@ -149,8 +149,10 @@ await step('並び順を回す', `
     return order.length > 0;`, true);
 // **本文の中の言葉で引く。** 題で引くと「買い物」と「買い物リスト」の
 // 二本に当たり、数で見張れない（部分一致はそれで正しい）。
+// **一本にしか無い言葉で引く。** 「買い物」は題で二本に当たり、
+// 「牛乳」は競合の控えにも入っている ── 数で見張るなら一本のものを。
 await step('言葉で探す', `
-    el('find').value = '牛乳';
+    el('find').value = 'パン';
     el('find').dispatchEvent(new Event('input'));
     await new Promise((g) => setTimeout(g, 500));
     const n = shownNotes().length;
@@ -320,7 +322,152 @@ await step('設定の献立を出す', `
     closeMenu();
     return n > 3;`, true);
 
-// 十二。Web から取り込む（手元に立てたページがあるときだけ）
+// 十二。**右押し、ぜんぶ。** 窓には八か所ある ── どれも「押した瞬間に
+// しか通らない道」で、単体の試験は一つも触っていない。
+const RIGHT = [
+    ['左の列の行き先', `el('rail').querySelector('.dest')`],
+    ['一覧の行', `el('list').querySelector('.row')`],
+    ['一覧の空きどころ', `el('list')`],
+    ['左の列の空きどころ', `el('rail')`],
+    ['帯の題', `el('title')`],
+    ['読む面の字の上', `[...el('read').children].find((n) => n.tagName === 'P')`],
+    ['読む面の表の上', `el('read').querySelector('td')`],
+    ['読む面の升の上', `el('read').querySelector('.box')`],
+    ['読む面のリンクの上', `el('read').querySelector('a')`],
+];
+await step('よくばりを開く（右押しのため）', `await openNote(${path('よくばり.md')}); setView('read'); return view;`, 'read');
+for (const [name, pick] of RIGHT) {
+    await step('右押し：' + name, `
+        closeMenu();
+        const n = ${pick};
+        if (!n) return 'なし';
+        n.dispatchEvent(new MouseEvent('contextmenu',
+            { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
+        await new Promise((g) => setTimeout(g, 250));
+        const out = document.querySelectorAll('#more button').length;
+        closeMenu();
+        return out > 0;`, true);
+}
+await step('右押し：タブ', `
+    closeMenu();
+    await openNote(${path('買い物.md')}, { tab: true });
+    const d = el('strip').querySelector('.tab');
+    if (!d) return 'なし';
+    d.dispatchEvent(new MouseEvent('contextmenu',
+        { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
+    await new Promise((g) => setTimeout(g, 250));
+    const out = document.querySelectorAll('#more button').length;
+    closeMenu();
+    return out > 0;`, true);
+await step('右押し：目次の見出し', `
+    closeMenu();
+    await openNote(${path('よくばり.md')});
+    if (!tocOn) toggleToc();
+    await new Promise((g) => setTimeout(g, 600));
+    const h = el('toc').querySelector('.h');
+    if (!h) return 'なし';
+    h.dispatchEvent(new MouseEvent('contextmenu',
+        { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
+    await new Promise((g) => setTimeout(g, 250));
+    const out = document.querySelectorAll('#more button').length;
+    closeMenu();
+    if (tocOn) toggleToc();
+    return out > 0;`, true);
+
+// 十三。まとめて選んだときの献立（一括タグ・移す・消す）
+await step('選んで献立を出す', `
+    pickAll();
+    pickedMenu({ x: 300, y: 300 });
+    await new Promise((g) => setTimeout(g, 250));
+    const out = document.querySelectorAll('#more button').length;
+    closeMenu();
+    unpickAll();
+    return out > 2;`, true);
+
+// 十四。**残りの命令。** 小窓を開けるものは `await` しない。
+const LATER = [
+    ['タグ設定', `cmdTags();`],
+    ['フォルダへ移動', `cmdMove();`],
+    ['通知設定', `cmdRemind();`],
+    ['テーマ', `cmdTheme();`],
+    ['vim の入切', `cmdVim();`],
+    ['行番号', `cmdLineNo();`],
+    ['ambər について', `cmdAbout();`],
+    ['ノートを探す', `openFind();`],
+    ['期間で絞る', `openDrawer('when');`],
+];
+for (const [name, call] of LATER) {
+    await step('命令：' + name, `
+        await openNote(${path('よくばり.md')});
+        ${call}
+        await new Promise((g) => setTimeout(g, 400));
+        closeSheet(null);
+        closeMenu();
+        if (typeof closeDrawer === "function") closeDrawer();
+        return true;`, true);
+}
+await step('命令：現状バージョン保存', `await cmdKeepNow(); return true;`, true);
+
+/// **訊いてくる命令は、返事をしてやる。** `await` すると返ってこない
+/// （小窓が閉じられるのを待っている）── 呼びっぱなしにして、出た小窓に
+/// 答える。答えないと、その先の道を一度も通らない。
+///
+/// **一度では足りない。** 「家族と共有する」は棚を作るかを訊いたあと、
+/// もう一度**名前**を訊く ── 一度しか答えていなくて、途中で止まっていた
+/// （走査で気づいた）。選ぶ小窓なら一つめを押し、打つ小窓なら字を入れる。
+const answering = (call, then) => `
+    ${call}
+    for (let i = 0; i < 5; i += 1) {
+        await new Promise((g) => setTimeout(g, 450));
+        if (el('veil').hidden) break;
+        const first = document.querySelector('#veil #sheet .items .it');
+        if (first) { first.click(); continue; }
+        const box = document.querySelector('#veil input');
+        closeSheet(box && box.value ? box.value : '試し');
+    }
+    await new Promise((g) => setTimeout(g, 900));
+    ${then}`;
+
+await step('命令：家族と共有する', answering(
+    `await openNote(${path('買い物.md')}); cmdToShare();`,
+    `return state.notes.some((n) => n.shared);`), true);
+// **見るのは、そのノート一本。** 棚を作った時点で、その中に元から
+// 居たノート（`家族/買い物リスト.md`）も共有になる ── 「一本も共有されて
+// いないこと」では、いつまでも真にならない（走査で気づいた）。
+await step('命令：共有をやめる', answering(
+    `const was = state.open.title; cmdToShare();`,
+    `return !state.notes.some((n) => n.title === was && n.shared);`), true);
+await step('命令：見本のノートを入れる', answering(
+    `cmdWelcome();`,
+    `return state.notes.length > 0;`), true);
+
+// 十五。**うまくいかないとき。** ここが今まで一度も見られていなかった。
+await step('無いノートを開く', `
+    try { await openNote(state.root + '/ありません.md'); } catch { /* 断られてよい */ }
+    return true;`, true);
+await step('無い道を core に訊く', `
+    try { await ask('read', { path: state.root + '/ありません.md' }); return '通った'; }
+    catch { return true; }`, true);
+await step('外へ出られないとき', `
+    const r = await window.amber.fetchPage('http://127.0.0.1:1/');
+    return typeof r.error === 'string';`, true);
+await step('ページでない道', `
+    const r = await window.amber.fetchPage('file:///etc/hosts');
+    return typeof r.error === 'string';`, true);
+await step('道の形になっていないもの', `
+    const r = await window.amber.fetchPage('とりこんで');
+    return typeof r.error === 'string';`, true);
+await step('壊れた HTML を貼る', `
+    const md = webToMd('<div><p>本文<span>途切れ', 'https://example.com/');
+    return md.includes('本文');`, true);
+await step('空を貼る', `return webToMd('', '') === '';`, true);
+await step('競合の控えがあるノート', `
+    const clash = state.notes.find((n) => /競合コピー/.test(n.path));
+    if (!clash) return 'なし';
+    await openNote(clash.path);
+    return !!state.open;`, true);
+
+// 十六。Web から取り込む（手元に立てたページがあるときだけ）
 if (process.env.SITE) {
     await step('Web から取り込む', `
         const got = await window.amber.fetchPage(${JSON.stringify(process.env.SITE)});
@@ -329,7 +476,7 @@ if (process.env.SITE) {
         return md.includes('#') && md.length > 20;`, true);
 }
 
-// 十三。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
+// 十七。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => x.book === '歩き試し'
             || /複製|新しいノート|週報/.test(x.title || ''))) {

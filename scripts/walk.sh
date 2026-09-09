@@ -98,6 +98,10 @@ printf -- '---\ntitle: からっぽ\ncreated: 2026-09-06\n---\n\n' > "$notes/か
 printf -- '---\ntitle: 段取り\ncreated: 2026-09-07\ntags: [仕事]\n---\n\n# 段取り\n\n## 朝\n\n本文。\n' > "$notes/仕事/段取り.md"
 printf -- '---\ntitle: 週報のひな型\ncreated: 2020-01-01\n---\n\n# 週報\n\n## やったこと\n' > "$notes/テンプレート/週報のひな型.md"
 printf -- '---\ntitle: 買い物リスト\ncreated: 2026-09-05\n---\n\n# 買い物リスト\n\n- 家族のぶん\n' > "$notes/家族/買い物リスト.md"
+# **競合の控え。** クラウドが同時更新を見つけたときに置いていく形 ──
+# これがある一覧を一度も開いていなかった（走査で気づいた）。
+printf -- '---\ntitle: 買い物\ncreated: 2026-09-08\n---\n\n# 買い物\n\n- 牛乳を二本\n' \
+  > "$notes/買い物 (Taketan の競合コピー 2026-09-08).md"
 
 # ── 取り込む先のページ（外へは出ない） ──
 siteport="${SITEPORT:-8731}"
