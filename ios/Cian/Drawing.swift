@@ -204,7 +204,7 @@ struct Canvas: UIViewRepresentable {
         init(tall: Binding<CGFloat>) { _tall = tall }
 
         func webView(_ web: WKWebView, didFail: WKNavigation!, withError e: Error) {
-            print("[図] 頁を開けません: \(e)")
+            print("[図] ページを開けません: \(e)")
         }
 
         func webView(_ web: WKWebView, didFinish: WKNavigation!) {

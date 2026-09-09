@@ -124,6 +124,8 @@ struct Where: View {
     @State private var clipDone: String?
     /// 使われていない画像の片づけ（依頼 449）。
     @State private var sparing = false
+    /// よその予定表の出し入れ（依頼 456）。
+    @State private var feeding = false
     @AppStorage("cian.look") private var look = Look.auto
     @AppStorage("amber.font") private var font = Size.system
     @AppStorage("cian.autosave") private var autosave = true
@@ -211,6 +213,11 @@ struct Where: View {
                     // **片づけ**（依頼 449）── 貼ったノートを消しても、
                     // 画像は `attachments/` に残る。消す道がどこにも
                     // 無かったので、フォルダだけが重くなっていた。
+                    Button {
+                        feeding = true
+                    } label: {
+                        Label("よその予定表を読む", systemImage: "calendar.badge.plus")
+                    }
                     Button {
                         sparing = true
                     } label: {
@@ -326,6 +333,7 @@ struct Where: View {
             // 取ってきて、一本のノートにする。
             .sheet(isPresented: $clipping) { clipSheet }
             .sheet(isPresented: $sparing) { Sparing(store: store) }
+            .sheet(isPresented: $feeding) { Feeds() }
             .alert("取り込みました", isPresented: Binding(
                 get: { clipDone != nil }, set: { if !$0 { clipDone = nil } }
             )) {

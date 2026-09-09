@@ -19,10 +19,15 @@ struct Calendaring: View {
         let day: String
         let at: String?
         let title: String
+        /// よその予定表のものには、開く先が無い。
         let path: String
         let kind: String
-        var id: String { day + (at ?? "") + path + kind }
+        /// よその予定の場所と、どの予定表から来たか。
+        var place: String = ""
+        var from: String = ""
+        var id: String { day + (at ?? "") + path + kind + title }
         var isPlan: Bool { kind != "note" }
+        var isAway: Bool { kind == "away" }
     }
 
     /// **開くたびに今月へ戻さない。** 先の予定を見にきた人を、
@@ -118,7 +123,8 @@ struct Calendaring: View {
                     .fontWeight(d == Self.today ? .bold : .regular)
                 ForEach(mine.prefix(2)) { s in
                     Text(s.title).font(.system(size: 8)).lineLimit(1)
-                        .foregroundStyle(s.isPlan ? Color.accentColor : .secondary)
+                        .foregroundStyle(s.isAway ? Color.blue
+                            : (s.isPlan ? Color.accentColor : Color.secondary))
                 }
                 if mine.count > 2 {
                     Text("ほか \(mine.count - 2)").font(.system(size: 8)).foregroundStyle(.tertiary)
@@ -171,6 +177,12 @@ struct Calendaring: View {
 
     @ViewBuilder private func row(_ s: Slot, time: Bool) -> some View {
         Button {
+            // **よその予定にはノートが無い。** 押しても何も起きないより、
+            // なぜ開かないかを言う。
+            if s.isAway {
+                trouble = "よその予定表のものなので、ここでは直せません。"
+                return
+            }
             guard let n = store.notes.first(where: { $0.path == s.path }) else { return }
             dismiss()
             open(n)
@@ -181,10 +193,16 @@ struct Calendaring: View {
                         .foregroundStyle(.secondary).frame(width: 44, alignment: .leading)
                 }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(s.title)
+                    Text(s.title).foregroundStyle(s.isAway ? Color.blue : Color.primary)
                     // **道は出さない** ── 読めない長さになるうえ、知りたいのは
-                    // 中身のほう。一行目を添える。
-                    if let n = store.notes.first(where: { $0.path == s.path }), !n.excerpt.isEmpty {
+                    // 中身のほう。自分のノートは一行目、よその予定は場所と出どころ。
+                    if s.isAway {
+                        let under = [s.place, s.from].filter { !$0.isEmpty }.joined(separator: "・")
+                        if !under.isEmpty {
+                            Text(under).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    } else if let n = store.notes.first(where: { $0.path == s.path }),
+                              !n.excerpt.isEmpty {
                         Text(n.excerpt).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
@@ -256,6 +274,16 @@ struct Calendaring: View {
             }
         } catch {
             trouble = error.localizedDescription
+        }
+        // よその予定表は、あとから足す ── 一つも読めなくても、自分のぶんは出る。
+        let (y, m) = (year, month)
+        Task { @MainActor in
+            let more = await Away.month(y, m)
+            guard y == year, m == month else { return }   // 月を替えたあとの答えは捨てる
+            slots = (slots + more).sorted {
+                ($0.day, $0.at == nil ? 1 : 0, $0.at ?? "", $0.title)
+                    < ($1.day, $1.at == nil ? 1 : 0, $1.at ?? "", $1.title)
+            }
         }
     }
 

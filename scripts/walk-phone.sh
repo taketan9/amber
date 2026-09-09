@@ -37,6 +37,10 @@ cat > "$work/index.html" <<'PAGE'
 だからこの段落はわざと長く書いてあります。もっと長く。もっと長く。</p>
 </article><footer>足の字。</footer></body></html>
 PAGE
+# よその予定表（依頼 456）── 走査が読む一枚。
+printf 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:%s\r\nBEGIN:VEVENT\r\nDTSTART;TZID=Asia/Tokyo:20260904T183000\r\nSUMMARY:%s\r\nLOCATION:%s\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260921\r\nDTEND;VALUE=DATE:20260924\r\nSUMMARY:%s\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART;TZID=Asia/Tokyo:20260907T200000\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:%s\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n' \
+  '家の予定' '歯医者' '駅前' '旅行' 'ごみ出し' > "$work/away.ics"
+
 # **入れ子の中で起こさない** ── 括弧の中だと `$!` は括弧の番号で、
 # 片づけのときに本体が生き残る。
 python3 -m http.server "$port" --directory "$work" >/dev/null 2>&1 &

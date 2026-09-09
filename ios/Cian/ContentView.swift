@@ -700,7 +700,7 @@ struct ContentView: View {
                              + " ── クラウドが中身をまだ持ってきていないだけで、消えてはいません")
                     }
                     if !store.clashes.isEmpty {
-                        band(.orange, "\(store.clashes.count) 件、同時に更新された控えがあります",
+                        band(.orange, "\(store.clashes.count) 件、同時に更新されたコピーがあります",
                              store.clashes.prefix(3).map {
                                  ($0.clash?.of ?? "") + (($0.clash?.by.isEmpty == false)
                                      ? "（\($0.clash!.by)）" : "")

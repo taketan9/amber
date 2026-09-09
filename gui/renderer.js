@@ -598,7 +598,7 @@ el('title').addEventListener('contextmenu', (e) => {
     popMenu([
         { name: '題を直す', run: renameTitle },
         { name: 'ファイル名を写す', run: () => copyText(baseOf(path), 'ファイル名') },
-        { name: '道を写す', run: () => copyText(path, '置き場所') },
+        { name: '場所をコピー', run: () => copyText(path, '置き場所') },
         { name: 'Finder で表示', sep: true, run: () => window.amber.reveal(path) },
     ], { x: e.clientX, y: e.clientY });
 });
@@ -1002,7 +1002,7 @@ function row(n) {
     // **控えは、消さずに札を貼る。** 一覧から外すと、中身を助け出す道が
     // どこにも無くなる ── 並べたうえで、そういうものだと言う。
     const clash = n.clash
-        ? '<span class="clashmark" title="クラウドが作った控えです">競合</span>'
+        ? '<span class="clashmark" title="クラウドが作ったコピーです">競合</span>'
         : '';
     // **共有中は、書く前に分かるように。** 家族が読むノートに、そうと
     // 知らずに書くことがないように ── 印は題の隣（開いてからでは遅い）。
@@ -1850,7 +1850,7 @@ function armPaper(box, text, open) {
             node.contentEditable = 'false';
             node.title = node.classList.contains('mermaid') || node.querySelector('code.language-mermaid')
                 ? '押すと、図を見ながら直せます'
-                : '押すと、書く面のその行へ';
+                : '押すと、「コード」のその行へ';
         }
     }
     // 升は字ではなく操作 ── 中に caret が入ると、押せるものが打てるものに見える。
@@ -3118,7 +3118,7 @@ async function syncRead() {
     if (body === null) {
         // **黙って止まらない。** 打った字が消えたように見えるのがいちばん悪い。
         say('保存できません ── 図かコード枠の元の字が取れません。'
-            + '「コード」の面で直してください');
+            + '「コード」で直してください');
         el('state').textContent = '保存できません';
         return;
     }
@@ -3376,7 +3376,7 @@ async function readSourceEdit(change, node, stay) {
     const blocks = [...box.children].map((n) =>
         richBlock(n) ? n.dataset.md : (blockToMd(n) ?? ''));
     if (blocks.some((b) => b === undefined)) {
-        say('この面からは書き戻せません（コードか図の元の字が取れません）');
+        say('ここからは書き戻せません（コードか図の元の字が取れません）');
         return;
     }
     try {
@@ -3444,7 +3444,7 @@ async function cmdVim() {
 /// 行番号の入切。**「コード」の面だけの話。**
 async function cmdLineNo() {
     const to = await askPick('行番号', [
-        { name: '出す', sub: '「コード」の面の左に', value: true },
+        { name: '出す', sub: '「コード」の左に', value: true },
         { name: '出さない', value: false },
     ], lineNo ? 'いま オン' : 'いま オフ');
     if (to === null || to === lineNo) return;
@@ -3456,7 +3456,7 @@ async function cmdSyntax() {
         ['見出し', '# 大きい見出し', '# から始める。## で一段小さく'],
         ['箇条書き', '- もの', '行の頭に - と空白'],
         ['番号つき', '1. ひとつめ', '1. 2. 3. と書く'],
-        ['チェック', '- [ ] やること', '押すと入り切りできる升になる'],
+        ['チェック', '- [ ] やること', '押してチェックできるようになります'],
         ['太字', '**ここが太字**', '前後を ** で挟む'],
         ['斜体', '*ここが斜体*', '前後を * で挟む'],
         ['取り消し線', '~~消した字~~', '前後を ~~ で挟む'],
@@ -5373,7 +5373,7 @@ el('read').addEventListener('click', async (e) => {
                 // **絵の大きさは、押して選べる**（依頼 420）── 記法を
                 // 覚えていない人が、いちばん変えたがるのがこれ。
                 pic ? { name: '大きさ…', sub: sizeNow(rich), run: () => askSize(rich) } : null,
-                pic ? null : { name: 'コードで直す', sub: '書く面のその行へ', run: () => toSource(rich) },
+                pic ? null : { name: 'コードで直す', sub: '「コード」のその行へ', run: () => toSource(rich) },
                 { name: '消す', sep: true, run: () => dropBlock(rich) },
             ], { x: e.clientX, y: e.clientY });
         }
@@ -6792,7 +6792,7 @@ const LOOSE_KEYS = [
     ['ゴミ箱へ入れる', 'Delete', '選んでいるノートを（訊いてから）'],
     ['ノートを探す', '/', '一覧を見ているとき'],
     ['閉じる・やめる', 'Esc', '小窓・工房・大きい画面から'],
-    ['次の升へ', 'Tab', '表の中で（⇧Tab で前へ、最後で押すと行が増える）'],
+    ['次のマスへ', 'Tab', '表の中で（⇧Tab で前へ、最後で押すと行が増える）'],
 ];
 
 /// ショートカットの一覧（⌘⇧/）。**探せれば、覚えなくていい。**
@@ -6810,8 +6810,8 @@ async function cmdKeys() {
         if (name === '|' || !run) continue;
         // 見出しだけ、鍵とボタンで振る舞いが違う ── 一打はその深さに直し、
         // ボタンは押すたびに深くなる。一覧では両方言う。
-        if (name === '見出し') { put(name, '⌘1 ⌘2 ⌘3 ⌘4', '一打でその深さに（帯のボタンは押すたび深く）', run); continue; }
-        put(name, key || '', key ? '' : '帯のボタンから', run);
+        if (name === '見出し') { put(name, '⌘1 ⌘2 ⌘3 ⌘4', '一回でその深さに（下のボタンは押すたび深く）', run); continue; }
+        put(name, key || '', key ? '' : '下のボタンから', run);
     }
     put('マークダウンの書き方', '', '記号そのものを見る', cmdSyntax);
 
@@ -7622,7 +7622,7 @@ function drawCloud() {
     }
     if (clash.length) {
         rows.push('<div class="c clash"><b>' + clash.length
-            + ' 件、同時に更新された控えがあります</b>'
+            + ' 件、同時に更新されたコピーがあります</b>'
             + '<span>'
             + escapeHtml(clash.slice(0, 3).map((n) =>
                 n.clash.of + (n.clash.by ? '（' + n.clash.by + '）' : '')).join('・'))

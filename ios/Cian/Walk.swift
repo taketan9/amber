@@ -133,9 +133,9 @@ enum Walk {
             let now = store.notes.first { $0.path == note.path }
             return now?.tags.contains("仕事") == true ? nil : "タグが読み返せません"
         }
-        step("升を押す") {
+        step("チェックを押す") {
             let out = try store.checked("- [ ] 牛乳\n", line: 0, done: true)
-            return out.contains("- [x]") ? nil : "升が入りません: \(out)"
+            return out.contains("- [x]") ? nil : "チェックが入りません: \(out)"
         }
         step("画像の大きさを変える") {
             let out = try store.sized("![画像](a.png)", width: "200")
@@ -267,6 +267,32 @@ enum Walk {
             if rep.count != 5 { return "毎週水曜が \(rep.count) 回です" }
             if (once[0]["at"] as? String) != "14:00" { return "時刻が違います" }
             return nil
+        }
+
+        // ── 三の四。よその予定表（依頼 456）──────────────
+        if let site = ProcessInfo.processInfo.environment["SITE"],
+           let ics = Clipping.reach(site + "away.ics") {
+            await step("よその予定表を読む") {
+                let text = try await Away.fetch(ics)
+                let name = try Away.check(text)
+                if name != "家の予定" { return "名前が \(name) です" }
+                Away.feeds = [Away.Feed(url: ics.absoluteString, name: name)]
+
+                let got = await Away.month(2026, 9)
+                let trip = got.filter { $0.title == "旅行" }.map(\.day)
+                let bin = got.filter { $0.title == "ごみ出し" }
+                if trip.count != 3 { return "終日でまたぐものが \(trip.count) 日です" }
+                if trip.first != "2026-09-21" { return "またぐ初日が \(trip.first ?? "") です" }
+                if bin.count != 4 { return "毎週月曜が \(bin.count) 回です" }
+                guard let one = got.first(where: { $0.title == "歯医者" }) else {
+                    return "時刻つきのものが出ていません"
+                }
+                if one.at != "18:30" { return "時刻が \(one.at ?? "なし") です" }
+                if one.place != "駅前" { return "場所が読めていません" }
+                if !one.isAway { return "よそのものだと分かりません" }
+                Away.feeds = []
+                return nil
+            }
         }
 
         // ── 四。よそから来るもの ────────────────────────

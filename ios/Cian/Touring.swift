@@ -23,7 +23,7 @@ struct Touring: View {
                     ContentUnavailableView {
                         Label("見出しがありません", systemImage: "list.bullet.indent")
                     } description: {
-                        Text("行の頭に `#` と空白を置くと見出しになります（下の帯の「見出し」でも入ります）。")
+                        Text("行の頭に `#` と空白を置くと見出しになります（下のボタンの「見出し」でも入ります）。")
                     }
                 } else {
                     List(heads) { h in
