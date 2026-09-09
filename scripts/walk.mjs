@@ -486,7 +486,10 @@ if (process.env.SITE) {
     await step('Web から取り込む', `
         const got = await window.amber.fetchPage(${JSON.stringify(process.env.SITE)});
         if (got.error) return got.error;
-        const md = webToMd(bestPart(webClean(got.html, got.url)).outerHTML, got.url);
+        // **窓の cmdClip と同じ呼び方で。** 別の呼び方で確かめると、
+        // 呼び方が変わった日にここだけ古いまま通ってしまう
+        // （この中に逆引用符は書けない ── 頭の注意書きのとおり）。
+        const md = webToMd(bestPart(got.html), got.url);
         return md.includes('#') && md.length > 20;`, true);
 }
 

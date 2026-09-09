@@ -43,7 +43,7 @@ python3 scripts/shipped.py      # 未リリースの数
 | `switch-test` | ノートを替えたとき、本文が混ざらないこと |
 | `diagram-test` | 図の組み立て |
 | `win-test` | Windows でだけ出るもの（`file://`・鍵の名前） |
-| `web-test` | よそから来た HTML → ノートの字（15 件） |
+| `web-test` | よそから来た HTML → ノートの字・題・本文らしいところ（24 件）。**電話の取り込みもこの一組を呼ぶ**ので、`clipTitle` と `bestPart` が切り出しの外へ出た日にはここが落ちる |
 | `agree-test` | **窓と電話が、同じノートを同じ字に戻すか**（糊は別々に書いてある） |
 | `contract` | crmaine との約束（名前を黙って変えていないか） |
 | `requests.py` | 台帳 ── **人が頼んだことが、まだ守られているか** |
@@ -140,7 +140,13 @@ xcrun simctl spawn BOOTED log stream --style compact \
   絵文字の板・図や枠や絵を叩いて吹き出し（大きさ・消す・コードで直す）
 - `Making` ＋ 新しいノート ── 題・タグ・**型から**
 - `Nest` フォルダ、`Tagging` タグ、`Stars` ブックマークの棚
-- `Sifting` 絞り込み、`Where` 置き場所、`Naming` 名前
+- `Sifting` 絞り込み、`Where` 置き場所、`Naming` 名前 ──
+  **Web から取り込む**は手元にページを立てて確かめる
+  (`cd 適当なフォルダ && python3 -m http.server 8777` して
+  `http://127.0.0.1:8777/` を渡す)。よそのページで試すと、
+  相手が変わった日に何が原因か分からなくなる。
+  取り込んだら**窓と同じ字か**をファイルで見る ── 本文だけでなく、
+  最後の `出典:` の一行まで（依頼 441）
 - `Past` 過去バージョン、`Studio`/`Drawing` 図の工房、`Tabling` 表、`Syntax` 書き方
 - `Bell`/`Booking`/`Ringing` 通知、`Touring` 案内
 - 歯車の中ぜんぶ

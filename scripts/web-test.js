@@ -7,12 +7,20 @@
  * そこ ── `webToMd` は「均す」だけで、字にするのは面の書き戻しと同じ
  * `blockToMd`。均しが足りなければ、見出しも一覧も一行の字になって出る。
  *
- * 見るのは五つ:
+ * 見るのは七つ:
  *   一。要らない札（script、nav、隠してあるもの）が落ちること
  *   二。入れ物（div、section）がほどけて、中の形が残ること
  *   三。相対の行き先が、絶対の道になること
  *   四。絵が `![](…)` として残り、数取りの 1px は落ちること
  *   五。枠（`<pre>`）が ``` で囲まれること
+ *   六。ページの題から、サイト名の尻尾が落ちること（`clipTitle`）
+ *   七。本文らしいところだけ採れること（`bestPart`）
+ *
+ * **六と七も、切り出しの中で見る。** ここは切り出し（`richBlock` から
+ * 「薄い包み」まで）だけを読んで動かしているので、`clipTitle` と
+ * `bestPart` が切り出しの外へ出た日にはこの検査が落ちる ── 電話は
+ * この二つを窓と同じ一組から呼んでいて、外へ出た瞬間に電話だけ
+ * 取り込めなくなる（実際にそうなった）。
  *
  *     node scripts/web-test.js
  */
@@ -113,6 +121,39 @@ const CASES = [
         ''],
 ];
 
+/// [名前, 入れる HTML まるごと, 出てほしい題]
+const TITLES = [
+    ['サイト名の尻尾を落とす',
+        '<title>段取りの決め方 | example</title>', '段取りの決め方'],
+    ['全角の縦棒でも落とす',
+        '<title>段取りの決め方 ｜ example</title>', '段取りの決め方'],
+    ['ダッシュでも落とす',
+        '<title>段取りの決め方 — example</title>', '段取りの決め方'],
+    ['尻尾が無ければ、そのまま',
+        '<title>段取りの決め方</title>', '段取りの決め方'],
+    ['実体参照はほどく',
+        '<title>朝 &amp; 夜</title>', '朝 & 夜'],
+    ['題が無ければ、何も返さない', '<p>本文</p>', ''],
+];
+
+/// [名前, 入れる HTML まるごと, 本文として出てほしい .md]
+const PARTS = [
+    ['article が名乗っていれば、それを信じる',
+        '<nav>案内</nav><header><h1>ここは飾り</h1></header>'
+        + '<article><h1>本題</h1><p>' + 'あ'.repeat(300) + '</p></article>'
+        + '<footer>足</footer>',
+        '# 本題\n\n' + 'あ'.repeat(300)],
+    ['名乗りが無ければ、いちばん字の多いかたまり',
+        '<div><p>案内</p></div><div><h2>本題</h2><p>' + 'い'.repeat(200)
+        + '</p><p>' + 'ろ'.repeat(200) + '</p></div>',
+        '## 本題\n\n' + 'い'.repeat(200) + '\n\n' + 'ろ'.repeat(200)],
+    ['長い台本は、字の量で本文に勝てない',
+        '<script type="application/ld+json">' + 'x'.repeat(2000)
+        + '</script><div><h2>本題</h2><p>' + 'は'.repeat(200)
+        + '</p><p>' + 'に'.repeat(200) + '</p></div>',
+        '## 本題\n\n' + 'は'.repeat(200) + '\n\n' + 'に'.repeat(200)],
+];
+
 let bad = 0;
 for (const [name, html, want] of CASES) {
     const got = webToMd(html, BASE);
@@ -122,10 +163,27 @@ for (const [name, html, want] of CASES) {
     console.log('  ほしい: ' + JSON.stringify(want));
     console.log('  出た　: ' + JSON.stringify(got));
 }
+for (const [name, html, want] of TITLES) {
+    const got = clipTitle(html);
+    if (got === want) continue;
+    bad += 1;
+    console.log('✗ 題：' + name);
+    console.log('  ほしい: ' + JSON.stringify(want));
+    console.log('  出た　: ' + JSON.stringify(got));
+}
+for (const [name, html, want] of PARTS) {
+    const got = webToMd(bestPart(html), BASE);
+    if (got === want) continue;
+    bad += 1;
+    console.log('✗ 本文：' + name);
+    console.log('  ほしい: ' + JSON.stringify(want));
+    console.log('  出た　: ' + JSON.stringify(got));
+}
 
 console.log('');
 if (bad) {
-    console.log(CASES.length + ' 件中 ' + bad + ' 件おかしいです');
+    console.log((CASES.length + TITLES.length + PARTS.length)
+        + ' 件中 ' + bad + ' 件おかしいです');
     process.exit(1);
 }
 console.log('ぜんぶ通りました');

@@ -19,6 +19,39 @@ struct Where: View {
     let choose: () -> Void
     let bringIn: () -> Void
     let restore: () -> Void
+    /// 取ってきて、一本のノートにする（依頼 421 の乙）。
+    ///
+    /// **題はページのもの、中身は本文だけ、出どころは本文の最後に字で。**
+    /// 判断はぜんぶ `Clipping` と core にあり、ここは繋ぐだけ。
+    private func clip() {
+        guard let url = Clipping.reach(clipUrl) else {
+            trouble = "道の形になっていません"
+            return
+        }
+        clipBusy = true
+        Task { @MainActor in
+            defer { clipBusy = false }
+            let hand = Clipping()
+            await hand.warm()
+            do {
+                let got = try await hand.clip(url)
+                let name = got.title.isEmpty ? url.host ?? "取り込み" : got.title
+                guard let made = try store.make(titled: name) else {
+                    trouble = "ノートを作れませんでした"
+                    return
+                }
+                let read = try Cian.call("read", ["path": made.path])
+                let head = try store.split(read["text"] as? String ?? "").0
+                _ = try store.save(made, text: head + "\n" + got.body,
+                                   stamp: read["stamp"] as? String ?? "")
+                store.reload()
+                clipDone = name
+            } catch {
+                trouble = error.localizedDescription
+            }
+        }
+    }
+
     /// 名前を `sheet(item:)` に渡すための包み。
     struct Named: Identifiable {
         let name: String
@@ -31,6 +64,11 @@ struct Where: View {
     @Environment(\.dismiss) private var dismiss
     @State private var zip: URL?
     @State private var trouble: String?
+    /// Web から取り込むときの、道と最中かどうか（依頼 421 の乙）。
+    @State private var clipping = false
+    @State private var clipUrl = ""
+    @State private var clipBusy = false
+    @State private var clipDone: String?
     @AppStorage("cian.look") private var look = Look.auto
     @AppStorage("amber.font") private var font = Size.system
     @AppStorage("cian.autosave") private var autosave = true
@@ -88,6 +126,17 @@ struct Where: View {
                 }
 
                 Section {
+                    // **Web から取り込む**（依頼 421 の乙・窓と同じ）。
+                    // 電話で「これ残しておきたい」と思うのはたいてい
+                    // Safari の中なので、道を打つのではなく**写してから
+                    // ここを押す**形にしてある（欄には既に入っている）。
+                    Button {
+                        clipUrl = UIPasteboard.general.string
+                            .flatMap { Clipping.reach($0) != nil ? $0 : nil } ?? ""
+                        clipping = true
+                    } label: {
+                        Label("Web から取り込む", systemImage: "safari")
+                    }
                     Button {
                         dismiss()
                         bringIn()
@@ -208,6 +257,39 @@ struct Where: View {
                 Button("閉じる") {}
             } message: {
                 Text(trouble ?? "")
+            }
+            // **Web から取り込む**（依頼 421 の乙）。道を一つ訊いて、
+            // 取ってきて、一本のノートにする。
+            .alert("Web から取り込む", isPresented: $clipping) {
+                TextField("https://…", text: $clipUrl)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                Button("取り込む") { clip() }
+                Button("やめる", role: .cancel) {}
+            } message: {
+                Text("ページの道を貼ってください。本文だけを一本のノートにします。")
+            }
+            .alert("取り込みました", isPresented: Binding(
+                get: { clipDone != nil }, set: { if !$0 { clipDone = nil } }
+            )) {
+                Button("わかりました") {}
+            } message: {
+                Text("「\(clipDone ?? "")」を作りました。")
+            }
+            .overlay {
+                if clipBusy {
+                    // **待っていることを見せる。** 取りに行くのは何秒かかかる
+                    // ので、何も出ないと押せていないように見える。
+                    ZStack {
+                        Color.black.opacity(0.25).ignoresSafeArea()
+                        VStack(spacing: 10) {
+                            ProgressView()
+                            Text("取りに行っています…").font(.footnote)
+                        }
+                        .padding(22)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    }
+                }
             }
             .navigationTitle("設定")
             .navigationBarTitleDisplayMode(.inline)

@@ -628,9 +628,8 @@ async function cmdClip() {
     let md = '';
     let title = '';
     try {
-        const body = webClean(got.html, got.url);
         title = clipTitle(got.html);
-        md = webToMd(bestPart(body).outerHTML, got.url);
+        md = webToMd(bestPart(got.html), got.url);
     } catch (e) {
         say('読めません: ' + why(e));
         return;
@@ -666,33 +665,6 @@ async function cmdClip() {
     } catch (e) {
         say('作れません: ' + why(e));
     }
-}
-
-/// ページの題。**`<title>` から、サイト名の尻尾を落とす** ──
-/// 「段取りの決め方 | example」の `| example` は、ノートの題には要らない。
-function clipTitle(html) {
-    const raw = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] || '';
-    const t = new DOMParser().parseFromString('<p>' + raw + '</p>', 'text/html')
-        .body.textContent.trim();
-    return edges(t.split(/\s+[|｜–—-]\s+/)[0] || t).slice(0, 120);
-}
-
-/// 本文らしいところ。**`article` が名乗っていれば、それを信じる。**
-///
-/// 無ければ、いちばん字の多いかたまり ── 案内も足も、字の量では本文に
-/// 勝てない。勝てないところまでしか当てられないので、外れたら人が消す。
-function bestPart(body) {
-    const named = body.querySelector('article, [role="main"], main');
-    if (named && named.textContent.trim().length > 200) return named;
-    let best = body;
-    let most = body.textContent.trim().length;
-    for (const n of body.querySelectorAll('*')) {
-        const len = n.textContent.trim().length;
-        // **半分より少なくなるところまでは降りない。** 降りすぎると、
-        // 長い一段落だけを採って前後を捨てることになる。
-        if (len > most * 0.6 && len < most) { best = n; most = len; }
-    }
-    return best;
 }
 
 /// **型を置くフォルダの名前。**
@@ -2823,6 +2795,51 @@ const WEB_PEEL = 'div,section,article,main,header,footer,figure,figcaption,'
     + 'details,summary,center,font,small,mark,ins,abbr,time,cite,q,dfn,'
     + 'picture,tbody,thead,tfoot,colgroup,col,noscript';
 
+/// ページの題。**`<title>` から、サイト名の尻尾を落とす** ──
+/// 「段取りの決め方 | example」の `| example` は、ノートの題には要らない。
+function clipTitle(html) {
+    const raw = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] || '';
+    const t = new DOMParser().parseFromString('<p>' + raw + '</p>', 'text/html')
+        .body.textContent.trim();
+    return edges(t.split(/\s+[|｜–—-]\s+/)[0] || t).slice(0, 120);
+}
+
+/// **要らない札を落とすだけ。** 均す前と、選ぶ前の、両方で使う。
+function webDrop(body) {
+    for (const n of body.querySelectorAll(WEB_DROP)) n.remove();
+    // 隠してあるものは、読む人に見えていない ── 貼らない。
+    for (const n of body.querySelectorAll('[hidden],[aria-hidden="true"]')) n.remove();
+    return body;
+}
+
+/// 本文らしいところ。**`article` が名乗っていれば、それを信じる。**
+///
+/// 無ければ、いちばん字の多いかたまり ── 案内も足も、字の量では本文に
+/// 勝てない。勝てないところまでしか当てられないので、外れたら人が消す。
+///
+/// **均す前の HTML を受ける。** 均すと `article` も `main` も皮を剥がれて
+/// 消えるので、均したあとに名乗りを探しても、絶対に見つからない ──
+/// いちばん確かな手がかりを、使う前に自分で捨てていた。
+function bestPart(html) {
+    const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+    const body = doc.body;
+    if (!body) return '';
+    // **選ぶ前に、要らない札は落としておく。** 頁の中の長い台本や
+    // 隠した札が、字の量で本文に勝ってしまう。
+    webDrop(body);
+    const named = body.querySelector('article, [role="main"], main');
+    if (named && named.textContent.trim().length > 200) return named.outerHTML;
+    let best = body;
+    let most = body.textContent.trim().length;
+    for (const n of body.querySelectorAll('*')) {
+        const len = n.textContent.trim().length;
+        // **半分より少なくなるところまでは降りない。** 降りすぎると、
+        // 長い一段落だけを採って前後を捨てることになる。
+        if (len > most * 0.6 && len < most) { best = n; most = len; }
+    }
+    return best === body ? body.innerHTML : best.outerHTML;
+}
+
 /// よそから来た HTML を、**amber が知っている形へ均してから**字にする。
 ///
 /// **字に直すのは `blockToMd` 一本**（依頼 421）── 面の書き戻しと同じ道を
@@ -2857,9 +2874,7 @@ function webClean(html, base) {
     const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
     const body = doc.body;
     if (!body) return null;
-    for (const n of body.querySelectorAll(WEB_DROP)) n.remove();
-    // 隠してあるものは、読む人に見えていない ── 貼らない。
-    for (const n of body.querySelectorAll('[hidden],[aria-hidden="true"]')) n.remove();
+    webDrop(body);
 
     const abs = (u) => {
         const t = String(u || '').trim();
