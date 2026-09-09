@@ -129,6 +129,7 @@ jobs:
           node scripts/round-test.js
           node scripts/key-test.js
           node scripts/web-test.js
+          node scripts/agree-test.js
 
       - name: 一往復してみる（Windows）
         if: runner.os == 'Windows'

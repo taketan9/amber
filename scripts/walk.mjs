@@ -15,6 +15,11 @@
  *       戻せないノートは、そこから先の保存が黙って止まる
  *
  * 落ちたものだけ出す。ぜんぶ通れば一行。
+ *
+ * **窓へ送る字の中に、逆引用符と円記号を書かないこと。** ここは
+ * テンプレートの中なので、そこでテンプレートが閉じる・改行が本物になる
+ * ── 三度踏んだ（2026-09-09）。註にも書けない。改行が要るなら
+ * String.fromCharCode(10)。
  */
 const PORT = process.env.PORT || 9333;
 
@@ -476,7 +481,135 @@ if (process.env.SITE) {
         return md.includes('#') && md.length > 20;`, true);
 }
 
-// 十七。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
+/* ── 十七。**触ったあと、壊れていないか** ──
+ *
+ * ここがこの走査のいちばんの目当て。**面を行き来しただけで字が変わる**、
+ * が実際にあった（2026-09-08・段落の改行が空白に、`*` の点が `-` に、
+ * `1. 1.` が `1. 2.` に…）。同期しているフォルダなら、それが全部むこうへ
+ * 差分として飛ぶ。
+ *
+ * 見張りは一つ ── **何もしない往復では、字が一文字も変わらない。**
+ */
+
+/// 面を行き来して、字が変わっていないかを見る。
+const trip = (name, prepare) => step('往復：' + name, `
+    await openNote(${path('往復.md')});
+    // **毎回、元の字から始める。** 前の往復が崩したノートで次を回すと、
+    // 崩れたもの同士を比べて「変わっていません」になる（一度そうなった）。
+    if (window.__pristine === undefined) {
+        window.__pristine = whole();
+    } else if (whole() !== window.__pristine) {
+        setView('write');
+        await new Promise((g) => setTimeout(g, 250));
+        loading = true;
+        editor.setValue(state.head ? window.__pristine.slice(state.head.length) : window.__pristine);
+        loading = false;
+        state.dirty = true;
+        await save();
+    }
+    setView('read');
+    await new Promise((g) => setTimeout(g, 600));
+    ${prepare || ''}
+    const was = whole();
+    for (let i = 0; i < 3; i += 1) {
+        setView('write');
+        await new Promise((g) => setTimeout(g, 250));
+        setView('read');
+        await new Promise((g) => setTimeout(g, 400));
+        // **書き戻しを、必ず一度通す。**
+        //
+        // 面を替えるだけでは書き戻しが走らない ── 替えただけの往復は何も
+        // 確かめていなかった（前後の空白を落とす壊し方を入れても鳴らな
+        // かった。変異させて初めて分かった・2026-09-09）。人が一文字
+        // 打った時と同じ合図を出して、面の字をノートへ返させる。
+        el('read').dispatchEvent(new Event('input'));
+        await new Promise((g) => setTimeout(g, 1100));
+    }
+    const now = whole();
+    if (now === was) return true;
+    // どこが変わったかを言う ── 「変わりました」だけでは直せない。
+    //
+    // **改行は数で書く。** ここは窓へ送る字（テンプレート）の中なので、
+    // 円記号で書くと走査の側で本物の改行になり、送る字が途中で切れる。
+    // 逆引用符も同じ理由で書けない ── そこでテンプレートが閉じる。
+    const nl = String.fromCharCode(10);
+    const a = was.split(nl);
+    const b = now.split(nl);
+    for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+        if (a[i] !== b[i]) return (i + 1) + ' 行目: ' + JSON.stringify(a[i]) + ' → ' + JSON.stringify(b[i]);
+    }
+    return '長さが違います（' + a.length + ' → ' + b.length + '）';`, true);
+
+await trip('何もしないで三往復');
+await trip('並べて表示をはさむ', `
+    setView('split');
+    await new Promise((g) => setTimeout(g, 400));
+    setView('read');
+    await new Promise((g) => setTimeout(g, 400));`);
+await trip('一文字打ってから', `
+    const p = [...el('read').children].find((n) => n.tagName === 'P');
+    const r = document.createRange(); r.selectNodeContents(p); r.collapse(false);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    el('read').focus();
+    document.execCommand('insertText', false, 'あ');
+    await new Promise((g) => setTimeout(g, 1200));`);
+await trip('升を押してから', `
+    const tick = el('read').querySelector('.box');
+    if (tick) tick.click();
+    await new Promise((g) => setTimeout(g, 1200));`);
+await trip('絵文字を入れてから', `
+    await openEmoji();
+    el('emojifind').value = 'おめでとう'; drawFaces();
+    const p = [...el('read').children].find((n) => n.tagName === 'P');
+    const r = document.createRange(); r.selectNodeContents(p); r.collapse(false);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    el('read').focus();
+    document.querySelector('#emojigrid button').click();
+    closeEmoji();
+    await new Promise((g) => setTimeout(g, 1200));`);
+await trip('絵の大きさを変えてから', `
+    const f = el('read').querySelector('figure');
+    if (f) await readSourceEdit(async (md) =>
+        (await ask('imgsize', { line: md, width: '400px' })).line, f);
+    await new Promise((g) => setTimeout(g, 800));`);
+await trip('ブラウザから貼ってから', `
+    const r0 = el('read');
+    const p = [...r0.children].find((n) => n.tagName === 'P');
+    const rg = document.createRange(); rg.selectNodeContents(p); rg.collapse(false);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(rg);
+    r0.focus();
+    const dt = new DataTransfer();
+    dt.setData('text/plain', '見出し');
+    dt.setData('text/html', '<h3>貼った見出し</h3><ul><li>一つ</li></ul>');
+    r0.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    await new Promise((g) => setTimeout(g, 1200));`);
+await trip('記号を付けてから', `
+    const p = [...el('read').children].find((n) => n.tagName === 'P');
+    const r = document.createRange(); r.selectNodeContents(p); r.collapse(false);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    el('read').focus();
+    MARKS.flat().find((m) => m[0] === '引用')[2]();
+    await new Promise((g) => setTimeout(g, 1200));`);
+
+// **ノートを替えても混ざらない**（`switch-test` の実物版）。
+await step('往復：ノートを替えても混ざらない', `
+    await openNote(${path('よくばり.md')});
+    setView('write');
+    await new Promise((g) => setTimeout(g, 300));
+    const a = whole();
+    await openNote(${path('買い物.md')});
+    await new Promise((g) => setTimeout(g, 400));
+    const b = whole();
+    await openNote(${path('よくばり.md')});
+    await new Promise((g) => setTimeout(g, 400));
+    if (whole() !== a) return 'よくばりの字が変わりました';
+    await openNote(${path('買い物.md')});
+    await new Promise((g) => setTimeout(g, 400));
+    if (whole() !== b) return '買い物の字が変わりました';
+    setView('read');
+    return true;`, true);
+
+// 十八。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => x.book === '歩き試し'
             || /複製|新しいノート|週報/.test(x.title || ''))) {
