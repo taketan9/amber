@@ -139,7 +139,7 @@ struct Paper: UIViewRepresentable {
       /* **電話では少し小さく。** 絵は 43 列あり、そのままだと右が切れる
          ── 初めて開いた人が見るのが「ambə」では締まらない（実際に切れた）。 */
       #paper pre > code.language-amber{color:var(--amber);display:block;
-        line-height:1;font-size:.78em}
+        line-height:1;font-size:.72em}
       #paper table{border-collapse:collapse;display:block;overflow-x:auto;
         max-width:100%}
       #paper th,#paper td{border:1px solid var(--line);padding:6px 10px;
