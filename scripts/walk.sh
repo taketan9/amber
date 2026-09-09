@@ -145,6 +145,11 @@ fn main() {}
 ![amber の印](attachments/amber.png)
 MD
 
+# **よそから来た形のノート。** Windows で作られたもの・古い日本語のもの。
+# core は読んだときの文字コード・BOM・改行のまま書き戻すが、**窓を通した
+# ときもそうか**は誰も見ていなかった。
+python3 "$here/fixtures.py" "$notes"
+
 # ── 取り込む先のページ（外へは出ない） ──
 siteport="${SITEPORT:-8731}"
 cat > "$work/site/index.html" <<'HTML'
@@ -157,6 +162,12 @@ cat > "$work/site/index.html" <<'HTML'
 HTML
 (cd "$work/site" && python3 -m http.server "$siteport" >/dev/null 2>&1 &)
 
+# **エンジンを作り直してから出す。** 窓は起動時の実行ファイルを掴んだまま
+# なので、直したはずの判断が効かないまま「通りました」になる（実際になった）。
+(cd "$root" && cargo build -q -p amber-server) || {
+  echo "エンジンが作れません"; exit 2
+}
+
 # ── 窓を出す ──
 (cd "$root/gui" && HOME="$work/home" npx electron --remote-debugging-port="$port" . \
   >"$work/win.log" 2>&1 &)
@@ -165,4 +176,4 @@ for i in $(seq 1 40); do
   sleep 0.5
 done
 
-SITE="http://127.0.0.1:$siteport/" PORT="$port" node "$here/walk.mjs"
+SITE="http://127.0.0.1:$siteport/" PORT="$port" NOTES="$notes" node "$here/walk.mjs"

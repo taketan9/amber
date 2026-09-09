@@ -161,7 +161,24 @@ pub struct Note {
 /// Read one note. Only the head of the file is looked at — a list of two
 /// hundred notes must not read two hundred whole files to draw itself.
 pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
-    let text = std::fs::read_to_string(path).ok()?;
+    // **UTF-8 でないノートも、一覧に出す**（依頼 429）。
+    //
+    // ここは頭だけ読む速い道で、`read_to_string` は UTF-8 でなければ
+    // 何も返さない ── そのまま素通りさせていたので、**Shift_JIS で
+    // 書かれたノートが amber から丸ごと消えていた**。開けるのに一覧に
+    // 無い、という形（`read` op は通る）で、どこから探せばいいのかが
+    // 画面のどこにも出ない。
+    //
+    // 落ちたときだけ、文字コードを見る側（`text::read`）で読み直す ──
+    // ほとんどのノートは UTF-8 なので、速い道はそのまま。
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(_) => crate::text::read(path).ok()?.lines.join("\n"),
+    };
+    // **BOM は字ではない。** 残すと一行目が `\u{feff}---` になり、前書きが
+    // 前書きに見えない ── 題も `tags:` も読まれず、前書きぜんぶが本文の
+    // 書き出しとして一覧に出る（実際に出た）。
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
     let lines: Vec<String> = text.lines().take(head_lines.max(8)).map(str::to_string).collect();
     let meta = std::fs::metadata(path).ok();
     let f = front(&lines);
@@ -1447,6 +1464,36 @@ pub fn new_note(title: &str, today: &str, now: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_note_that_is_not_utf8_still_shows_up() {
+        let dir = tempfile::tempdir().unwrap();
+        // 古い日本語（Shift_JIS・CRLF）── Windows のメモ帳が置いていく形。
+        let body = "---\r\ntitle: 日本語\r\ntags: [仕事]\r\n---\r\n\r\n# 日本語\r\n\r\n本文です。\r\n";
+        let (bytes, _, bad) = encoding_rs::SHIFT_JIS.encode(body);
+        assert!(!bad, "試しの字が Shift_JIS で書けません");
+        std::fs::write(dir.path().join("日本語.md"), &bytes[..]).unwrap();
+
+        // BOM 付き（古いメモ帳・Excel が置いていく形）。
+        let mut bom = vec![0xEF, 0xBB, 0xBF];
+        bom.extend_from_slice("---\ntitle: 前書き\n---\n\n本文。\n".as_bytes());
+        std::fs::write(dir.path().join("BOM.md"), bom).unwrap();
+
+        let one = |name: &str| super::read(&dir.path().join(name), 40).expect(name);
+
+        // **一覧から消えない。** 前は `read_to_string` が断って `None` を
+        // 返し、Shift_JIS のノートが丸ごと出てこなかった。
+        let sjis = one("日本語.md");
+        assert_eq!(sjis.title, "日本語");
+        assert_eq!(sjis.tags, vec!["仕事"]);
+
+        // **BOM は前書きを隠さない。** 前は一行目が `\u{feff}---` になり、
+        // 前書きが前書きに見えず、題がファイル名から採られていた。
+        let bom = one("BOM.md");
+        assert_eq!(bom.title, "前書き");
+        assert!(!bom.excerpt.contains('\u{feff}'), "BOM が本文に残っています: {:?}", bom.excerpt);
+        assert!(!bom.excerpt.contains("---"), "前書きが本文に漏れています: {:?}", bom.excerpt);
+    }
+
     #[test]
     fn duplicate_keeps_the_words_and_takes_today() {
         let dir = tempfile::tempdir().unwrap();

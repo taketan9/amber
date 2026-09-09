@@ -21,7 +21,11 @@
  * ── 三度踏んだ（2026-09-09）。註にも書けない。改行が要るなら
  * String.fromCharCode(10)。
  */
+import { readFileSync } from 'node:fs';
+
 const PORT = process.env.PORT || 9333;
+/// 試し場のノートが置いてある道（`walk.sh` が渡す）。
+const NOTES = process.env.NOTES || '';
 
 /* ── 窓と話す ── */
 
@@ -609,7 +613,50 @@ await step('往復：ノートを替えても混ざらない', `
     setView('read');
     return true;`, true);
 
-// 十八。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
+/* ── 十八。**よそから来た形のノートを、そのまま返すか**（依頼 429）──
+ *
+ * Windows で作られたノート（CRLF）、BOM 付き、古い日本語（Shift_JIS）。
+ * core は読んだときの形のまま書き戻すが、**窓を通したときもそうか**は
+ * 誰も見ていなかった。開いて、打った時と同じ合図を出して、保存させてから
+ * **バイトを見る**（画面では分からない）。
+ */
+const SHAPES = [
+    ['改行CRLF.md', (b) => b.includes('\r\n'), 'CRLF が LF になりました'],
+    ['BOM付き.md', (b) => b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf, 'BOM が落ちました'],
+    // Shift_JIS は UTF-8 では出ない並び ── 「本」は 0x96 0x7b。
+    ['日本語SJIS.md', (b) => b.includes(Buffer.from([0x96, 0x7b])), 'Shift_JIS が UTF-8 になりました'],
+];
+for (const [name, ok, why] of SHAPES) {
+    // **中身を本当に変える。** 合図だけでは保存が走らない（同じ字なら
+    // 書かない）── 壊しても鳴らなかったのはそれだった。一文字入れる。
+    await step('形を保つ：' + name, `
+        await openNote(state.root + '/' + ${JSON.stringify(name)});
+        // **開けたことを、先に確かめる。** 開けないと前のノートが開いた
+        // ままで、そこに打って「通った」になる ── 実際にそうなって、
+        // 一覧から消えているノートを見落としかけた。
+        if (!state.open || !state.open.path.endsWith(${JSON.stringify(name)})) {
+            return '一覧にありません（開けませんでした）';
+        }
+        setView('read');
+        await new Promise((g) => setTimeout(g, 500));
+        const p = [...el('read').children].find((n) => n.tagName === 'P');
+        const r = document.createRange(); r.selectNodeContents(p); r.collapse(false);
+        const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+        el('read').focus();
+        document.execCommand('insertText', false, 'あ');
+        await new Promise((g) => setTimeout(g, 1500));
+        return whole().includes('本文です。あ');`, true);
+    if (!NOTES) continue;
+    ran += 1;
+    try {
+        const bytes = readFileSync(NOTES + '/' + name);
+        if (!ok(bytes)) bad.push({ name: 'バイト：' + name, why: [why] });
+    } catch (e) {
+        bad.push({ name: 'バイト：' + name, why: ['読めません: ' + e.message] });
+    }
+}
+
+// 十九。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => x.book === '歩き試し'
             || /複製|新しいノート|週報/.test(x.title || ''))) {
