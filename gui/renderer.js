@@ -7873,12 +7873,18 @@ async function cmdExport() {
     const name = stem();
     try {
         if (how === 'md') {
-            const at = await window.amber.saveText(name + '.md', whole());
+            // **ファイルと同じ字にする。** 面が持っているのは最後の改行の
+            // 無い姿で、そのまま書き出すと**元のノートと一バイト違う**
+            // （実際に 99 と 100 になった）── 「そのまま」と言っている以上、
+            // そこは合わせる。core も保存のときに同じ一文字を足している。
+            const text = whole();
+            const at = await window.amber.saveText(
+                name + '.md', text.endsWith('\n') ? text : text + '\n');
             if (at) say('書き出しました: ' + at);
             return;
         }
         const body = (await ask('html', { text: whole() })).html || '';
-        const page = onePage(state.open.title || name, body);
+        const page = onePage(state.open.title || name, await inlinePictures(body));
         const at = how === 'html'
             ? await window.amber.saveText(name + '.html', page)
             : await window.amber.savePDF(name + '.pdf', page);
@@ -7888,11 +7894,32 @@ async function cmdExport() {
     }
 }
 
+/// **絵を、書き出す一枚の中へ入れる**（依頼 435）。
+///
+/// 献立は「一枚で完結」と言っているのに、絵は `attachments/…` という
+/// **隣を指す道**のままだった ── 書き出した HTML を人に送ると、送られた
+/// 側では絵が出ない。言っていることを本当にする。
+///
+/// 落として来られない絵は、道のまま残す ── 消すと「あったはずのものが
+/// 無い」になり、そちらのほうが分かりにくい。
+async function inlinePictures(html) {
+    const dir = state.open ? dirOf(state.open.path) : '';
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    for (const img of doc.querySelectorAll('img')) {
+        const src = img.getAttribute('src') || '';
+        if (!src || /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//')) continue;
+        try {
+            const got = await window.amber.fileBytes(absPath(src, dir));
+            if (got && got.b64) img.src = 'data:image/' + (got.ext || 'png') + ';base64,' + got.b64;
+        } catch { /* 読めない絵は、道のまま置いておく */ }
+    }
+    return doc.body.innerHTML;
+}
+
 /// 一枚で完結する HTML。
 ///
 /// **外を参照しない。** 別の機械で開いても字の形が崩れないように、字体は
-/// その機械にあるものだけ。絵はノートの隣から拾っているので、そこだけは
-/// 付いてこない（それは書き出しではなく、束ねる話）。
+/// その機械にあるものだけ。絵は `inlinePictures` が中へ入れてある。
 function onePage(title, body) {
     return '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
         + '<title>' + escapeHtml(title) + '</title><style>'
