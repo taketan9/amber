@@ -49,7 +49,7 @@ struct Syntax: View {
 /// amber について（電話）。
 ///
 /// **不具合を伝えるときの三つ**（窓の `cmdAbout` と同じ顔ぶれ）── 画面の
-/// 版、エンジンの版、ノートの置き場所。これが無いと、どちらの amber の
+/// 版、エンジンの版、ノートの保存場所。これが無いと、どちらの amber の
 /// どの版の話なのかが分からないまま話が始まる。
 struct About: View {
     let store: NotesStore?
@@ -96,7 +96,7 @@ struct About: View {
             Section {
                 LabeledContent("画面", value: app)
                 LabeledContent("エンジン", value: engine)
-                LabeledContent("ノートの置き場所", value: store?.rootName ?? "（この画面からは見えません）")
+                LabeledContent("ノートの保存場所", value: store?.rootName ?? "（この画面からは見えません）")
             } footer: {
                 Text("不具合を伝えるときは、この三つを添えてください。")
             }

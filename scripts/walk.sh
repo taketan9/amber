@@ -49,6 +49,19 @@ if [ -f "$mine" ]; then cp "$mine" "$work/amber.json.mine"; else touch "$work/�
 
 # ── 試すノート。**書けるものを一通り**入れておく ──
 cp "$root/packaging/welcome/attachments/amber.png" "$notes/attachments/" 2>/dev/null || true
+# **途中に書くための一本**（依頼 461）。飾りの無い長い段落が一つ ──
+# よくばり.md は飾りで字が細切れになるので、caret を「途中」に置けない。
+cat > "$notes/途中.md" <<'MD'
+---
+title: 途中
+created: 2026-09-01
+---
+
+# 途中
+
+これは飾りのない十分に長い段落なので、まん中あたりにカーソルを置けます。
+MD
+
 cat > "$notes/よくばり.md" <<'MD'
 ---
 title: よくばり

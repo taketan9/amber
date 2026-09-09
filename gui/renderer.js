@@ -40,7 +40,7 @@ const dirOf = (at) => String(at || '').replace(/[^/\\]*$/, '');
 ///
 /// 正しい形は `file:///C:/Users/…`。円記号を `/` に直し、頭に一本足す。
 /// **`\\\\server\\share` は別**（機械の名前が入るので、斜線は二本のまま）
-/// ── 会社の置き場所はネットワークの向こうのことがある。
+/// ── 会社の保存場所はネットワークの向こうのことがある。
 const fileURL = (at) => {
     const p = String(at || '').replace(/\\/g, '/');
     if (p.startsWith('//')) return 'file:' + encodeURI(p);
@@ -585,7 +585,7 @@ el('rail').addEventListener('contextmenu', (e) => {
     e.preventDefault();
     popMenu([
         { name: '新しいフォルダ', run: () => cmdMkBook() },
-        { name: '新しいブックマークの置き場所', run: () => newShelf('') },
+        { name: '新しいブックマークのグループ', run: () => newShelf('') },
         { name: '左の列を畳む', key: '⌘/', sep: true, run: toggleRail },
     ], { x: e.clientX, y: e.clientY });
 });
@@ -598,7 +598,7 @@ el('title').addEventListener('contextmenu', (e) => {
     popMenu([
         { name: '題を直す', run: renameTitle },
         { name: 'ファイル名を写す', run: () => copyText(baseOf(path), 'ファイル名') },
-        { name: '場所をコピー', run: () => copyText(path, '置き場所') },
+        { name: '場所をコピー', run: () => copyText(path, '保存場所') },
         { name: 'Finder で表示', sep: true, run: () => window.amber.reveal(path) },
     ], { x: e.clientX, y: e.clientY });
 });
@@ -688,7 +688,7 @@ async function cmdTemplate() {
         (n) => n.book === TEMPLATES || n.book.startsWith(TEMPLATES + '/'));
     if (!rows.length) {
         // **どうすれば使えるかを言う。** 「ありません」だけだと、
-        // 作れないのか置き場所が違うのかが分からない。
+        // 作れないのか保存場所が違うのかが分からない。
         say('「' + TEMPLATES + '」フォルダを作って、中にノートを置くと型になります');
         return;
     }
@@ -959,7 +959,7 @@ async function manyMove() {
 /// まとめてゴミ箱へ。**訊くのは一度だけ。**
 ///
 /// 一本ずつの `cmdDelete` を二十回まわすと、二十回訊かれる ── ゴミ箱の
-/// 無い置き場所（会社の OneDrive）では、断られてからもう一度、で四十回に
+/// 無い保存場所（会社の OneDrive）では、断られてからもう一度、で四十回に
 /// なる。数を言って一度承知をもらい、そのあとは黙って進める。
 async function manyDelete() {
     const notes = pickedNotes();
@@ -2311,7 +2311,7 @@ function landBackIn(node, at) {
 /// **図や枠の中に caret を置かない**（`PAPER.ja.md` 六章の芯の 3）── 中に
 /// 入ると「押せるものが打てるものに見える」。二つ続いていれば、二つとも跨ぐ。
 ///
-/// **跨いだ先が無いなら、置き場所を作る** ── 図で始まるノートの上に一行
+/// **跨いだ先が無いなら、保存場所を作る** ── 図で始まるノートの上に一行
 /// 足す道が、いままで無かった（末尾には `tailStop` があるのに）。
 function checkArrow(box, dir) {
     const line = lineAt(box);
@@ -2795,6 +2795,43 @@ const WEB_PEEL = 'div,section,article,main,header,footer,figure,figcaption,'
     + 'details,summary,center,font,small,mark,ins,abbr,time,cite,q,dfn,'
     + 'picture,tbody,thead,tfoot,colgroup,col,noscript';
 
+/// 最後に caret が居た、**そのものの場所**（かたまりではなく、字と字のあいだ）。
+///
+/// **`focus()` は caret を連れてこない。** 板やボタンを押した時点で焦点は
+/// そちらへ移り、読む面の選択は消える ── そこで `focus()` だけして字を
+/// 入れると、**ノートの頭に入る**（本人が見つけた・依頼 461）。だから
+/// 動いたときに憶えておいて、入れる直前に戻す。
+///
+/// **窓と電話で一組。** 同じ間違いを二か所で直すことになるので、ここに置く。
+let caretSpot = null;
+
+/// caret が動いた。`box` の中に居るときだけ憶える。
+function markCaret(box) {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount || !box) return;
+    let n = sel.getRangeAt(0).startContainer;
+    if (n.nodeType === 3) n = n.parentNode;
+    if (!n || !box.contains(n)) return;
+    caretSpot = sel.getRangeAt(0).cloneRange();
+}
+
+/// 憶えている場所へ caret を戻す。**戻せたかどうかを返す。**
+///
+/// 戻せないのは、そのかたまりが組み直されて消えたとき ── そのときは
+/// 呼んだ側が決める（頭に入れるのか、何もしないのか）。
+function caretBack(box) {
+    if (!caretSpot || !box) return false;
+    const n = caretSpot.startContainer;
+    const holder = n.nodeType === 3 ? n.parentNode : n;
+    if (!holder || !box.contains(holder)) return false;
+    box.focus();
+    const sel = getSelection();
+    if (!sel) return false;
+    sel.removeAllRanges();
+    sel.addRange(caretSpot);
+    return true;
+}
+
 /// ページの題。**`<title>` から、サイト名の尻尾を落とす** ──
 /// 「段取りの決め方 | example」の `| example` は、ノートの題には要らない。
 function clipTitle(html) {
@@ -3258,6 +3295,9 @@ document.addEventListener('selectionchange', () => {
     let n = sel.getRangeAt(0).startContainer;
     if (n.nodeType === 3) n = n.parentNode;
     if (!n || !box.contains(n)) return;
+    // 字と字のあいだ（切り出しの一組・依頼 461）と、かたまり（依頼 204）。
+    // **別のことを憶えている** ── 絵文字は前者に入り、記号は後者に効く。
+    markCaret(box);
     while (n && n.parentElement !== box) n = n.parentElement;
     if (n) caretAt = n;
 });
@@ -3788,7 +3828,9 @@ const firstWord = (words) => String(words || '').split(' ')[0] || '';
 /// たびに開き直させない。閉じるのは Esc か、外を押したとき。
 function putFace(ch) {
     if (onRead()) {
-        el('read').focus();
+        // **憶えている場所へ戻してから入れる。** `focus()` だけでは caret が
+        // 先頭に落ち、ノートの頭に入る（依頼 461）。
+        if (!caretBack(el('read'))) el('read').focus();
         document.execCommand('insertText', false, ch);
     } else {
         put(ch);
@@ -3873,7 +3915,7 @@ function whole() {
 function applyView() {
     const open = !!state.open;
     // **帯はいつも出す。** 設定（⚙）はノートを開いていなくても要る ──
-    // 「置き場所を変える」はノートが一本も無いときにこそ押したい。
+    // 「保存場所を変える」はノートが一本も無いときにこそ押したい。
     el('top').hidden = false;
     for (const id of ['title', 'views', 'count2', 'state', 'dots']) el(id).hidden = !open;
     el('blank').hidden = open;
@@ -4174,7 +4216,7 @@ function mermaidOpts() {
         // **書き損じの絵を、mermaid に描かせない。**
         //
         // 既定では、字が通らないと mermaid は**自分で赤い絵を描いて
-        // 置いていく** ── その置き場所は `document.body` で、こちらの
+        // 置いていく** ── その保存場所は `document.body` で、こちらの
         // `catch` は絵を消せない。打つたびに描き直すので、一文字ごとに
         // 一枚ずつ積み上がり、画面の上に「Syntax error in text」が
         // 並んだ。積まれた絵は幅を持つので**ノートが左へ潰れる**。
@@ -5355,7 +5397,7 @@ el('read').addEventListener('click', async (e) => {
     if (art) {
         e.preventDefault();
         popMenu([
-            { name: '図を直す', sub: '工房が開きます', run: () => studioOpen(art) },
+            { name: '図を直す', sub: 'ツールが開きます', run: () => studioOpen(art) },
             { name: '消す', sep: true, run: () => dropBlock(art) },
         ], { x: e.clientX, y: e.clientY });
         return;
@@ -6350,7 +6392,7 @@ let sparePicked = new Set();
 /// 読めなかったノートがあれば、消す前にそう言う ── 黙って少なく数えるのが
 /// いちばん危ない。
 async function cmdSpare() {
-    if (!state.root) { say('置き場所がありません'); return; }
+    if (!state.root) { say('保存場所がありません'); return; }
     let got;
     try {
         got = await window.amber.call('spare', { path: state.root });
@@ -6458,7 +6500,7 @@ let calSlots = [];
 /// **ノートを見るところは奪わない。** 面（表示／コード）はノートのもので、
 /// カレンダーはノートではない ── 上に重ねて出し、ノートを開くときに閉じる。
 async function cmdCalendar() {
-    if (!state.root) { say('置き場所がありません'); return; }
+    if (!state.root) { say('保存場所がありません'); return; }
     if (!calMonth) {
         const now = new Date();
         calMonth = { y: now.getFullYear(), m: now.getMonth() + 1 };
@@ -6561,7 +6603,7 @@ function drawCalDay() {
 
 /// **その日に予定を足す。** 足すのは新しいノートで、日付は前書きに書く
 /// ── 「ノートに日付を書くと予定になる」（依頼 73）が既にあるので、
-/// カレンダーのためだけの置き場所を作らない。
+/// カレンダーのためだけの保存場所を作らない。
 async function calAdd(day) {
     const title = await askText('予定を足す（' + dayName(day) + '）', '',
         'ノートが一本できます。時刻は次に訊きます');
@@ -6693,7 +6735,7 @@ async function awayFor(y, m) {
 ///
 /// 二か所に書くと、片方にだけ増えた命令ができて、そのうち「あるはずなのに
 /// 無い」になる。`need` は要るもの: `note` は開いているノート、`root` は
-/// 置き場所（いつもある）。`menu` が真なら、⋯ の献立にも出る。
+/// 保存場所（いつもある）。`menu` が真なら、⋯ の献立にも出る。
 const CMDS = [
     { id: 'new', name: '新しいノート', key: '⌘N', run: () => newNote() },
     { id: 'tmpl', name: 'テンプレートから新しいノート', sub: '「' + TEMPLATES + '」フォルダの中身',
@@ -6791,7 +6833,7 @@ const LOOSE_KEYS = [
     ['そのノートを開いて打つ', 'Enter', '一覧を見ているとき'],
     ['ゴミ箱へ入れる', 'Delete', '選んでいるノートを（訊いてから）'],
     ['ノートを探す', '/', '一覧を見ているとき'],
-    ['閉じる・やめる', 'Esc', '小窓・工房・大きい画面から'],
+    ['閉じる・やめる', 'Esc', 'ポップアップ・ツール・大きい画面から'],
     ['次のマスへ', 'Tab', '表の中で（⇧Tab で前へ、最後で押すと行が増える）'],
 ];
 
@@ -6947,7 +6989,7 @@ function openMenu(at, which) {
                 // **無ければ作る。** 「共有する」を押した人に、その前に
                 // 「フォルダを作る」を押させない。
                 ? '「' + (to.at.split('/').pop() || 'ぜんぶ') + '」へ移します'
-                : '「家族」という棚を作って、そこへ移します' };
+                : '「家族」というフォルダを作って、そこへ移します' };
         }
         return c;
     });
@@ -7139,7 +7181,7 @@ function head(name, plus) {
 async function railPlus(kind) {
     if (kind === 'book') { await cmdMkBook(); return; }
     if (kind === 'star') {
-        const name = await askText('新しいブックマークの置き場所の名前', '', '仕事/週次 と書けば階層になります');
+        const name = await askText('新しいブックマークのグループの名前', '', '仕事/週次 と書けば階層になります');
         if (name === null || !name.trim()) return;
         try {
             await ask('shelf', { path: state.root, name: name.trim() });
@@ -7176,7 +7218,7 @@ function railMenu(kind, what, at) {
             });
         }
         items.push({
-            name: isShare ? '家族との共有をやめる' : '家族と共有する棚にする',
+            name: isShare ? '家族との共有をやめる' : '家族と共有するフォルダにする',
             run: () => cmdShare(what, isShare),
         });
         // フォルダの履歴は、**中のノートの姿をまとめて時系列で** ──
@@ -7185,12 +7227,12 @@ function railMenu(kind, what, at) {
                      run: () => cmdHistory(state.root + '/' + what, true) });
     }
     if (kind === 'star') {
-        items.push({ name: 'この中に置き場所を作る', run: () => newShelf(what) });
+        items.push({ name: 'この中にグループを作る', run: () => newShelf(what) });
     }
     items.push({ name: '名前を変える', sep: items.length > 0, run: () => railRename(kind, what) });
     items.push({
         name: kind === 'book' ? 'このフォルダをゴミ箱へ'
-            : (kind === 'tag' ? 'このタグを全部のノートから外す' : 'この置き場所を消す'),
+            : (kind === 'tag' ? 'このタグを全部のノートから外す' : 'このグループを消す'),
         run: () => railDrop(kind, what),
     });
     popMenu(items, at);
@@ -7252,7 +7294,7 @@ async function railDrop(kind, what) {
     const ask2 = kind === 'book'
         ? '「' + what + '」を、中の ' + hit.length + ' 件ごとゴミ箱へ入れますか'
         : kind === 'star'
-            ? '置き場所「' + what + '」を消しますか'
+            ? '保存場所「' + what + '」を消しますか'
                 + (hit.length ? '（中の ' + hit.length + ' 件はブックマークの直下へ）' : '')
             : '「' + what + '」の' + what2 + 'を ' + hit.length + ' 件から外しますか（ノートは残ります）';
     if (!await askYes(ask2)) return;
@@ -7268,7 +7310,7 @@ async function railDrop(kind, what) {
             // ブックマークの直下へ移す ── 棚を片付けたつもりで、
             // 印まで一緒に消えるのは取り返しがつかない。
             for (const n of hit) await shelveOne(n, '');
-            // **棚そのものも忘れる。** 置き場所は空でも残るように core が
+            // **棚そのものも忘れる。** 保存場所は空でも残るように core が
             // 憶えている（`notebook::add_star`）── ノートから外すだけでは、
             // 中身の無い棚が並び続けて**消せないもの**になっていた。
             await ask('shelf', { path: state.root, name: what, drop: true });
@@ -7291,7 +7333,7 @@ async function railDrop(kind, what) {
 ///
 /// **開いているノートは、開いたまま直す。** 直接ファイルを書くと、窓が
 /// 持っている字と食い違い、次の保存でどちらかが消える。
-/// ノートを、指した置き場所へ移す（`''` はブックマークの直下）。
+/// ノートを、指した保存場所へ移す（`''` はブックマークの直下）。
 async function shelveOne(n, to) {
     const same = state.open && state.open.path === n.path;
     const text = same ? whole() : (await ask('read', { path: n.path })).text;
@@ -7325,7 +7367,7 @@ async function retagOne(n, kind, from, to) {
 
 /// amber の置き場所の外にある `.md` を、**単発で**開く。
 ///
-/// 置き場所を入れ替えない ── 一本開くたびに一覧が丸ごと変わると、
+/// 保存場所を入れ替えない ── 一本開くたびに一覧が丸ごと変わると、
 /// 「さっきまでのノートが消えた」に見える。並べても持たない ── 「フォルダが
 /// そのまま索引」という前提の外にあるものを索引に混ぜると、索引が索引で
 /// なくなる。
@@ -7406,7 +7448,7 @@ document.addEventListener('drop', async (e) => {
     document.body.classList.remove('dropping');
     const at = window.amber.pathOf(e.dataTransfer.files[0]);
     if (!at) { say('この落としものの場所が分かりません'); return; }
-    // 置き場所の中のものは、いつもの一本として開く ── 同じファイルが
+    // 保存場所の中のものは、いつもの一本として開く ── 同じファイルが
     // 一覧と客の両方に居ると、どちらに書いたのか分からなくなる。
     if (at.startsWith(state.root + '/')) {
         if (state.guest) closeGuest();
@@ -7507,13 +7549,13 @@ function stem() {
 ///
 /// **どこに置くかを、その場で選ぶ。** 前は「入れる／外す」と「置き場所を
 /// 選ぶ」が別の命令になっていて、入れたあとにもう一度探して選ぶ形だった
-/// ── フォルダへ移動と同じ一手で済む話。置き場所が無ければ、その場で作る。
+/// ── フォルダへ移動と同じ一手で済む話。保存場所が無ければ、その場で作る。
 async function cmdStar() {
     if (starred(state.open)) {
         const now = state.open.star;
         const off = await askPick('このノートはブックマーク済みです',
             [{ name: 'ブックマークから外す', value: 'off' },
-             { name: '置き場所を変える', value: 'move' }],
+             { name: '保存場所を変える', value: 'move' }],
             now && now !== 'true' ? 'いま: ' + now : 'いま: ブックマークの直下');
         if (off === null) return;
         if (off === 'off') {
@@ -7525,7 +7567,7 @@ async function cmdStar() {
     }
     const where = [{ name: '（ブックマークの直下）', value: '' },
         ...state.stars.map((x) => ({ name: x, value: x })),
-        { name: '＋ 新しい置き場所を作る', value: ' new' }];
+        { name: '＋ 新しい保存場所を作る', value: ' new' }];
     let to = await askPick('どこに登録しますか', where);
     if (to === null) return;
     if (to === ' new') {
@@ -7538,13 +7580,13 @@ async function cmdStar() {
     }
 }
 
-/// ブックマークの置き場所を一つ作る。`under` があれば、その下に。
+/// ブックマークの保存場所を一つ作る。`under` があれば、その下に。
 ///
 /// **「/」を打たせない。** 階層は親を右押しして作る ── 一行に全部書かせる
 /// のは、書き方を知っている人にしか通じない。
 async function newShelf(under) {
-    const name = await askText(under ? '「' + under + '」の下に作る名前' : '新しい置き場所の名前',
-        '', under ? '' : '下の階層は、置き場所を右押しして作れます');
+    const name = await askText(under ? '「' + under + '」の下に作る名前' : '新しい保存場所の名前',
+        '', under ? '' : '下の階層は、保存場所を右押しして作れます');
     if (name === null || !name.trim()) return null;
     const leaf = name.trim().replace(/\//g, '／');
     const full = under ? under + '/' + leaf : leaf;
@@ -7937,7 +7979,7 @@ function closeFind() {
 /// 要り、機種を替えるたびにもう一度要った。
 async function cmdShare(folder, off) {
     if (!off) {
-        const ok = await askYes('「' + folder + '」を、家族と分ける棚にしますか');
+        const ok = await askYes('「' + folder + '」を、家族と分けるフォルダにしますか');
         if (!ok) return;
     }
     const by = off ? '' : await myName();
@@ -7951,7 +7993,7 @@ async function cmdShare(folder, off) {
         if (off) { say('共有をやめました（ノートはそのままです）'); return; }
         // **二段あることを言う。** amber が印を置いただけでは誰にも届かない
         // ── クラウド側で人に分けるのは、まだ人がやる。
-        await askYes('「' + folder + '」を共有の棚にしました。\n\n'
+        await askYes('「' + folder + '」を共有のフォルダにしました。\n\n'
             + 'あとは、このフォルダをクラウド側で家族に分けてください。'
             + '（いま開きますか）')
             ? window.amber.reveal(state.root + '/' + folder)
@@ -8007,7 +8049,7 @@ async function cmdToShare() {
     }
     let to = (state.shares[0] || {}).at;
     if (to === undefined) {
-        const ok = await askYes('「家族」という棚を作って、そこへ移しますか');
+        const ok = await askYes('「家族」というフォルダを作って、そこへ移しますか');
         if (!ok) return;
         const by = await myName();
         if (by === null) return;
@@ -8133,7 +8175,7 @@ function sayIfBlind(got) {
 /// 二度訊き続けると、消すたびに二回答えることになる。分かっているなら、
 /// 初めの一回で正直に訊けばいい。
 ///
-/// 置き場所ごとに憶える ── 別のフォルダへ移せば、そちらにはゴミ箱がある。
+/// 保存場所ごとに憶える ── 別のフォルダへ移せば、そちらにはゴミ箱がある。
 let noBins = [];
 const noBin = () => noBins.includes(state.root);
 
@@ -8168,7 +8210,7 @@ async function cmdDelete() {
         // Windows の会社端末では `Documents` が OneDrive へ寄せられている
         // ことがあり（Known Folder Move）、そこにはゴミ箱が無い ──
         // `Failed to perform delete operation` で断られる。ネットワークの
-        // 置き場所も同じ。ここで黙ると、**そのノートは二度と消せない**。
+        // 保存場所も同じ。ここで黙ると、**そのノートは二度と消せない**。
         //
         // **消すのは、訊いてから。** ゴミ箱が「戻せる」ことの担保だった
         // ので、それが無い以上そう言う ── 言わずに消すほうが強すぎる。
@@ -8476,7 +8518,7 @@ async function cmdRoot() {
         })),
         { name: '別の場所を選ぶ', sub: 'フォルダを一つ選びます', value: ' pick' },
     ];
-    const go = await askPick('ノートの置き場所', items,
+    const go = await askPick('ノートの保存場所', items,
         'いま: ' + shortPath(state.root) + (here ? '（' + here.name + '）' : ''));
     if (go === null) return;
 
@@ -8511,7 +8553,7 @@ async function cmdRoot() {
             await ask('migrate', { from: was, to: dir });
             say('ノート ' + had + ' 件を、画像と履歴ごと移しました');
         } catch (e) {
-            // **移せなくても、置き場所は変えない。** 半分だけ移った状態で
+            // **移せなくても、保存場所は変えない。** 半分だけ移った状態で
             // 向こうを見せると、残りが消えたようにしか見えない。
             say('移せません: ' + why(e));
             return;
@@ -8524,7 +8566,7 @@ async function cmdRoot() {
     state.open = null;
     applyView();
     await reload({});
-    say('置き場所を変えました: ' + shortPath(dir));
+    say('保存場所を変えました: ' + shortPath(dir));
 }
 
 /// いま動いている amber の身元。
@@ -8551,7 +8593,7 @@ async function cmdAbout() {
     await askPick('', [
         { name: '画面', sub: 'ambər ' + (await window.amber.appVersion() || '?'), value: null },
         { name: 'エンジン', sub: engine, value: null },
-        { name: 'ノートの置き場所', sub: state.root || '（まだ決めていません）', value: null },
+        { name: 'ノートの保存場所', sub: state.root || '（まだ決めていません）', value: null },
     // **`bare` は渡さない。** `false` を渡すと `bare ?? few` の `??` が
     // それを素通しし（`??` が拾うのは null と undefined だけ）、三つしか
     // 無い一覧に「絞り込む」の欄が出る ── 三つを絞り込む人はいない。
@@ -8561,14 +8603,14 @@ async function cmdAbout() {
 
 /* ── 前の姿 ── */
 
-/// 見本のノートを、いまの置き場所に置く。
+/// 見本のノートを、いまの保存場所に置く。
 ///
 /// **初回に置けなかった人のための道。** 自動で置くのは、まだ一本も
 /// ノートが無いときの一度きり ── 既にノートがある人のフォルダに三枚
 /// 落とすと、それはただの散らかし。それでも「入れてくれ」と言える場所が
 /// 要る（電話の設定にも同じものがある）。
 async function cmdWelcome() {
-    const go = await askYes('見本のノートを、いまの置き場所に入れますか');
+    const go = await askYes('見本のノートを、いまの保存場所に入れますか');
     if (!go) return;
     try {
         const r = await window.amber.welcome(state.root);
@@ -8871,7 +8913,7 @@ const escapeAttr = escapeHtml;
     drawMarks();
     // **帯を先に整える。** ノートを一本も開かないまま終わる起動もある
     // （初めて立ち上げた日がそう）── そのとき ⚙ が出ていないと、
-    // 置き場所を決める道がどこにも無い。
+    // 保存場所を決める道がどこにも無い。
     applyView();
     if (saved.railOff) { railOff = true; document.body.classList.add('norail'); }
     if (saved.listOff) { listOff = true; document.body.classList.add('nolist'); }

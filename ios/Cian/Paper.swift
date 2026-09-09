@@ -365,11 +365,17 @@ struct Paper: UIViewRepresentable {
       });
     });
 
-    /// 絵文字を caret のところへ（依頼 418）。**焦点が外れていても入れる**
-    /// ── 板を出した時点で面から手は離れているので、置き場所は面が
-    /// 憶えている最後の caret になる。
+    /// caret が動いたら憶えておく（切り出しの `markCaret`）。**焦点が
+    /// 外れてから入れるものが、どこへ入るかはこれで決まる。**
+    document.addEventListener('selectionchange', () => markCaret(box));
+
+    /// 絵文字を caret のところへ（依頼 418）。
+    ///
+    /// **`focus()` だけでは caret は戻らない。** 板を出した時点で面から
+    /// 手は離れているので、憶えている場所へ戻してから入れる ── 窓では
+    /// これを忘れていて、ノートの頭に入った（依頼 461）。
     window.putFace = (ch) => {
-      box.focus();
+      if (!caretBack(box)) box.focus();
       document.execCommand('insertText', false, ch);
     };
 

@@ -509,7 +509,7 @@ struct DeskView: View {
         //
         // 下の帯にしたのは幅のためだけではない。**電話の親指は下に居る** ──
         // 打ちながら押すものは、打っている手の側にあるほうがいい。帯は
-        // 「表示」にも「コード」にも出ているので、置き場所は一つで済む。
+        // 「表示」にも「コード」にも出ているので、保存場所は一つで済む。
         ToolbarItem(id: "read", placement: .topBarTrailing) {
             Button {
                 guard let id = here?.id else { return }
@@ -566,7 +566,7 @@ struct DeskView: View {
         ToolbarItem(id: "more", placement: .topBarTrailing) {
             Menu {
                 Button { shelving = here?.note } label: {
-                    Label(here?.note.star == nil ? "ブックマークに登録" : "置き場所を変える",
+                    Label(here?.note.star == nil ? "ブックマークに登録" : "保存場所を変える",
                           systemImage: "star")
                 }
                 Button { tags = here?.note.tags ?? []; tagging = true } label: {

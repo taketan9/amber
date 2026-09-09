@@ -742,6 +742,81 @@ if (process.env.SITE) {
     `, true);
 }
 
+/* ── 十六の六。**ノートの途中に書き込む**（依頼 461） ──
+ *
+ * **これまで、入れるものは端でしか確かめていなかった。** 端に入るなら
+ * 途中にも入るだろう、は成り立たない ── 押した瞬間に焦点がボタンへ移り、
+ * caret が先頭へ落ちるからで、それは端に居るときには目に見えない。
+ * 本人が見つけた（ノートの途中で絵文字を入れたら、頭に入った）。
+ */
+
+/// 読む面の、長い段落の「途中」に caret を置く。
+const midway = `
+    setView('read');
+    await new Promise((g) => setTimeout(g, 350));
+    const box = el('read');
+    const walk = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    let node = null;
+    while (walk.nextNode()) {
+        if (walk.currentNode.data.trim().length > 12) { node = walk.currentNode; break; }
+    }
+    if (!node) return 'ノートに、途中を作れる行がありません';
+    const line = node.parentElement;
+    const half = 6;
+    const was = line.textContent;
+    const spot = document.createRange();
+    spot.setStart(node, half);
+    spot.collapse(true);
+    box.focus();
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(spot);
+    document.dispatchEvent(new Event('selectionchange'));
+`;
+
+await step('途中に書く：絵文字が、caret のところに入る', `
+    await openNote(${path('途中.md')});
+    ${midway}
+    // **人が押したときと同じ形にする** ── 板を開くと焦点は板の欄へ移り、
+    // 読む面の選択は消える。ここで caret を憶えていないと頭に入る。
+    await openEmoji();
+    await new Promise((g) => setTimeout(g, 300));
+    if (document.activeElement === box) return '板を開いても焦点が移っていません（試しになりません）';
+    putFace('😀');
+    await new Promise((g) => setTimeout(g, 250));
+    closeEmoji();
+    const now = line.textContent;
+    if (now === was) {
+        const at = el('read').textContent.indexOf('😀');
+        return at < 0 ? '入りませんでした'
+            : 'ちがうところに入りました（ノートの ' + at + ' 文字目）';
+    }
+    if (now.startsWith('😀')) return 'その行の頭に入りました';
+    if (el('read').textContent.indexOf('😀') < 6) return 'ノートの頭に入りました';
+    if (now !== was.slice(0, half) + '😀' + was.slice(half)) {
+        return 'caret のところではありません: ' + now.slice(0, 24);
+    }
+    return true;
+`, true);
+
+await step('途中に書く：記号も、caret のところに効く', `
+    await openNote(${path('途中.md')});
+    ${midway}
+    // 途中の三文字を選んでから太字にする。**帯のボタンは焦点を奪わない**
+    // （依頼 204）ので、選んだままで効くのが正しい姿。
+    const pick = document.createRange();
+    pick.setStart(node, half);
+    pick.setEnd(node, Math.min(node.data.length, half + 3));
+    sel.removeAllRanges();
+    sel.addRange(pick);
+    document.execCommand('bold');
+    const bold = line.querySelector('b, strong');
+    if (!bold) return '太字になりませんでした';
+    if (line.textContent.startsWith(bold.textContent)) return '行の頭が太字になりました';
+    if (!was.includes(bold.textContent)) return '選んでいない字が太字になりました';
+    return true;
+`, true);
+
 /* ── 十七。**触ったあと、壊れていないか** ──
  *
  * ここがこの走査のいちばんの目当て。**面を行き来しただけで字が変わる**、

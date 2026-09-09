@@ -25,6 +25,11 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- カレンダー（依頼 460）。**なぜ要るのかを、その場で言う** ── iOS が
+	     この字をそのまま出すので、ここが「アクセスします」だけだと、
+	     何に使うのか分からないまま許可を訊かれることになる。 -->
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>この iPhone の予定表を、ambər のカレンダーに並べます。予定を足すときにも使います。</string>
 	<!-- The two that make the notes folder a real place. `in place` is what
 	     lets cian read the files where they live instead of a copy — a copy
 	     would sync back to nowhere. -->

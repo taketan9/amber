@@ -45,7 +45,7 @@ struct Stars: View {
                 }
                 .buttonStyle(.plain)
                 .swipeActions {
-                    Button("棚を消す", role: .destructive) {
+                    Button("グループを消す", role: .destructive) {
                         // The notes are not touched — only the shelf they
                         // were standing on. They are still in their folders,
                         // which is where they always were.
@@ -75,7 +75,7 @@ struct Stars: View {
                     .tint(.orange)
                 }
                 .contextMenu {
-                    Button { moving = note } label: { Label("棚を変える", systemImage: "star") }
+                    Button { moving = note } label: { Label("グループを変える", systemImage: "star") }
                 }
             }
             if store.shelves(in: at).isEmpty && store.starred(on: at).isEmpty {
@@ -89,10 +89,10 @@ struct Stars: View {
                 Button { name = ""; making = true } label: {
                     Image(systemName: "plus.rectangle.on.folder")
                 }
-                .accessibilityLabel("新しい棚")
+                .accessibilityLabel("新しいグループ")
             }
         }
-        .alert("新しい棚", isPresented: $making) {
+        .alert("新しいグループ", isPresented: $making) {
             TextField("名前", text: $name)
             Button("やめる", role: .cancel) {}
             Button("作る") {
@@ -139,16 +139,16 @@ struct Shelving: View {
                         name = ""
                         making = true
                     } label: {
-                        Label("新しい棚…", systemImage: "plus.rectangle.on.folder")
+                        Label("新しいグループ…", systemImage: "plus.rectangle.on.folder")
                     }
                 }
             }
-            .navigationTitle("棚を選ぶ")
+            .navigationTitle("グループを選ぶ")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("やめる") { dismiss() } }
             }
-            .alert("新しい棚", isPresented: $making) {
+            .alert("新しいグループ", isPresented: $making) {
                 TextField("名前", text: $name)
                 Button("やめる", role: .cancel) {}
                 Button("作る") {
@@ -161,7 +161,7 @@ struct Shelving: View {
                     } catch { store.trouble = error.localizedDescription }
                 }
             } message: {
-                Text("作ってから、このノートをそこに入れます。「棚/中の棚」と書けば階層になります。")
+                Text("作ってから、このノートをそこに入れます。「グループ/中のグループ」と書けば階層になります。")
             }
         }
     }

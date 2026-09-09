@@ -66,6 +66,9 @@ built=$(ls -d ~/Library/Developer/Xcode/DerivedData/Cian-*/Build/Products/Debug-
 # 一度目から二度目になる。
 xcrun simctl uninstall "$boot" "$app" >/dev/null 2>&1 || true
 xcrun simctl install "$boot" "$built"
+# **予定表の許可を先に出しておく。** 走査は小窓を押せないので、ここで
+# 出しておかないと「許可されていない」道しか通らない（依頼 460）。
+xcrun simctl privacy "$boot" grant calendar "$app" >/dev/null 2>&1 || true
 
 out="$work/out.txt"
 SIMCTL_CHILD_SITE="http://127.0.0.1:$port/" \

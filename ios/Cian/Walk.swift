@@ -210,7 +210,7 @@ enum Walk {
 
         // ── 三の二。使われていない画像（依頼 449）────────
         step("使われていない画像だけを数える") {
-            guard let root = store.rootURL else { return "置き場所がありません" }
+            guard let root = store.rootURL else { return "保存場所がありません" }
             let pics = root.appendingPathComponent("attachments")
             try FileManager.default.createDirectory(at: pics, withIntermediateDirectories: true)
             let used = pics.appendingPathComponent("走査-1.png")
@@ -293,6 +293,41 @@ enum Walk {
                 Away.feeds = []
                 return nil
             }
+        }
+
+        // ── 三の五。この iPhone の予定表（依頼 460）──────
+        //
+        // **読むだけでなく、書けること。** よその予定表（iCal）との違いは
+        // そこ一つなので、足す・直す・消すを一周してみる。
+        if Phone.allowed {
+            step("iPhone の予定表に、足して・直して・消せる") {
+                let day = "2026-09-11"
+                let name = "走査の予定 \(Int(Date().timeIntervalSince1970))"
+                try Phone.add(title: name, day: day, at: "11:00")
+
+                var got = Phone.month(2026, 9)
+                guard let made = got.first(where: { $0.title == name }) else {
+                    return "足したものが出てきません"
+                }
+                if made.day != day { return "日が \(made.day) です" }
+                if made.at != "11:00" { return "時刻が \(made.at ?? "なし") です" }
+                if !made.isPhone { return "この iPhone のものだと分かりません" }
+
+                try Phone.rename(made.path, to: name + "・直した")
+                got = Phone.month(2026, 9)
+                if !got.contains(where: { $0.title == name + "・直した" }) {
+                    return "直したのに、題が変わっていません"
+                }
+
+                try Phone.drop(made.path)
+                got = Phone.month(2026, 9)
+                if got.contains(where: { $0.title.hasPrefix(name) }) {
+                    return "消したのに、まだあります"
+                }
+                return nil
+            }
+        } else {
+            step("iPhone の予定表") { "許可されていません（走査の前に grant していますか）" }
         }
 
         // ── 四。よそから来るもの ────────────────────────

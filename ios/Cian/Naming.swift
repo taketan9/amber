@@ -36,7 +36,7 @@ struct Naming: View {
                     Text("共有したノートに「誰が直したか」を出すために使います。ノートには書きません（.md はただのマークダウンのままです）。空のままでも共有はできます。")
                 }
                 Section {
-                    Text("「\(folder)」を、家族と分ける棚にします。")
+                    Text("「\(folder)」を、家族と分けるフォルダにします。")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("このあと、フォルダそのものをクラウド側で家族に分けてください ── ambər が印を置いただけでは、まだ誰にも届きません。")
                         .font(.footnote).foregroundStyle(.secondary)

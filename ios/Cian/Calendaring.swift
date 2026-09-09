@@ -28,6 +28,10 @@ struct Calendaring: View {
         var id: String { day + (at ?? "") + path + kind + title }
         var isPlan: Bool { kind != "note" }
         var isAway: Bool { kind == "away" }
+        /// この iPhone の予定表のもの ── **こちらは直せる**。
+        var isPhone: Bool { kind == "phone" }
+        /// ノートを開く先を持たないもの（よそ・この iPhone）。
+        var noNote: Bool { kind == "away" || kind == "phone" }
     }
 
     /// **開くたびに今月へ戻さない。** 先の予定を見にきた人を、
@@ -40,6 +44,9 @@ struct Calendaring: View {
     @State private var adding = false
     @State private var newTitle = ""
     @State private var newAt = "09:00"
+    /// 直している、この iPhone の予定。
+    @State private var editing: Slot?
+    @State private var editTitle = ""
 
     static var today: String {
         let f = DateFormatter()
@@ -48,45 +55,49 @@ struct Calendaring: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                grid
-                Divider()
-                day
+        NavigationStack { inside }
+            .task {
+                // **押されて開いたときに訊く。** 起きた瞬間に訊くと、
+                // 何のために訊かれたのか分からないまま断られる。
+                if !Phone.asked { await Phone.ask() }
+                count()
             }
-            // **`Text` に数をそのまま渡さない。** SwiftUI は土地の決まりで
-            // 桁を区切るので、年が「2,026年」になる（実際になった）。
-            .navigationTitle(Text(verbatim: "\(year)年 \(month)月"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("閉じる") { dismiss() }
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { step(-1) } label: { Image(systemName: "chevron.left") }
-                    Button("今日") {
-                        year = Calendar.current.component(.year, from: Date())
-                        month = Calendar.current.component(.month, from: Date())
-                        picked = Self.today
-                        count()
-                    }
-                    Button { step(1) } label: { Image(systemName: "chevron.right") }
-                }
-            }
-            .alert("読めません", isPresented: Binding(
-                get: { trouble != nil }, set: { if !$0 { trouble = nil } })
-            ) { Button("閉じる") {} } message: { Text(trouble ?? "") }
-            .alert("予定を足す", isPresented: $adding) {
-                TextField("何をする", text: $newTitle)
-                TextField("何時から（空なら終日）", text: $newAt)
-                    .keyboardType(.numbersAndPunctuation)
-                Button("足す") { add() }
-                Button("やめる", role: .cancel) {}
-            } message: {
-                Text("\(spoken(picked)) に、ノートが一本できます。")
-            }
+    }
+
+    /// **一つの `body` に積み上げない。** 積むと Swift が型を追いきれず、
+    /// 「時間内に型検査できません」で組めなくなる（実際になった）。
+    private var inside: some View {
+        VStack(spacing: 0) {
+            grid
+            Divider()
+            day
         }
-        .task { count() }
+        // **`Text` に数をそのまま渡さない。** SwiftUI は土地の決まりで
+        // 桁を区切るので、年が「2,026年」になる（実際になった）。
+        .navigationTitle(Text(verbatim: "\(year)年 \(month)月"))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { bar }
+        .modifier(Asking(
+            trouble: $trouble, adding: $adding, editing: $editing,
+            newTitle: $newTitle, newAt: $newAt, editTitle: $editTitle,
+            day: spoken(picked), toPhone: Phone.allowed,
+            add: add, rename: rename, drop: drop))
+    }
+
+    @ToolbarContentBuilder private var bar: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("閉じる") { dismiss() }
+        }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button { step(-1) } label: { Image(systemName: "chevron.left") }
+            Button("今日") {
+                year = Calendar.current.component(.year, from: Date())
+                month = Calendar.current.component(.month, from: Date())
+                picked = Self.today
+                count()
+            }
+            Button { step(1) } label: { Image(systemName: "chevron.right") }
+        }
     }
 
     // MARK: 月の表
@@ -124,7 +135,8 @@ struct Calendaring: View {
                 ForEach(mine.prefix(2)) { s in
                     Text(s.title).font(.system(size: 8)).lineLimit(1)
                         .foregroundStyle(s.isAway ? Color.blue
-                            : (s.isPlan ? Color.accentColor : Color.secondary))
+                            : (s.isPhone ? Color.green
+                               : (s.isPlan ? Color.accentColor : Color.secondary)))
                 }
                 if mine.count > 2 {
                     Text("ほか \(mine.count - 2)").font(.system(size: 8)).foregroundStyle(.tertiary)
@@ -179,6 +191,11 @@ struct Calendaring: View {
         Button {
             // **よその予定にはノートが無い。** 押しても何も起きないより、
             // なぜ開かないかを言う。
+            if s.isPhone {
+                editing = s
+                editTitle = s.title
+                return
+            }
             if s.isAway {
                 trouble = "よその予定表のものなので、ここでは直せません。"
                 return
@@ -193,10 +210,12 @@ struct Calendaring: View {
                         .foregroundStyle(.secondary).frame(width: 44, alignment: .leading)
                 }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(s.title).foregroundStyle(s.isAway ? Color.blue : Color.primary)
+                    Text(s.title)
+                        .foregroundStyle(s.isAway ? Color.blue
+                            : (s.isPhone ? Color.green : Color.primary))
                     // **道は出さない** ── 読めない長さになるうえ、知りたいのは
                     // 中身のほう。自分のノートは一行目、よその予定は場所と出どころ。
-                    if s.isAway {
+                    if s.noNote {
                         let under = [s.place, s.from].filter { !$0.isEmpty }.joined(separator: "・")
                         if !under.isEmpty {
                             Text(under).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -249,6 +268,28 @@ struct Calendaring: View {
         return "\(m)月\(day)日"
     }
 
+    private func rename() {
+        guard let e = editing else { return }
+        let title = editTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        do {
+            try Phone.rename(e.path, to: title)
+            count()
+        } catch {
+            trouble = error.localizedDescription
+        }
+    }
+
+    private func drop() {
+        guard let e = editing else { return }
+        do {
+            try Phone.drop(e.path)
+            count()
+        } catch {
+            trouble = error.localizedDescription
+        }
+    }
+
     private func step(_ n: Int) {
         var m = month + n
         var y = year
@@ -276,6 +317,8 @@ struct Calendaring: View {
             trouble = error.localizedDescription
         }
         // よその予定表は、あとから足す ── 一つも読めなくても、自分のぶんは出る。
+        // この iPhone の予定表（許可されているときだけ）。
+        slots += Phone.month(year, month)
         let (y, m) = (year, month)
         Task { @MainActor in
             let more = await Away.month(y, m)
@@ -287,10 +330,22 @@ struct Calendaring: View {
         }
     }
 
+    /// 足す。**この iPhone の予定表が使えるならそちらへ**（依頼 460）──
+    /// 普通のカレンダーとして期待されるのはこちら。使えないときだけ、
+    /// これまでどおりノートを作る（そう書いてある）。
     private func add() {
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         let at = newAt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if Phone.allowed {
+            do {
+                try Phone.add(title: title, day: picked, at: at.isEmpty ? nil : at)
+                count()
+            } catch {
+                trouble = error.localizedDescription
+            }
+            return
+        }
         let when = at.isEmpty ? picked : picked + " " + at
         do {
             guard let made = try store.make(titled: title) else {
@@ -307,5 +362,53 @@ struct Calendaring: View {
         } catch {
             trouble = error.localizedDescription
         }
+    }
+}
+
+/// カレンダーが訊く三つ（読めません・足す・直す）。
+///
+/// 画面から出したのは、**一つの `body` に積むと型検査が終わらない**から
+/// ── 見た目の都合ではなく、組めるかどうかの都合。
+private struct Asking: ViewModifier {
+    @Binding var trouble: String?
+    @Binding var adding: Bool
+    @Binding var editing: Calendaring.Slot?
+    @Binding var newTitle: String
+    @Binding var newAt: String
+    @Binding var editTitle: String
+    let day: String
+    let toPhone: Bool
+    let add: () -> Void
+    let rename: () -> Void
+    let drop: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .alert("読めません", isPresented: Binding(
+                get: { trouble != nil }, set: { if !$0 { trouble = nil } })
+            ) { Button("閉じる") {} } message: { Text(trouble ?? "") }
+            .alert("予定を足す", isPresented: $adding) {
+                TextField("何をする", text: $newTitle)
+                TextField("何時から（空なら終日）", text: $newAt)
+                    .keyboardType(.numbersAndPunctuation)
+                Button("足す") { add() }
+                Button("やめる", role: .cancel) {}
+            } message: {
+                Text(toPhone
+                     ? "\(day) の予定表に足します。"
+                     : "\(day) に、ノートが一本できます。")
+            }
+            // この iPhone の予定は、**押したら直せる**（よその予定表と
+            // 違って、書き戻す口がある）。
+            .alert("予定を直す", isPresented: Binding(
+                get: { editing != nil }, set: { if !$0 { editing = nil } })
+            ) {
+                TextField("題", text: $editTitle)
+                Button("直す") { rename() }
+                Button("消す", role: .destructive) { drop() }
+                Button("やめる", role: .cancel) {}
+            } message: {
+                Text("この iPhone の予定表のものです。")
+            }
     }
 }

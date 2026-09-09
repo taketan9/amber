@@ -444,7 +444,7 @@ struct ContentView: View {
                     // done in passing; moving is filing; exporting is the one
                     // that leaves cian, and leaving is always last.
                     Button { shelving = note } label: {
-                        Label(note.star == nil ? "ブックマークに登録する" : "置き場所を変える", systemImage: "star")
+                        Label(note.star == nil ? "ブックマークに登録する" : "保存場所を変える", systemImage: "star")
                     }
                     // Every notebook, not just the ones beside this note —
                     // filing is often filing *away*.
@@ -870,7 +870,7 @@ struct ContentView: View {
                         Button {
                             sharing = b.path
                         } label: {
-                            Label("家族と共有する棚にする", systemImage: "person.2")
+                            Label("家族と共有するフォルダにする", systemImage: "person.2")
                         }
                         // フォルダの履歴は、**中のノートの姿をまとめて** ──
                         // 「あのあたりで壊した」は、どのノートかを覚えて
