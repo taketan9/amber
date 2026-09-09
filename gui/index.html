@@ -715,6 +715,18 @@ body.split #read { border-left: 1px solid var(--line-2); }
   background: var(--rail); border: 1px solid var(--line-2); border-radius: 10px;
 }
 #read pre code { background: none; border: 0; padding: 0; font-size: .86em; }
+/* **枠の中に、琥珀の字**（依頼 437）。` ```amber ` と書いた枠だけ、この色で
+   出す ── 初めて開いた人に見せる絵のため。Monaco はこの語彙を知らないので
+   色を付けず、書いた字がそのまま残る。**メモ帳でも GitHub でも、ただの枠と
+   して読める**（色は amber で開いた人のぶん）── ノートに入るのは囲みの中の
+   字だけで、覚える記法は増えない。 */
+#read pre > code.language-amber {
+  color: var(--amber);
+  /* **行間をゼロに。** 絵は半分の高さの記号（▀▄█）で描いてあるので、
+     行が離れていると縦の棒が繋がらず、字が横縞に割れて読めない
+     （実際にそう出た）。ここだけ詰める。 */
+  display: block; line-height: 1; letter-spacing: 0;
+}
 
 /* 区切り線は端まで引かない ── 全幅の線は「ここで終わり」に見えるが、
    Markdown の `---` は「話が変わる」でしかない。 */

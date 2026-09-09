@@ -5253,7 +5253,11 @@ async function paintCode() {
     for (const code of el('read').querySelectorAll('pre > code[class^="language-"]')) {
         const lang = code.className.replace('language-', '').trim();
         // mermaid は図として描くので、字に色を付けない。
-        if (!lang || lang === 'mermaid') continue;
+        //
+        // `amber` も渡さない（依頼 437）── あれは絵で、語彙ではない。
+        // Monaco は知らない語彙でも字を span で包んで返し、その色が
+        // **こちらの琥珀色を上書きする**（実際に黒いまま出た）。
+        if (!lang || lang === 'mermaid' || lang === 'amber') continue;
         try {
             const painted = await monaco.editor.colorize(code.textContent, lang, { tabSize: 4 });
             // 組み直しに追い越されていたら、もう別のノートを見ている。
@@ -7928,6 +7932,7 @@ function onePage(title, body) {
         + 'color:#2a2011;background:#fffdf8}'
         + 'h1,h2,h3,h4{line-height:1.4;margin:1.6em 0 .5em}'
         + 'h2{padding-bottom:.2em;border-bottom:1px solid #efe6d4}'
+        + 'pre>code.language-amber{color:#b5760f;display:block;line-height:1}'
         + 'code{font:.88em/1.6 ui-monospace,Menlo,monospace;background:#f3ecdf;'
         + 'border:1px solid #efe6d4;border-radius:5px;padding:.1em .35em}'
         + 'pre{padding:11px 14px;overflow-x:auto;background:#f3ecdf;'

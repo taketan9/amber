@@ -135,6 +135,11 @@ struct Paper: UIViewRepresentable {
       #paper pre{background:var(--rail);padding:11px 13px;border-radius:9px;
         overflow-x:auto}
       #paper pre code{background:none;padding:0}
+      /* 枠の中の琥珀の字（依頼 437）── 窓と同じ。 */
+      /* **電話では少し小さく。** 絵は 43 列あり、そのままだと右が切れる
+         ── 初めて開いた人が見るのが「ambə」では締まらない（実際に切れた）。 */
+      #paper pre > code.language-amber{color:var(--amber);display:block;
+        line-height:1;font-size:.78em}
       #paper table{border-collapse:collapse;display:block;overflow-x:auto;
         max-width:100%}
       #paper th,#paper td{border:1px solid var(--line);padding:6px 10px;
