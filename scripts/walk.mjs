@@ -749,6 +749,25 @@ await step('カレンダー：予定を足すと、ノートが一本できる',
 /* ── 十六の四の二。**みんなの予定を、人ごとに**（依頼 471） ── */
 
 if (process.env.TEAMCSV) {
+    await step('チームの予定表：読んでいなければ、その字ごと出ない', `
+        // **初めて amber を開いた人の画面に、会社の話を出さない**
+        // （依頼 473・475）。読んでいないときは「更新」も時点も出ない。
+        teamFile = '';
+        teamPlans = null;
+        window.amber.remember({ teamFile });
+        calMonth = { y: 2026, m: 9 };
+        calDay = '2026-09-09';
+        calView = 'day';
+        calGroup = true;
+        calHide = [];
+        await cmdCalendar();
+        await new Promise((g) => setTimeout(g, 1500));
+        if (!el('cal').querySelector('.teamat').hidden) return '時点が出ています';
+        if (!el('cal').querySelector('.teamnow').hidden) return '「更新」が出ています';
+        if (teamTick) return '読みにいく約束が置かれています';
+        return true;
+    `, true);
+
     await step('グループカレンダー：CSV を読むと、人ごとの段ができる', `
         teamFile = ${JSON.stringify(process.env.TEAMCSV)};
         teamPlans = null;
@@ -920,7 +939,9 @@ if (process.env.TEAMCSV) {
         await cmdTeamOff();
         await new Promise((g) => setTimeout(g, 1200));
         if (teamFile) return 'まだ読んでいます';
+        // **読んでいない人のカレンダーには、会社の話が一つも出ない。**
         if (!el('cal').querySelector('.teamat').hidden) return '入口が出たままです';
+        if (!el('cal').querySelector('.teamnow').hidden) return '「更新」が出たままです';
         if (teamTick) return '読みにいく約束が残っています';
         if (calSlots.some((s) => s.kind === 'team')) return 'まだ予定が残っています';
         calGroup = false;
