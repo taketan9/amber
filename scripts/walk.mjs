@@ -1421,10 +1421,93 @@ if (NOTES) {
     }
 }
 
+/* ── 二十の二。**二台で同じフォルダを触る**（依頼 479） ── */
+
+if (NOTES) {
+    // **「向こう」は node 側が演じる。** 歩みの本体は窓の中で走るので、
+    // ファイルを直に書けるのはこちらだけ ── 電話がフォルダに書いたのと
+    // 同じことを、ここでやる。
+    const other = NOTES + '/二台目.md';
+    const wrote = (line) => writeFileSync(other,
+        '---\ncreated: 2026-09-05\n---\n# 二台目\n\n' + line + '\n');
+
+    wrote('はじめの字。');
+    await sleep(1800);
+
+    await step('二台目：向こうが置いたノートが、こちらに出る', `
+        const n = state.notes.find((x) => x.title === '二台目');
+        if (!n) return '置いたノートが一覧に出ません';
+        await openNote(n.path);
+        await new Promise((g) => setTimeout(g, 1200));
+        return whole().includes('はじめの字') ? true : '開けていません';
+    `, true);
+
+    wrote('向こうが直した字。');
+    await sleep(2500);
+
+    await step('二台目：開いているノートが外で変わったら、拾い直す', `
+        // **黙って古いまま残る**のがいちばん悪い ── 見ている人に
+        // 気づく手立てが無い。
+        const now = whole();
+        return now.includes('向こうが直した字')
+            ? true : '古いまま残っています: ' + JSON.stringify(now.slice(0, 120));
+    `, true);
+
+    await step('二台目：こちらで保存する', `
+        loading = true;
+        editor.setValue('# 二台目\\n\\nこちらで保存した字。\\n');
+        loading = false;
+        state.dirty = true;
+        await save();
+        await new Promise((g) => setTimeout(g, 2000));
+        // **打ち消しを憶えたままにしない。** 前は「最後に自分で書いた道」を
+        // 消さなかったので、そのノートが外で何度変わっても無視し続けた。
+        return lastWrote ? '保存の跳ね返りを、まだ待ち構えています' : true;
+    `, true);
+
+    wrote('保存のあとに向こうが直した。');
+    await sleep(2500);
+
+    await step('二台目：自分が保存したあとでも、向こうの直しは届く', `
+        return whole().includes('保存のあとに向こうが直した')
+            ? true : '保存したノートは、そのあとずっと無視されます';
+    `, true);
+
+    await step('二台目：打ちかけの字を置く', `
+        loading = true;
+        editor.setValue('# 二台目\\n\\nいま打ちかけの字。\\n');
+        loading = false;
+        state.dirty = true;
+        return true;
+    `, true);
+
+    wrote('外から横取り。');
+    await sleep(2800);
+
+    await step('二台目：打ちかけの字を、外から消させない', `
+        // **打っているあいだは、下から書き換えない。** 向こうの字は
+        // ファイルに残ったまま待つ ── 画面の字が、打った覚えのないものに
+        // 変わるのがいちばん怖い。
+        return whole().includes('いま打ちかけの字')
+            ? true : '打っていた字が消えました';
+    `, true);
+
+    await step('二台目：保存したときに、両方とも残る', `
+        // 突き合わせるのは保存のとき ── そこで**どちらも失わない**。
+        state.dirty = true;
+        await save();
+        await new Promise((g) => setTimeout(g, 2000));
+        const now = whole();
+        if (!now.includes('いま打ちかけの字')) return '打っていた字が消えました';
+        if (!now.includes('外から横取り')) return '向こうの字が消えました';
+        return true;
+    `, true);
+}
+
 // 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => x.book === '歩き試し'
-            || /複製|新しいノート|週報/.test(x.title || ''))) {
+            || /複製|新しいノート|週報|二台目/.test(x.title || ''))) {
         try { await ask('delete', { path: n.path }); } catch { /* もう無い */ }
     }
     await reload({ quiet: true });

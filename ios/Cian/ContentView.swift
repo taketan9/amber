@@ -987,6 +987,7 @@ struct ContentView: View {
             store.find(now)
         }
         .refreshable { store.reload() }
+        .modifier(Waking(store: store, desk: desk))
         // One screen for every open note, with the tabs above them.
         .navigationDestination(isPresented: $showing) { DeskView(desk: desk, store: store) }
         // Straight into the note that was just made, and **in the writing
@@ -1017,6 +1018,39 @@ extension String: @retroactive Identifiable {
 ///
 /// なので `searchable` そのものを付け外しする。閉じるとき（取り消しを押した
 /// とき）は `on` が false になり、この修飾ごと消える。
+/// **戻ってきたら、読み直す**（依頼 479）。
+///
+/// 同じフォルダを窓と電話が触るので、電話を置いているあいだに向こうで
+/// 書かれる ── 読み直さないと、開いた瞬間の一覧が古いまま出る。
+/// **「引き下げれば来る」では気づけない** ── そこに新しいものがあると
+/// 知らない人は、引き下げようと思わない。
+///
+/// 直しかけを抱えているときは触らない ── 打っている字を下から
+/// 書き換えない。
+///
+/// **一覧の本体には足さない。** あの `body` はもう型を追いきれる限界に
+/// 居て、一行足すだけで組めなくなる（`Seeking` と同じ理由でここに出す）。
+struct Waking: ViewModifier {
+    let store: NotesStore
+    @ObservedObject var desk: Desk
+
+    /// **`scenePhase` ではなく、報せを受ける。** `onChange(of:)` は
+    /// 新旧どちらの形に解けるかが呼ぶ場所で変わり、引数の数で組めたり
+    /// 組めなかったりする ── 前に出るという一点だけが要るので、
+    /// それだけを言ってくる報せを直に受ける。
+    func body(content: Content) -> some View {
+        content.onReceive(
+            NotificationCenter.default
+                .publisher(for: UIApplication.willEnterForegroundNotification)
+        ) { _ in
+            // **打ちかけを抱えているときは触らない。** 一覧を読み直すと
+            // 開いている札まで組み直されて、打った字が消えることがある。
+            if desk.tabs.contains(where: { $0.dirty }) { return }
+            store.reload()
+        }
+    }
+}
+
 struct Seeking: ViewModifier {
     @Binding var needle: String
     @Binding var on: Bool

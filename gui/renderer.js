@@ -6105,10 +6105,17 @@ async function newNote(title) {
 const FRESH = ['title', 'excerpt', 'tags', 'updated', 'created', 'bytes', 'search'];
 
 /// 最後に自分で書いたノート。見張りが自分の書き込みで起きたかを見分ける。
+///
+/// **一度きり・数秒だけ**（依頼 479）。前は書いた道を憶えたまま消して
+/// いなかったので、**そのノートへの外からの変更を、そのあとずっと
+/// 無視していた** ── 窓で保存 → 電話で直す → 窓は何も知らない、が
+/// 実際に起きる（二台で同じフォルダを触るときの、まさにその形）。
 let lastWrote = null;
+let lastWroteAt = 0;
 
 async function freshenRow(path) {
     lastWrote = path;
+    lastWroteAt = Date.now();
     const at = state.notes.findIndex((n) => n.path === path);
     if (at < 0) return reload({ quiet: true });
     let one;
@@ -8113,17 +8120,36 @@ window.amber.onChanged((names) => {
     // （`が` = `か` + `゛`）、字の上では同じ名前が一致しなくなる。外れても
     // 数え直すだけで害は無いが、**日本語の名前のノートだけ遅い**になる。
     const nfc = (s) => String(s).normalize('NFC');
+    // **打ち消すのは、自分の書き込みの跳ね返り一回だけ。**
+    //
+    // 憶えたまま消さないと、そのノートが外で何度変わっても無視し続ける。
+    // 跳ね返りが来ないこともある（別の動きと一緒に丸められる）ので、
+    // 時間でも切る ── 数秒より後に来たものは、もう自分のではない。
     if (names && names.length && lastWrote
-        && names.every((n) => nfc(n) === nfc(lastWrote))) return;
+        && Date.now() - lastWroteAt < 4000
+        && names.every((n) => nfc(n) === nfc(lastWrote))) {
+        lastWrote = null;
+        return;
+    }
     churn = setTimeout(async () => {
         if (state.guest) return;                 // 単発で開いている一本は索引の外
+        // **見比べる相手を、先に控える**（依頼 479）。
+        //
+        // `reload` は開いている行を新しいほうに繋ぎ直す ── そのあとで
+        // 「変わったか」を見ると、新しい値どうしを見比べることになり、
+        // **いつも「変わっていない」になる**。開いているノートの字だけが
+        // 古いまま残っていたのはこれで、二台で同じフォルダを触ると必ず出る。
+        const was = state.open ? state.open.updated : null;
+        const at = state.open ? state.open.path : null;
         await reload({});
         if (state.open && !state.dirty) {
             const now = state.notes.find((n) => n.path === state.open.path);
             // 消えていたら、開いたままにしない ── 無いノートを見せ続けると、
             // 次の保存で作り直してしまう。
             if (!now) { state.open = null; applyView(); return; }
-            if (now.updated !== state.open.updated) await openNote(now.path, { quiet: true });
+            if (now.path === at && now.updated !== was) {
+                await openNote(now.path, { quiet: true });
+            }
         }
     }, 250);
 });
