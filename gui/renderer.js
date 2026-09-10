@@ -6511,9 +6511,12 @@ let calDay = null;
 /// 見方（`month` / `week` / `day`）。**憶える** ── 週で暮らしている人を、
 /// 開くたびに月へ連れ戻さない（依頼 468）。
 let calView = 'month';
-/// **人ごとに並べるか**（依頼 471）。日と週のときだけ効く ── 月の表を
+/// **グループカレンダー**（依頼 471）。日と週のときだけ効く ── 月の表を
 /// 人ごとに割ると、一人ぶんの升目が字より小さくなる。これも憶える。
 let calGroup = false;
+/// 出さない人（段の鍵）。**全員を並べると読めない** ── 十五人の段から
+/// 三人を探すのは、目でやる仕事としては重い（依頼 473）。憶える。
+let calHide = [];
 /// その月ぶんの予定（core の `month` が返したまま）。
 let calSlots = [];
 
@@ -6579,12 +6582,20 @@ async function drawCal() {
     for (const b of box.querySelectorAll('.seg button')) {
         b.classList.toggle('on', b.dataset.view === calView);
     }
-    // 「みんな」は日と週のときだけ。月の表を人ごとに割ると、一人ぶんの
-    // 升目が字より小さくなる。
+    // グループカレンダーは日と週のときだけ。月の表を人ごとに割ると、
+    // 一人ぶんの升目が字より小さくなる。
     const crowd = box.querySelector('.crowdbtn');
     crowd.hidden = calView === 'month';
     crowd.classList.toggle('on', calGroup);
     const grouped = calGroup && calView !== 'month';
+    // 「人を選ぶ」は、並べているときだけ。
+    const pick = box.querySelector('.whobtn');
+    pick.hidden = !grouped;
+    if (grouped) {
+        const all = crowdLanes(calView === 'day' ? [calDay] : weekOf(calDay), true).length;
+        const on = all - calHide.length;
+        pick.textContent = calHide.length ? '人を選ぶ（' + on + '/' + all + '）' : '人を選ぶ';
+    }
 
     box.querySelector('.mo').textContent = calTitle();
     const plans = calSlots.filter((s) => s.kind !== 'note').length;
@@ -6740,7 +6751,7 @@ function whoOf(s) {
 /// **予定の無い人も段を持つ。** 出張の週に段ごと消えると、書き出せて
 /// いないのか本当に空なのかが、画面からは区別できない ── いちばん
 /// 知りたいのが「空いているかどうか」なのに。
-function crowdLanes(days) {
+function crowdLanes(days, whole) {
     const lanes = new Map();
     const put = (key, name, kind) => {
         if (!lanes.has(key)) lanes.set(key, { key, name, kind, slots: [] });
@@ -6757,8 +6768,10 @@ function crowdLanes(days) {
     }
     for (const w of teamPeople) put('team:' + (w.mail || w.name), w.name, 'team');
     const rank = (l) => (l.key === 'me' ? 0 : l.kind === 'here' ? 1 : l.kind === 'away' ? 2 : 3);
-    return [...lanes.values()].sort((a, b) => rank(a) - rank(b)
+    const out = [...lanes.values()].sort((a, b) => rank(a) - rank(b)
         || a.name.localeCompare(b.name, 'ja'));
+    // **選んだ人だけ並べる。** `whole` が真なら、選ぶための一覧なので全員。
+    return whole ? out : out.filter((l) => !calHide.includes(l.key));
 }
 
 /// 一時間ぶんの横幅（日のとき）。字が読める幅を確保して、足りなければ
@@ -6790,7 +6803,8 @@ function drawCrowd() {
 
     const rows = lanes.map((lane) => {
         const track = calView === 'day' ? crowdDay(lane, days[0]) : crowdWeek(lane, days);
-        return '<div class="row"><div class="who ' + lane.kind + '">'
+        return '<div class="ln"><div class="who ' + lane.kind + '"'
+            + ' data-key="' + escapeAttr(lane.key) + '" title="押すと引っ込めます">'
             + '<span>' + escapeHtml(lane.name) + '</span></div>'
             + '<div class="track"' + wide + '>' + track + '</div></div>';
     }).join('');
@@ -6814,10 +6828,17 @@ function drawCrowd() {
 /// 一人ぶん・一日ぶんの帯（横が時間）。
 function crowdDay(lane, day) {
     const mine = lane.slots.filter((s) => s.day === day);
-    // 終日は、うしろに薄く一日ぶん敷く ── 予定の帯を隠さない。
+    // **終日は、一日ぶんの帯にする。** 二十四時間ぶん敷いて「終日」と
+    // 書く ── `00:00〜23:59` に読み替えると、時刻つきの予定に混ざって
+    // 並び、画面に `00:00` という嘘の時刻が出る。
     const whole = mine.filter((s) => !s.at).map((s) =>
-        '<div class="span ' + s.kind + '" title="' + escapeAttr(s.title) + '">'
-        + escapeHtml(s.title) + '</div>').join('');
+        '<div class="span ' + s.kind + (s.shut ? ' shut' : '') + '"'
+        + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
+        + ' title="' + escapeAttr('終日 ' + s.title) + '">'
+        // **字は、見えているところに貼りつける。** 帯は一日ぶんの幅が
+        // あるので、字を頭に置くと横に流したとたんに画面の外へ出る
+        // ── 帯だけが残って、何の帯かが読めなくなる。
+        + '<b><i>終日</i> ' + escapeHtml(s.title) + '</b></div>').join('');
     const bars = mine.filter((s) => s.at).map((s) => {
         const from = mins(s.at);
         if (from === null) return '';
@@ -6840,16 +6861,46 @@ function crowdDay(lane, day) {
 function crowdWeek(lane, days) {
     return days.map((d) => {
         const mine = lane.slots.filter((s) => s.day === d);
-        const chips = mine.slice(0, 4).map((s) =>
-            '<div class="chip ' + s.kind + (s.shut ? ' shut' : '') + '"'
+        // **終日が先。** その日いっぱいの用事は、時刻つきの予定より先に
+        // 目に入るほうがよい（居るか居ないかの話なので）。
+        const mine2 = mine.filter((s) => !s.at).concat(mine.filter((s) => s.at));
+        const chips = mine2.slice(0, 4).map((s) =>
+            '<div class="chip ' + s.kind + (s.at ? '' : ' all')
+            + (s.shut ? ' shut' : '') + '"'
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
-            + ' title="' + escapeAttr((s.at ? s.at + ' ' : '') + s.title) + '">'
-            + (s.at ? '<i>' + escapeHtml(s.at) + '</i> ' : '')
+            + ' title="' + escapeAttr((s.at ? s.at + ' ' : '終日 ') + s.title) + '">'
+            + '<i>' + escapeHtml(s.at || '終日') + '</i> '
             + escapeHtml(s.title) + '</div>').join('');
-        const rest = mine.length > 4
-            ? '<div class="more">ほか ' + (mine.length - 4) + '</div>' : '';
+        const rest = mine2.length > 4
+            ? '<div class="more">ほか ' + (mine2.length - 4) + '</div>' : '';
         return '<div class="cell" data-day="' + d + '">' + chips + rest + '</div>';
     }).join('');
+}
+
+
+/// 出す人を選ぶ。
+///
+/// **一人ずつ切り替えて、そのつど開き直す。** 一度に選ぶ小窓が無い
+/// ので、選んだら閉じずにもう一度出す ── 三人消すのに三回開き直すのは
+/// 面倒だが、「選んでいる途中」が画面に残るぶん、間違いに気づきやすい。
+async function cmdWhoPick() {
+    for (;;) {
+        const lanes = crowdLanes(calView === 'day' ? [calDay] : weekOf(calDay), true);
+        const rows = lanes.map((l) => ({
+            name: (calHide.includes(l.key) ? '　　' : '✓　') + l.name,
+            sub: calHide.includes(l.key) ? '出していません' : '',
+            value: l.key,
+        }));
+        rows.unshift({ name: '── 全員を出す', value: '*' });
+        const pick = await askPick('グループカレンダーに出す人', rows,
+            '選ぶと出し入れできます。閉じるまで続けて選べます', true);
+        if (pick === null) return;
+        if (pick === '*') calHide = [];
+        else if (calHide.includes(pick)) calHide = calHide.filter((k) => k !== pick);
+        else calHide = calHide.concat(pick);
+        window.amber.remember({ calHide });
+        await drawCal();
+    }
 }
 
 
@@ -7035,6 +7086,20 @@ el('cal').addEventListener('click', async (e) => {
         await drawCal();
         return;
     }
+    if (e.target.closest('.whobtn')) { await cmdWhoPick(); return; }
+    // 名前を押したら、その人を引っ込める。**戻し方をその場で言う** ──
+    // 押して消えたものの戻し方が画面のどこにも無いのが、いちばん困る。
+    const who = e.target.closest('.crowd .rows .who');
+    if (who) {
+        const key = who.dataset.key;
+        if (!key) return;
+        calHide = calHide.includes(key)
+            ? calHide.filter((k) => k !== key) : calHide.concat(key);
+        window.amber.remember({ calHide });
+        say(who.textContent.trim() + ' を引っ込めました（「人を選ぶ」で戻せます）');
+        await drawCal();
+        return;
+    }
     // みんなの表を押したとき。**読むだけのものは、そう言う。**
     const bar = e.target.closest('.crowd .bar, .crowd .chip');
     if (bar) {
@@ -7197,6 +7262,11 @@ async function hereFor(y, m) {
 /// 二か所に書くと、片方にだけ増えた命令ができて、そのうち「あるはずなのに
 /// 無い」になる。`need` は要るもの: `note` は開いているノート、`root` は
 /// 保存場所（いつもある）。`menu` が真なら、⋯ の献立にも出る。
+/// **合言葉。** これを打つまで、チームの予定表の二行はどこにも出ない
+/// （依頼 473）。日本語で打つものにしないのは、変換の途中で偶然出て
+/// しまわないため ── ここは「打とうと思った人だけ」が通る道。
+const TEAM_WORD = 'csv';
+
 const CMDS = [
     { id: 'new', name: '新しいノート', key: '⌘N', run: () => newNote() },
     { id: 'tmpl', name: 'テンプレートから新しいノート', sub: '「' + TEMPLATES + '」フォルダの中身',
@@ -7225,12 +7295,19 @@ const CMDS = [
     { id: 'sub', name: 'よその予定表を読む', sub: 'Google カレンダーなどの iCal の URL',
       app: true, run: cmdSubscribe },
     { id: 'unsub', name: 'よその予定表を読むのをやめる', app: true, run: cmdUnsubscribe },
-    // **既定では出ていない道。** 会社の Outlook は外から読める形を一つも
-    // 出さないので、別の道具が置いた CSV を読む（依頼 471）。読むだけで、
-    // 取りに行くことも書き戻すこともしない。
-    { id: 'team', name: 'チームの予定表を読む（CSV）',
-      sub: '別の道具が書き出した一枚を、人ごとに並べます', app: true, run: cmdTeam },
-    { id: 'teamoff', name: 'チームの予定表を読むのをやめる', app: true, run: cmdTeamOff },
+    // **合言葉を打つまで、どこにも出ない**（依頼 473）。
+    //
+    // 会社の Outlook は外から読める形を一つも出さないので、別の道具が
+    // 置いた CSV を読む（依頼 471）。読むだけで、取りに行くことも書き戻す
+    // こともしない ── ただ、初めて amber を見た人にこの二行が並んで
+    // いると、何の話なのかが分からないまま面食らう。
+    //
+    // 出し方: 「何をしますか」（⌘⇧P）で `csv` と打つ。合言葉は
+    // `TEAM_WORD` の一行 ── 変えたければそこを変える。
+    { id: 'team', name: 'チームの予定表を読む（CSV）', word: TEAM_WORD,
+      sub: '別の道具が書き出した一枚を、人ごとに並べます', run: cmdTeam },
+    { id: 'teamoff', name: 'チームの予定表を読むのをやめる', word: TEAM_WORD,
+      run: cmdTeamOff },
     { id: 'when', name: '期間で絞る', run: () => openDrawer('when') },
 
     // ── このノートにすること（⋯ と、ノートの右押し）
@@ -7363,7 +7440,11 @@ async function palette() {
 
     head('── すること');
     for (const c of CMDS.filter(canRun)) {
-        rows.push({ name: c.name, key: keyText(c.key), run: () => c.run() });
+        rows.push({
+            name: c.name, key: keyText(c.key), run: () => c.run(),
+            // 合言葉のあるものは、打たれるまで出てこない（依頼 473）。
+            word: c.word,
+        });
     }
 
     // いま開いているノートの見出し ── 長いノートの中を歩く道。
@@ -7417,7 +7498,10 @@ async function palette() {
     }
 
     const pick = await askPick('何をしますか',
-        rows.map((r, n) => ({ name: r.name, sub: r.sub || '', key: r.key || '', head: r.head, value: n })),
+        rows.map((r, n) => ({
+            name: r.name, sub: r.sub || '', key: r.key || '', head: r.head,
+            word: r.word, value: n,
+        })),
         '↑↓ で選び、Enter で実行');
     if (pick === null) return;
     const hit = rows[pick];
@@ -9241,7 +9325,12 @@ function sheet({ title, value, placeholder, items, foot, bare, brand }) {
         const q = input.value.trim().toLowerCase();
         // 打った字を、名前のどこかに含むもの。**部分一致** ── 覚えている
         // のはたいてい真ん中の一語で、頭ではない。
-        const hit = items.filter((i) => !q || (i.name + ' ' + (i.sub || '')).toLowerCase().includes(q));
+        const hit = items.filter((i) => {
+            // **合言葉のあるものは、打たれるまで出てこない**（依頼 473）。
+            // 初めて amber を見た人の一覧に、会社の話が混ざらないように。
+            if (i.word) return q.includes(i.word);
+            return !q || (i.name + ' ' + (i.sub || '')).toLowerCase().includes(q);
+        });
         // **絞るのは全部から、描くのは頭だけ。**
         //
         // 「何をしますか」がノートも行き先も抱えるようになった（依頼 414）
@@ -9369,6 +9458,7 @@ const escapeAttr = escapeHtml;
     away = Array.isArray(saved.away) ? saved.away : [];
     if (['month', 'week', 'day'].includes(saved.calView)) calView = saved.calView;
     calGroup = !!saved.calGroup;
+    if (Array.isArray(saved.calHide)) calHide = saved.calHide.filter((k) => typeof k === 'string');
     if (typeof saved.teamFile === 'string') teamFile = saved.teamFile;
     noBins = Array.isArray(saved.noBins) ? saved.noBins : [];
     incomings = (saved.incomings && typeof saved.incomings === 'object') ? saved.incomings : {};

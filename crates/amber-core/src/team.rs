@@ -313,12 +313,15 @@ impl Columns {
         );
         // **名前のない予定にも、何かを出す。** 件名を伏せて書き出す会社が
         // ある ── 空欄の帯は、押せない模様にしか見えない。
+        //
+        // 「見せてもらえていない」と「そもそも入っていない」は違うので、
+        // 字も分ける。
         let title = if !title.is_empty() {
             title.to_string()
         } else if shut {
-            "予定あり（非公開）".to_string()
+            "非公開".to_string()
         } else {
-            "予定あり".to_string()
+            "空".to_string()
         };
 
         let one = |day: chrono::NaiveDate, at: Option<String>, to: Option<String>| Plan {
@@ -612,7 +615,7 @@ mod tests {
 
         // 件名の見えない予定。
         let hidden = got.plans.iter().find(|p| p.shut).unwrap();
-        assert_eq!(hidden.title, "予定あり（非公開）");
+        assert_eq!(hidden.title, "非公開");
         assert_eq!(hidden.who, "鈴木 一郎");
     }
 
@@ -741,7 +744,7 @@ mod tests {
     #[test]
     fn a_nameless_plan_still_says_something() {
         let csv = format!("{HEAD}山田,,2026-09-10 10:00,2026-09-10 11:00,\n");
-        assert_eq!(of(&csv, 2026, 9).plans[0].title, "予定あり");
+        assert_eq!(of(&csv, 2026, 9).plans[0].title, "空");
     }
 
     /// 「空き時間」は、空いているという意味なので出さない。

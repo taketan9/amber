@@ -749,17 +749,18 @@ await step('カレンダー：予定を足すと、ノートが一本できる',
 /* ── 十六の四の二。**みんなの予定を、人ごとに**（依頼 471） ── */
 
 if (process.env.TEAMCSV) {
-    await step('チームの予定表：CSV を読むと、人ごとの段ができる', `
+    await step('グループカレンダー：CSV を読むと、人ごとの段ができる', `
         teamFile = ${JSON.stringify(process.env.TEAMCSV)};
         window.amber.remember({ teamFile });
         calMonth = { y: 2026, m: 9 };
         calDay = '2026-09-09';
         calView = 'day';
         calGroup = true;
+        calHide = [];
         await cmdCalendar();
         await new Promise((g) => setTimeout(g, 1500));
-        if (el('cal').querySelector('.crowd').hidden) return 'みんなの表が出ていません';
-        const names = [...el('cal').querySelectorAll('.crowd .row .who')]
+        if (el('cal').querySelector('.crowd').hidden) return 'グループカレンダーが出ていません';
+        const names = [...el('cal').querySelectorAll('.crowd .rows .who')]
             .map((x) => x.textContent.trim());
         for (const w of ['山田 武', '鈴木 一郎', '佐藤 花']) {
             if (!names.includes(w)) return w + ' の段がありません';
@@ -780,7 +781,7 @@ if (process.env.TEAMCSV) {
         // 件名の見えない予定は、そうと分かる形で出る。
         const shut = team.filter((s) => s.shut);
         if (shut.length !== 1) return '非公開が ' + shut.length + ' 件です';
-        if (shut[0].title !== '予定あり（非公開）') return '非公開の出し方が ' + shut[0].title + ' です';
+        if (shut[0].title !== '非公開') return '非公開の出し方が ' + shut[0].title + ' です';
         return true;
     `, true);
 
@@ -809,6 +810,63 @@ if (process.env.TEAMCSV) {
         await new Promise((g) => setTimeout(g, 1500));
         const oct = calMonths().filter((x) => x.m === 10);
         if (!oct.length) return '十月を読んでいません';
+        return true;
+    `, true);
+
+
+    await step('グループカレンダー：人を絞れる', `
+        calView = 'day'; calDay = '2026-09-09'; calHide = [];
+        await drawCal(); await new Promise((g) => setTimeout(g, 900));
+        const all = [...el('cal').querySelectorAll('.crowd .rows .who')];
+        const one = all.find((x) => x.textContent.trim() === '山田 武');
+        if (!one) return '山田 武 の段がありません';
+        one.click();
+        await new Promise((g) => setTimeout(g, 900));
+        const now = [...el('cal').querySelectorAll('.crowd .rows .who')]
+            .map((x) => x.textContent.trim());
+        if (now.includes('山田 武')) return '押しても引っ込みません';
+        if (!now.includes('鈴木 一郎')) return 'ほかの人まで消えました';
+        const btn = el('cal').querySelector('.whobtn');
+        if (btn.hidden) return '「人を選ぶ」が出ていません';
+        if (!btn.textContent.includes('/')) return '何人中何人かが出ていません';
+        // 戻す。
+        calHide = [];
+        await drawCal();
+        await new Promise((g) => setTimeout(g, 900));
+        return [...el('cal').querySelectorAll('.crowd .rows .who')]
+            .map((x) => x.textContent.trim()).includes('山田 武')
+            ? true : '戻せません';
+    `, true);
+
+    await step('グループカレンダー：目盛りと段の区切りが、同じところにある', `
+        const c = el('cal').querySelector('.crowd');
+        const ticks = c.querySelector('.ticks').getBoundingClientRect().x;
+        const track = c.querySelector('.rows .track').getBoundingClientRect().x;
+        // **名前の長さで段の欄が広がると、その段だけ目盛りがずれる。**
+        return Math.abs(ticks - track) < 1
+            ? true : '目盛りと段が ' + Math.round(track - ticks) + ' ずれています';
+    `, true);
+
+    await step('グループカレンダー：終日は「終日」と出る', `
+        calDay = '2026-09-10';
+        await drawCal(); await new Promise((g) => setTimeout(g, 900));
+        const band = [...el('cal').querySelectorAll('.crowd .span')];
+        if (!band.length) return '終日の帯がありません';
+        if (!band.some((x) => x.textContent.includes('終日'))) return '「終日」と書いていません';
+        if (band.some((x) => x.textContent.includes('00:00'))) return '00:00 と出ています';
+        return true;
+    `, true);
+
+    await step('チームの予定表：合言葉を打つまで、一覧に出てこない', `
+        // 「何をしますか」に並ぶ行を、そのまま組み立てて確かめる。
+        const rows = CMDS.filter(canRun).map((c) => ({ name: c.name, word: c.word }));
+        const secret = rows.filter((r) => r.word);
+        if (secret.length !== 2) return '合言葉つきが ' + secret.length + ' 件です';
+        const shown = (q) => rows.filter((i) => (i.word ? q.includes(i.word)
+            : !q || i.name.toLowerCase().includes(q)));
+        if (shown('').some((r) => r.word)) return '何も打たないのに出ています';
+        if (shown('よてい').some((r) => r.word)) return '「よてい」で出てしまいます';
+        if (shown(TEAM_WORD).filter((r) => r.word).length !== 2) return '合言葉で出てきません';
         return true;
     `, true);
 

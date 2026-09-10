@@ -1202,7 +1202,7 @@ body.dropping::after {
 #sparebox .hd { display: flex; align-items: center; gap: .6rem;
   padding: .7rem .9rem; border-bottom: 1px solid var(--line); }
 #sparebox .grow { flex: 1; }
-#sparebox .sum { color: var(--ink2); font-size: .85em; }
+#sparebox .sum { color: var(--ink-2); font-size: .85em; }
 #sparebox .warn { padding: .6rem .9rem; color: var(--ink);
   background: var(--sel); font-size: .85em; }
 #sparebox .grid { overflow-y: auto; padding: .8rem;
@@ -1215,9 +1215,9 @@ body.dropping::after {
   justify-content: center; background: var(--bg); }
 #sparebox .cell img { max-width: 100%; max-height: 6.5rem; display: block; }
 #sparebox .cell .cap { padding: .4rem .5rem; font-size: .78em;
-  color: var(--ink2); line-height: 1.4; word-break: break-all; }
+  color: var(--ink-2); line-height: 1.4; word-break: break-all; }
 #sparebox .cell .cap b { color: var(--ink); font-weight: 600; }
-#sparebox .none { padding: 2rem; text-align: center; color: var(--ink2); }
+#sparebox .none { padding: 2rem; text-align: center; color: var(--ink-2); }
 /* ボタンは工房と同じ形 ── 同じ見た目のものは、同じ意味であってほしい。 */
 #sparebox .hd button {
   padding: 5px 13px; border-radius: 8px; font-size: 12.5px;
@@ -1243,7 +1243,7 @@ body.dropping::after {
   padding: .6rem .9rem; border-bottom: 1px solid var(--line); }
 #calbox .hd .mo { font-size: 1.05rem; min-width: 7.5rem; }
 #calbox .hd .grow { flex: 1; }
-#calbox .hd .sum { color: var(--ink2); font-size: .82em; }
+#calbox .hd .sum { color: var(--ink-2); font-size: .82em; }
 #calbox .hd button { padding: 4px 11px; border-radius: 8px; font-size: 12.5px;
   border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
 #calbox .hd button:hover { background: var(--hover); }
@@ -1251,8 +1251,8 @@ body.dropping::after {
 #calbox .month { padding: .6rem .7rem; display: flex; flex-direction: column; min-height: 0; }
 #calbox .dow { display: grid; grid-template-columns: repeat(7,1fr); gap: 3px; }
 #calbox .dow i { font-style: normal; text-align: center; font-size: .72em;
-  color: var(--ink3); padding-bottom: 3px; }
-#calbox .dow i.sat { color: #6f9fd8 } #calbox .dow i.sun { color: var(--bad) }
+  color: var(--ink-3); padding-bottom: 3px; }
+#calbox .dow i.sat { color: #6f9fd8 } #calbox .dow i.sun { color: #d8756f }
 #calbox .days { flex: 1; display: grid; grid-template-columns: repeat(7,1fr);
   grid-auto-rows: 1fr; gap: 3px; min-height: 0; }
 #calbox .d { background: var(--rail); border: 1px solid transparent;
@@ -1262,12 +1262,12 @@ body.dropping::after {
 #calbox .d.dim { opacity: .45 }
 #calbox .d.on { border-color: var(--line); background: var(--hover) }
 #calbox .d.today { border-color: var(--amber) }
-#calbox .d .n { font-size: .72em; color: var(--ink2); font-variant-numeric: tabular-nums }
+#calbox .d .n { font-size: .72em; color: var(--ink-2); font-variant-numeric: tabular-nums }
 #calbox .d.today .n { color: var(--amber); font-weight: 700 }
 #calbox .d .ev { font-size: .68em; line-height: 1.5; margin-top: 1px; padding: 0 3px;
   border-left: 2px solid var(--amber); border-radius: 2px; background: var(--sel);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#calbox .d .ev.note { background: none; border-left-color: transparent; color: var(--ink3) }
+#calbox .d .ev.note { background: none; border-left-color: transparent; color: var(--ink-3) }
 /* **よその予定表のものは、別の色。** 自分が直せるものと、読むだけの
    ものが同じ顔をしていると、押してから分かることになる。 */
 #calbox .d .ev.away { border-left-color: #6f9fd8;
@@ -1278,21 +1278,21 @@ body.dropping::after {
 #calbox .d .ev.here { border-left-color: #5fa87a;
   background: color-mix(in srgb, #5fa87a 16%, transparent) }
 #calbox .side .slot.here .w b { color: #3f8a5f }
-#calbox .d .more { font-size: .66em; color: var(--ink3); padding-left: 3px }
+#calbox .d .more { font-size: .66em; color: var(--ink-3); padding-left: 3px }
 #calbox .side { border-left: 1px solid var(--line); padding: .7rem .8rem;
   overflow-y: auto; background: var(--rail); }
 #calbox .side .h { font-weight: 700; margin-bottom: .4rem }
-#calbox .side .h small { color: var(--ink3); font-weight: 400; margin-left: .4em }
+#calbox .side .h small { color: var(--ink-3); font-weight: 400; margin-left: .4em }
 #calbox .side .slot { display: flex; gap: .5rem; padding: 3px 0; cursor: pointer;
   border-radius: 5px; font-size: .84em; }
 #calbox .side .slot:hover { background: var(--hover) }
-#calbox .side .slot .t { color: var(--ink3); min-width: 3rem;
+#calbox .side .slot .t { color: var(--ink-3); min-width: 3rem;
   font-variant-numeric: tabular-nums; }
 #calbox .side .slot .w b { display: block; font-weight: 600 }
-#calbox .side .slot .w span { color: var(--ink3); font-size: .9em }
-#calbox .side .none { color: var(--ink3); font-size: .84em; padding: .3rem 0 }
+#calbox .side .slot .w span { color: var(--ink-3); font-size: .9em }
+#calbox .side .none { color: var(--ink-3); font-size: .84em; padding: .3rem 0 }
 #calbox .side .add { margin-top: .7rem; width: 100%; padding: 5px;
-  border: 1px dashed var(--line); border-radius: 8px; color: var(--ink2);
+  border: 1px dashed var(--line); border-radius: 8px; color: var(--ink-2);
   font-size: .84em; background: none; }
 #calbox .side .add:hover { border-color: var(--amber); color: var(--amber) }
 
@@ -1300,7 +1300,7 @@ body.dropping::after {
 #calbox .seg { display: inline-flex; border: 1px solid var(--line);
   border-radius: 8px; overflow: hidden; margin-left: .3rem; }
 #calbox .seg button { border: 0; border-radius: 0; padding: 4px 11px;
-  font-size: 12px; color: var(--ink3); background: none; }
+  font-size: 12px; color: var(--ink-3); background: none; }
 #calbox .seg button.on { background: var(--sel); color: var(--ink); }
 #calbox .hours { flex: 1; display: flex; flex-direction: column; min-height: 0;
   padding: .4rem .5rem .5rem; }
@@ -1313,12 +1313,12 @@ body.dropping::after {
 #calbox .lane:first-child { border-left: 0 }
 #calbox .lane .hr { height: 2.1rem; border-top: 1px solid var(--line); }
 #calbox .lane .hr:first-child { border-top: 0 }
-#calbox .clock { text-align: right; padding-right: .4rem; color: var(--ink3);
+#calbox .clock { text-align: right; padding-right: .4rem; color: var(--ink-3);
   font-size: .68em; font-variant-numeric: tabular-nums; }
 #calbox .clock div { height: 2.1rem; }
-#calbox .hd { text-align: center; font-size: .72em; color: var(--ink3);
+#calbox .hd { text-align: center; font-size: .72em; color: var(--ink-3);
   padding: 2px 0; }
-#calbox .hd.sat { color: #6f9fd8 } #calbox .hd.sun { color: var(--bad) }
+#calbox .hd.sat { color: #6f9fd8 } #calbox .hd.sun { color: #d8756f }
 #calbox .hd.today { color: var(--amber); font-weight: 700 }
 #calbox .blk { position: absolute; left: 2px; right: 2px; border-radius: 4px;
   padding: 0 4px; font-size: .68em; line-height: 1.35; overflow: hidden;
@@ -1327,7 +1327,7 @@ body.dropping::after {
   background: color-mix(in srgb, #6f9fd8 16%, transparent) }
 #calbox .blk.here { border-left-color: #5fa87a;
   background: color-mix(in srgb, #5fa87a 16%, transparent) }
-#calbox .blk.note { border-left-color: transparent; background: none; color: var(--ink3) }
+#calbox .blk.note { border-left-color: transparent; background: none; color: var(--ink-3) }
 
 /* みんなの予定を、人ごとに並べる（依頼 471）。
    横に時間（または日付）、縦に人 ── 一日を画面幅に押し込むと三十分の
@@ -1340,17 +1340,33 @@ body.dropping::after {
 #calbox .crowd .axis { display: flex; position: sticky; top: 0; z-index: 2;
   background: var(--paper); border-bottom: 1px solid var(--line); }
 #calbox .crowd .ticks { display: flex }
-#calbox .crowd .tk { flex: none; font-size: .68em; color: var(--ink3); padding: 2px 0 3px 4px;
+#calbox .crowd .tk { flex: none; font-size: .68em; color: var(--ink-3); padding: 2px 0 3px 4px;
   border-left: 1px solid var(--line); font-variant-numeric: tabular-nums; }
-#calbox .crowd .tk.sat { color: #6f9fd8 } #calbox .crowd .tk.sun { color: var(--bad) }
+#calbox .crowd .tk.sat { color: #6f9fd8 } #calbox .crowd .tk.sun { color: #d8756f }
 #calbox .crowd .tk.today { color: var(--amber); font-weight: 700 }
-#calbox .crowd .row { display: flex; border-bottom: 1px solid var(--line); min-height: 2.2rem }
+/* **一段の名前は `row` にしない。** 一覧のノート一行が `.row` を持って
+   いて、そちらの `padding-left: 16px` が段にも効き、その段の目盛りだけ
+   16 ずれていた（実際にずれた）── 一般的すぎる名前は、いつか必ず当たる。 */
+#calbox .crowd .ln { display: flex; border-bottom: 1px solid var(--line);
+  min-height: 2.2rem; padding: 0 }
+/* **段の下地は、時間ぶんの幅を持つ。** 日は一日を横に流すので、幅を
+   画面のぶんしか取らないと、区切り線と段の下線が途中で切れる。 */
+#calbox .crowd:not(.wk) .rows, #calbox .crowd:not(.wk) .ln,
+#calbox .crowd:not(.wk) .axis { width: max-content; min-width: 100% }
 /* **名前は左に貼りつける。** 横に流したときに誰の段か分からなくなる
    のが、この表でいちばん困る壊れ方。 */
-#calbox .crowd .who { flex: none; width: 8.5rem; position: sticky; left: 0; z-index: 1;
+/* **名前の欄は、名前の長さで広がってはいけない。**
+   flex の中では `min-width: auto` が効いていて、折り返さない字は
+   その字の幅より細くならない ── 長い名前の段だけ欄が広がり、その段の
+   目盛りだけ右へずれていた（実際にずれた）。`min-width: 0` で床を外す。 */
+#calbox .crowd .who { flex: 0 0 8.5rem; width: 8.5rem; min-width: 0;
+  position: sticky; left: 0; z-index: 1;
   background: var(--rail); border-right: 1px solid var(--line); padding: 4px 6px;
   font-size: .76em; display: flex; align-items: center; }
-#calbox .crowd .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+#calbox .crowd .rows .who { cursor: pointer }
+#calbox .crowd .rows .who:hover { background: var(--hover) }
+#calbox .crowd .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0 }
 #calbox .crowd .axis .who { background: var(--paper); border-right-color: var(--line) }
 #calbox .crowd .who.note::before,
 #calbox .crowd .who.here::before,
@@ -1376,13 +1392,27 @@ body.dropping::after {
   background: color-mix(in srgb, #b98ad0 20%, transparent) }
 /* 中身の見えない予定は、**縞にする** ── 「取れなかった」ではなく
    「見せてもらえていない」ことが、一目で分かるように。 */
-#calbox .crowd .bar.shut, #calbox .crowd .chip.shut { color: var(--ink2);
+#calbox .crowd .bar.shut, #calbox .crowd .chip.shut { color: var(--ink-2);
   background-image: repeating-linear-gradient(135deg, transparent 0 5px,
-    color-mix(in srgb, var(--ink3) 22%, transparent) 5px 10px); }
+    color-mix(in srgb, var(--ink-3) 22%, transparent) 5px 10px); }
+/* 終日は、一日ぶんの帯。**「終日」と書く** ── 00:00 と書くと、
+   その時刻に何かがあるように読める。 */
 #calbox .crowd .span { position: absolute; left: 0; right: 0; top: 3px; bottom: 3px;
-  border-radius: 4px; font-size: .68em; padding: 1px 5px; color: var(--ink2);
-  background: color-mix(in srgb, var(--ink3) 12%, transparent); overflow: hidden;
-  white-space: nowrap; }
+  border-radius: 4px; font-size: .68em; padding: 1px 0; color: var(--ink-2);
+  background: color-mix(in srgb, var(--ink-3) 26%, transparent);
+  white-space: nowrap; cursor: pointer; line-height: 1.6;
+  border-left: 2px solid color-mix(in srgb, var(--ink-3) 55%, transparent); }
+/* **`overflow` は帯に付けない。** 付けるとその帯が「スクロールする箱」に
+   なってしまい、中の貼りつく字がどこにも貼りつかなくなる。 */
+/* 貼りつく先は**名前の欄の右**。`0` にすると、名前の欄の下に潜って
+   見えなくなる（あちらも貼りついていて、下地を持っている）。 */
+#calbox .crowd .span b { position: sticky; left: 8.5rem; display: block;
+  width: fit-content; max-width: 100%; padding: 0 5px; font-weight: 400;
+  overflow: hidden; text-overflow: ellipsis; }
+#calbox .crowd .span i, #calbox .crowd .chip.all i { font-style: normal;
+  color: var(--ink-3); font-size: .92em }
+#calbox .crowd .chip.all { background: color-mix(in srgb, var(--ink-3) 12%, transparent);
+  border-left-color: color-mix(in srgb, var(--ink-3) 55%, transparent); color: var(--ink-2) }
 /* 週は画面に収める ── 七日のうち五日しか見えない週の表は、週の表ではない。 */
 #calbox .crowd.wk .track, #calbox .crowd.wk .ticks { display: flex; flex: 1 1 0; min-width: 0 }
 #calbox .crowd.wk .tk, #calbox .crowd.wk .cell { flex: 1 1 0; width: auto; min-width: 0 }
@@ -1391,7 +1421,7 @@ body.dropping::after {
 #calbox .crowd .chip { font-size: .68em; line-height: 1.45; padding: 0 4px;
   border-radius: 3px; border-left: 2px solid var(--amber); background: var(--sel);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer }
-#calbox .crowd .chip i { font-style: normal; color: var(--ink3);
+#calbox .crowd .chip i { font-style: normal; color: var(--ink-3);
   font-variant-numeric: tabular-nums }
 #calbox .crowd .chip.away { border-left-color: #6f9fd8;
   background: color-mix(in srgb, #6f9fd8 16%, transparent) }
@@ -1399,7 +1429,7 @@ body.dropping::after {
   background: color-mix(in srgb, #5fa87a 16%, transparent) }
 #calbox .crowd .chip.team { border-left-color: #b98ad0;
   background: color-mix(in srgb, #b98ad0 16%, transparent) }
-#calbox .crowd .more { font-size: .64em; color: var(--ink3); padding-left: 4px }
+#calbox .crowd .more { font-size: .64em; color: var(--ink-3); padding-left: 4px }
 #calbox .allday .ad { font-size: .68em; padding: 1px 4px; border-radius: 3px;
   border-left: 2px solid var(--amber); background: var(--sel); cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1526,7 +1556,8 @@ body.dropping::after {
         <button data-view="month">月</button>
       </span>
       <!-- 横に時間、縦に人（依頼 471）。日と週のときだけ出す。 -->
-      <button class="crowdbtn" title="横に時間、縦に人で並べます" hidden>みんな</button>
+      <button class="crowdbtn" title="横に時間、縦に人で並べます" hidden>グループカレンダー</button>
+      <button class="whobtn" title="並べる人を選びます" hidden>人を選ぶ</button>
       <span class="grow"></span>
       <span class="sum"></span>
       <button class="x">閉じる</button>
