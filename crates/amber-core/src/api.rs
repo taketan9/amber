@@ -932,14 +932,25 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // 会社の網の中にしかない紙なので、家では必ず読めない。
         "team" => {
             let at = std::path::PathBuf::from(arg(p, "path"));
+            // **月を言わなければ、一枚ぜんぶ**（依頼 476）。
+            //
+            // この紙は「今日から何日ぶん」の一枚で、月ごとに分かれて
+            // いない ── 月を替えるたびに読み直すと、同じ紙を何度も
+            // 開くことになるうえ、**途中で置き換わると月によって時点の
+            // 違うものが並ぶ**。呼ぶ側が一度読んで、持っておく。
             let year = p["year"].as_i64().unwrap_or(0) as i32;
             let month = p["month"].as_u64().unwrap_or(0) as u32;
-            if !(1..=12).contains(&month) {
+            if month != 0 && !(1..=12).contains(&month) {
                 anyhow::bail!("月が 1〜12 ではありません: {month}");
             }
             let file = crate::text::read(&at)
                 .map_err(|e| anyhow::anyhow!("{} を読めません（{e}）", at.display()))?;
-            let got = crate::team::of(&file.lines.join("\n"), year, month);
+            let text = file.lines.join("\n");
+            let got = if month == 0 {
+                crate::team::all(&text)
+            } else {
+                crate::team::of(&text, year, month)
+            };
             Ok(serde_json::json!({
                 "fetched": got.fetched,
                 "people": got.people.iter().map(|w| serde_json::json!({

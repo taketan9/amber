@@ -58,13 +58,6 @@ pub fn of(text: &str, year: i32, month: u32) -> Team {
     let mut got = all(text);
     let want = format!("{year:04}-{month:02}");
     got.plans.retain(|p| p.day.starts_with(&want));
-    got.plans.sort_by(|a, b| {
-        a.mail
-            .cmp(&b.mail)
-            .then(a.day.cmp(&b.day))
-            .then(a.at.cmp(&b.at))
-            .then(a.title.cmp(&b.title))
-    });
     got
 }
 
@@ -114,6 +107,13 @@ pub fn all(text: &str) -> Team {
         }
     }
     out.people.sort_by(|a, b| a.name.cmp(&b.name));
+    out.plans.sort_by(|a, b| {
+        a.mail
+            .cmp(&b.mail)
+            .then(a.day.cmp(&b.day))
+            .then(a.at.cmp(&b.at))
+            .then(a.title.cmp(&b.title))
+    });
     out
 }
 

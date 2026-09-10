@@ -751,6 +751,7 @@ await step('カレンダー：予定を足すと、ノートが一本できる',
 if (process.env.TEAMCSV) {
     await step('グループカレンダー：CSV を読むと、人ごとの段ができる', `
         teamFile = ${JSON.stringify(process.env.TEAMCSV)};
+        teamPlans = null;
         window.amber.remember({ teamFile });
         calMonth = { y: 2026, m: 9 };
         calDay = '2026-09-09';
@@ -792,11 +793,47 @@ if (process.env.TEAMCSV) {
         const at = el('cal').querySelector('.teamat');
         if (at.hidden) return 'いつ時点かが出ていません';
         if (!at.textContent.includes('9/9 08:15')) return '「' + at.textContent + '」としか出ていません';
-        // **読んでいる人に、合言葉を毎回打たせない。**
-        setTimeout(() => closeSheet(0), 400);
-        at.click();
-        await new Promise((g) => setTimeout(g, 1500));
+        if (el('cal').querySelector('.teamnow').hidden) return '「更新」が出ていません';
         return true;
+    `, true);
+
+    await step('チームの予定表：日を替えても読み直さない', `
+        // **前の月へ戻ったら紙が入れ替わっていた**、が画面の上でいちばん
+        // 分かりにくい壊れ方（依頼 476）。日を替えても、持っている一枚から
+        // 選び直すだけ ── ファイルは開かない。
+        const sheet = teamPlans;
+        const was = teamAt;
+        calDay = '2026-09-16';
+        calMonth = { y: 2026, m: 10 };
+        await drawCal();
+        await new Promise((g) => setTimeout(g, 1200));
+        calMonth = { y: 2026, m: 9 };
+        calDay = '2026-09-09';
+        await drawCal();
+        await new Promise((g) => setTimeout(g, 1200));
+        if (teamPlans !== sheet) return '日を替えただけで読み直しました';
+        return teamAt === was ? true : '時点が ' + teamAt + ' に変わりました';
+    `, true);
+
+    await step('チームの予定表：「更新」を押すと、読みにいく', `
+        const sheet = teamPlans;
+        el('cal').querySelector('.teamnow').click();
+        await new Promise((g) => setTimeout(g, 2500));
+        if (teamPlans === sheet) return '押しても読みにいきません';
+        if (teamAt !== '9/9 08:15') return '時点が ' + teamAt + ' になりました';
+        return teamPlans.length === sheet.length ? true : '中身が変わりました';
+    `, true);
+
+    await step('チームの予定表：次に読みにいくのは、毎時十分', `
+        // 元の CSV は毎時零分に置き換わる ── 零分ちょうどに読むと、
+        // 書いている途中の紙を読むことがある。
+        const nine = nextTenPast(new Date('2026-09-10T09:00:00'));
+        if (nine.getHours() !== 9 || nine.getMinutes() !== 10) return '九時零分の次が ' + nine;
+        const past = nextTenPast(new Date('2026-09-10T09:10:00'));
+        if (past.getHours() !== 10) return '九時十分ちょうどの次が ' + past;
+        const late = nextTenPast(new Date('2026-09-10T23:40:00'));
+        if (late.getHours() !== 0 || late.getDate() !== 11) return '日をまたげません: ' + late;
+        return teamTick ? true : '約束が置かれていません';
     `, true);
 
     await step('チームの予定表：何日もある終日は、日ごとに出る', `
@@ -884,6 +921,7 @@ if (process.env.TEAMCSV) {
         await new Promise((g) => setTimeout(g, 1200));
         if (teamFile) return 'まだ読んでいます';
         if (!el('cal').querySelector('.teamat').hidden) return '入口が出たままです';
+        if (teamTick) return '読みにいく約束が残っています';
         if (calSlots.some((s) => s.kind === 'team')) return 'まだ予定が残っています';
         calGroup = false;
         calView = 'month';

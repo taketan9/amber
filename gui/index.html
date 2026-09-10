@@ -1245,6 +1245,8 @@ body.dropping::after {
 #calbox .hd .grow { flex: 1; }
 #calbox .hd .sum { color: var(--ink-2); font-size: .82em; }
 #calbox .hd .teamat { color: var(--ink-2); font-size: .78em; border-style: dashed }
+#calbox .hd .teamat.bad { color: #d8756f; border-color: #d8756f }
+#calbox .hd .teamnow { font-size: .78em }
 #calbox .hd button { padding: 4px 11px; border-radius: 8px; font-size: 12.5px;
   border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
 #calbox .hd button:hover { background: var(--hover); }
@@ -1562,7 +1564,10 @@ body.dropping::after {
       <span class="grow"></span>
       <span class="sum"></span>
       <!-- 読んでいるあいだの入口（依頼 475）。合言葉は、ここでは訊かない。 -->
-      <button class="teamat" title="読み直す・別のファイルにする・やめる" hidden></button>
+      <button class="teamat" hidden></button>
+      <!-- **日を替えても読み直さない**（依頼 476）── 読むのは、ここを
+           押したときと、毎時十分。 -->
+      <button class="teamnow" title="いま読みにいきます" hidden>更新</button>
       <button class="x">閉じる</button>
     </div>
     <div class="body">

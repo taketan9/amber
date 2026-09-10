@@ -6533,6 +6533,9 @@ async function cmdCalendar() {
     }
     el('cal').hidden = false;
     await hereAsk();
+    // **開いたときに、いま置いてある一枚を読む**（依頼 476）。ここから先は
+    // 日を替えても読み直さない ── 読むのは「更新」を押したときと、毎時十分。
+    if (teamFile && !teamPlans) { await teamLoad(); teamClock(); }
     await drawCal();
 }
 
@@ -6571,7 +6574,7 @@ async function drawCal() {
         calSlots = calSlots.concat(await hereFor(y, m));
         const far = await awayFor(y, m);
         awaySlots = awaySlots.concat(far);
-        calSlots = calSlots.concat(far, await teamFor(y, m));
+        calSlots = calSlots.concat(far, teamFor(y, m));
     }
     if (bad) say('カレンダーを読めません: ' + bad);
     calSlots = calSlots.sort((a, b) =>
@@ -6608,7 +6611,13 @@ async function drawCal() {
     // ── 読み直す・別の紙にする・やめるは、ここから。
     const at = box.querySelector('.teamat');
     at.hidden = !teamFile;
-    at.textContent = teamAt ? 'チームは ' + teamAt + ' 時点' : 'チームの予定表';
+    at.textContent = teamBad ? 'チームは読めません'
+        : teamAt ? 'チームは ' + teamAt + ' 時点' : 'チームの予定表';
+    at.classList.toggle('bad', !!teamBad);
+    at.title = teamBad
+        ? teamBad + '（' + shortPath(teamFile) + '）'
+        : shortPath(teamFile) + ' ── 押すと、別のファイルにするか、やめられます';
+    box.querySelector('.teamnow').hidden = !teamFile;
 
     box.querySelector('.month').hidden = calView !== 'month';
     box.querySelector('.hours').hidden = calView === 'month' || grouped;
@@ -6912,10 +6921,21 @@ async function cmdWhoPick() {
 /* ── チームの予定表（CSV）── */
 
 /// 読む一枚の場所。**この機械の中だけに持つ**（ノートにも `.amber/` にも
-/// 書かない ── あそこはフォルダと一緒に旅をする）。
-let teamAt = '';
+/// 書かない ── あそこはフォルダと一緒に旅をする。会社のファイルの
+/// 在りかが、家の機械にまで伝わることになる）。
 let teamFile = '';
+/// 最後に読めた一枚。**月ごとには読み直さない**（依頼 476）── この紙は
+/// 「今日から何日ぶん」の一枚で、月では分かれていない。月を替えるたびに
+/// 読み直すと、途中で置き換わったときに**月によって時点の違うものが
+/// 並ぶ**ことになる。読むのは、開いたとき・「更新」を押したとき・毎時十分。
+let teamPlans = null;
 let teamPeople = [];
+/// その紙が「いつ時点」か。
+let teamAt = '';
+/// 読めなかったときの言い分。
+let teamBad = '';
+/// 次に読みにいく約束。
+let teamTick = null;
 
 /// 読む紙を決める。
 async function cmdTeam() {
@@ -6924,8 +6944,12 @@ async function cmdTeam() {
     ]);
     if (!pick) return;
     teamFile = pick;
+    teamPlans = null;
     window.amber.remember({ teamFile });
-    say('チームの予定表を読むようにしました');
+    await teamLoad();
+    teamClock();
+    say(teamBad ? '読めません: ' + teamBad
+        : 'チームの予定表を読むようにしました' + (teamAt ? '（' + teamAt + ' 時点）' : ''));
     if (!el('cal').hidden) await drawCal();
 }
 
@@ -6936,13 +6960,11 @@ async function cmdTeam() {
 /// 読んでいるあいだは、いつ時点かの字がそのまま入口になる。
 async function cmdTeamHere() {
     const pick = await askPick('チームの予定表', [
-        { name: '読み直す', sub: teamAt ? 'いまは ' + teamAt + ' 時点' : '' },
         { name: '別のファイルにする', sub: shortPath(teamFile) },
         { name: '読むのをやめる' },
     ].map((r, n) => ({ ...r, value: n })), '', true);
     if (pick === null) return;
-    if (pick === 0) { await drawCal(); say('読み直しました'); return; }
-    if (pick === 1) { await cmdTeam(); return; }
+    if (pick === 0) { await cmdTeam(); return; }
     await cmdTeamOff();
 }
 
@@ -6950,31 +6972,86 @@ async function cmdTeamHere() {
 async function cmdTeamOff() {
     if (!teamFile) { say('チームの予定表は読んでいません'); return; }
     teamFile = '';
+    teamPlans = null;
     teamPeople = [];
     teamAt = '';
+    teamBad = '';
+    teamClock();
     window.amber.remember({ teamFile });
     say('チームの予定表を読むのをやめました');
     if (!el('cal').hidden) await drawCal();
 }
 
-/// ひと月ぶん。
+/// **いま読みにいく。**「更新」を押したとき。
 ///
-/// **読めなくても、ほかは出す。** 会社の網の中にしか無い紙なので、
-/// 家では必ず読めない ── そのたびに騒ぐと、家では毎回叱られる。
-async function teamFor(y, m) {
-    if (!teamFile) { teamPeople = []; teamAt = ''; return []; }
+/// **日を替えたときには読まない**（依頼 476）── 前の月を見に戻ったら
+/// 紙が入れ替わっていた、というのが画面の上でいちばん分かりにくい。
+/// 読むのは、人が読めと言ったときか、決めた時刻。
+async function cmdTeamNow() {
+    if (!teamFile) return;
+    say('読みにいっています…');
+    await teamLoad();
+    if (!el('cal').hidden) await drawCal();
+    say(teamBad ? '読めません: ' + teamBad
+        : '読み直しました' + (teamAt ? '（' + teamAt + ' 時点）' : ''));
+}
+
+/// 一枚まるごと読む。
+///
+/// **読めなくても、前に読めたものは捨てない。** 会社の網の中にしか無い
+/// 紙なので、家では必ず読めない ── そのたびに段がまるごと消えると、
+/// 「読めていない」のか「予定が無い」のかが画面から区別できなくなる。
+async function teamLoad() {
+    if (!teamFile) { teamPlans = null; teamPeople = []; teamAt = ''; teamBad = ''; return; }
     try {
-        const got = await window.amber.call('team', { path: teamFile, year: y, month: m });
+        const got = await window.amber.call('team', { path: teamFile });
+        teamPlans = got.days || [];
         teamPeople = got.people || [];
-        // 「2026-09-10T08:15:00+09:00」を「9/10 08:15」に。
-        const w = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}:\d{2})/.exec(String(got.fetched || ''));
-        teamAt = w ? Number(w[2]) + '/' + Number(w[3]) + ' ' + w[4] : '';
-        return got.days || [];
-    } catch {
-        teamPeople = [];
-        teamAt = '';
-        return [];
+        teamAt = teamStamp(got.fetched);
+        teamBad = '';
+    } catch (e) {
+        teamBad = why(e);
     }
+}
+
+/// 「2026-09-10T08:15:00+09:00」を「9/10 08:15」に。
+function teamStamp(text) {
+    const w = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}:\d{2})/.exec(String(text || ''));
+    return w ? Number(w[2]) + '/' + Number(w[3]) + ' ' + w[4] : '';
+}
+
+/// ひと月ぶん。**持っている一枚から選ぶだけ** ── ここではファイルを開かない。
+function teamFor(y, m) {
+    if (!teamPlans) return [];
+    const want = String(y) + '-' + String(m).padStart(2, '0');
+    return teamPlans.filter((p) => p.day.startsWith(want));
+}
+
+/// **次の「毎時十分」**（依頼 476）。
+///
+/// 元の CSV は毎時零分に置き換わる。**零分ちょうどには読まない** ──
+/// 書いている途中の紙を読むと、列の揃っていない半分だけの表になる。
+/// 十分待てば書き終わっている。
+function nextTenPast(now) {
+    const at = new Date(now);
+    at.setMinutes(10, 0, 0);
+    if (at <= now) at.setHours(at.getHours() + 1);
+    return at;
+}
+
+/// 約束を置き直す。**読んでいないときは置かない。**
+function teamClock() {
+    if (teamTick) { clearTimeout(teamTick); teamTick = null; }
+    if (!teamFile) return;
+    const now = new Date();
+    teamTick = setTimeout(async () => {
+        teamTick = null;
+        await teamLoad();
+        if (!el('cal').hidden) await drawCal();
+        // **次の約束は、起きてから置く。** 先に置くと、寝ていた機械が
+        // 起きたときに何度もまとめて鳴る。
+        teamClock();
+    }, nextTenPast(now) - now);
 }
 
 
@@ -7109,6 +7186,7 @@ el('cal').addEventListener('click', async (e) => {
         return;
     }
     if (e.target.closest('.whobtn')) { await cmdWhoPick(); return; }
+    if (e.target.closest('.teamnow')) { await cmdTeamNow(); return; }
     if (e.target.closest('.teamat')) { await cmdTeamHere(); return; }
     // 名前を押したら、その人を引っ込める。**戻し方をその場で言う** ──
     // 押して消えたものの戻し方が画面のどこにも無いのが、いちばん困る。
@@ -9482,7 +9560,7 @@ const escapeAttr = escapeHtml;
     if (['month', 'week', 'day'].includes(saved.calView)) calView = saved.calView;
     calGroup = !!saved.calGroup;
     if (Array.isArray(saved.calHide)) calHide = saved.calHide.filter((k) => typeof k === 'string');
-    if (typeof saved.teamFile === 'string') teamFile = saved.teamFile;
+    if (typeof saved.teamFile === 'string') { teamFile = saved.teamFile; teamClock(); }
     noBins = Array.isArray(saved.noBins) ? saved.noBins : [];
     incomings = (saved.incomings && typeof saved.incomings === 'object') ? saved.incomings : {};
     // 外から動いたら教えてもらう ── 同じフォルダを二つの端末で触るのが
