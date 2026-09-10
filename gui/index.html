@@ -491,6 +491,13 @@ body.mac #top { padding-top: 30px; }
    縮むのは右端の meta のほうにする。 */
 #title {
   font-size: 17px; font-weight: 700; flex: 1 1 auto; min-width: 9ch;
+  /* **帯から自分を切り抜く。** `#top` は窓ごと引きずる四角
+     （`-webkit-app-region: drag`）で、そこから抜けるには **`no-drag` と
+     書くしかない** ── 何も書かないと `none` になるが、`none` は
+     「引きずらない」ではなく「切り抜かない」で、親の四角に含まれたまま。
+     OS が先に押しを取るので `onclick` は一度も鳴らず、題を押しても
+     窓が動くだけで字が打てなかった（実際にそうなっていた・依頼 477）。 */
+  -webkit-app-region: no-drag;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   /* 押せば直せる。**ふだんはボタンに見せない** ── 帯の題は読むものが先で、
      直すのはたまに。触れたときだけ、直せることが分かればいい。 */
@@ -528,14 +535,15 @@ body.mac #top { padding-top: 30px; }
 /* **⋯ と ⚙ の区別を、形ではなく言葉で付ける。**
    前は点三つと歯車が並んでいて、どちらがノートの話でどちらがアプリの話か
    画面のどこにも書いていなかった。片方に名前を付ける。 */
-#dots, #gear {
+#tocbtn, #dots, #gear {
   flex: none; padding: 3px 8px; border-radius: 8px;
   color: var(--ink-2); -webkit-app-region: no-drag; line-height: 1.3;
 }
+#tocbtn { font-size: 15px }
 #dots { font-size: 12.5px; font-weight: 600; }
 /* 歯車は絵なので、字と同じ大きさだと小さく見える。 */
 #gear { font-size: 23px; padding: 0 8px; line-height: 1; }
-#dots:hover, #gear:hover { background: var(--hover); color: var(--ink); }
+#tocbtn:hover, #dots:hover, #gear:hover { background: var(--hover); color: var(--ink); }
 
 /* 戻す・やり直す。**歯車の左** ── ノートに対してすることなので、
    amber に対してすること（歯車）より手前に置く。戻れないときは薄くする
@@ -862,11 +870,15 @@ body.vim #vim { display: block; }
 /* ── 小窓 ── 命令を選ぶ・字を打つ・一つ選ぶ、を一つで賄う ──
    別々に作ると、三つの微妙に違う「Esc で閉じる」ができる。 */
 #veil {
-  position: fixed; inset: 0; z-index: 30; display: flex;
+  /* **小窓は、何よりも上。** カレンダー（60）や「使われていない画像」
+     （60）から呼ばれた小窓が下に開くと、暗幕の裏で開いたまま押せない
+     ── 画面の上では「押しても何も起きない」にしか見えない
+     （実際に「予定を足す」がそうなっていた・依頼 477）。 */
+  position: fixed; inset: 0; z-index: 80; display: flex;
   justify-content: center; align-items: flex-start; padding-top: 12vh;
   background: rgba(0,0,0,.28);
-  /* 小窓は帯より下に出るので今は当たっていないが、上げた日に黙って
-     押せなくなる ── 切っておく（理由は `#studio` に書いた）。 */
+  /* 帯（`-webkit-app-region: drag`）より上に出るので、切っておかないと
+     黙って押せなくなる（理由は `#studio` に書いた）。 */
   -webkit-app-region: no-drag;
 }
 #veil[hidden] { display: none !important; }
@@ -1234,11 +1246,12 @@ body.dropping::after {
 /* ── カレンダー（依頼 453）──
    月の表と、その日の中身。**ノートを組んだまま出せるのが、この道具で
    カレンダーを持つ意味** ── 予定表とノートが別のアプリなら作れない。 */
-#cal { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.5);
-  display: flex; align-items: center; justify-content: center; }
-#calbox { width: min(66rem, 94vw); height: min(44rem, 88vh); display: flex;
-  flex-direction: column; background: var(--paper); color: var(--ink);
-  border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+/* **カレンダーは面の一つ**（依頼 478）── ノートと同じ場所に、同じ広さで
+   出す。小窓として重ねていたころは左右が狭く、全画面にしても広がらな
+   かった（予定を眺めるのは「ちょっと開く」ではなく「しばらく居る」）。 */
+#cal { flex: 1; min-height: 0; min-width: 0; display: flex; }
+#calbox { flex: 1; min-width: 0; display: flex; flex-direction: column;
+  background: var(--paper); color: var(--ink); overflow: hidden; }
 #calbox .hd { display: flex; align-items: center; gap: .5rem;
   padding: .6rem .9rem; border-bottom: 1px solid var(--line); }
 #calbox .hd .mo { font-size: 1.05rem; min-width: 7.5rem; }
@@ -1250,10 +1263,11 @@ body.dropping::after {
 #calbox .hd button { padding: 4px 11px; border-radius: 8px; font-size: 12.5px;
   border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
 #calbox .hd button:hover { background: var(--hover); }
-#calbox .body { flex: 1; display: grid; grid-template-columns: 1fr 17rem; min-height: 0; }
-#calbox .month { padding: .6rem .7rem; display: flex; flex-direction: column; min-height: 0; }
+#calbox .body { flex: 1; display: flex; min-height: 0; min-width: 0; }
+#calbox .body > * { flex: 1; min-width: 0 }
+#calbox .month { padding: .7rem .9rem; display: flex; flex-direction: column; min-height: 0; }
 #calbox .dow { display: grid; grid-template-columns: repeat(7,1fr); gap: 3px; }
-#calbox .dow i { font-style: normal; text-align: center; font-size: .72em;
+#calbox .dow i { font-style: normal; text-align: center; font-size: .85em;
   color: var(--ink-3); padding-bottom: 3px; }
 #calbox .dow i.sat { color: #6f9fd8 } #calbox .dow i.sun { color: #d8756f }
 #calbox .days { flex: 1; display: grid; grid-template-columns: repeat(7,1fr);
@@ -1265,9 +1279,9 @@ body.dropping::after {
 #calbox .d.dim { opacity: .45 }
 #calbox .d.on { border-color: var(--line); background: var(--hover) }
 #calbox .d.today { border-color: var(--amber) }
-#calbox .d .n { font-size: .72em; color: var(--ink-2); font-variant-numeric: tabular-nums }
+#calbox .d .n { font-size: .85em; color: var(--ink-2); font-variant-numeric: tabular-nums }
 #calbox .d.today .n { color: var(--amber); font-weight: 700 }
-#calbox .d .ev { font-size: .68em; line-height: 1.5; margin-top: 1px; padding: 0 3px;
+#calbox .d .ev { font-size: .78em; line-height: 1.55; margin-top: 2px; padding: 1px 5px;
   border-left: 2px solid var(--amber); border-radius: 2px; background: var(--sel);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #calbox .d .ev.note { background: none; border-left-color: transparent; color: var(--ink-3) }
@@ -1275,29 +1289,18 @@ body.dropping::after {
    ものが同じ顔をしていると、押してから分かることになる。 */
 #calbox .d .ev.away { border-left-color: #6f9fd8;
   background: color-mix(in srgb, #6f9fd8 16%, transparent) }
-#calbox .side .slot.away .w b { color: #4a7fbd }
 /* **この機械の予定表のものは、直せる。** よそ（読むだけ）と、自分の
    ノート（琥珀）と、三つを見分けられるように。 */
 #calbox .d .ev.here { border-left-color: #5fa87a;
   background: color-mix(in srgb, #5fa87a 16%, transparent) }
-#calbox .side .slot.here .w b { color: #3f8a5f }
-#calbox .d .more { font-size: .66em; color: var(--ink-3); padding-left: 3px }
-#calbox .side { border-left: 1px solid var(--line); padding: .7rem .8rem;
-  overflow-y: auto; background: var(--rail); }
-#calbox .side .h { font-weight: 700; margin-bottom: .4rem }
-#calbox .side .h small { color: var(--ink-3); font-weight: 400; margin-left: .4em }
-#calbox .side .slot { display: flex; gap: .5rem; padding: 3px 0; cursor: pointer;
-  border-radius: 5px; font-size: .84em; }
-#calbox .side .slot:hover { background: var(--hover) }
-#calbox .side .slot .t { color: var(--ink-3); min-width: 3rem;
-  font-variant-numeric: tabular-nums; }
-#calbox .side .slot .w b { display: block; font-weight: 600 }
-#calbox .side .slot .w span { color: var(--ink-3); font-size: .9em }
-#calbox .side .none { color: var(--ink-3); font-size: .84em; padding: .3rem 0 }
-#calbox .side .add { margin-top: .7rem; width: 100%; padding: 5px;
-  border: 1px dashed var(--line); border-radius: 8px; color: var(--ink-2);
-  font-size: .84em; background: none; }
-#calbox .side .add:hover { border-color: var(--amber); color: var(--amber) }
+/* チームの予定は紫（日・週の表と揃える）。**月の表だけ色が無いと、
+   同じ予定が見方によって別のものに見える。** */
+#calbox .d .ev.team { border-left-color: #b98ad0;
+  background: color-mix(in srgb, #b98ad0 16%, transparent) }
+#calbox .d .ev.shut { color: var(--ink-2);
+  background-image: repeating-linear-gradient(135deg, transparent 0 5px,
+    color-mix(in srgb, var(--ink-3) 22%, transparent) 5px 10px); }
+#calbox .d .more { font-size: .74em; color: var(--ink-3); padding-left: 4px }
 
 /* 日・週の表（依頼 468）── 時間が縦に並ぶ。 */
 #calbox .seg { display: inline-flex; border: 1px solid var(--line);
@@ -1314,22 +1317,28 @@ body.dropping::after {
   position: relative; }
 #calbox .lane { border-left: 1px solid var(--line); position: relative; }
 #calbox .lane:first-child { border-left: 0 }
-#calbox .lane .hr { height: 2.1rem; border-top: 1px solid var(--line); }
+#calbox .lane .hr { height: 3rem; border-top: 1px solid var(--line); }
 #calbox .lane .hr:first-child { border-top: 0 }
-#calbox .clock { text-align: right; padding-right: .4rem; color: var(--ink-3);
-  font-size: .68em; font-variant-numeric: tabular-nums; }
-#calbox .clock div { height: 2.1rem; }
-#calbox .hd { text-align: center; font-size: .72em; color: var(--ink-3);
-  padding: 2px 0; }
+#calbox .clock { text-align: right; padding-right: .5rem; color: var(--ink-3);
+  font-size: .82em; font-variant-numeric: tabular-nums; }
+#calbox .clock div { height: 3rem; }
+#calbox .hd { text-align: center; font-size: .85em; color: var(--ink-3);
+  padding: 4px 0; }
 #calbox .hd.sat { color: #6f9fd8 } #calbox .hd.sun { color: #d8756f }
 #calbox .hd.today { color: var(--amber); font-weight: 700 }
-#calbox .blk { position: absolute; left: 2px; right: 2px; border-radius: 4px;
-  padding: 0 4px; font-size: .68em; line-height: 1.35; overflow: hidden;
+#calbox .blk { position: absolute; left: 2px; right: 2px; border-radius: 5px;
+  padding: 1px 6px; font-size: .82em; line-height: 1.4; overflow: hidden;
   border-left: 2px solid var(--amber); background: var(--sel); cursor: pointer; }
 #calbox .blk.away { border-left-color: #6f9fd8;
   background: color-mix(in srgb, #6f9fd8 16%, transparent) }
 #calbox .blk.here { border-left-color: #5fa87a;
   background: color-mix(in srgb, #5fa87a 16%, transparent) }
+#calbox .blk.team { border-left-color: #b98ad0;
+  background: color-mix(in srgb, #b98ad0 16%, transparent) }
+/* 中身の見えない予定は縞 ── どの見方でも同じ顔で出す。 */
+#calbox .blk.shut, #calbox .allday .ad.shut { color: var(--ink-2);
+  background-image: repeating-linear-gradient(135deg, transparent 0 5px,
+    color-mix(in srgb, var(--ink-3) 22%, transparent) 5px 10px); }
 #calbox .blk.note { border-left-color: transparent; background: none; color: var(--ink-3) }
 
 /* みんなの予定を、人ごとに並べる（依頼 471）。
@@ -1343,7 +1352,7 @@ body.dropping::after {
 #calbox .crowd .axis { display: flex; position: sticky; top: 0; z-index: 2;
   background: var(--paper); border-bottom: 1px solid var(--line); }
 #calbox .crowd .ticks { display: flex }
-#calbox .crowd .tk { flex: none; font-size: .68em; color: var(--ink-3); padding: 2px 0 3px 4px;
+#calbox .crowd .tk { flex: none; font-size: .82em; color: var(--ink-3); padding: 3px 0 4px 5px;
   border-left: 1px solid var(--line); font-variant-numeric: tabular-nums; }
 #calbox .crowd .tk.sat { color: #6f9fd8 } #calbox .crowd .tk.sun { color: #d8756f }
 #calbox .crowd .tk.today { color: var(--amber); font-weight: 700 }
@@ -1351,7 +1360,7 @@ body.dropping::after {
    いて、そちらの `padding-left: 16px` が段にも効き、その段の目盛りだけ
    16 ずれていた（実際にずれた）── 一般的すぎる名前は、いつか必ず当たる。 */
 #calbox .crowd .ln { display: flex; border-bottom: 1px solid var(--line);
-  min-height: 2.2rem; padding: 0 }
+  min-height: 2.8rem; padding: 0 }
 /* **段の下地は、時間ぶんの幅を持つ。** 日は一日を横に流すので、幅を
    画面のぶんしか取らないと、区切り線と段の下線が途中で切れる。 */
 #calbox .crowd:not(.wk) .rows, #calbox .crowd:not(.wk) .ln,
@@ -1362,10 +1371,10 @@ body.dropping::after {
    flex の中では `min-width: auto` が効いていて、折り返さない字は
    その字の幅より細くならない ── 長い名前の段だけ欄が広がり、その段の
    目盛りだけ右へずれていた（実際にずれた）。`min-width: 0` で床を外す。 */
-#calbox .crowd .who { flex: 0 0 8.5rem; width: 8.5rem; min-width: 0;
+#calbox .crowd .who { flex: 0 0 10rem; width: 10rem; min-width: 0;
   position: sticky; left: 0; z-index: 1;
-  background: var(--rail); border-right: 1px solid var(--line); padding: 4px 6px;
-  font-size: .76em; display: flex; align-items: center; }
+  background: var(--rail); border-right: 1px solid var(--line); padding: 4px 8px;
+  font-size: .88em; display: flex; align-items: center; }
 #calbox .crowd .rows .who { cursor: pointer }
 #calbox .crowd .rows .who:hover { background: var(--hover) }
 #calbox .crowd .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1383,8 +1392,8 @@ body.dropping::after {
 #calbox .crowd .vr { position: absolute; top: 0; bottom: 0; width: 1px;
   background: var(--line); opacity: .45 }
 #calbox .crowd .vr.thick { opacity: .9 }
-#calbox .crowd .bar { position: absolute; top: 3px; bottom: 3px; border-radius: 4px;
-  padding: 1px 5px; font-size: .68em; line-height: 1.4; overflow: hidden;
+#calbox .crowd .bar { position: absolute; top: 3px; bottom: 3px; border-radius: 5px;
+  padding: 2px 6px; font-size: .8em; line-height: 1.5; overflow: hidden;
   white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
   border-left: 2px solid var(--amber); background: var(--sel); }
 #calbox .crowd .bar.away { border-left-color: #6f9fd8;
@@ -1401,7 +1410,7 @@ body.dropping::after {
 /* 終日は、一日ぶんの帯。**「終日」と書く** ── 00:00 と書くと、
    その時刻に何かがあるように読める。 */
 #calbox .crowd .span { position: absolute; left: 0; right: 0; top: 3px; bottom: 3px;
-  border-radius: 4px; font-size: .68em; padding: 1px 0; color: var(--ink-2);
+  border-radius: 5px; font-size: .8em; padding: 2px 0; color: var(--ink-2);
   background: color-mix(in srgb, var(--ink-3) 26%, transparent);
   white-space: nowrap; cursor: pointer; line-height: 1.6;
   border-left: 2px solid color-mix(in srgb, var(--ink-3) 55%, transparent); }
@@ -1409,7 +1418,7 @@ body.dropping::after {
    なってしまい、中の貼りつく字がどこにも貼りつかなくなる。 */
 /* 貼りつく先は**名前の欄の右**。`0` にすると、名前の欄の下に潜って
    見えなくなる（あちらも貼りついていて、下地を持っている）。 */
-#calbox .crowd .span b { position: sticky; left: 8.5rem; display: block;
+#calbox .crowd .span b { position: sticky; left: 10rem; display: block;
   width: fit-content; max-width: 100%; padding: 0 5px; font-weight: 400;
   overflow: hidden; text-overflow: ellipsis; }
 #calbox .crowd .span i, #calbox .crowd .chip.all i { font-style: normal;
@@ -1421,7 +1430,7 @@ body.dropping::after {
 #calbox .crowd.wk .tk, #calbox .crowd.wk .cell { flex: 1 1 0; width: auto; min-width: 0 }
 #calbox .crowd .cell { flex: none; width: 132px; border-left: 1px solid var(--line);
   padding: 1px 3px; display: flex; flex-direction: column; gap: 2px; min-width: 0 }
-#calbox .crowd .chip { font-size: .68em; line-height: 1.45; padding: 0 4px;
+#calbox .crowd .chip { font-size: .78em; line-height: 1.55; padding: 1px 5px;
   border-radius: 3px; border-left: 2px solid var(--amber); background: var(--sel);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer }
 #calbox .crowd .chip i { font-style: normal; color: var(--ink-3);
@@ -1433,11 +1442,13 @@ body.dropping::after {
 #calbox .crowd .chip.team { border-left-color: #b98ad0;
   background: color-mix(in srgb, #b98ad0 16%, transparent) }
 #calbox .crowd .more { font-size: .64em; color: var(--ink-3); padding-left: 4px }
-#calbox .allday .ad { font-size: .68em; padding: 1px 4px; border-radius: 3px;
+#calbox .allday .ad { font-size: .8em; padding: 2px 6px; border-radius: 4px;
   border-left: 2px solid var(--amber); background: var(--sel); cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #calbox .allday .ad.away { border-left-color: #6f9fd8;
   background: color-mix(in srgb, #6f9fd8 16%, transparent) }
+#calbox .allday .ad.team { border-left-color: #b98ad0;
+  background: color-mix(in srgb, #b98ad0 16%, transparent) }
 #calbox .allday .ad.here { border-left-color: #5fa87a;
   background: color-mix(in srgb, #5fa87a 16%, transparent) }
 </style>
@@ -1514,6 +1525,50 @@ body.dropping::after {
       <div id="marks"></div>
       <div id="vim"></div>
     </div>
+  <!-- **カレンダー**（依頼 453・478）。ノートと同じ場所に、面として出す
+       ── 小窓として重ねていたころは左右が狭く、全画面にしても広がらな
+       かった。右のその日の欄は落とした（同じことが表の中に出ている）。 -->
+  <div id="cal" hidden><div id="calbox">
+    <div class="hd">
+      <button class="prev" title="前へ">‹</button>
+      <b class="mo"></b>
+      <button class="next" title="次へ">›</button>
+      <button class="today">今日</button>
+      <span class="seg">
+        <button data-view="day">日</button>
+        <button data-view="week">週</button>
+        <button data-view="month">月</button>
+      </span>
+      <!-- 横に時間、縦に人（依頼 471）。日と週のときだけ出す。 -->
+      <button class="crowdbtn" title="横に時間、縦に人で並べます" hidden>グループカレンダー</button>
+      <button class="whobtn" title="並べる人を選びます" hidden>人を選ぶ</button>
+      <!-- **予定を足す道は、いつも見えているところに。** 前は右の欄の
+           いちばん下にあって、日を選ばないと出てこなかった。 -->
+      <button class="add">＋ 予定を登録する</button>
+      <span class="grow"></span>
+      <span class="sum"></span>
+      <!-- 読んでいるあいだの入口（依頼 475）。合言葉は、ここでは訊かない。 -->
+      <button class="teamat" hidden></button>
+      <!-- **日を替えても読み直さない**（依頼 476）── 読むのは、ここを
+           押したときと、毎時十分。 -->
+      <button class="teamnow" title="いま読みにいきます" hidden>更新</button>
+      <button class="x">閉じる</button>
+    </div>
+    <div class="body">
+      <div class="month">
+        <div class="dow"><i>月</i><i>火</i><i>水</i><i>木</i><i>金</i><i class="sat">土</i><i class="sun">日</i></div>
+        <div class="days"></div>
+      </div>
+      <!-- 週と日は、時間が縦に並ぶ ── 「いつなら空いているか」は、
+           月の表からは読み取れない。 -->
+      <div class="hours" hidden>
+        <div class="allday"></div>
+        <div class="cols"></div>
+      </div>
+      <!-- みんなの予定を、人ごとに一段。横は時間（日）か日付（週）。 -->
+      <div class="crowd" hidden></div>
+    </div>
+  </div></div>
   </div>
   <div id="veil" hidden><div id="sheet">
     <div class="brand" hidden></div>
@@ -1544,47 +1599,6 @@ body.dropping::after {
     </div>
     <div class="warn" hidden></div>
     <div class="grid"></div>
-  </div></div>
-  <!-- **カレンダー**（依頼 453）。ひと月ぶんを一度で取り、日を押すと
-       右にその日が開く。よそのカレンダーは、あとでここに足す。 -->
-  <div id="cal" hidden><div id="calbox">
-    <div class="hd">
-      <button class="prev" title="前へ">‹</button>
-      <b class="mo"></b>
-      <button class="next" title="次へ">›</button>
-      <button class="today">今日</button>
-      <span class="seg">
-        <button data-view="day">日</button>
-        <button data-view="week">週</button>
-        <button data-view="month">月</button>
-      </span>
-      <!-- 横に時間、縦に人（依頼 471）。日と週のときだけ出す。 -->
-      <button class="crowdbtn" title="横に時間、縦に人で並べます" hidden>グループカレンダー</button>
-      <button class="whobtn" title="並べる人を選びます" hidden>人を選ぶ</button>
-      <span class="grow"></span>
-      <span class="sum"></span>
-      <!-- 読んでいるあいだの入口（依頼 475）。合言葉は、ここでは訊かない。 -->
-      <button class="teamat" hidden></button>
-      <!-- **日を替えても読み直さない**（依頼 476）── 読むのは、ここを
-           押したときと、毎時十分。 -->
-      <button class="teamnow" title="いま読みにいきます" hidden>更新</button>
-      <button class="x">閉じる</button>
-    </div>
-    <div class="body">
-      <div class="month">
-        <div class="dow"><i>月</i><i>火</i><i>水</i><i>木</i><i>金</i><i class="sat">土</i><i class="sun">日</i></div>
-        <div class="days"></div>
-      </div>
-      <!-- 週と日は、時間が縦に並ぶ ── 「いつなら空いているか」は、
-           月の表からは読み取れない。 -->
-      <div class="hours" hidden>
-        <div class="allday"></div>
-        <div class="cols"></div>
-      </div>
-      <!-- みんなの予定を、人ごとに一段。横は時間（日）か日付（週）。 -->
-      <div class="crowd" hidden></div>
-      <div class="side"></div>
-    </div>
   </div></div>
   <div id="studio" hidden><div id="studiobox">
     <div class="hd">

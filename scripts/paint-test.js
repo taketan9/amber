@@ -45,5 +45,39 @@ for (const rel of files) {
     console.log(`${rel}: 色の名前 ${known.size} 個、呼び出し ${used.size} 種`);
 }
 
-console.log(bad ? `\n${bad} 件、無い色を呼んでいます` : '\n呼んでいる色は、ぜんぶ定義されています');
+/* **同じ予定は、どの見方でも同じ色**（依頼 478）。
+ *
+ * カレンダーには見方が五つある（月の升目・週と日の帯・終日の段・
+ * グループの帯・グループの升目）。色は五か所に別々に書いてあるので、
+ * 種類を一つ足すと**どこかを書き忘れる** ── 実際、チームの紫を足した
+ * とき、月の升目と平の週表の二か所が琥珀のまま残っていた。同じ予定が
+ * 見方によって別のものに見えるのは、いちばん困る。
+ */
+{
+    const src = fs.readFileSync(path.join(__dirname, '..', 'gui', 'index.html'), 'utf8');
+    // 色を付けている種類（自分のノートは既定の琥珀なので数えない）。
+    const kinds = ['away', 'here', 'team'];
+    const places = [
+        ['月の升目', '#calbox .d .ev.'],
+        ['週と日の帯', '#calbox .blk.'],
+        ['終日の段', '#calbox .allday .ad.'],
+        ['グループの帯', '#calbox .crowd .bar.'],
+        ['グループの升目', '#calbox .crowd .chip.'],
+    ];
+    for (const kind of kinds) {
+        for (const [where, prefix] of places) {
+            // **前方一致では数えない。** `.team` は `.teamX` にも当たるので、
+            // 名前の切れ目まで見る（変異テストがそこで黙った）。
+            const at = new RegExp(
+                (prefix + kind).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\w-])');
+            if (at.test(src)) continue;
+            bad += 1;
+            console.log(`✗ ${where}に「${kind}」の色がありません`
+                + ` ── 同じ予定が、見方によって別の色になります`);
+        }
+    }
+    console.log(`予定の色: ${kinds.length} 種 × ${places.length} の見方`);
+}
+
+console.log(bad ? `\n${bad} 件、色が揃っていません` : '\n呼んでいる色は、ぜんぶ定義されていて、見方ごとに揃っています');
 process.exit(bad ? 1 : 0);

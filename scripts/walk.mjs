@@ -661,6 +661,36 @@ await step('使われていない画像：小さく並ぶ', `
     return cells > 0 && cells === shots;
 `, true);
 
+/* ── 十六の三の二。**引きずる帯に、押すものを埋めない**（依頼 477） ── */
+
+await step('帯：押せるものが、窓を引きずる四角の中に埋まっていない', `
+    // **none は「引きずらない」ではなく「切り抜かない」。** 親が drag の
+    // 四角なら、何も書いていない子はその四角に含まれたままで、OS が先に
+    // 押しを取る ── onclick は一度も鳴らない。
+    //
+    // **作った押しでは捕まらない。** el.click() は OS を通らないので、
+    // 総ざらいはずっと素通りしていた（題が打てないのに「通りました」）。
+    // 見るのは、押しの通り道ではなく**四角のほう**。
+    const region = (x) => getComputedStyle(x).webkitAppRegion;
+    const stuck = [];
+    for (const x of document.querySelectorAll(
+        'button, input, textarea, select, a[href], [contenteditable], .dest, .row, .it, .slot')) {
+        if (x.closest('[hidden]')) continue;
+        let at = x;
+        while (at) {
+            const r = region(at);
+            if (r === 'no-drag') break;
+            if (r === 'drag') {
+                stuck.push('#' + (x.id || '') + '.' + (x.className || x.tagName));
+                break;
+            }
+            at = at.parentElement;
+        }
+    }
+    return stuck.length ? '引きずる帯の中に ' + stuck.length + ' 個: ' + stuck.slice(0, 5).join(' / ')
+        : true;
+`, true);
+
 /* ── 十六の四。**カレンダー**（依頼 453） ── */
 
 await step('カレンダー：左の列から開ける', `
@@ -673,8 +703,18 @@ await step('カレンダー：左の列から開ける', `
     // **一覧は動かない** ── カレンダーは行き先ではないので、押しても
     // 一覧が空にならないこと。
     const kept = state.dest.kind !== 'cal';
-    el('cal').hidden = true;
+    // **開いているあいだは、左の列のカレンダーが光る**（依頼 477）。
+    const lit = el('rail').querySelector('.dest[data-kind="cal"]').classList.contains('on');
+    // **ノートと同じ場所に出る**（依頼 478）── 小窓ではないので、
+    // ノートの面は引っ込んでいる。
+    const wide = el('cal').closest('#pane') && el('work').hidden;
+    calShut();
     if (!open) return '開きませんでした';
+    if (!lit) return '左の列が光りません';
+    if (!wide) return 'ノートと同じ場所に出ていません';
+    if (el('rail').querySelector('.dest[data-kind="cal"]').classList.contains('on')) {
+        return '閉じても光ったままです';
+    }
     return kept ? true : '一覧の行き先まで変わりました';
 `, true);
 
@@ -723,11 +763,16 @@ await step('カレンダー：終日の段に、ノートは出さない', `
     return twice === 0 ? true : '終日の段に ' + twice + ' 回出ています';
 `, true);
 
-await step('カレンダー：予定に出ているノートを、下でもう一度出さない', `
+await step('カレンダー：予定に出ているノートを、升目でもう一度出さない', `
+    // 面談は remind: を持つので予定として出る。その日に書いたノートとしても
+    // 数えられるが、同じ升目に二度並べない（二つあるように見える）。
+    calView = 'month';
     calDay = '2026-09-09';
-    drawCalDay();
-    const side = el('cal').querySelector('.side').textContent;
-    const hits = side.split('面談').length - 1;
+    await drawCal();
+    await new Promise((g) => setTimeout(g, 700));
+    const cell = el('cal').querySelector('.d[data-day="2026-09-09"]');
+    if (!cell) return '九日の升目がありません';
+    const hits = cell.textContent.split('面談').length - 1;
     return hits === 1 ? true : '面談が ' + hits + ' 回出ています';
 `, true);
 
@@ -742,7 +787,7 @@ await step('カレンダー：予定を足すと、ノートが一本できる',
     const made = calSlots.filter((s) => s.day === '2026-09-11' && s.title === '走査の予定');
     if (made.length !== 1) return '足した日に出ていません';
     if (made[0].at !== '11:00') return '時刻が ' + made[0].at + ' です';
-    el('cal').hidden = true;
+    calShut();
     return true;
 `, true);
 
@@ -946,7 +991,7 @@ if (process.env.TEAMCSV) {
         if (calSlots.some((s) => s.kind === 'team')) return 'まだ予定が残っています';
         calGroup = false;
         calView = 'month';
-        el('cal').hidden = true;
+        calShut();
         return true;
     `, true);
 }
@@ -984,13 +1029,18 @@ if (process.env.SITE) {
     `, true);
 
     await step('よその予定表：押しても、直せるふりをしない', `
+        calView = 'week';
+        calGroup = false;
         calDay = '2026-09-21';
-        drawCalDay();
-        const slot = el('cal').querySelector('.slot.away');
-        if (!slot) return 'よその予定が出ていません';
-        if (slot.dataset.at) return 'ノートが無いのに、開く先を持っています';
-        slot.click();
-        await new Promise((g) => setTimeout(g, 200));
+        await drawCal();
+        await new Promise((g) => setTimeout(g, 900));
+        const ad = el('cal').querySelector('.ad.away');
+        if (!ad) return 'よその予定が出ていません';
+        if (ad.dataset.at) return 'ノートが無いのに、開く先を持っています';
+        ad.click();
+        await new Promise((g) => setTimeout(g, 300));
+        calView = 'month';
+        await drawCal();
         return el('say').textContent.includes('直せません') ? true : '何も言いません';
     `, true);
 
@@ -998,7 +1048,7 @@ if (process.env.SITE) {
         setTimeout(() => closeSheet(away[0].url), 250);
         await cmdUnsubscribe();
         await new Promise((g) => setTimeout(g, 600));
-        el('cal').hidden = true;
+        calShut();
         return away.length === 0 ? true : 'まだ ' + away.length + ' 件あります';
     `, true);
 }
@@ -1095,7 +1145,7 @@ await step('この機械の予定表：許可が無くても、カレンダー�
     await new Promise((g) => setTimeout(g, 700));
     const open = !el('cal').hidden;
     const mine = calSlots.filter((s) => s.kind !== 'here').length;
-    el('cal').hidden = true;
+    calShut();
     if (!open) return '開きませんでした';
     return mine > 0 ? true : '自分の予定まで消えました';
 `, true);

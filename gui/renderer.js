@@ -218,7 +218,11 @@ function drawRail() {
     // **カレンダー**（依頼 454）。ここに置かないと、パレットを知っている
     // 人しか辿り着けない ── 電話は一覧の同じ段に出しているので、窓にも
     // 同じ場所に置く（本人が「カレンダーってどこだろう？」・依頼 467）。
-    rows.push('<div class="dest" data-kind="cal" data-what="" data-depth="0">'
+    // **開いているあいだは、ここが光る。** 行き先は変えない（一覧は
+    // そのまま）が、いま何を見ているかは画面が答えるべき（依頼 477）。
+    const calOpen = calOn;
+    rows.push('<div class="dest' + (calOpen ? ' on' : '')
+        + '" data-kind="cal" data-what="" data-depth="0">'
         + '<svg class="mk" viewBox="0 0 16 16" aria-hidden="true">'
         + '<g fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"'
         + ' stroke-linejoin="round">' + RAIL_MARKS.cal + '</g></svg>'
@@ -1352,6 +1356,9 @@ function rememberTabs() {
 }
 
 async function openNote(path, opts) {
+    // **ノートを開いたら、カレンダーからは出る**（依頼 478）── 同じ場所を
+    // 使うので、開いたノートがカレンダーの裏に隠れることになる。
+    calOn = false;
     // 一覧に無い一本（外から来たもの）は、`opts.guest` が持ってくる。
     const note = (opts && opts.guest) || state.notes.find((n) => n.path === path);
     if (!note) return;
@@ -3929,13 +3936,17 @@ function whole() {
 }
 
 function applyView() {
-    const open = !!state.open;
+    // **カレンダーを出しているあいだは、ノートの面は引っ込む**（依頼 478）。
+    // 同じ場所を使うので、両方は出せない。
+    el('cal').hidden = !calOn;
+    const open = !!state.open && !calOn;
     // **帯はいつも出す。** 設定（⚙）はノートを開いていなくても要る ──
     // 「保存場所を変える」はノートが一本も無いときにこそ押したい。
     el('top').hidden = false;
-    for (const id of ['title', 'views', 'count2', 'state', 'dots']) el(id).hidden = !open;
-    el('blank').hidden = open;
+    for (const id of ['title', 'views', 'count2', 'state', 'dots', 'tocbtn']) el(id).hidden = !open;
+    el('blank').hidden = open || calOn;
     el('work').hidden = !open;
+    if (calOn) el('strip').hidden = true;
     el('ed').hidden = !open || view === 'read';
     el('read').hidden = !open || view === 'write';
     el('toc').hidden = !open || !tocOn;
@@ -6519,6 +6530,13 @@ let calGroup = false;
 let calHide = [];
 /// その月ぶんの予定（core の `month` が返したまま）。
 let calSlots = [];
+/// **カレンダーは、面の一つ**（依頼 478）。
+///
+/// 前は小窓として上に重ねていたが、**重ねると左右が狭い**うえ、
+/// ノートと同じ場所に出せば全画面（F12）がそのまま効く ── 予定を
+/// 眺めるのは「ちょっと開く」ではなく「しばらく居る」ことなので、
+/// ノートと同じ広さで扱う。
+let calOn = false;
 
 /// カレンダーを開く。
 ///
@@ -6526,12 +6544,15 @@ let calSlots = [];
 /// カレンダーはノートではない ── 上に重ねて出し、ノートを開くときに閉じる。
 async function cmdCalendar() {
     if (!state.root) { say('保存場所がありません'); return; }
+    calOn = true;
     if (!calMonth) {
         const now = new Date();
         calMonth = { y: now.getFullYear(), m: now.getMonth() + 1 };
         calDay = ymd(now.getFullYear(), now.getMonth(), now.getDate());
     }
-    el('cal').hidden = false;
+    applyView();
+    // **左の列も、いま見ているものに合わせる**（依頼 477）。
+    drawRail();
     await hereAsk();
     // **開いたときに、いま置いてある一枚を読む**（依頼 476）。ここから先は
     // 日を替えても読み直さない ── 読むのは「更新」を押したときと、毎時十分。
@@ -6555,6 +6576,13 @@ function calMonths() {
     if (calView === 'day') add(calDay);
     else for (const d of weekOf(calDay)) add(d);
     return [...want.values()];
+}
+
+/// カレンダーを閉じて、ノートに戻る。
+function calShut() {
+    calOn = false;
+    applyView();
+    drawRail();
 }
 
 async function drawCal() {
@@ -6622,8 +6650,8 @@ async function drawCal() {
     box.querySelector('.month').hidden = calView !== 'month';
     box.querySelector('.hours').hidden = calView === 'month' || grouped;
     box.querySelector('.crowd').hidden = !grouped;
-    if (grouped) { drawCrowd(); drawCalDay(); return; }
-    if (calView !== 'month') { drawHours(); drawCalDay(); return; }
+    if (grouped) { drawCrowd(); return; }
+    if (calView !== 'month') { drawHours(); return; }
 
     // **月曜はじまり。** 一覧の並びも週も、ここでは月曜から。
     const first = new Date(calMonth.y, calMonth.m - 1, 1);
@@ -6645,7 +6673,7 @@ async function drawCal() {
         const sorted = plans.concat(
             mine.filter((s) => s.kind === 'note' && !shown.has(s.path)));
         const chips = sorted.slice(0, 3).map((s) =>
-            '<span class="ev ' + s.kind + '">'
+            '<span class="ev ' + s.kind + (s.shut ? ' shut' : '') + '">'
             + (s.at ? escapeHtml(s.at) + ' ' : '') + escapeHtml(s.title) + '</span>').join('');
         const rest = sorted.length > 3 ? '<span class="more">ほか ' + (sorted.length - 3) + '</span>' : '';
         const marks = (day === today ? ' today' : '') + (day === calDay ? ' on' : '');
@@ -6653,7 +6681,6 @@ async function drawCal() {
             + '<div class="n">' + Number(day.slice(8)) + '</div>' + chips + rest + '</div>';
     }).join('');
 
-    drawCalDay();
 }
 
 
@@ -6691,7 +6718,7 @@ const mins = (t) => {
 /// 高さの元は一時間 = `HOUR_PX`。終わりの時刻が無いもの（amber 自身の
 /// 予定は「その時刻」しか持たない）は、三十分ぶんの高さにする ──
 /// 潰れて読めないより、少し大きいほうがよい。
-const HOUR_PX = 33.6;   // index.html の 2.1rem と合わせる
+const HOUR_PX = 48;   // index.html の 3rem と合わせる
 function drawHours() {
     const box = el('cal');
     const days = calView === 'day' ? [calDay] : weekOf(calDay);
@@ -6790,7 +6817,7 @@ function crowdLanes(days, whole) {
 
 /// 一時間ぶんの横幅（日のとき）。字が読める幅を確保して、足りなければ
 /// 横に流す ── 一日を画面幅に押し込むと、三十分の会議が線になる。
-const CROWD_HOUR = 58;
+const CROWD_HOUR = 72;
 
 /// **横に時間（または日付）、縦に人。**
 function drawCrowd() {
@@ -7055,43 +7082,6 @@ function teamClock() {
 }
 
 
-/// 選んだ日の中身。**押したらノートへ** ── 予定は入口で、書くのはノート。
-function drawCalDay() {
-    const side = el('cal').querySelector('.side');
-    if (!calDay) { side.innerHTML = ''; return; }
-    const mine = calSlots.filter((s) => s.day === calDay);
-    const plans = mine.filter((s) => s.kind !== 'note');
-    // **予定に出ているノートを、下でもう一度出さない。** 同じ一本が
-    // 二度並ぶと、二つあるように見える（実際にそう見えた）。
-    const said = new Set(plans.map((s) => s.path));
-    const notes = mine.filter((s) => s.kind === 'note' && !said.has(s.path));
-    const w = ['月', '火', '水', '木', '金', '土', '日'];
-    const d = new Date(calDay + 'T00:00:00');
-    // **道は出さない。** 読めない長さになるうえ、知りたいのは中身のほう
-    // ── そのノートの一行目を添える。
-    // 添える一行。**自分のノートは一行目、よその予定は場所と出どころ。**
-    const under = (s) => {
-        if (s.kind === 'away') {
-            return escapeHtml([s.place, s.from].filter(Boolean).join('・'));
-        }
-        const n = (state.notes || []).find((x) => x.path === s.path);
-        return n && n.excerpt ? escapeHtml(n.excerpt.slice(0, 40)) : '';
-    };
-    const rows = (list, none, timed) => list.length
-        ? list.map((s) => '<div class="slot ' + s.kind + '"'
-            + (s.path ? ' data-at="' + escapeHtml(s.path) + '"' : '') + '>'
-            + (timed ? '<span class="t">' + escapeHtml(s.at || '終日') + '</span>' : '')
-            + '<span class="w"><b>' + escapeHtml(s.title) + '</b>'
-            + '<span>' + under(s) + '</span></span></div>').join('')
-        : '<div class="none">' + none + '</div>';
-    side.innerHTML =
-        '<div class="h">' + Number(calDay.slice(5, 7)) + '月' + Number(calDay.slice(8)) + '日'
-        + '<small>' + w[(d.getDay() + 6) % 7] + '</small></div>'
-        + rows(plans, '予定はありません', true)
-        + (notes.length ? '<div class="h" style="margin-top:.8rem">この日に書いたノート</div>'
-            + rows(notes, '', false) : '')
-        + '<button class="add">＋ この日に予定を足す</button>';
-}
 
 /// **その日に予定を足す。** 足すのは新しいノートで、日付は前書きに書く
 /// ── 「ノートに日付を書くと予定になる」（依頼 73）が既にあるので、
@@ -7154,7 +7144,9 @@ async function hereEdit(id) {
 
 el('cal').addEventListener('click', async (e) => {
     const box = el('cal');
-    if (e.target === box || e.target.closest('.x')) { box.hidden = true; return; }
+    // **地を押しても閉じない**（依頼 478）── 小窓ではなく面になったので、
+    // 何もないところを押すのは「閉じる」ではない。
+    if (e.target.closest('.x')) { calShut(); return; }
     // **動く幅は、見方に合わせる** ── 週を見ている人の「次」は次の週。
     const step = (n) => {
         if (calView === 'month') {
@@ -7206,7 +7198,7 @@ el('cal').addEventListener('click', async (e) => {
     if (bar) {
         if (bar.dataset.at) {
             if (bar.classList.contains('here')) { await hereEdit(bar.dataset.at); return; }
-            box.hidden = true;
+            calShut();
             await openNote(bar.dataset.at);
             return;
         }
@@ -7229,7 +7221,7 @@ el('cal').addEventListener('click', async (e) => {
     }
     const ad = e.target.closest('.ad');
     if (ad) {
-        if (ad.dataset.at) { box.hidden = true; await openNote(ad.dataset.at); }
+        if (ad.dataset.at) { calShut(); await openNote(ad.dataset.at); }
         else say('よその予定表のものなので、ここでは直せません');
         return;
     }
@@ -7237,7 +7229,7 @@ el('cal').addEventListener('click', async (e) => {
     if (blk) {
         if (blk.classList.contains('here')) { await hereEdit(blk.dataset.at); return; }
         if (!blk.dataset.at) { say('よその予定表のものなので、ここでは直せません'); return; }
-        box.hidden = true;
+        calShut();
         await openNote(blk.dataset.at);
         return;
     }
@@ -7249,17 +7241,6 @@ el('cal').addEventListener('click', async (e) => {
         return;
     }
     if (e.target.closest('.add')) { await calAdd(calDay); return; }
-    const slot = e.target.closest('.slot');
-    if (slot) {
-        // この機械の予定表のものは、**押したら直せる**。
-        if (slot.classList.contains('here')) { await hereEdit(slot.dataset.at); return; }
-        // **よその予定にはノートが無い。** 押しても何も起きないより、
-        // なぜ開かないかを言う。
-        if (!slot.dataset.at) { say('よその予定表のものなので、ここでは直せません'); return; }
-        box.hidden = true;
-        await openNote(slot.dataset.at);
-        return;
-    }
     const cell = e.target.closest('.d[data-day]');
     if (cell) { calDay = cell.dataset.day; await drawCal(); }
 });
