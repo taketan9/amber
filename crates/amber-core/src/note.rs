@@ -160,6 +160,47 @@ pub struct Note {
 
 /// Read one note. Only the head of the file is looked at — a list of two
 /// hundred notes must not read two hundred whole files to draw itself.
+/// ノートの**頭だけ**読む。
+///
+/// **最後まで読まない。** 一覧も月の表も見ているのは前書きと数行で、
+/// 一万二千行のノートを丸ごと読んでから頭を切り出すのは、ノートが増える
+/// ほど効いてくる（依頼 470 ── 二万本で測った）。
+///
+/// UTF-8 でないノートだけ、文字コードを見る側（`text::read`）で読み直す
+/// ── ほとんどのノートは UTF-8 なので、速い道はそのまま（依頼 429）。
+pub fn head(path: &Path, head_lines: usize) -> Option<Vec<String>> {
+    use std::io::BufRead;
+    let want = head_lines.max(8);
+    let lines: Vec<String> = match std::fs::File::open(path) {
+        Ok(f) => {
+            let mut out = Vec::with_capacity(want.min(64));
+            let mut bad = false;
+            for line in std::io::BufReader::new(f).lines().take(want) {
+                match line {
+                    Ok(l) => out.push(l),
+                    Err(_) => { bad = true; break; }
+                }
+            }
+            if bad {
+                crate::text::read(path).ok()?.lines.into_iter().take(want).collect()
+            } else {
+                out
+            }
+        }
+        Err(_) => crate::text::read(path).ok()?.lines.into_iter().take(want).collect(),
+    };
+    // **BOM は字ではない。** 残すと一行目が `\u{feff}---` になり、前書きが
+    // 前書きに見えない ── 題も `tags:` も読まれず、前書きぜんぶが本文の
+    // 書き出しとして一覧に出る（実際に出た）。
+    let mut lines = lines;
+    if let Some(first) = lines.first_mut() {
+        if let Some(cut) = first.strip_prefix('\u{feff}') {
+            *first = cut.to_string();
+        }
+    }
+    Some(lines)
+}
+
 pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
     // **UTF-8 でないノートも、一覧に出す**（依頼 429）。
     //
@@ -169,17 +210,16 @@ pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
     // 無い、という形（`read` op は通る）で、どこから探せばいいのかが
     // 画面のどこにも出ない。
     //
-    // 落ちたときだけ、文字コードを見る側（`text::read`）で読み直す ──
-    // ほとんどのノートは UTF-8 なので、速い道はそのまま。
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(_) => crate::text::read(path).ok()?.lines.join("\n"),
-    };
-    // **BOM は字ではない。** 残すと一行目が `\u{feff}---` になり、前書きが
-    // 前書きに見えない ── 題も `tags:` も読まれず、前書きぜんぶが本文の
-    // 書き出しとして一覧に出る（実際に出た）。
-    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-    let lines: Vec<String> = text.lines().take(head_lines.max(8)).map(str::to_string).collect();
+    let lines = head(path, head_lines)?;
+    from_head(path, &lines)
+}
+
+/// 読んだ頭の行から、一覧に出す形を組む。
+///
+/// `read` と月の表が同じ行を使い回すために分けてある ── 分けていなかった
+/// 頃は、同じファイルを二度読んでいた（依頼 470）。
+pub fn from_head(path: &Path, lines: &[String]) -> Option<Note> {
+    let lines = lines.to_vec();
     let meta = std::fs::metadata(path).ok();
     let f = front(&lines);
     let body = &lines[f.lines.min(lines.len())..];
@@ -2507,7 +2547,13 @@ pub struct Remind {
 /// ```
 pub fn remind(text: &str) -> Remind {
     let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
-    let f = front(&lines);
+    remind_lines(&lines)
+}
+
+/// 前書きから予定を読む。**行を渡す形** ── 頭だけ読んだものを、そのまま
+/// 使い回せる（同じファイルを二度読まないため・依頼 470）。
+pub fn remind_lines(lines: &[String]) -> Remind {
+    let f = front(lines);
     let mut out = Remind::default();
 
     if let Some(v) = f.fields.get("remind") {

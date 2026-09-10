@@ -16,6 +16,47 @@
 //! 値打ち ── その日に書いたノートが、予定の隣に並ぶ。
 
 use chrono::Datelike;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+/// 一度読んだノートの、憶えておく形。
+///
+/// **月を替えるたびに全部読み直さない**（依頼 470）── 二万本で測ると
+/// 一回 415 ミリ秒かかっていて、押すたびにそれが乗る。ファイルの日付と
+/// 大きさが変わっていなければ、前に読んだものをそのまま使う。
+///
+/// **ディスクには書かない。** `.amber/` はフォルダと一緒に旅をするので、
+/// そこに索引を置くと、別の端末で古い索引を読むことになる。エンジンが
+/// 生きているあいだだけ、頭の中に持つ。
+#[derive(Clone)]
+struct Known {
+    when: u64,
+    size: u64,
+    title: String,
+    created: Option<u64>,
+    plan: crate::note::Remind,
+}
+
+fn seen() -> &'static Mutex<HashMap<std::path::PathBuf, Known>> {
+    static SEEN: OnceLock<Mutex<HashMap<std::path::PathBuf, Known>>> = OnceLock::new();
+    SEEN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// ファイルの「変わったかどうか」を見るしるし。
+///
+/// **秒ではなく、もっと細かく見る。** 秒までしか見ないと、同じ一秒の
+/// あいだに書き替えて長さも変わらなかったノートを、変わっていないものと
+/// 思い込む ── 一字だけ直した題が、月の表に古いまま出ることになる。
+fn mark(at: &std::path::Path) -> Option<(u64, u64)> {
+    let m = std::fs::metadata(at).ok()?;
+    let when = m
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    Some((when, m.len()))
+}
 
 /// その日にあるもの、一つ。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,26 +150,57 @@ pub fn of(rows: &[crate::survey::Row], year: i32, month: u32) -> Vec<Slot> {
         if !(low.ends_with(".md") || low.ends_with(".markdown")) {
             continue;
         }
-        let Some(note) = crate::note::read(&r.path, 60) else { continue };
-        let path = r.path.to_string_lossy().into_owned();
-        let title = if note.title.is_empty() {
-            name.trim_end_matches(".md").to_string()
-        } else {
-            note.title.clone()
+        // **変わっていなければ、読み直さない**（依頼 470）。
+        let now = mark(&r.path);
+        let mut store = seen().lock().ok();
+        let cached = store.as_ref().and_then(|m| m.get(&r.path)).cloned().filter(|k| {
+            now.is_some_and(|(w, z)| k.when == w && k.size == z)
+        });
+        let known = match cached {
+            Some(k) => k,
+            None => {
+                // **一度だけ読む。** 題も予定も、同じ頭の行から読む ── 前は
+                // `read` で一度、`read_to_string` でもう一度、まるごと読んで
+                // いた。
+                let Some(lines) = crate::note::head(&r.path, 60) else { continue };
+                let Some(note) = crate::note::from_head(&r.path, &lines) else { continue };
+                let k = Known {
+                    when: now.map(|(w, _)| w).unwrap_or(0),
+                    size: now.map(|(_, z)| z).unwrap_or(0),
+                    title: if note.title.is_empty() {
+                        name.trim_end_matches(".md").to_string()
+                    } else {
+                        note.title.clone()
+                    },
+                    created: note.created,
+                    plan: crate::note::remind_lines(&lines),
+                };
+                if let Some(m) = store.as_mut() {
+                    // 際限なく溜めない ── 途方もない数のノートを歩いた
+                    // ときは、いったん捨てて憶え直す。
+                    if m.len() > 50_000 {
+                        m.clear();
+                    }
+                    m.insert(r.path.clone(), k.clone());
+                }
+                k
+            }
         };
+        drop(store);
+        let path = r.path.to_string_lossy().into_owned();
+        let title = known.title.clone();
 
         // 書いた日 ── 予定ではないが、その日に何をしていたかが分かる。
         // **その機械の日付で**（世界標準時ではなく）── 日本の朝に作った
         // ノートが前の日に並ぶのは、見た人には理由が分からない。
-        if let Some(d) = note.created.and_then(local_day) {
+        if let Some(d) = known.created.and_then(local_day) {
             if d >= from && d <= to {
                 out.push(Slot { day: d, at: None, title: title.clone(),
                                 path: path.clone(), kind: Kind::Note });
             }
         }
 
-        let Ok(text) = std::fs::read_to_string(&r.path) else { continue };
-        let plan = crate::note::remind(&text);
+        let plan = &known.plan;
         if let Some(once) = plan.once {
             let d = once.date();
             if d >= from && d <= to {
@@ -210,5 +282,37 @@ mod tests {
         let rep: Vec<&super::Slot> = got.iter().filter(|s| s.kind == super::Kind::Repeat).collect();
         assert_eq!(rep.len(), 1);
         assert_eq!(rep[0].day.to_string(), "2026-09-30", "九月は三十日まで");
+    }
+
+    /// 憶えたものが、**書き替えたら古いまま出てこない**（依頼 470）。
+    ///
+    /// 二万本で測ると、月を替えるたびに 415 ミリ秒かかっていた ── 憶えて
+    /// おくと 58 ミリ秒になる。ただし「憶える」を入れた日にいちばん怖いのは
+    /// 速さではなく、**直した予定が古い姿で出続けること**なので、そこを見張る。
+    /// とりわけ、同じ一秒のあいだに長さも変えずに書き替えた場合。
+    #[test]
+    fn a_rewritten_note_is_read_again() {
+        let d = tempfile::tempdir().unwrap();
+        let at = d.path().join("面談.md");
+        std::fs::write(
+            &at,
+            "---\ntitle: 面談あ\ncreated: 2026-09-01\nremind: 2026-09-10 10:00\n---\n\n# 面談あ\n",
+        ).unwrap();
+        let first = super::of(&walk(d.path()), 2026, 9);
+        assert!(first.iter().any(|s| s.title == "面談あ"));
+
+        // 長さも変えず、間も置かずに書き替える。
+        std::fs::write(
+            &at,
+            "---\ntitle: 面談い\ncreated: 2026-09-01\nremind: 2026-09-11 10:00\n---\n\n# 面談い\n",
+        ).unwrap();
+        let then = super::of(&walk(d.path()), 2026, 9);
+        assert!(then.iter().any(|s| s.title == "面談い"), "直した題で出る");
+        assert!(!then.iter().any(|s| s.title == "面談あ"), "古い題は残らない");
+        let moved = then
+            .iter()
+            .find(|s| s.title == "面談い" && s.kind == super::Kind::Once)
+            .unwrap();
+        assert_eq!(moved.day.to_string(), "2026-09-11", "動かした日で出る");
     }
 }
