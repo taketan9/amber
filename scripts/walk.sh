@@ -176,6 +176,10 @@ HTML
 # よその予定表（依頼 456）── 一度きり・終日でまたぐもの・毎週の三つ。
 printf 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:%s\r\nBEGIN:VEVENT\r\nDTSTART;TZID=Asia/Tokyo:20260904T183000\r\nSUMMARY:%s\r\nLOCATION:%s\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260921\r\nDTEND;VALUE=DATE:20260924\r\nSUMMARY:%s\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART;TZID=Asia/Tokyo:20260907T200000\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:%s\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n' \
   '家の予定' '歯医者' '駅前' '旅行' 'ごみ出し' > "$work/site/away.ics"
+# チームの予定表（依頼 471）── 取り決め（`docs/team-csv.ja.md`）の形。
+# BOM あり・CRLF・件名の中の読点・非公開・取り消し・終日のまたぎを含める。
+python3 "$here/team-fixture.py" "$work/team.csv"
+
 (cd "$work/site" && python3 -m http.server "$siteport" >/dev/null 2>&1 &)
 
 # **エンジンを作り直してから出す。** 窓は起動時の実行ファイルを掴んだまま
@@ -192,4 +196,5 @@ for i in $(seq 1 40); do
   sleep 0.5
 done
 
-SITE="http://127.0.0.1:$siteport/" PORT="$port" NOTES="$notes" node "$here/walk.mjs"
+SITE="http://127.0.0.1:$siteport/" PORT="$port" NOTES="$notes" TEAMCSV="$work/team.csv" \
+  node "$here/walk.mjs"

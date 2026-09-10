@@ -22,6 +22,7 @@ pub mod stamp;
 pub mod sync;
 pub mod text;
 pub mod survey;
+pub mod team;
 pub mod zipbox;
 
 use std::sync::atomic::{AtomicBool, Ordering};

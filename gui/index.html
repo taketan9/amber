@@ -1328,6 +1328,78 @@ body.dropping::after {
 #calbox .blk.here { border-left-color: #5fa87a;
   background: color-mix(in srgb, #5fa87a 16%, transparent) }
 #calbox .blk.note { border-left-color: transparent; background: none; color: var(--ink3) }
+
+/* みんなの予定を、人ごとに並べる（依頼 471）。
+   横に時間（または日付）、縦に人 ── 一日を画面幅に押し込むと三十分の
+   会議が線になるので、幅は決め打ちにして横に流す。 */
+#calbox .crowdbtn { margin-left: .2rem }
+#calbox .crowdbtn.on { background: var(--sel); border-color: var(--amber); color: var(--ink) }
+#calbox .crowd { flex: 1; min-height: 0; min-width: 0; overflow: hidden;
+  padding: .4rem .5rem .5rem; }
+#calbox .crowd .scroll { height: 100%; overflow: auto; }
+#calbox .crowd .axis { display: flex; position: sticky; top: 0; z-index: 2;
+  background: var(--paper); border-bottom: 1px solid var(--line); }
+#calbox .crowd .ticks { display: flex }
+#calbox .crowd .tk { flex: none; font-size: .68em; color: var(--ink3); padding: 2px 0 3px 4px;
+  border-left: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+#calbox .crowd .tk.sat { color: #6f9fd8 } #calbox .crowd .tk.sun { color: var(--bad) }
+#calbox .crowd .tk.today { color: var(--amber); font-weight: 700 }
+#calbox .crowd .row { display: flex; border-bottom: 1px solid var(--line); min-height: 2.2rem }
+/* **名前は左に貼りつける。** 横に流したときに誰の段か分からなくなる
+   のが、この表でいちばん困る壊れ方。 */
+#calbox .crowd .who { flex: none; width: 8.5rem; position: sticky; left: 0; z-index: 1;
+  background: var(--rail); border-right: 1px solid var(--line); padding: 4px 6px;
+  font-size: .76em; display: flex; align-items: center; }
+#calbox .crowd .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+#calbox .crowd .axis .who { background: var(--paper); border-right-color: var(--line) }
+#calbox .crowd .who.note::before,
+#calbox .crowd .who.here::before,
+#calbox .crowd .who.away::before,
+#calbox .crowd .who.team::before { content: ''; flex: none; width: 3px; height: 1.1em;
+  border-radius: 2px; margin-right: .4rem; background: var(--amber); }
+#calbox .crowd .who.here::before { background: #5fa87a }
+#calbox .crowd .who.away::before { background: #6f9fd8 }
+#calbox .crowd .who.team::before { background: #b98ad0 }
+#calbox .crowd .track { flex: none; position: relative; display: flex; padding: 3px 0 }
+#calbox .crowd .vr { position: absolute; top: 0; bottom: 0; width: 1px;
+  background: var(--line); opacity: .45 }
+#calbox .crowd .vr.thick { opacity: .9 }
+#calbox .crowd .bar { position: absolute; top: 3px; bottom: 3px; border-radius: 4px;
+  padding: 1px 5px; font-size: .68em; line-height: 1.4; overflow: hidden;
+  white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
+  border-left: 2px solid var(--amber); background: var(--sel); }
+#calbox .crowd .bar.away { border-left-color: #6f9fd8;
+  background: color-mix(in srgb, #6f9fd8 20%, transparent) }
+#calbox .crowd .bar.here { border-left-color: #5fa87a;
+  background: color-mix(in srgb, #5fa87a 20%, transparent) }
+#calbox .crowd .bar.team { border-left-color: #b98ad0;
+  background: color-mix(in srgb, #b98ad0 20%, transparent) }
+/* 中身の見えない予定は、**縞にする** ── 「取れなかった」ではなく
+   「見せてもらえていない」ことが、一目で分かるように。 */
+#calbox .crowd .bar.shut, #calbox .crowd .chip.shut { color: var(--ink2);
+  background-image: repeating-linear-gradient(135deg, transparent 0 5px,
+    color-mix(in srgb, var(--ink3) 22%, transparent) 5px 10px); }
+#calbox .crowd .span { position: absolute; left: 0; right: 0; top: 3px; bottom: 3px;
+  border-radius: 4px; font-size: .68em; padding: 1px 5px; color: var(--ink2);
+  background: color-mix(in srgb, var(--ink3) 12%, transparent); overflow: hidden;
+  white-space: nowrap; }
+/* 週は画面に収める ── 七日のうち五日しか見えない週の表は、週の表ではない。 */
+#calbox .crowd.wk .track, #calbox .crowd.wk .ticks { display: flex; flex: 1 1 0; min-width: 0 }
+#calbox .crowd.wk .tk, #calbox .crowd.wk .cell { flex: 1 1 0; width: auto; min-width: 0 }
+#calbox .crowd .cell { flex: none; width: 132px; border-left: 1px solid var(--line);
+  padding: 1px 3px; display: flex; flex-direction: column; gap: 2px; min-width: 0 }
+#calbox .crowd .chip { font-size: .68em; line-height: 1.45; padding: 0 4px;
+  border-radius: 3px; border-left: 2px solid var(--amber); background: var(--sel);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer }
+#calbox .crowd .chip i { font-style: normal; color: var(--ink3);
+  font-variant-numeric: tabular-nums }
+#calbox .crowd .chip.away { border-left-color: #6f9fd8;
+  background: color-mix(in srgb, #6f9fd8 16%, transparent) }
+#calbox .crowd .chip.here { border-left-color: #5fa87a;
+  background: color-mix(in srgb, #5fa87a 16%, transparent) }
+#calbox .crowd .chip.team { border-left-color: #b98ad0;
+  background: color-mix(in srgb, #b98ad0 16%, transparent) }
+#calbox .crowd .more { font-size: .64em; color: var(--ink3); padding-left: 4px }
 #calbox .allday .ad { font-size: .68em; padding: 1px 4px; border-radius: 3px;
   border-left: 2px solid var(--amber); background: var(--sel); cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1453,6 +1525,8 @@ body.dropping::after {
         <button data-view="week">週</button>
         <button data-view="month">月</button>
       </span>
+      <!-- 横に時間、縦に人（依頼 471）。日と週のときだけ出す。 -->
+      <button class="crowdbtn" title="横に時間、縦に人で並べます" hidden>みんな</button>
       <span class="grow"></span>
       <span class="sum"></span>
       <button class="x">閉じる</button>
@@ -1468,6 +1542,8 @@ body.dropping::after {
         <div class="allday"></div>
         <div class="cols"></div>
       </div>
+      <!-- みんなの予定を、人ごとに一段。横は時間（日）か日付（週）。 -->
+      <div class="crowd" hidden></div>
       <div class="side"></div>
     </div>
   </div></div>

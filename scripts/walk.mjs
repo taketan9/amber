@@ -746,6 +746,84 @@ await step('カレンダー：予定を足すと、ノートが一本できる',
     return true;
 `, true);
 
+/* ── 十六の四の二。**みんなの予定を、人ごとに**（依頼 471） ── */
+
+if (process.env.TEAMCSV) {
+    await step('チームの予定表：CSV を読むと、人ごとの段ができる', `
+        teamFile = ${JSON.stringify(process.env.TEAMCSV)};
+        window.amber.remember({ teamFile });
+        calMonth = { y: 2026, m: 9 };
+        calDay = '2026-09-09';
+        calView = 'day';
+        calGroup = true;
+        await cmdCalendar();
+        await new Promise((g) => setTimeout(g, 1500));
+        if (el('cal').querySelector('.crowd').hidden) return 'みんなの表が出ていません';
+        const names = [...el('cal').querySelectorAll('.crowd .row .who')]
+            .map((x) => x.textContent.trim());
+        for (const w of ['山田 武', '鈴木 一郎', '佐藤 花']) {
+            if (!names.includes(w)) return w + ' の段がありません';
+        }
+        // **予定の無い人も段を持つ**（佐藤は「空き時間」しかない）。
+        if (!names.includes('自分のノート')) return '自分の段がありません';
+        return true;
+    `, true);
+
+    await step('チームの予定表：取り決めのややこしいところが、そのまま出る', `
+        const team = calSlots.filter((s) => s.kind === 'team');
+        // 件名の中の読点で、列がずれない。
+        if (!team.some((s) => s.title === '設計、および見積')) return '読点で列がずれています';
+        // 取り消された予定は出ない。
+        if (team.some((s) => s.title === '消えた会議')) return '取り消した予定が出ています';
+        // 「空き時間」は予定ではない。
+        if (team.some((s) => s.title === 'あき')) return '空き時間が出ています';
+        // 件名の見えない予定は、そうと分かる形で出る。
+        const shut = team.filter((s) => s.shut);
+        if (shut.length !== 1) return '非公開が ' + shut.length + ' 件です';
+        if (shut[0].title !== '予定あり（非公開）') return '非公開の出し方が ' + shut[0].title + ' です';
+        return true;
+    `, true);
+
+    await step('チームの予定表：いつ時点の紙かを出す', `
+        const sum = el('cal').querySelector('.sum').textContent;
+        return sum.includes('9/9 08:15') ? true : '「' + sum + '」としか出ていません';
+    `, true);
+
+    await step('チームの予定表：何日もある終日は、日ごとに出る', `
+        calView = 'week';
+        await drawCal();
+        await new Promise((g) => setTimeout(g, 1200));
+        const trip = calSlots.filter((s) => s.kind === 'team' && s.title === '出張');
+        if (trip.length !== 2) return '出張が ' + trip.length + ' 日です';
+        if (trip[0].day !== '2026-09-10') return '初日が ' + trip[0].day + ' です';
+        if (trip.some((s) => s.day === '2026-09-12')) return '終わりの日まで出ています';
+        return true;
+    `, true);
+
+    await step('チームの予定表：週は月をまたいでも白紙にならない', `
+        // 九月二十八日からの週は十月に入る ── 九月ぶんだけ読むと、
+        // 十月の四日が「予定が無い」ように見える。
+        calView = 'week';
+        calDay = '2026-09-30';
+        await drawCal();
+        await new Promise((g) => setTimeout(g, 1500));
+        const oct = calMonths().filter((x) => x.m === 10);
+        if (!oct.length) return '十月を読んでいません';
+        return true;
+    `, true);
+
+    await step('チームの予定表：読むのをやめられる', `
+        await cmdTeamOff();
+        await new Promise((g) => setTimeout(g, 1200));
+        if (teamFile) return 'まだ読んでいます';
+        if (calSlots.some((s) => s.kind === 'team')) return 'まだ予定が残っています';
+        calGroup = false;
+        calView = 'month';
+        el('cal').hidden = true;
+        return true;
+    `, true);
+}
+
 /* ── 十六の五。**よその予定表**（依頼 456） ── */
 
 if (process.env.SITE) {

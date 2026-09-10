@@ -925,6 +925,42 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 })).collect::<Vec<_>>(),
             }))
         }
+        // **人ごとに並べる予定表を、CSV から読む**（依頼 471）。
+        //
+        // 取りに行かない ── 別の道具が置いた一枚を読むだけ。取り決めは
+        // `docs/team-csv.ja.md`。**読めなくても、理由を返して終わる** ──
+        // 会社の網の中にしかない紙なので、家では必ず読めない。
+        "team" => {
+            let at = std::path::PathBuf::from(arg(p, "path"));
+            let year = p["year"].as_i64().unwrap_or(0) as i32;
+            let month = p["month"].as_u64().unwrap_or(0) as u32;
+            if !(1..=12).contains(&month) {
+                anyhow::bail!("月が 1〜12 ではありません: {month}");
+            }
+            let file = crate::text::read(&at)
+                .map_err(|e| anyhow::anyhow!("{} を読めません（{e}）", at.display()))?;
+            let got = crate::team::of(&file.lines.join("\n"), year, month);
+            Ok(serde_json::json!({
+                "fetched": got.fetched,
+                "people": got.people.iter().map(|w| serde_json::json!({
+                    "name": w.name,
+                    "mail": w.mail,
+                })).collect::<Vec<_>>(),
+                "days": got.plans.iter().map(|p| serde_json::json!({
+                    "day": p.day,
+                    "at": p.at,
+                    "to": p.to,
+                    "title": p.title,
+                    "place": p.place,
+                    "who": p.who,
+                    "mail": p.mail,
+                    "show": p.show,
+                    "shut": p.shut,
+                    "kind": "team",
+                })).collect::<Vec<_>>(),
+            }))
+        }
+
         "emoji" => Ok(crate::emoji::table()),
 
         // 同じ中身のノートをもう一つ（依頼 412）。

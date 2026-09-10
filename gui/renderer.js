@@ -6511,6 +6511,9 @@ let calDay = null;
 /// 見方（`month` / `week` / `day`）。**憶える** ── 週で暮らしている人を、
 /// 開くたびに月へ連れ戻さない（依頼 468）。
 let calView = 'month';
+/// **人ごとに並べるか**（依頼 471）。日と週のときだけ効く ── 月の表を
+/// 人ごとに割ると、一人ぶんの升目が字より小さくなる。これも憶える。
+let calGroup = false;
 /// その月ぶんの予定（core の `month` が返したまま）。
 let calSlots = [];
 
@@ -6530,22 +6533,45 @@ async function cmdCalendar() {
     await drawCal();
 }
 
+/// 出している範囲がまたぐ月。
+///
+/// **週は月をまたぐ。** 九月三十日から十月四日までの週で九月ぶんだけを
+/// 読むと、十月の四日が白紙のまま出る ── 予定が無いのか、読んでいない
+/// のかが、画面からは区別できない。
+function calMonths() {
+    if (calView === 'month') return [{ y: calMonth.y, m: calMonth.m }];
+    const want = new Map();
+    const add = (day) => {
+        const y = Number(day.slice(0, 4));
+        const m = Number(day.slice(5, 7));
+        want.set(y * 100 + m, { y, m });
+    };
+    if (calView === 'day') add(calDay);
+    else for (const d of weekOf(calDay)) add(d);
+    return [...want.values()];
+}
+
 async function drawCal() {
     const box = el('cal');
-    try {
-        const got = await window.amber.call('month', {
-            path: state.root, year: calMonth.y, month: calMonth.m,
-        });
-        calSlots = got.days || [];
-    } catch (e) {
-        calSlots = [];
-        say('カレンダーを読めません: ' + why(e));
+    calSlots = [];
+    awaySlots = [];
+    let bad = '';
+    for (const { y, m } of calMonths()) {
+        try {
+            const got = await window.amber.call('month', { path: state.root, year: y, month: m });
+            calSlots = calSlots.concat(got.days || []);
+        } catch (e) {
+            bad = why(e);
+        }
+        // この機械の予定表と、よその予定表と、チームの紙を足す ── どれが
+        // 読めなくても、自分のぶんは出る。
+        calSlots = calSlots.concat(await hereFor(y, m));
+        const far = await awayFor(y, m);
+        awaySlots = awaySlots.concat(far);
+        calSlots = calSlots.concat(far, await teamFor(y, m));
     }
-    // この機械の予定表と、よその予定表を足す ── どちらか読めなくても、
-    // 自分のぶんは出る。
-    const mine = await hereFor(calMonth.y, calMonth.m);
-    awaySlots = await awayFor(calMonth.y, calMonth.m);
-    calSlots = calSlots.concat(mine, awaySlots).sort((a, b) =>
+    if (bad) say('カレンダーを読めません: ' + bad);
+    calSlots = calSlots.sort((a, b) =>
         a.day.localeCompare(b.day)
         || (a.at ? 0 : 1) - (b.at ? 0 : 1)
         || String(a.at).localeCompare(String(b.at))
@@ -6553,12 +6579,25 @@ async function drawCal() {
     for (const b of box.querySelectorAll('.seg button')) {
         b.classList.toggle('on', b.dataset.view === calView);
     }
+    // 「みんな」は日と週のときだけ。月の表を人ごとに割ると、一人ぶんの
+    // 升目が字より小さくなる。
+    const crowd = box.querySelector('.crowdbtn');
+    crowd.hidden = calView === 'month';
+    crowd.classList.toggle('on', calGroup);
+    const grouped = calGroup && calView !== 'month';
+
     box.querySelector('.mo').textContent = calTitle();
     const plans = calSlots.filter((s) => s.kind !== 'note').length;
-    box.querySelector('.sum').textContent = plans ? plans + ' 件の予定' : '予定はありません';
+    // **いつ時点の紙かを出す。** チームの予定は置き換わる一枚を読んで
+    // いるだけなので、これが無いと古い紙を今の予定だと思って読む。
+    box.querySelector('.sum').textContent =
+        (plans ? plans + ' 件の予定' : '予定はありません')
+        + (teamAt ? '　／　チームは ' + teamAt + ' 時点' : '');
 
     box.querySelector('.month').hidden = calView !== 'month';
-    box.querySelector('.hours').hidden = calView === 'month';
+    box.querySelector('.hours').hidden = calView === 'month' || grouped;
+    box.querySelector('.crowd').hidden = !grouped;
+    if (grouped) { drawCrowd(); drawCalDay(); return; }
     if (calView !== 'month') { drawHours(); drawCalDay(); return; }
 
     // **月曜はじまり。** 一覧の並びも週も、ここでは月曜から。
@@ -6682,6 +6721,189 @@ function drawHours() {
     const from = early.length ? Math.min(...early) : 7 * 60;
     cols.scrollTop = Math.max(0, (from / 60 - 0.5) * HOUR_PX);
 }
+
+/* ── みんなの予定を、人ごとに並べる（依頼 471） ── */
+
+/// その予定は**誰のものか**。段をまとめる鍵と、段に出す名前。
+///
+/// **鍵は名前ではない。** 表示名は同姓・改姓・全角半角で揺れるので、
+/// 会社の紙はメールでまとめる（`docs/team-csv.ja.md` の取り決め）。
+function whoOf(s) {
+    if (s.kind === 'team') return { key: 'team:' + (s.mail || s.who), name: s.who || '（名前なし）' };
+    if (s.kind === 'away') return { key: 'away:' + (s.from || ''), name: s.from || 'よその予定表' };
+    if (s.kind === 'here') return { key: 'here:' + (s.from || ''), name: s.from || 'この端末' };
+    return { key: 'me', name: '自分のノート' };
+}
+
+/// 段の並び。
+///
+/// **予定の無い人も段を持つ。** 出張の週に段ごと消えると、書き出せて
+/// いないのか本当に空なのかが、画面からは区別できない ── いちばん
+/// 知りたいのが「空いているかどうか」なのに。
+function crowdLanes(days) {
+    const lanes = new Map();
+    const put = (key, name, kind) => {
+        if (!lanes.has(key)) lanes.set(key, { key, name, kind, slots: [] });
+        return lanes.get(key);
+    };
+    // 自分が先、つぎに端末とよそ、そのあとにチーム ── 見にきた人の段を
+    // いちばん上に置く。
+    put('me', '自分のノート', 'note');
+    for (const s of calSlots) {
+        if (!days.includes(s.day)) continue;
+        if (s.kind === 'note') continue;
+        const who = whoOf(s);
+        put(who.key, who.name, s.kind).slots.push(s);
+    }
+    for (const w of teamPeople) put('team:' + (w.mail || w.name), w.name, 'team');
+    const rank = (l) => (l.key === 'me' ? 0 : l.kind === 'here' ? 1 : l.kind === 'away' ? 2 : 3);
+    return [...lanes.values()].sort((a, b) => rank(a) - rank(b)
+        || a.name.localeCompare(b.name, 'ja'));
+}
+
+/// 一時間ぶんの横幅（日のとき）。字が読める幅を確保して、足りなければ
+/// 横に流す ── 一日を画面幅に押し込むと、三十分の会議が線になる。
+const CROWD_HOUR = 58;
+
+/// **横に時間（または日付）、縦に人。**
+function drawCrowd() {
+    const box = el('cal');
+    const days = calView === 'day' ? [calDay] : weekOf(calDay);
+    const lanes = crowdLanes(days);
+    // **一日は横に流す。週は流さない。** 一日を画面幅に押し込むと三十分の
+    // 会議が線になるので幅を決め打ちにするが、週の七日は画面に収まる
+    // ほうがよい ── 七日のうち五日しか見えない週の表は、週の表ではない。
+    const wide = calView === 'day' ? ' style="width:' + 24 * CROWD_HOUR + 'px"' : '';
+    const cell = calView === 'day' ? ' style="width:' + CROWD_HOUR + 'px"' : '';
+    const today = ymd(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+
+    // 上の目盛り。日なら時刻、週なら日付。
+    const ticks = calView === 'day'
+        ? Array.from({ length: 24 }, (_, h) =>
+            '<div class="tk"' + cell + '>' + h + '</div>').join('')
+        : days.map((d) => {
+            const w = (new Date(d + 'T00:00:00').getDay() + 6) % 7;
+            const mark = (w === 5 ? ' sat' : w === 6 ? ' sun' : '') + (d === today ? ' today' : '');
+            return '<div class="tk' + mark + '">'
+                + weekName(d) + ' ' + Number(d.slice(8)) + '</div>';
+        }).join('');
+
+    const rows = lanes.map((lane) => {
+        const track = calView === 'day' ? crowdDay(lane, days[0]) : crowdWeek(lane, days);
+        return '<div class="row"><div class="who ' + lane.kind + '">'
+            + '<span>' + escapeHtml(lane.name) + '</span></div>'
+            + '<div class="track"' + wide + '>' + track + '</div></div>';
+    }).join('');
+
+    const crowd = box.querySelector('.crowd');
+    crowd.classList.toggle('wk', calView !== 'day');
+    crowd.innerHTML = '<div class="scroll">'
+        + '<div class="axis"><div class="who"></div>'
+        + '<div class="ticks"' + wide + '>' + ticks + '</div></div>'
+        + '<div class="rows">' + rows + '</div></div>';
+
+    // **朝が見えているところから始める**（縦の表と同じ）。
+    if (calView === 'day') {
+        const early = calSlots.filter((s) => s.day === days[0] && s.at)
+            .map((s) => mins(s.at)).filter((n) => n !== null);
+        const from = early.length ? Math.min(...early) : 8 * 60;
+        crowd.querySelector('.scroll').scrollLeft = Math.max(0, (from / 60 - 0.5) * CROWD_HOUR);
+    }
+}
+
+/// 一人ぶん・一日ぶんの帯（横が時間）。
+function crowdDay(lane, day) {
+    const mine = lane.slots.filter((s) => s.day === day);
+    // 終日は、うしろに薄く一日ぶん敷く ── 予定の帯を隠さない。
+    const whole = mine.filter((s) => !s.at).map((s) =>
+        '<div class="span ' + s.kind + '" title="' + escapeAttr(s.title) + '">'
+        + escapeHtml(s.title) + '</div>').join('');
+    const bars = mine.filter((s) => s.at).map((s) => {
+        const from = mins(s.at);
+        if (from === null) return '';
+        const till = mins(s.to);
+        const wide = Math.max(24, ((till !== null && till > from ? till - from : 30) / 60) * CROWD_HOUR);
+        return '<div class="bar ' + s.kind + (s.shut ? ' shut' : '') + '"'
+            + ' style="left:' + ((from / 60) * CROWD_HOUR) + 'px;width:' + wide + 'px"'
+            + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
+            + ' title="' + escapeAttr(s.at + (s.to ? '〜' + s.to : '') + ' ' + s.title
+                + (s.place ? '（' + s.place + '）' : '')) + '">'
+            + escapeHtml(s.title) + '</div>';
+    }).join('');
+    const hours = Array.from({ length: 24 }, (_, h) =>
+        '<div class="vr' + (h % 3 === 0 ? ' thick' : '') + '" style="left:'
+        + (h * CROWD_HOUR) + 'px"></div>').join('');
+    return hours + whole + bars;
+}
+
+/// 一人ぶん・一週ぶん（横が日付）。
+function crowdWeek(lane, days) {
+    return days.map((d) => {
+        const mine = lane.slots.filter((s) => s.day === d);
+        const chips = mine.slice(0, 4).map((s) =>
+            '<div class="chip ' + s.kind + (s.shut ? ' shut' : '') + '"'
+            + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
+            + ' title="' + escapeAttr((s.at ? s.at + ' ' : '') + s.title) + '">'
+            + (s.at ? '<i>' + escapeHtml(s.at) + '</i> ' : '')
+            + escapeHtml(s.title) + '</div>').join('');
+        const rest = mine.length > 4
+            ? '<div class="more">ほか ' + (mine.length - 4) + '</div>' : '';
+        return '<div class="cell" data-day="' + d + '">' + chips + rest + '</div>';
+    }).join('');
+}
+
+
+/* ── チームの予定表（CSV）── */
+
+/// 読む一枚の場所。**この機械の中だけに持つ**（ノートにも `.amber/` にも
+/// 書かない ── あそこはフォルダと一緒に旅をする）。
+let teamAt = '';
+let teamFile = '';
+let teamPeople = [];
+
+/// 読む紙を決める。
+async function cmdTeam() {
+    const pick = await window.amber.pickFile([
+        { name: 'CSV', extensions: ['csv', 'txt'] },
+    ]);
+    if (!pick) return;
+    teamFile = pick;
+    window.amber.remember({ teamFile });
+    say('チームの予定表を読むようにしました');
+    if (!el('cal').hidden) await drawCal();
+}
+
+/// 読むのをやめる。
+async function cmdTeamOff() {
+    if (!teamFile) { say('チームの予定表は読んでいません'); return; }
+    teamFile = '';
+    teamPeople = [];
+    teamAt = '';
+    window.amber.remember({ teamFile });
+    say('チームの予定表を読むのをやめました');
+    if (!el('cal').hidden) await drawCal();
+}
+
+/// ひと月ぶん。
+///
+/// **読めなくても、ほかは出す。** 会社の網の中にしか無い紙なので、
+/// 家では必ず読めない ── そのたびに騒ぐと、家では毎回叱られる。
+async function teamFor(y, m) {
+    if (!teamFile) { teamPeople = []; teamAt = ''; return []; }
+    try {
+        const got = await window.amber.call('team', { path: teamFile, year: y, month: m });
+        teamPeople = got.people || [];
+        // 「2026-09-10T08:15:00+09:00」を「9/10 08:15」に。
+        const w = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}:\d{2})/.exec(String(got.fetched || ''));
+        teamAt = w ? Number(w[2]) + '/' + Number(w[3]) + ' ' + w[4] : '';
+        return got.days || [];
+    } catch {
+        teamPeople = [];
+        teamAt = '';
+        return [];
+    }
+}
+
 
 /// 選んだ日の中身。**押したらノートへ** ── 予定は入口で、書くのはノート。
 function drawCalDay() {
@@ -6807,6 +7029,29 @@ el('cal').addEventListener('click', async (e) => {
         await drawCal();
         return;
     }
+    if (e.target.closest('.crowdbtn')) {
+        calGroup = !calGroup;
+        window.amber.remember({ calGroup });
+        await drawCal();
+        return;
+    }
+    // みんなの表を押したとき。**読むだけのものは、そう言う。**
+    const bar = e.target.closest('.crowd .bar, .crowd .chip');
+    if (bar) {
+        if (bar.dataset.at) {
+            if (bar.classList.contains('here')) { await hereEdit(bar.dataset.at); return; }
+            box.hidden = true;
+            await openNote(bar.dataset.at);
+            return;
+        }
+        say(bar.classList.contains('team')
+            ? 'チームの予定表は読むだけです'
+            : 'よその予定表のものなので、ここでは直せません');
+        return;
+    }
+    // 週の「みんな」で、空いている升目を押したらその日を選ぶ。
+    const box3 = e.target.closest('.crowd .cell');
+    if (box3) { calDay = box3.dataset.day; await drawCal(); return; }
     // 週と日の表で、何もないところを押したら**その時刻で**足す。
     const lane = e.target.closest('.lane');
     if (lane && !e.target.closest('.blk')) {
@@ -6980,6 +7225,12 @@ const CMDS = [
     { id: 'sub', name: 'よその予定表を読む', sub: 'Google カレンダーなどの iCal の URL',
       app: true, run: cmdSubscribe },
     { id: 'unsub', name: 'よその予定表を読むのをやめる', app: true, run: cmdUnsubscribe },
+    // **既定では出ていない道。** 会社の Outlook は外から読める形を一つも
+    // 出さないので、別の道具が置いた CSV を読む（依頼 471）。読むだけで、
+    // 取りに行くことも書き戻すこともしない。
+    { id: 'team', name: 'チームの予定表を読む（CSV）',
+      sub: '別の道具が書き出した一枚を、人ごとに並べます', app: true, run: cmdTeam },
+    { id: 'teamoff', name: 'チームの予定表を読むのをやめる', app: true, run: cmdTeamOff },
     { id: 'when', name: '期間で絞る', run: () => openDrawer('when') },
 
     // ── このノートにすること（⋯ と、ノートの右押し）
@@ -9117,6 +9368,8 @@ const escapeAttr = escapeHtml;
     state.root = saved.root;
     away = Array.isArray(saved.away) ? saved.away : [];
     if (['month', 'week', 'day'].includes(saved.calView)) calView = saved.calView;
+    calGroup = !!saved.calGroup;
+    if (typeof saved.teamFile === 'string') teamFile = saved.teamFile;
     noBins = Array.isArray(saved.noBins) ? saved.noBins : [];
     incomings = (saved.incomings && typeof saved.incomings === 'object') ? saved.incomings : {};
     // 外から動いたら教えてもらう ── 同じフォルダを二つの端末で触るのが
