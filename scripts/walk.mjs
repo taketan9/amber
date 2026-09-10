@@ -693,6 +693,36 @@ await step('カレンダー：ひと月ぶんが出る', `
     return true;
 `, true);
 
+await step('カレンダー：日・週・月を切り替えられる', `
+    calMonth = { y: 2026, m: 9 };
+    calDay = '2026-09-09';
+    for (const v of ['week', 'day', 'month']) {
+        const b = el('cal').querySelector('.seg button[data-view=' + JSON.stringify(v) + ']');
+        if (!b) return v + ' の切り替えがありません';
+        b.click();
+        await new Promise((g) => setTimeout(g, 700));
+        if (calView !== v) return v + ' に変わりません';
+        const hours = !el('cal').querySelector('.hours').hidden;
+        if (v === 'month' && hours) return '月なのに時間の表が出ています';
+        if (v !== 'month' && !hours) return v + ' なのに時間の表が出ていません';
+    }
+    return true;
+`, true);
+
+await step('カレンダー：終日の段に、ノートは出さない', `
+    calView = 'week';
+    calDay = '2026-09-09';
+    await drawCal();
+    await new Promise((g) => setTimeout(g, 700));
+    // 面談は remind: を持つので帯に出る。その日に書いたノートとしても
+    // 数えられるが、終日の段には出さない（上と下に二度並ばない）。
+    const ad = [...el('cal').querySelectorAll('.ad')].map((x) => x.textContent);
+    const twice = ad.filter((t) => t.includes('面談')).length;
+    calView = 'month';
+    await drawCal();
+    return twice === 0 ? true : '終日の段に ' + twice + ' 回出ています';
+`, true);
+
 await step('カレンダー：予定に出ているノートを、下でもう一度出さない', `
     calDay = '2026-09-09';
     drawCalDay();

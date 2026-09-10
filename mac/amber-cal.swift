@@ -83,13 +83,15 @@ case "month":
             let last = e.endDate ?? start
             while d <= last && d < to {
                 if d >= from {
-                    rows.append(one(e, day.string(from: d), nil))
+                    rows.append(one(e, day.string(from: d), nil, nil))
                 }
                 guard let next = cal.date(byAdding: .day, value: 1, to: d) else { break }
                 d = next
             }
         } else {
-            rows.append(one(e, day.string(from: start), clock.string(from: start)))
+            // **終わりの時刻も渡す** ── 週と日の表では、それが高さになる。
+            let till = e.endDate.map { clock.string(from: $0) }
+            rows.append(one(e, day.string(from: start), clock.string(from: start), till))
         }
     }
     out(["days": rows])
@@ -140,10 +142,11 @@ default:
     no("知らない操作: \(what)")
 }
 
-func one(_ e: EKEvent, _ day: String, _ at: String?) -> [String: Any] {
+func one(_ e: EKEvent, _ day: String, _ at: String?, _ to: String?) -> [String: Any] {
     [
         "day": day,
         "at": at as Any,
+        "to": to as Any,
         "title": e.title ?? "（題なし）",
         "id": e.eventIdentifier ?? "",
         "place": e.location ?? "",

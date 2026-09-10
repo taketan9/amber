@@ -1295,6 +1295,46 @@ body.dropping::after {
   border: 1px dashed var(--line); border-radius: 8px; color: var(--ink2);
   font-size: .84em; background: none; }
 #calbox .side .add:hover { border-color: var(--amber); color: var(--amber) }
+
+/* 日・週の表（依頼 468）── 時間が縦に並ぶ。 */
+#calbox .seg { display: inline-flex; border: 1px solid var(--line);
+  border-radius: 8px; overflow: hidden; margin-left: .3rem; }
+#calbox .seg button { border: 0; border-radius: 0; padding: 4px 11px;
+  font-size: 12px; color: var(--ink3); background: none; }
+#calbox .seg button.on { background: var(--sel); color: var(--ink); }
+#calbox .hours { flex: 1; display: flex; flex-direction: column; min-height: 0;
+  padding: .4rem .5rem .5rem; }
+#calbox .allday { display: grid; gap: 3px; align-items: start;
+  border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-bottom: 3px;
+  min-height: 1.4rem; }
+#calbox .cols { flex: 1; display: grid; gap: 0; overflow-y: auto; min-height: 0;
+  position: relative; }
+#calbox .lane { border-left: 1px solid var(--line); position: relative; }
+#calbox .lane:first-child { border-left: 0 }
+#calbox .lane .hr { height: 2.1rem; border-top: 1px solid var(--line); }
+#calbox .lane .hr:first-child { border-top: 0 }
+#calbox .clock { text-align: right; padding-right: .4rem; color: var(--ink3);
+  font-size: .68em; font-variant-numeric: tabular-nums; }
+#calbox .clock div { height: 2.1rem; }
+#calbox .hd { text-align: center; font-size: .72em; color: var(--ink3);
+  padding: 2px 0; }
+#calbox .hd.sat { color: #6f9fd8 } #calbox .hd.sun { color: var(--bad) }
+#calbox .hd.today { color: var(--amber); font-weight: 700 }
+#calbox .blk { position: absolute; left: 2px; right: 2px; border-radius: 4px;
+  padding: 0 4px; font-size: .68em; line-height: 1.35; overflow: hidden;
+  border-left: 2px solid var(--amber); background: var(--sel); cursor: pointer; }
+#calbox .blk.away { border-left-color: #6f9fd8;
+  background: color-mix(in srgb, #6f9fd8 16%, transparent) }
+#calbox .blk.here { border-left-color: #5fa87a;
+  background: color-mix(in srgb, #5fa87a 16%, transparent) }
+#calbox .blk.note { border-left-color: transparent; background: none; color: var(--ink3) }
+#calbox .allday .ad { font-size: .68em; padding: 1px 4px; border-radius: 3px;
+  border-left: 2px solid var(--amber); background: var(--sel); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#calbox .allday .ad.away { border-left-color: #6f9fd8;
+  background: color-mix(in srgb, #6f9fd8 16%, transparent) }
+#calbox .allday .ad.here { border-left-color: #5fa87a;
+  background: color-mix(in srgb, #5fa87a 16%, transparent) }
 </style>
 </head>
 <body>
@@ -1404,10 +1444,15 @@ body.dropping::after {
        右にその日が開く。よそのカレンダーは、あとでここに足す。 -->
   <div id="cal" hidden><div id="calbox">
     <div class="hd">
-      <button class="prev" title="前の月">‹</button>
+      <button class="prev" title="前へ">‹</button>
       <b class="mo"></b>
-      <button class="next" title="次の月">›</button>
+      <button class="next" title="次へ">›</button>
       <button class="today">今日</button>
+      <span class="seg">
+        <button data-view="day">日</button>
+        <button data-view="week">週</button>
+        <button data-view="month">月</button>
+      </span>
       <span class="grow"></span>
       <span class="sum"></span>
       <button class="x">閉じる</button>
@@ -1416,6 +1461,12 @@ body.dropping::after {
       <div class="month">
         <div class="dow"><i>月</i><i>火</i><i>水</i><i>木</i><i>金</i><i class="sat">土</i><i class="sun">日</i></div>
         <div class="days"></div>
+      </div>
+      <!-- 週と日は、時間が縦に並ぶ ── 「いつなら空いているか」は、
+           月の表からは読み取れない。 -->
+      <div class="hours" hidden>
+        <div class="allday"></div>
+        <div class="cols"></div>
       </div>
       <div class="side"></div>
     </div>

@@ -918,6 +918,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 "days": got.iter().map(|e| serde_json::json!({
                     "day": e.day.to_string(),
                     "at": e.at.map(|t| t.format("%H:%M").to_string()),
+                    "to": e.to.map(|t| t.format("%H:%M").to_string()),
                     "title": e.title,
                     "place": e.place,
                     "kind": "away",

@@ -30,6 +30,9 @@ pub struct Event {
     pub day: NaiveDate,
     /// 終日なら `None`。
     pub at: Option<NaiveTime>,
+    /// 終わりの時刻。**週と日の表で高さになる** ── 無ければ呼んだ側が
+    /// 決める（いまは三十分ぶんの高さにしている）。
+    pub to: Option<NaiveTime>,
     pub title: String,
     /// 場所（`LOCATION`）。無ければ空。
     pub place: String,
@@ -216,6 +219,7 @@ pub fn month(text: &str, year: i32, want: u32) -> Vec<Event> {
     let mut place = String::new();
     let mut start: Option<(NaiveDate, Option<NaiveTime>)> = None;
     let mut end: Option<NaiveDate> = None;
+    let mut till: Option<NaiveTime> = None;
     let mut rrule: Option<Rule> = None;
     let mut skip: Vec<NaiveDate> = Vec::new();
 
@@ -227,6 +231,7 @@ pub fn month(text: &str, year: i32, want: u32) -> Vec<Event> {
             place.clear();
             start = None;
             end = None;
+            till = None;
             rrule = None;
             skip.clear();
             continue;
@@ -264,7 +269,9 @@ pub fn month(text: &str, year: i32, want: u32) -> Vec<Event> {
                 if skip.contains(&d) {
                     continue;
                 }
-                out.push(Event { day: d, at, title: name.clone(), place: place.clone() });
+                out.push(Event {
+                    day: d, at, to: till, title: name.clone(), place: place.clone(),
+                });
             }
             continue;
         }
@@ -280,6 +287,8 @@ pub fn month(text: &str, year: i32, want: u32) -> Vec<Event> {
                 let date = args.iter().any(|a| a.eq_ignore_ascii_case("VALUE=DATE"));
                 if date {
                     end = stamp(value, false).map(|(d, _)| d);
+                } else {
+                    till = stamp(value, value.ends_with('Z')).and_then(|(_, t)| t);
                 }
             }
             "RRULE" => rrule = Some(rule(value)),
@@ -323,7 +332,8 @@ pub fn looks_like(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     const SAMPLE: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:家の予定\r\n\
-BEGIN:VEVENT\r\nDTSTART;TZID=Asia/Tokyo:20260909T140000\r\nSUMMARY:面談\r\n\
+BEGIN:VEVENT\r\nDTSTART;TZID=Asia/Tokyo:20260909T140000\r\n\
+DTEND;TZID=Asia/Tokyo:20260909T153000\r\nSUMMARY:面談\r\n\
 LOCATION:会議室 A\r\nEND:VEVENT\r\n\
 BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260921\r\nDTEND;VALUE=DATE:20260924\r\n\
 SUMMARY:出張\r\nEND:VEVENT\r\n\
@@ -341,6 +351,7 @@ END:VEVENT\r\nEND:VCALENDAR\r\n";
         let one = got.iter().find(|e| e.title == "面談").expect("面談");
         assert_eq!(one.day.to_string(), "2026-09-09");
         assert_eq!(one.at.unwrap().to_string(), "14:00:00");
+        assert_eq!(one.to.unwrap().to_string(), "15:30:00", "終わりの時刻も読む");
         assert_eq!(one.place, "会議室 A");
 
         // 終日でまたがるものは、その日ぶんぜんぶに（`DTEND` は含まない）。

@@ -6508,6 +6508,9 @@ el('spare').addEventListener('click', async (e) => {
 /// 先の予定を見にきた人を、閉じて開くたびに今日へ連れ戻さない。
 let calMonth = null;
 let calDay = null;
+/// 見方（`month` / `week` / `day`）。**憶える** ── 週で暮らしている人を、
+/// 開くたびに月へ連れ戻さない（依頼 468）。
+let calView = 'month';
 /// その月ぶんの予定（core の `month` が返したまま）。
 let calSlots = [];
 
@@ -6547,9 +6550,16 @@ async function drawCal() {
         || (a.at ? 0 : 1) - (b.at ? 0 : 1)
         || String(a.at).localeCompare(String(b.at))
         || a.title.localeCompare(b.title));
-    box.querySelector('.mo').textContent = calMonth.y + '年 ' + calMonth.m + '月';
+    for (const b of box.querySelectorAll('.seg button')) {
+        b.classList.toggle('on', b.dataset.view === calView);
+    }
+    box.querySelector('.mo').textContent = calTitle();
     const plans = calSlots.filter((s) => s.kind !== 'note').length;
     box.querySelector('.sum').textContent = plans ? plans + ' 件の予定' : '予定はありません';
+
+    box.querySelector('.month').hidden = calView !== 'month';
+    box.querySelector('.hours').hidden = calView === 'month';
+    if (calView !== 'month') { drawHours(); drawCalDay(); return; }
 
     // **月曜はじまり。** 一覧の並びも週も、ここでは月曜から。
     const first = new Date(calMonth.y, calMonth.m - 1, 1);
@@ -6580,6 +6590,97 @@ async function drawCal() {
     }).join('');
 
     drawCalDay();
+}
+
+
+/// 上に出す名前。見方で変わる。
+function calTitle() {
+    if (calView === 'month') return calMonth.y + '年 ' + calMonth.m + '月';
+    if (calView === 'day') return dayName(calDay) + '（' + weekName(calDay) + '）';
+    const days = weekOf(calDay);
+    return dayName(days[0]) + ' 〜 ' + dayName(days[6]);
+}
+
+const weekName = (d) => ['月', '火', '水', '木', '金', '土', '日'][
+    (new Date(d + 'T00:00:00').getDay() + 6) % 7];
+
+/// その日を含む週（月曜はじまり・七つ）。
+function weekOf(day) {
+    const d = new Date(day + 'T00:00:00');
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const out = [];
+    for (let i = 0; i < 7; i += 1) {
+        out.push(ymd(d.getFullYear(), d.getMonth(), d.getDate()));
+        d.setDate(d.getDate() + 1);
+    }
+    return out;
+}
+
+/// 時刻を分に。読めなければ null。
+const mins = (t) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || ''));
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+};
+
+/// 週と日の表。**時間が縦に並ぶ。**
+///
+/// 高さの元は一時間 = `HOUR_PX`。終わりの時刻が無いもの（amber 自身の
+/// 予定は「その時刻」しか持たない）は、三十分ぶんの高さにする ──
+/// 潰れて読めないより、少し大きいほうがよい。
+const HOUR_PX = 33.6;   // index.html の 2.1rem と合わせる
+function drawHours() {
+    const box = el('cal');
+    const days = calView === 'day' ? [calDay] : weekOf(calDay);
+    const today = ymd(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+
+    // 終日の段（曜日の見出しも兼ねる）。
+    const ad = box.querySelector('.allday');
+    ad.style.gridTemplateColumns = '3rem repeat(' + days.length + ', 1fr)';
+    ad.innerHTML = '<div></div>' + days.map((d) => {
+        const w = (new Date(d + 'T00:00:00').getDay() + 6) % 7;
+        const mark = (w === 5 ? ' sat' : w === 6 ? ' sun' : '') + (d === today ? ' today' : '');
+        // **終日の段は「予定」だけ。** その日に書いたノートはここではなく、
+        // 右のその日の欄に出る ── 段に混ぜると、時刻つきの予定が上と下に
+        // 二度並ぶ（実際にそう見えた）。
+        const whole = calSlots.filter((s) => s.day === d && !s.at && s.kind !== 'note');
+        return '<div><div class="hd' + mark + '">' + weekName(d) + ' '
+            + Number(d.slice(8)) + '</div>'
+            + whole.map((s) => '<div class="ad ' + s.kind + '"'
+                + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
+                + '>' + escapeHtml(s.title) + '</div>').join('') + '</div>';
+    }).join('');
+
+    // 時刻の目盛りと、日ごとの帯。
+    const cols = box.querySelector('.cols');
+    cols.style.gridTemplateColumns = '3rem repeat(' + days.length + ', 1fr)';
+    const hours = [];
+    for (let h = 0; h < 24; h += 1) hours.push(h);
+    cols.innerHTML = '<div class="clock">'
+        + hours.map((h) => '<div>' + h + '</div>').join('') + '</div>'
+        + days.map((d) => {
+            const timed = calSlots.filter((s) => s.day === d && s.at);
+            const blocks = timed.map((s) => {
+                const from = mins(s.at);
+                if (from === null) return '';
+                const till = mins(s.to);
+                const high = Math.max(18, ((till !== null && till > from ? till - from : 30)
+                    / 60) * HOUR_PX);
+                return '<div class="blk ' + s.kind + '"'
+                    + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
+                    + ' style="top:' + ((from / 60) * HOUR_PX) + 'px;height:' + high + 'px">'
+                    + escapeHtml(s.at) + ' ' + escapeHtml(s.title) + '</div>';
+            }).join('');
+            return '<div class="lane" data-day="' + d + '">'
+                + hours.map(() => '<div class="hr"></div>').join('') + blocks + '</div>';
+        }).join('');
+
+    // **朝が見えているところから始める。** 開いた瞬間に真夜中が出ていると、
+    // 毎回スクロールしてから見ることになる。いちばん早い予定か、七時。
+    const early = calSlots
+        .filter((s) => days.includes(s.day) && s.at)
+        .map((s) => mins(s.at)).filter((n) => n !== null);
+    const from = early.length ? Math.min(...early) : 7 * 60;
+    cols.scrollTop = Math.max(0, (from / 60 - 0.5) * HOUR_PX);
 }
 
 /// 選んだ日の中身。**押したらノートへ** ── 予定は入口で、書くのはノート。
@@ -6623,14 +6724,14 @@ function drawCalDay() {
 /// **その日に予定を足す。** 足すのは新しいノートで、日付は前書きに書く
 /// ── 「ノートに日付を書くと予定になる」（依頼 73）が既にあるので、
 /// カレンダーのためだけの保存場所を作らない。
-async function calAdd(day) {
+async function calAdd(day, at0) {
     // **この機械の予定表が使えるなら、そちらへ**（依頼 462）── 普通の
     // カレンダーとして期待されるのはそれ。使えないときだけノートを作る。
     const title = await askText('予定を足す（' + dayName(day) + '）', '',
         hereOn ? 'この機械の予定表に入ります。時刻は次に訊きます'
                : 'ノートが一本できます。時刻は次に訊きます');
     if (title === null || !title.trim()) return;
-    const at = await askText('何時から', '09:00', '空のままなら終日');
+    const at = await askText('何時から', at0 || '09:00', '空のままなら終日');
     if (at === null) return;
     if (hereOn) {
         const got = await window.amber.cal(['add', title.trim(), day, at.trim()]);
@@ -6682,15 +6783,53 @@ async function hereEdit(id) {
 el('cal').addEventListener('click', async (e) => {
     const box = el('cal');
     if (e.target === box || e.target.closest('.x')) { box.hidden = true; return; }
+    // **動く幅は、見方に合わせる** ── 週を見ている人の「次」は次の週。
     const step = (n) => {
-        let m = calMonth.m + n;
-        let y = calMonth.y;
-        if (m < 1) { m = 12; y -= 1; }
-        if (m > 12) { m = 1; y += 1; }
-        calMonth = { y, m };
+        if (calView === 'month') {
+            let m = calMonth.m + n;
+            let y = calMonth.y;
+            if (m < 1) { m = 12; y -= 1; }
+            if (m > 12) { m = 1; y += 1; }
+            calMonth = { y, m };
+            return;
+        }
+        const d = new Date(calDay + 'T00:00:00');
+        d.setDate(d.getDate() + n * (calView === 'week' ? 7 : 1));
+        calDay = ymd(d.getFullYear(), d.getMonth(), d.getDate());
+        calMonth = { y: d.getFullYear(), m: d.getMonth() + 1 };
     };
     if (e.target.closest('.prev')) { step(-1); await drawCal(); return; }
     if (e.target.closest('.next')) { step(1); await drawCal(); return; }
+    const seg = e.target.closest('.seg button');
+    if (seg) {
+        calView = seg.dataset.view;
+        window.amber.remember({ calView });
+        await drawCal();
+        return;
+    }
+    // 週と日の表で、何もないところを押したら**その時刻で**足す。
+    const lane = e.target.closest('.lane');
+    if (lane && !e.target.closest('.blk')) {
+        const box2 = lane.getBoundingClientRect();
+        const h = Math.max(0, Math.min(23, Math.floor((e.clientY - box2.top) / HOUR_PX)));
+        calDay = lane.dataset.day;
+        await calAdd(calDay, String(h).padStart(2, '0') + ':00');
+        return;
+    }
+    const ad = e.target.closest('.ad');
+    if (ad) {
+        if (ad.dataset.at) { box.hidden = true; await openNote(ad.dataset.at); }
+        else say('よその予定表のものなので、ここでは直せません');
+        return;
+    }
+    const blk = e.target.closest('.blk');
+    if (blk) {
+        if (blk.classList.contains('here')) { await hereEdit(blk.dataset.at); return; }
+        if (!blk.dataset.at) { say('よその予定表のものなので、ここでは直せません'); return; }
+        box.hidden = true;
+        await openNote(blk.dataset.at);
+        return;
+    }
     if (e.target.closest('.today')) {
         const now = new Date();
         calMonth = { y: now.getFullYear(), m: now.getMonth() + 1 };
@@ -8977,6 +9116,7 @@ const escapeAttr = escapeHtml;
     const saved = await window.amber.recall();
     state.root = saved.root;
     away = Array.isArray(saved.away) ? saved.away : [];
+    if (['month', 'week', 'day'].includes(saved.calView)) calView = saved.calView;
     noBins = Array.isArray(saved.noBins) ? saved.noBins : [];
     incomings = (saved.incomings && typeof saved.incomings === 'object') ? saved.incomings : {};
     // 外から動いたら教えてもらう ── 同じフォルダを二つの端末で触るのが
