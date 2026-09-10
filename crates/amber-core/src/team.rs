@@ -314,14 +314,16 @@ impl Columns {
         // **名前のない予定にも、何かを出す。** 件名を伏せて書き出す会社が
         // ある ── 空欄の帯は、押せない模様にしか見えない。
         //
-        // 「見せてもらえていない」と「そもそも入っていない」は違うので、
-        // 字も分ける。
+        // 「見せてもらえていない」と「読み取れなかった」は違うので、字も
+        // 分ける。**どちらも「空」とは書かない** ── 直前の行で「空き時間」
+        // を落としているので、同じ字を使うと「空いている」と読める。
+        // ここに帯が出ているということは、**予定はある**。
         let title = if !title.is_empty() {
             title.to_string()
         } else if shut {
             "非公開".to_string()
         } else {
-            "空".to_string()
+            "件名なし".to_string()
         };
 
         let one = |day: chrono::NaiveDate, at: Option<String>, to: Option<String>| Plan {
@@ -741,10 +743,11 @@ mod tests {
     }
 
     /// 件名を伏せて書き出す会社がある ── 空欄の帯は出さない。
+    /// **「空」とは書かない**（「空き時間」と読み違える）。
     #[test]
     fn a_nameless_plan_still_says_something() {
         let csv = format!("{HEAD}山田,,2026-09-10 10:00,2026-09-10 11:00,\n");
-        assert_eq!(of(&csv, 2026, 9).plans[0].title, "空");
+        assert_eq!(of(&csv, 2026, 9).plans[0].title, "件名なし");
     }
 
     /// 「空き時間」は、空いているという意味なので出さない。

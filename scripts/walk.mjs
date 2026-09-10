@@ -782,12 +782,21 @@ if (process.env.TEAMCSV) {
         const shut = team.filter((s) => s.shut);
         if (shut.length !== 1) return '非公開が ' + shut.length + ' 件です';
         if (shut[0].title !== '非公開') return '非公開の出し方が ' + shut[0].title + ' です';
+        // **件名の取れない予定を「空」とは書かない** ── 直前で「空き時間」を
+        // 落としているので、同じ字だと「空いている」と読める。
+        if (team.some((s) => s.title === '空')) return '「空」と出ています';
         return true;
     `, true);
 
-    await step('チームの予定表：いつ時点の紙かを出す', `
-        const sum = el('cal').querySelector('.sum').textContent;
-        return sum.includes('9/9 08:15') ? true : '「' + sum + '」としか出ていません';
+    await step('チームの予定表：いつ時点の紙かが、そのまま入口になる', `
+        const at = el('cal').querySelector('.teamat');
+        if (at.hidden) return 'いつ時点かが出ていません';
+        if (!at.textContent.includes('9/9 08:15')) return '「' + at.textContent + '」としか出ていません';
+        // **読んでいる人に、合言葉を毎回打たせない。**
+        setTimeout(() => closeSheet(0), 400);
+        at.click();
+        await new Promise((g) => setTimeout(g, 1500));
+        return true;
     `, true);
 
     await step('チームの予定表：何日もある終日は、日ごとに出る', `
@@ -874,6 +883,7 @@ if (process.env.TEAMCSV) {
         await cmdTeamOff();
         await new Promise((g) => setTimeout(g, 1200));
         if (teamFile) return 'まだ読んでいます';
+        if (!el('cal').querySelector('.teamat').hidden) return '入口が出たままです';
         if (calSlots.some((s) => s.kind === 'team')) return 'まだ予定が残っています';
         calGroup = false;
         calView = 'month';

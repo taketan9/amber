@@ -6599,11 +6599,16 @@ async function drawCal() {
 
     box.querySelector('.mo').textContent = calTitle();
     const plans = calSlots.filter((s) => s.kind !== 'note').length;
+    box.querySelector('.sum').textContent = plans ? plans + ' 件の予定' : '予定はありません';
     // **いつ時点の紙かを出す。** チームの予定は置き換わる一枚を読んで
     // いるだけなので、これが無いと古い紙を今の予定だと思って読む。
-    box.querySelector('.sum').textContent =
-        (plans ? plans + ' 件の予定' : '予定はありません')
-        + (teamAt ? '　／　チームは ' + teamAt + ' 時点' : '');
+    //
+    // **ここが、読んだあとの入口になる。** 合言葉は「まだ読んでいない人」の
+    // 目に触れないためのものなので、**もう読んでいる人に毎回打たせない**
+    // ── 読み直す・別の紙にする・やめるは、ここから。
+    const at = box.querySelector('.teamat');
+    at.hidden = !teamFile;
+    at.textContent = teamAt ? 'チームは ' + teamAt + ' 時点' : 'チームの予定表';
 
     box.querySelector('.month').hidden = calView !== 'month';
     box.querySelector('.hours').hidden = calView === 'month' || grouped;
@@ -6924,6 +6929,23 @@ async function cmdTeam() {
     if (!el('cal').hidden) await drawCal();
 }
 
+/// もう読んでいる人のための入口。**合言葉は、ここでは訊かない。**
+///
+/// 合言葉（依頼 473）は「まだ読んでいない人の一覧に会社の話を混ぜない」
+/// ためのもので、**もう読んでいる人に毎回打たせるためのものではない**。
+/// 読んでいるあいだは、いつ時点かの字がそのまま入口になる。
+async function cmdTeamHere() {
+    const pick = await askPick('チームの予定表', [
+        { name: '読み直す', sub: teamAt ? 'いまは ' + teamAt + ' 時点' : '' },
+        { name: '別のファイルにする', sub: shortPath(teamFile) },
+        { name: '読むのをやめる' },
+    ].map((r, n) => ({ ...r, value: n })), '', true);
+    if (pick === null) return;
+    if (pick === 0) { await drawCal(); say('読み直しました'); return; }
+    if (pick === 1) { await cmdTeam(); return; }
+    await cmdTeamOff();
+}
+
 /// 読むのをやめる。
 async function cmdTeamOff() {
     if (!teamFile) { say('チームの予定表は読んでいません'); return; }
@@ -7087,6 +7109,7 @@ el('cal').addEventListener('click', async (e) => {
         return;
     }
     if (e.target.closest('.whobtn')) { await cmdWhoPick(); return; }
+    if (e.target.closest('.teamat')) { await cmdTeamHere(); return; }
     // 名前を押したら、その人を引っ込める。**戻し方をその場で言う** ──
     // 押して消えたものの戻し方が画面のどこにも無いのが、いちばん困る。
     const who = e.target.closest('.crowd .rows .who');
