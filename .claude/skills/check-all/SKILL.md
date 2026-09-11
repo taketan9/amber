@@ -22,7 +22,7 @@ description: amber の全部の動作チェック。いつもの検査（Rust・
 cd ~/workspace/amber
 cargo test --workspace
 cargo clippy --workspace --all-targets
-for t in diagram-test paper-test win-test switch-test contract round-test key-test web-test agree-test words-test paint-test drive-test; do
+for t in diagram-test paper-test win-test switch-test contract round-test key-test web-test agree-test words-test paint-test drive-test themes-test; do
   printf '%-14s ' "$t"; node scripts/$t.js 2>&1 | tail -1
 done
 python3 scripts/requests.py     # 台帳（依頼が守られているか）
@@ -50,6 +50,7 @@ python3 scripts/shipped.py      # 未リリースの数
 | `words-test` | **同じものを、同じ名前で呼んでいるか**（注記の見出しは核・窓・電話の三か所にある ── 実際にずれていた） |
 | `contract` | crmaine との約束（名前を黙って変えていないか） |
 | `drive-test` | **Google のサインインの往復**（偽の Google を手元に立てて）── PKCE の合言葉が付くこと・違う state を受けないこと・切れた鍵が黙って新しくなること・やめると鍵が消えること。本物の Google は人が押すところなので、ここでは押さない |
+| `themes-test` | **amber のテーマは隣の cian と同じか**（十八の配色と三つの装いの写し `gui/palettes.js` が古くなっていないか。cian が隣に無ければ飛ばす。`--write` で作り直す） |
 | `requests.py` | 台帳 ── **人が頼んだことが、まだ守られているか** |
 
 台帳が落ちたら、**直す前にまず訊く** ── そこに書いてあるのは人が頼んだ

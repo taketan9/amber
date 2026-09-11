@@ -8594,16 +8594,67 @@ function gotoHead(h) {
 ///
 /// **名前で選んだら、選んだとおりに出す。** 「ayu-dark にしたのに昼は
 /// 明るい」は、選んだことにならない。既定（空）だけが OS に従う。
+/// **cian と同じ配色を、同じ順で**（依頼 495・本人「全テーマを全く同一に」）。
+/// 琥珀の三つは amber が育ててきたものなので頭に残す。そのあとに cian の窓の
+/// 三つの装い（白磁・陰翳・端末譲り）と、cian-tui の十八の配色。表は
+/// `palettes.js`（cian からの写し・`themes-test` が古くなれば鳴る）。
 const THEMES = [
     ['', '琥珀 ── OS に合わせる', null],
     ['amber-light', '琥珀 ── 明るい', false],
     ['amber-dark', '琥珀 ── 暗い', true],
-    ['ayu-light', 'ayu ── 明るい', false],
-    ['ayu-mirage', 'ayu ── 中間（mirage）', true],
-    ['ayu-dark', 'ayu ── 暗い', true],
-    ['paper', '紙 ── 白と黒だけ', false],
+    ['hakuji', '白磁', false],
+    ['inei', '陰翳', true],
+    ['terminal', '端末譲り', true],
+    ...CIAN_PALETTES.map((p) => [p.name, p.name, !lightColor(p.bg)]),
 ];
 let theme = '';
+
+/// 明るい色か（cian-core の `is_light` と同じ・Rec. 601）。
+function lightColor(hex) {
+    const n = parseInt(String(hex).slice(1), 16);
+    const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    return (299 * r + 587 * g + 114 * b) / 1000 > 128;
+}
+/// `a` を `b` へ `t` だけ寄せた色（0 なら a、1 なら b）。
+function mixColor(a, b, t) {
+    const rgb = (h) => [1, 3, 5].map((i) => parseInt(String(h).slice(i, i + 2), 16));
+    const [ar, ag, ab] = rgb(a);
+    const [br, bg, bb] = rgb(b);
+    const one = (x, y) => Math.round(x + (y - x) * t).toString(16).padStart(2, '0');
+    return '#' + one(ar, br) + one(ag, bg) + one(ab, bb);
+}
+
+/// amber の窓が使う十五の変数。cian の配色（十七の色）と装い（十三の変数）から組む。
+const THEME_VARS = ['--amber', '--amber-soft', '--amber-deep', '--bg', '--rail', '--list', '--paper',
+    '--line', '--line-2', '--ink', '--ink-2', '--ink-3', '--sel', '--hover', '--brand-s'];
+function themeVars(name) {
+    const look = CIAN_LOOKS[name];
+    if (look) {
+        const light = lightColor(look.pane);
+        const deep = light ? look.dir : look.accent;
+        return { light, vars: {
+            '--paper': look.pane, '--bg': look.bg, '--rail': look['pane-off'],
+            '--list': mixColor(look.pane, look['pane-off'], 0.5),
+            '--line': look.line, '--line-2': mixColor(look.line, look.pane, 0.5),
+            '--ink': look.text, '--ink-2': mixColor(look.text, look.dim, 0.45), '--ink-3': look.dim,
+            '--amber': look.accent, '--amber-soft': look['accent-dim'], '--amber-deep': deep,
+            '--sel': look['sel-strong'], '--hover': look['row-hover'], '--brand-s': deep,
+        } };
+    }
+    const p = CIAN_PALETTES.find((x) => x.name === name);
+    if (!p) return null;
+    const light = lightColor(p.bg);
+    // 明るい紙では、リンクや升に乗る濃い側を字のほうへ寄せて読めるようにする。
+    const deep = light ? mixColor(p.accent, p.fg, 0.3) : p.accent;
+    return { light, vars: {
+        '--paper': p.bg, '--rail': p.popup, '--list': mixColor(p.bg, p.popup, 0.5),
+        '--bg': mixColor(p.bg, p.popup, 0.35),
+        '--line': mixColor(p.border, p.bg, 0.4), '--line-2': mixColor(p.border, p.bg, 0.7),
+        '--ink': p.fg, '--ink-2': mixColor(p.fg, p.dim, 0.45), '--ink-3': p.dim,
+        '--amber': p.accent, '--amber-soft': mixColor(p.accent, p.bg, 0.55), '--amber-deep': deep,
+        '--sel': p.sel, '--hover': mixColor(p.sel, p.bg, 0.5), '--brand-s': deep,
+    } };
+}
 
 /// いま暗いか。**Monaco と mermaid にも同じ答えを渡す** ── 別々に訊くと、
 /// テーマを替えた日にエディタだけ前の明暗で残る。
@@ -8614,8 +8665,20 @@ function isDark() {
 
 function setTheme(name) {
     theme = name || '';
-    if (theme) document.documentElement.dataset.theme = theme;
-    else delete document.documentElement.dataset.theme;
+    const root = document.documentElement;
+    for (const k of THEME_VARS) root.style.removeProperty(k);
+    root.style.removeProperty('color-scheme');
+    const got = theme ? themeVars(theme) : null;
+    if (got) {
+        // cian の配色は、変数を直に差す（琥珀の三つは `index.html` の札で）。
+        root.dataset.theme = 'cian';
+        for (const [k, v] of Object.entries(got.vars)) root.style.setProperty(k, v);
+        root.style.setProperty('color-scheme', got.light ? 'light' : 'dark');
+    } else if (theme) {
+        root.dataset.theme = theme;
+    } else {
+        delete root.dataset.theme;
+    }
     window.amber.remember({ theme });
     if (window.monaco && editor) monaco.editor.setTheme(isDark() ? 'vs-dark' : 'vs');
     if (Mermaid) {
@@ -8630,11 +8693,15 @@ function themeName() {
     const t = THEMES.find(([k]) => k === theme);
     return t ? t[1].split(' ── ')[0] + (t[1].includes('──') ? '・' + t[1].split('── ')[1] : '') : '琥珀';
 }
+/// 表に無い名前が憶えに残っていたら（消えた配色）、琥珀に戻す。
+function knownTheme(name) {
+    return THEMES.some(([k]) => k === name) ? name : '';
+}
 
 async function cmdTheme() {
     const at = await askPick('テーマ', THEMES.map(([k, n]) => ({
         name: n, sub: k === theme ? '● いま' : '', value: k,
-    })), '琥珀は育ててきたもの。ayu は書く道具の定番。紙は刷るため');
+    })), '琥珀は amber が育ててきたもの。白磁から下は cian と同じ二十一の配色（同じ順）');
     if (at === null) return;
     setTheme(at);
 }
@@ -10856,7 +10923,7 @@ const escapeAttr = escapeHtml;
     if (typeof saved.fontStep === 'number') fontStep = saved.fontStep;
     if (saved.order) order = saved.order;
     if (saved.tocOn) tocOn = true;
-    if (saved.theme) setTheme(saved.theme);
+    if (saved.theme) setTheme(knownTheme(saved.theme));
     if (saved.lineNo) lineNo = true;
     drawOrder();
     booted = true;

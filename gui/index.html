@@ -93,44 +93,8 @@
   --brand-s: #f0a52b;
 }
 
-/* ayu ── 明るいほう。`--amber-deep` はリンクと升に乗るので、
-   ayu の accent `#FF9940`（白の上で 2.1:1）ではなく読める濃さにする。 */
-:root[data-theme="ayu-light"] {
-  color-scheme: light;
-  --amber: #ff9940; --amber-soft: #ffd9b3; --amber-deep: #a05a00;
-  --bg: #f8f9fa; --rail: #f3f4f5; --list: #fcfcfc; --paper: #ffffff;
-  --line: #dcdfe4; --line-2: #eaecef;
-  --ink: #5c6166; --ink-2: #787b80; --ink-3: #8a9199;
-  --sel: #ffe7d1; --hover: #eef0f2;
-}
-/* ayu ── 中間（mirage）。金は `#FFCC66`。 */
-:root[data-theme="ayu-mirage"] {
-  color-scheme: dark;
-  --amber: #ffcc66; --amber-soft: #ffe0a3; --amber-deep: #ffcc66;
-  --bg: #1f2430; --rail: #232834; --list: #1f2430; --paper: #242936;
-  --line: #343b4d; --line-2: #2b3242;
-  --ink: #cccac2; --ink-2: #a6a29a; --ink-3: #707a8c;
-  --sel: #3d4457; --hover: #2b3242;
-}
-/* ayu ── 暗いほう。金は `#E6B450`（iPhone のアクセントと同じ）。 */
-:root[data-theme="ayu-dark"] {
-  color-scheme: dark;
-  --amber: #e6b450; --amber-soft: #f2d59a; --amber-deep: #e6b450;
-  --bg: #0b0e14; --rail: #0d1017; --list: #0b0e14; --paper: #0f131a;
-  --line: #1f2430; --line-2: #171b24;
-  --ink: #bfbdb6; --ink-2: #9a9891; --ink-3: #565b66;
-  --sel: #26334d; --hover: #171b24;
-}
-/* 紙 ── 白と黒だけ。**刷るため、そして読むだけのため。**
-   色で意味を運ばない画面が一つ要る ── 色が見えない人にも同じものが届く。 */
-:root[data-theme="paper"] {
-  color-scheme: light;
-  --amber: #444444; --amber-soft: #dddddd; --amber-deep: #1a1a1a;
-  --bg: #ffffff; --rail: #f6f6f6; --list: #fbfbfb; --paper: #ffffff;
-  --line: #d4d4d4; --line-2: #e8e8e8;
-  --ink: #111111; --ink-2: #444444; --ink-3: #767676;
-  --sel: #ebebeb; --hover: #f2f2f2;
-}
+/* ayu と紙は cian の配色の表（`palettes.js`・依頼 495）に移った ── ここには
+   琥珀だけを書く。ほかの配色は変数を直に差す（`setTheme`）。 */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 /* **`hidden` は `display:flex` に負ける。** 属性は付いているのに出ている、
@@ -1732,6 +1696,7 @@ body.dropping::after {
   </div>
   <div id="say"></div>
   <script src="vendor/monaco/vs/loader.js"></script>
+  <script src="palettes.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

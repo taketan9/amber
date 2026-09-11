@@ -332,6 +332,23 @@ await step('選んで献立を出す', `
     unpickAll();
     return out > 2;`, true);
 
+// 十三の二。**テーマぜんぶ**（依頼 495）── 琥珀の三つと、cian と同じ二十一。
+// どれを着せても字と紙の色が分かれていて、着せ替えで例外が飛ばないこと。
+await step('テーマ：二十四の配色ぜんぶ着せられる', `
+    const was = theme;
+    const out = [];
+    for (const [k, n] of THEMES) {
+        setTheme(k);
+        await new Promise((g) => setTimeout(g, 30));
+        const css = getComputedStyle(document.documentElement);
+        const ink = css.getPropertyValue('--ink').trim();
+        const paper = css.getPropertyValue('--paper').trim();
+        if (!ink || !paper || ink === paper) out.push(n + ': ' + ink + '/' + paper);
+    }
+    setTheme(was);
+    if (THEMES.length !== 24) return '配色が ' + THEMES.length + ' 種です（24 のはず）';
+    return out.length ? out.join(' / ') : true;`, true);
+
 // 十四。**残りの命令。** 小窓を開けるものは `await` しない。
 const LATER = [
     ['タグ設定', `cmdTags();`],
