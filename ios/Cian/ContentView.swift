@@ -657,23 +657,11 @@ struct ContentView: View {
                 // 「よく使うもの」に見えてしまう（前はそうなっていた）。
                 if store.at.isEmpty {
                     HStack(spacing: 14) {
-                        // **言葉で探すのは、押してから。** 帯と並べて置きっ
-                        // ぱなしにすると一覧の頭が二段ぶん要る。
-                        Button { seeking = true } label: {
-                            Label("ノートを探す", systemImage: "magnifyingglass")
-                                .font(.footnote)
-                                .labelStyle(.titleAndIcon)
-                        }
-                        .buttonStyle(.borderless)
-                        // **フォルダのことは、この印一つに。** 印と「フォルダ」
-                        // の札が並んでいて、同じことを二度置いていた。押すと
-                        // フォルダの構成が出て、そこで**選ぶ／作る**（名前を
-                        // いきなり打たせない ── たいていは既にあるものへ行く）。
-                        Button { treeing = true } label: {
-                            Image(systemName: "folder.badge.plus").font(.footnote)
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel("フォルダ")
+                        // **探す欄は、いつも出ている**（本人・2026-09-12「最初から入力欄が
+                        // 出ているのは変かな？」→ 出しておく）── 題の下の検索の帯
+                        // （`Seeking`・iOS の標準の形）。ここには置かない。
+                        // **フォルダを作る印は「フォルダ」の見出しの右に**（本人「パッと
+                        // 探せなかった」）── 下の `header` にある。
                         Spacer(minLength: 0)
                         // **「フィルタ」の献立は無くなった。** 絞るのは下の
                         // 帯（タグ・フォルダ・期間）がやる ── ここに残って
@@ -690,7 +678,7 @@ struct ContentView: View {
                                 Label("全部まとめて見る", systemImage: "list.bullet")
                             }
                         } label: {
-                            Text("並び順").font(.footnote)
+                            Text("並び順").font(.subheadline)
                         }
                     }
                     // **右の余白は、何でもない場所。** 段のどこを触っても
@@ -906,7 +894,19 @@ struct ContentView: View {
                   }
                 } header: {
                     // 中に入っているときは、上の帯が既にどこかを言っている。
-                    if store.at.isEmpty { Text("フォルダ") }
+                    // **作る印は見出しの右**（本人・2026-09-12）。押すとフォルダの
+                    // 構成が出て、そこで選ぶ／作る（名前をいきなり打たせない）。
+                    if store.at.isEmpty {
+                        HStack {
+                            Text("フォルダ")
+                            Spacer()
+                            Button { treeing = true } label: {
+                                Image(systemName: "folder.badge.plus").font(.body)
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("フォルダを作る・選ぶ")
+                        }
+                    }
                 }
                 if store.at.isEmpty, ownBooks.isEmpty {
                     Text("まだありません（上の「フォルダ」から作れます）")
@@ -1071,8 +1071,8 @@ struct Seeking: ViewModifier {
     let tags: [String]
 
     func body(content: Content) -> some View {
-        if on {
-            content
+        // **探す欄はいつも出す**（本人・2026-09-12）── 前は押してから出していた。
+        content
                 .searchable(text: $needle, isPresented: $on,
                             placement: .navigationBarDrawer(displayMode: .always),
                             prompt: "ノートを探す")
@@ -1085,9 +1085,6 @@ struct Seeking: ViewModifier {
                         }
                     }
                 }
-        } else {
-            content
-        }
     }
 }
 

@@ -30,8 +30,8 @@ struct Sifting: View {
                             store.span = nil
                             open = nil
                         }
-                        .font(.caption)
-                        .padding(.horizontal, 9).padding(.vertical, 3)
+                        .font(.subheadline)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
                         .overlay(Capsule().strokeBorder(.secondary.opacity(0.5),
                                                         style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
                         .foregroundStyle(.secondary)
@@ -64,11 +64,11 @@ struct Sifting: View {
             open = open == which ? nil : which
         } label: {
             HStack(spacing: 3) {
-                Text(label).font(.caption)
+                Text(label).font(.subheadline)
                 Image(systemName: open == which ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
             }
-            .padding(.horizontal, 9).padding(.vertical, 3)
+            .padding(.horizontal, 12).padding(.vertical, 6)
             .background(
                 Capsule().fill(lit ? AnyShapeStyle(.tint)
                     : (open == which ? AnyShapeStyle(.tint.opacity(0.16)) : AnyShapeStyle(.clear)))
@@ -172,8 +172,8 @@ struct Spanning: View {
                         if s.from != nil || s.to != nil { store.span = s } else { store.span = nil }
                         held = made
                     }
-                    .font(.caption)
-                    .padding(.horizontal, 9).padding(.vertical, 3)
+                    .font(.subheadline)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
                     .background(Capsule().fill(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.clear)))
                     .overlay(Capsule().strokeBorder(.secondary.opacity(on ? 0 : 0.4)))
                     .foregroundStyle(on ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
@@ -182,7 +182,7 @@ struct Spanning: View {
             }
             HStack(spacing: 6) {
                 end("いつから", .from, store.span?.from)
-                Text("〜").font(.caption).foregroundStyle(.secondary)
+                Text("〜").font(.subheadline).foregroundStyle(.secondary)
                 end("いつまで", .to, store.span?.to)
             }
             HStack {
