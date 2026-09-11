@@ -264,9 +264,10 @@ export async function syncWalk() {
 
     // フォルダへ移す → 向こうも同じ ID のまま道が変わる（依頼 496）。
     await step('同期：フォルダへ移すと、向こうも同じ ID のまま道が変わる', `
-        // 総ざらいの途中では 買い物.md が別のフォルダに居ることがある ── 一覧から探す。
-        const note = state.notes.find((n) => n.path.endsWith('/買い物.md'));
-        if (!note) return '買い物.md がありません';
+        // 総ざらいの途中では、このノートは別のフォルダに居たり 買い物.3.md だったり
+        // する（同じ題が増えると番号は加算）── 開いている一本（題が 買い物）を使う。
+        const note = state.open;
+        if (!note || note.title !== '買い物') return '買い物のノートが開いていません: ' + (note && note.title);
         const rel0 = note.path.slice(state.root.length + 1);
         const before = (await window.amber.driveList()).find((x) => x.rel === rel0);
         if (!before) return '向こうに ' + rel0 + ' がありません';
