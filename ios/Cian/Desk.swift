@@ -9,6 +9,18 @@ import PhotosUI
 /// piece of state on the desk, and the editor is a window onto it.
 @MainActor
 final class Desk: ObservableObject {
+    /// ぶつかった場所 ── こちらの行と向こうの行（どちらかが空のこともある）。
+    struct Spot: Equatable {
+        var ours: [String]
+        var theirs: [String]
+    }
+    /// 前書きの鍵のぶつかり。
+    struct Field: Equatable {
+        let key: String
+        let ours: String
+        let theirs: String
+    }
+
     struct Tab: Identifiable, Equatable {
         let note: Note
         /// How the note describes itself: the `---` block at the top.
@@ -53,6 +65,12 @@ final class Desk: ObservableObject {
         var came: [Int] = []
         var both: [Int] = []
         var eyes = false
+        /// 同じ行を両方で直したところ（依頼 501・窓の `incoming.spots` と同じ・
+        /// 行の中身で憶える）と、前書きの鍵のぶつかり、相手の名前。
+        var spots: [Spot] = []
+        var fields: [Field] = []
+        var who = ""
+        var clashing: Bool { !spots.isEmpty || !fields.isEmpty }
 
         /// 「表示」の面で、いま見ている（打っている）**ファイルの行**。
         /// **面を替えても同じ場所に居る**ために要る ── 替えたあとでは、
@@ -109,6 +127,8 @@ final class Desk: ObservableObject {
             // 差し替えるぶんの書きかけは、置いていかない ── `Tab` ごと
             // 捨てるので、ここで書かないと消える。
             if let store, tabs[now].dirty { _ = try? save(tabs[now].id, store) }
+            if let store { settle(tabs[now].id, store) }
+            guard let now = tabs.firstIndex(where: { $0.id == showing }) else { return }
             tabs[now] = Tab(note: note, reading: !writing)
         } else if let now = tabs.firstIndex(where: { $0.id == showing }) {
             // 新しいタブは、いまのすぐ右へ（窓と同じ）。
@@ -123,8 +143,15 @@ final class Desk: ObservableObject {
     ///
     /// The neighbour on the left, because that is where you came from — a
     /// close that jumps to the far end of the row loses your place.
+    /// 棚（閉じるときに名前を揃えるのに要る・依頼 502）。`ContentView` が渡す。
+    weak var store: NotesStore?
+
     func close(_ id: String) {
         guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
+        // 離れるノートの名前を、題に揃えてから（依頼 502）。
+        if let store { settle(id, store) }
+        // 改名で札が差し替わっているので、取り直す。
+        guard let at = tabs.firstIndex(where: { $0.id == id }) ?? tabs.firstIndex(where: { $0.id == showing && showing != id }) else { return }
         tabs.remove(at: at)
         if showing == id {
             let next = min(max(0, at - 1), tabs.count - 1)
@@ -213,11 +240,139 @@ final class Desk: ObservableObject {
             tabs[now].came = got.came
             tabs[now].both = got.both
             tabs[now].eyes = got.eyes
+            tabs[now].spots = got.spots
+            tabs[now].fields = got.fields
+            tabs[now].who = "向こう"
             keepIncoming(tabs[now])
             redraw(id, store)
             store.freshen(tabs[now].note.path)
             return nil
         }
+    }
+
+    /// 同期が混ぜた印を、開いている札に付ける（依頼 500・501）。
+    func incoming(_ path: String, _ got: NotesStore.Merged, who: String, _ store: NotesStore) {
+        guard let at = tabs.firstIndex(where: { $0.note.path == path }) else { return }
+        tabs[at].loaded = false
+        try? load(path, store)
+        guard let now = tabs.firstIndex(where: { $0.note.path == path }) else { return }
+        tabs[now].came = got.came
+        tabs[now].both = got.both
+        tabs[now].eyes = got.eyes
+        tabs[now].spots = got.spots
+        tabs[now].fields = got.fields
+        tabs[now].who = who
+        keepIncoming(tabs[now])
+    }
+
+    // ── ぶつかった場所を選ぶ（依頼 501・窓の chooseSpot / chooseField の写し）──
+
+    /// 改行を行に含めたまま、行に割る（core の `records` と同じ割り方）。
+    nonisolated static func rowsOf(_ text: String) -> [String] {
+        var out: [String] = []
+        var cur = ""
+        for ch in text {
+            cur.append(ch)
+            if ch == "\n" { out.append(cur); cur = "" }
+        }
+        if !cur.isEmpty { out.append(cur) }
+        return out
+    }
+    /// ぶつかった場所を、いまの字の中で探す（末尾の改行は見ない）。見つからなければ -1。
+    nonisolated static func spotAt(_ rows: [String], _ spot: Spot) -> Int {
+        let want = spot.ours + spot.theirs
+        if want.isEmpty { return -1 }
+        let trim = { (s: String) -> String in s.hasSuffix("\n") ? String(s.dropLast()) : s }
+        if rows.count < want.count { return -1 }
+        for i in 0...(rows.count - want.count) {
+            var ok = true
+            for k in 0..<want.count where trim(rows[i + k]) != trim(want[k]) { ok = false; break }
+            if ok { return i }
+        }
+        return -1
+    }
+
+    /// 字を丸ごと差し替えて保存する（前書きも含めて）。
+    private func putWhole(_ id: String, _ text: String, _ store: NotesStore) {
+        guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let (head, body) = (try? store.split(text)) ?? ("", text)
+        tabs[at].head = head
+        tabs[at].text = body
+        _ = try? save(id, store, force: true)
+    }
+
+    /// 一つ選ぶ。`which` は ours / theirs / both。
+    func chooseSpot(_ id: String, _ n: Int, _ which: String, _ store: NotesStore) {
+        guard let at = tabs.firstIndex(where: { $0.id == id }), tabs[at].spots.indices.contains(n) else { return }
+        let spot = tabs[at].spots[n]
+        let rows = Self.rowsOf(tabs[at].whole)
+        let found = Self.spotAt(rows, spot)
+        if found >= 0, which != "both" {
+            let drop: Set<Int> = which == "ours"
+                ? Set((0..<spot.theirs.count).map { found + spot.ours.count + $0 })
+                : Set((0..<spot.ours.count).map { found + $0 })
+            if !drop.isEmpty {
+                let kept = rows.enumerated().filter { !drop.contains($0.offset) }.map { $0.element }
+                let shift = { (k: Int) -> Int in drop.contains(k) ? -1 : k - drop.filter { $0 < k }.count }
+                tabs[at].came = tabs[at].came.map(shift).filter { $0 >= 0 }
+                tabs[at].both = tabs[at].both.map(shift).filter { $0 >= 0 }
+                tabs[at].spots.remove(at: n)
+                putWhole(id, kept.joined(), store)
+            }
+        } else {
+            if found >= 0 {
+                let from = found + spot.ours.count
+                tabs[at].both = tabs[at].both.filter { $0 < from || $0 >= from + spot.theirs.count }
+            }
+            tabs[at].spots.remove(at: n)
+        }
+        settleIncoming(id)
+    }
+
+    /// 前書きの鍵を選ぶ。タグの「両方」は和集合。
+    func chooseField(_ id: String, _ n: Int, _ which: String, _ store: NotesStore) {
+        guard let at = tabs.firstIndex(where: { $0.id == id }), tabs[at].fields.indices.contains(n) else { return }
+        let f = tabs[at].fields[n]
+        var value: String? = which == "theirs" ? f.theirs : f.ours
+        if which == "both", f.key == "tags" {
+            let list = { (v: String) -> [String] in
+                v.replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")
+                    .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            }
+            var seen: [String] = []
+            for t in list(f.ours) + list(f.theirs) where !seen.contains(t) { seen.append(t) }
+            value = "[" + seen.joined(separator: ", ") + "]"
+        }
+        if value?.isEmpty == true { value = nil }
+        if let text = try? store.field(tabs[at].whole, f.key, value) { putWhole(id, text, store) }
+        guard let now = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs[now].fields.remove(at: n)
+        settleIncoming(id)
+    }
+
+    /// ぜんぶ、こちら（か向こう）で。
+    func chooseAll(_ id: String, _ which: String, _ store: NotesStore) {
+        while let at = tabs.firstIndex(where: { $0.id == id }), !tabs[at].spots.isEmpty { chooseSpot(id, 0, which, store) }
+        while let at = tabs.firstIndex(where: { $0.id == id }), !tabs[at].fields.isEmpty { chooseField(id, 0, which, store) }
+    }
+
+    private func settleIncoming(_ id: String) {
+        guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
+        if tabs[at].spots.isEmpty && tabs[at].fields.isEmpty {
+            tabs[at].eyes = false
+            if tabs[at].came.isEmpty { tabs[at].who = "" }
+        }
+        keepIncoming(tabs[at])
+    }
+
+    // ── ファイル名は題に合わせる（依頼 502・窓の settleName の写し）──
+
+    /// 離れるときに、そのノートの名前を題に揃える（打ちかけなら触らない）。
+    func settle(_ id: String, _ store: NotesStore) {
+        guard let at = tabs.firstIndex(where: { $0.id == id }), tabs[at].loaded, !tabs[at].dirty else { return }
+        guard let to = store.settle(tabs[at].note.path) else { return }
+        moved(from: tabs[at].note.path, to: to, store)
+        store.reload()
     }
 
     /// 入ってきたものの控え。**この機械の引き出しに置く** ── 「自分が
@@ -227,10 +382,12 @@ final class Desk: ObservableObject {
 
     private func keepIncoming(_ tab: Tab) {
         var all = UserDefaults.standard.dictionary(forKey: Self.seenKey) ?? [:]
-        if tab.came.isEmpty {
+        if tab.came.isEmpty && !tab.clashing {
             all.removeValue(forKey: tab.id)
         } else {
-            all[tab.id] = ["came": tab.came, "both": tab.both, "eyes": tab.eyes]
+            all[tab.id] = ["came": tab.came, "both": tab.both, "eyes": tab.eyes, "who": tab.who,
+                           "spots": tab.spots.map { ["ours": $0.ours, "theirs": $0.theirs] },
+                           "fields": tab.fields.map { ["key": $0.key, "ours": $0.ours, "theirs": $0.theirs] }]
         }
         UserDefaults.standard.set(all, forKey: Self.seenKey)
     }
@@ -243,6 +400,13 @@ final class Desk: ObservableObject {
         tabs[at].came = (one["came"] as? [Int]) ?? []
         tabs[at].both = (one["both"] as? [Int]) ?? []
         tabs[at].eyes = (one["eyes"] as? Bool) ?? false
+        tabs[at].who = (one["who"] as? String) ?? ""
+        tabs[at].spots = ((one["spots"] as? [[String: Any]]) ?? []).map {
+            Spot(ours: $0["ours"] as? [String] ?? [], theirs: $0["theirs"] as? [String] ?? [])
+        }
+        tabs[at].fields = ((one["fields"] as? [[String: Any]]) ?? []).map {
+            Field(key: $0["key"] as? String ?? "", ours: $0["ours"] as? String ?? "", theirs: $0["theirs"] as? String ?? "")
+        }
     }
 
     /// 「確認した」を押された ── 印を消す。
@@ -251,6 +415,9 @@ final class Desk: ObservableObject {
         tabs[at].came = []
         tabs[at].both = []
         tabs[at].eyes = false
+        tabs[at].spots = []
+        tabs[at].fields = []
+        tabs[at].who = ""
         keepIncoming(tabs[at])
     }
 

@@ -231,6 +231,7 @@ struct ContentView: View {
             Syncing.shared.store = store
             Syncing.shared.desk = desk
             Syncing.shared.load()
+            desk.store = store
             // What the routines owed while the phone was doing something
             // else. Asked for once, on the way in — see `Bell` for why this
             // is the moment and not nine on a Wednesday.

@@ -167,9 +167,10 @@ final class Syncing: ObservableObject {
                         let print = try Cian.call("syncprint", ["path": at])["print"] as? String ?? ""
                         let newId = try await Drive.shared.upload(rel: rel, text: text, print: print, id: id)
                         done.append(["rel": rel, "id": newId, "tag": print])
-                        desk?.incoming(at, got, store)
+                        let merged = NotesStore.Merged.from(got, text: text)
+                        desk?.incoming(at, merged, who: (there?.by.isEmpty == false ? there!.by : "向こう"), store)
                         report.clash += 1
-                        if got["eyes"] as? Bool == true { report.eyes += 1 }
+                        if merged.eyes { report.eyes += 1 }
                         report.touched.insert(at)
                     default:
                         break
@@ -283,15 +284,5 @@ extension Desk {
         tabs[at] = fresh
         if showing == from { showing = to }
         try? load(to, store)
-    }
-
-    /// 混ぜた印（来た行・ぶつかった場所）を、開いている札に付ける。
-    func incoming(_ path: String, _ got: [String: Any], _ store: NotesStore) {
-        guard let at = tabs.firstIndex(where: { $0.note.path == path }) else { return }
-        tabs[at].loaded = false
-        try? load(path, store)
-        tabs[at].came = (got["came"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue }
-        tabs[at].both = (got["both"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue }
-        tabs[at].eyes = got["eyes"] as? Bool ?? false
     }
 }

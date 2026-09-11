@@ -31,6 +31,8 @@ struct NoteView: View {
     @State private var trouble: String?
     /// 長押しされた図の、元の字（枠ごと）。
     @State private var fixingText: Fixing?
+    /// ぶつかった場所を選ぶ小窓（依頼 501）。
+    @State private var choosing = false
     /// 絵文字の板を出しているか（依頼 418）。
     @State private var facing = false
     /// 絵の大きさを訊いているか（依頼 420）。
@@ -295,7 +297,21 @@ struct NoteView: View {
     /// 名前が二つ付く。
     @ViewBuilder
     private var band: some View {
-        if !tab.came.isEmpty {
+        if tab.clashing {
+            // **ぶつかった場所がある**（依頼 501・窓の帯と同じ言葉）── 数と、選ぶ道。
+            HStack(spacing: 9) {
+                Circle().fill(Color(red: 0.77, green: 0.34, blue: 0.31)).frame(width: 8, height: 8)
+                Text("\(tab.who.isEmpty ? "向こう" : tab.who) と同じところを \(tab.spots.count + tab.fields.count) か所で直しています")
+                    .font(.footnote)
+                Spacer(minLength: 8)
+                Button("選ぶ") { choosing = true }
+                    .font(.footnote.weight(.semibold))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(Color(red: 0.77, green: 0.34, blue: 0.31).opacity(0.12))
+            Divider()
+        } else if !tab.came.isEmpty {
             HStack(spacing: 9) {
                 Circle()
                     .fill(tab.eyes ? Color(red: 0.77, green: 0.34, blue: 0.31) : Color("BrandSchwa"))
@@ -344,6 +360,9 @@ struct NoteView: View {
                     if reading { readMarks }
                 }
                 .background(paperColor)
+                .sheet(isPresented: $choosing) {
+                    Choosing(desk: desk, store: store, id: tab.id)
+                }
                 // **工房はここで開く。** 図は表示の面の中にあり、直した字を
                 // 戻す先はこのノートの本文なので、間に人を挟まない。
                 .sheet(item: $fixingText) { f in

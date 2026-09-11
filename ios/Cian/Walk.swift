@@ -416,6 +416,75 @@ enum Walk {
             if here.contains("太郎から.md") { return "古い名前が残っています" }
             return here.contains("太郎のメモ.md") ? nil : "新しい名前がありません: " + here.prefix(6).joined(separator: " / ")
         }
+        // 同じ行を両方で直した → 両方残って、選び口（依頼 501）。
+        let desk = Desk()
+        desk.store = store
+        Syncing.shared.desk = desk
+        await step("同期：同じ行を両方で直すと、両方残って選び口が出る") {
+            guard let note = store.notes.first(where: { $0.path.hasSuffix("/太郎のメモ.md") }) else { return "太郎のメモ.md がありません" }
+            desk.open(note, store, writing: true)
+            try desk.load(note.path, store)
+            guard let at = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "札がありません" }
+            desk.tabs[at].text = desk.tabs[at].text.replacingOccurrences(of: "iPhone で足した。", with: "iPhone で足した（こちらは十個）。")
+            _ = try desk.save(note.path, store)
+            _ = await sync.now("手")
+            let there = await talk("/_get?rel=" + ("太郎のメモ.md".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""))
+            let far = (there["text"] as? String ?? "").replacingOccurrences(of: "こちらは十個", with: "向こうは六個")
+            _ = await talk("/_put", ["rel": "太郎のメモ.md", "text": far, "by": "太郎の Mac"])
+            desk.tabs[at].text += "\nこちらでもう一行。\n"
+            _ = try desk.save(note.path, store)
+            guard let r = await sync.now("手") else { return "運びませんでした" }
+            if r.clash != 1 { return "ぶつかりが \(r.clash)（\(r.trouble.joined(separator: " / ")))" }
+            guard let now = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "札が消えました" }
+            let tab = desk.tabs[now]
+            if !tab.whole.contains("十個") || !tab.whole.contains("六個") { return "両方残っていません" }
+            if tab.spots.count != 1 { return "ぶつかった場所が \(tab.spots.count) です" }
+            if tab.who != "太郎の Mac" { return "相手の名前が \(tab.who) です" }
+            return nil
+        }
+        await step("同期：「こちらを残す」を選ぶと、向こうの行が消えて向こうにも上がる") {
+            guard let note = store.notes.first(where: { $0.path.hasSuffix("/太郎のメモ.md") }) else { return "太郎のメモ.md がありません" }
+            desk.chooseSpot(note.path, 0, "ours", store)
+            guard let now = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "札が消えました" }
+            let tab = desk.tabs[now]
+            if tab.whole.contains("六個") || !tab.whole.contains("十個") { return "選んだあとの字が違います" }
+            if tab.clashing { return "選び口が残っています" }
+            guard let r = await sync.now("手") else { return "運びませんでした" }
+            if r.up != 1 { return "上がったのが \(r.up) 本" }
+            let there = await talk("/_get?rel=" + ("太郎のメモ.md".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""))
+            let t = there["text"] as? String ?? ""
+            desk.close(note.path)
+            return t.contains("十個") && !t.contains("六個") ? nil : "向こうの字が違います"
+        }
+        // ファイル名は題に合わせる（依頼 502）── 離れたときと、時刻名の揃え直し。
+        await step("名前：一行目で題が決まるノートは、離れたときに名前が揃う") {
+            let made = try Cian.call("new", ["dir": store.rootPath, "title": ""])
+            guard let path = made["path"] as? String else { return "作れません" }
+            _ = try Cian.call("write", ["path": path, "text": "名前は一行目から\n\n本文。\n", "force": true])
+            store.reload()
+            guard let note = store.notes.first(where: { $0.path == path }) else { return "一覧にありません" }
+            desk.open(note, store)
+            try desk.load(path, store)
+            desk.close(path)
+            let names = store.notes.map { $0.path.split(separator: "/").last.map(String.init) ?? "" }
+            if names.contains(path.split(separator: "/").last.map(String.init) ?? "?") { return "時刻の名前のままです" }
+            return names.contains("名前は一行目から.md") ? nil : "揃っていません: " + names.prefix(8).joined(separator: " / ")
+        }
+        await step("名前：時刻の名前のノートは、一度に題の名前に揃う") {
+            let made = try Cian.call("new", ["dir": store.rootPath, "title": ""])
+            guard let path = made["path"] as? String else { return "作れません" }
+            _ = try Cian.call("write", ["path": path, "text": "めそぽたみあ\n", "force": true])
+            let n = store.tidyNames()
+            let names = store.notes.map { $0.path.split(separator: "/").last.map(String.init) ?? "" }
+            return n >= 1 && names.contains("めそぽたみあ.md") ? nil : "揃ったのが \(n) 本: " + names.prefix(8).joined(separator: " / ")
+        }
+        await step("同期：改名したぶんは、向こうも同じ ID のまま道が変わる") {
+            guard let r = await sync.now("手") else { return "運びませんでした" }
+            if r.trouble.first != nil { return "困りごと: " + r.trouble[0] }
+            let there = await rels()
+            return there.contains("名前は一行目から.md") && there.contains("めそぽたみあ.md") ? nil : "向こう: " + there.suffix(6).joined(separator: " / ")
+        }
+        Syncing.shared.desk = nil
         let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         _ = await talk("/_put", ["rel": "attachments/太郎の絵.png", "b64": png, "by": "太郎の Mac"])
         await step("同期：向こうが置いた絵が、bytes のまま下りてくる") {
@@ -425,11 +494,14 @@ enum Walk {
             guard let data = FileManager.default.contents(atPath: at) else { return "絵がありません" }
             return data.base64EncodedString() == png ? nil : "bytes が違います"
         }
-        _ = await talk("/_trash", ["rel": "太郎のメモ.md"])
+        // 離れたときに題（# 太郎から）に揃えて 太郎から.md になり、向こうも同じ名前に
+        // なっている ── いまの名前で消す。
+        let taro = store.notes.first { $0.title == "太郎から" }.map { $0.path.split(separator: "/").last.map(String.init) ?? "" } ?? "太郎から.md"
+        _ = await talk("/_trash", ["rel": taro])
         await step("同期：向こうで消したノートは、こちらからも消える") {
             guard let r = await sync.now("手") else { return "運びませんでした" }
-            if r.gone != 1 { return "消えたのが \(r.gone) 本（\(r.trouble.joined(separator: " / ")))" }
-            return store.notes.contains { $0.title == "太郎のメモ" } ? "一覧に残っています" : nil
+            if r.gone != 1 { return "消えたのが \(r.gone) 本（\(taro)・\(r.trouble.joined(separator: " / ")))" }
+            return store.notes.contains { $0.title == "太郎から" } ? "一覧に残っています" : nil
         }
         await step("同期：こちらで消したノートは、向こうでもゴミ箱へ") {
             guard let note = store.notes.first(where: { $0.title == "ストラテジーパターン" }) else { return "ノートがありません" }

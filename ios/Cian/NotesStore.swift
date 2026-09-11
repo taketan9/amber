@@ -293,6 +293,7 @@ final class NotesStore: ObservableObject {
             UserDefaults.standard.set(data, forKey: Self.bookmarkKey)
         }
         reload()
+        tidyNames()
     }
 
     func reload() {
@@ -1009,6 +1010,31 @@ final class NotesStore: ObservableObject {
         let both: [Int]
         /// 人の目が要るか。
         let eyes: Bool
+        /// 同じ行を両方で直したところ（行の中身で）と、前書きの鍵のぶつかり。
+        let spots: [Desk.Spot]
+        let fields: [Desk.Field]
+
+        /// core の答え（`came`・`both`・`spots`・`fields`）を、行の中身で持つ形に。
+        static func from(_ got: [String: Any], text: String) -> Merged {
+            let rows = Desk.rowsOf(text)
+            let slice = { (a: [Any]?) -> [String] in
+                guard let a, a.count == 2, let s = (a[0] as? NSNumber)?.intValue, let n = (a[1] as? NSNumber)?.intValue,
+                      s >= 0, s + n <= rows.count else { return [] }
+                return Array(rows[s..<(s + n)])
+            }
+            return Merged(
+                text: text,
+                came: (got["came"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue },
+                both: (got["both"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue },
+                eyes: got["eyes"] as? Bool ?? false,
+                spots: (got["spots"] as? [[String: Any]] ?? []).map {
+                    Desk.Spot(ours: slice($0["ours"] as? [Any]), theirs: slice($0["theirs"] as? [Any]))
+                },
+                fields: (got["fields"] as? [[String: Any]] ?? []).map {
+                    Desk.Field(key: $0["key"] as? String ?? "", ours: $0["ours"] as? String ?? "", theirs: $0["theirs"] as? String ?? "")
+                }
+            )
+        }
     }
 
     /// 同じノートを二人が更新したとき、**どちらかを捨てずに混ぜる**。
@@ -1031,12 +1057,25 @@ final class NotesStore: ObservableObject {
            !(was + ours).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw Cian.Failure.engine("混ぜた結果が空になりました")
         }
-        return Merged(
-            text: text,
-            came: (got["came"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue },
-            both: (got["both"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue },
-            eyes: got["eyes"] as? Bool ?? false
-        )
+        return Merged.from(got, text: text)
+    }
+
+    /// **題に合わせて改名する**（依頼 502・窓と同じ core の `settle`）。改名したら新しい道。
+    func settle(_ path: String) -> String? {
+        guard let root = root?.path, !root.isEmpty else { return nil }
+        guard let got = try? Cian.call("settle", ["path": root, "note": path]),
+              got["renamed"] as? Bool == true, let to = got["path"] as? String else { return nil }
+        return to
+    }
+
+    /// 時刻の名前のまま残っているノートを、一度だけ題の名前に揃える（決めごと 7）。
+    @discardableResult
+    func tidyNames() -> Int {
+        guard let root = root?.path, !root.isEmpty else { return 0 }
+        let got = try? Cian.call("tidynames", ["path": root])
+        let n = (got?["renamed"] as? [[String: Any]])?.count ?? 0
+        if n > 0 { reload() }
+        return n
     }
 
     func save(_ note: Note, text: String, stamp: String, force: Bool = false) throws -> Saved {
