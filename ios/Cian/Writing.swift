@@ -152,6 +152,11 @@ struct NoteView: View {
     @Environment(\.colorScheme) private var scheme
     @AppStorage("cian.look") private var look = Look.auto
     @AppStorage("amber.font") private var font = Size.system
+    /// 配色（依頼 499・cian と同じ二十一）。空なら琥珀。
+    @AppStorage("amber.palette") private var palette = ""
+    private var chosen: Palette? { Palettes.named(palette) }
+    /// 面の地 ── 配色があればその紙の色、無ければ透ける（iOS の地）。
+    private var paperColor: Color { Color(hex: chosen?.vars["--paper"] ?? "") ?? .clear }
 
     struct Fixing: Identifiable {
         let md: String
@@ -321,10 +326,11 @@ struct NoteView: View {
                 VStack(spacing: 0) {
                     band
                     Paper(text: $tab.text, folder: folder,
-                          dark: look == .dark || (look == .auto && scheme == .dark),
+                          dark: chosen.map { !$0.light } ?? (look == .dark || (look == .auto && scheme == .dark)),
                           size: font.px,
                           onCheck: tickLine, onAt: { tab.at = $0 },
                           came: tab.came, both: tab.both,
+                          palette: chosen?.vars ?? [:],
                           onFix: { fixingText = Fixing(md: $0) },
                           onMenu: {
                               let t = Tapped(kind: $0, at: $1, line: $2)
@@ -337,6 +343,7 @@ struct NoteView: View {
                     // しか使えない ── 電話の鍵盤にその記号は出ていない。
                     if reading { readMarks }
                 }
+                .background(paperColor)
                 // **工房はここで開く。** 図は表示の面の中にあり、直した字を
                 // 戻す先はこのノートの本文なので、間に人を挟まない。
                 .sheet(item: $fixingText) { f in

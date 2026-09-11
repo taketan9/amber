@@ -13,6 +13,9 @@ struct CianApp: App {
     /// 字の大きさ。**窓と同じものを電話にも**（窓は ⌘+ / ⌘−）── 本人が
     /// 「文字が全般的に小さくない？」（2026-09-08）。
     @AppStorage("amber.font") private var font = Size.system
+    /// 配色（依頼 499）── cian と同じ二十一。空なら琥珀（明暗は `look`）。
+    @AppStorage("amber.palette") private var palette = ""
+    private var chosen: Palette? { Palettes.named(palette) }
 
     var body: some Scene {
         WindowGroup {
@@ -28,8 +31,9 @@ struct CianApp: App {
                 // colour per screen: the tint is how you tell what can be
                 // touched, and a different answer on every screen is no
                 // answer.
+                // 配色を選んでも tint はシアンのまま（依頼 75・色は一つ、置き場所も一つ）。
                 .tint(Color("AccentColor"))
-                .preferredColorScheme(look.scheme)
+                .preferredColorScheme(chosen.map { $0.light ? ColorScheme.light : .dark } ?? look.scheme)
         }
     }
 

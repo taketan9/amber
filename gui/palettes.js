@@ -37,3 +37,53 @@ const CIAN_LOOKS = {
     inei: { "bg": "#14110f", "pane": "#1c1714", "pane-off": "#161211", "line": "#2b2320", "text": "#d9d0c5", "dim": "#7c6f64", "dir": "#c9a227", "accent": "#e8b84b", "accent-dim": "#2e2519", "on-accent": "#1a1409", "sel-strong": "#3d3120", "row-hover": "#241d19", "mark": "#c8703c" },
     terminal: { "bg": "#0c0c0c", "pane": "#111111", "pane-off": "#0d0d0d", "line": "#232323", "text": "#c8c8c8", "dim": "#6a6a6a", "dir": "#5fafff", "accent": "#5fffd7", "accent-dim": "#1c2a28", "on-accent": "#04120f", "sel-strong": "#263a37", "row-hover": "#1a1a1a", "mark": "#ffd75f" },
 };
+
+/* ── cian の色を、amber の十五の変数に組み替える ──
+ * **ここが唯一の算数。** 窓（renderer.js）も電話（Palettes.swift を作るとき）も
+ * これを通る ── 二か所に書くと、片方だけ直した日に同じ配色が二つの顔になる。 */
+
+/// 明るい色か（cian-core の `is_light` と同じ・Rec. 601）。
+function lightColor(hex) {
+    const n = parseInt(String(hex).slice(1), 16);
+    const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    return (299 * r + 587 * g + 114 * b) / 1000 > 128;
+}
+/// `a` を `b` へ `t` だけ寄せた色（0 なら a、1 なら b）。
+function mixColor(a, b, t) {
+    const rgb = (h) => [1, 3, 5].map((i) => parseInt(String(h).slice(i, i + 2), 16));
+    const [ar, ag, ab] = rgb(a);
+    const [br, bg, bb] = rgb(b);
+    const one = (x, y) => Math.round(x + (y - x) * t).toString(16).padStart(2, '0');
+    return '#' + one(ar, br) + one(ag, bg) + one(ab, bb);
+}
+/// 名前から `{ light, vars }`（amber の十五の変数）。知らない名前なら null。
+function amberVarsOf(name) {
+    const look = CIAN_LOOKS[name];
+    if (look) {
+        const light = lightColor(look.pane);
+        const deep = light ? look.dir : look.accent;
+        return { light, vars: {
+            '--paper': look.pane, '--bg': look.bg, '--rail': look['pane-off'],
+            '--list': mixColor(look.pane, look['pane-off'], 0.5),
+            '--line': look.line, '--line-2': mixColor(look.line, look.pane, 0.5),
+            '--ink': look.text, '--ink-2': mixColor(look.text, look.dim, 0.45), '--ink-3': look.dim,
+            '--amber': look.accent, '--amber-soft': look['accent-dim'], '--amber-deep': deep,
+            '--sel': look['sel-strong'], '--hover': look['row-hover'], '--brand-s': deep,
+        } };
+    }
+    const p = CIAN_PALETTES.find((x) => x.name === name);
+    if (!p) return null;
+    const light = lightColor(p.bg);
+    // 明るい紙では、リンクや升に乗る濃い側を字のほうへ寄せて読めるようにする。
+    const deep = light ? mixColor(p.accent, p.fg, 0.3) : p.accent;
+    return { light, vars: {
+        '--paper': p.bg, '--rail': p.popup, '--list': mixColor(p.bg, p.popup, 0.5),
+        '--bg': mixColor(p.bg, p.popup, 0.35),
+        '--line': mixColor(p.border, p.bg, 0.4), '--line-2': mixColor(p.border, p.bg, 0.7),
+        '--ink': p.fg, '--ink-2': mixColor(p.fg, p.dim, 0.45), '--ink-3': p.dim,
+        '--amber': p.accent, '--amber-soft': mixColor(p.accent, p.bg, 0.55), '--amber-deep': deep,
+        '--sel': p.sel, '--hover': mixColor(p.sel, p.bg, 0.5), '--brand-s': deep,
+    } };
+}
+
+if (typeof module !== 'undefined') module.exports = { CIAN_PALETTES, CIAN_LOOKS, lightColor, mixColor, amberVarsOf };

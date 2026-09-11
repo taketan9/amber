@@ -7182,12 +7182,13 @@ const CAL_COLORS = [
     ['#7a5c3a', '茶'], ['#5a6b7f', '灰'],
 ];
 const colorName = (hex) => (CAL_COLORS.find(([h]) => h === hex) || [])[1] || hex;
-/// その人の色。決めてあればそれ、無ければ鍵から一つ（同じ人はいつも同じ色）。
-function laneColor(key) {
+/// みんなの表の五色（本人・2026-09-12「見栄えのよい五色に絞る。五人以上は
+/// ループで」）── 並んだ順に 青・ピンク・黄・緑・紫、六人目はまた青。
+const LANE_COLORS = ['#3b78c9', '#e0669c', '#d9a400', '#2f8a52', '#8e5cb3'];
+/// その段の色。決めてあればそれ、無ければ**並んだ順**で五色を回す。
+function laneColor(key, n) {
     if (calColors[key]) return calColors[key];
-    let h = 0;
-    for (const c of String(key)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-    return CAL_COLORS[h % CAL_COLORS.length][0];
+    return LANE_COLORS[(Number(n) || 0) % LANE_COLORS.length];
 }
 function paintHereColor() {
     if (calHereColor) document.documentElement.style.setProperty('--cal-here', calHereColor);
@@ -7526,9 +7527,9 @@ function drawCrowd() {
                 + weekName(d) + ' ' + Number(d.slice(8)) + '</div>';
         }).join('');
 
-    const rows = lanes.map((lane) => {
+    const rows = lanes.map((lane, n) => {
         const track = calView === 'day' ? crowdDay(lane, days[0]) : crowdWeek(lane, days);
-        return '<div class="ln" style="--lane:' + laneColor(lane.key) + '"><div class="who ' + lane.kind + '"'
+        return '<div class="ln" style="--lane:' + laneColor(lane.key, n) + '"><div class="who ' + lane.kind + '"'
             + ' data-key="' + escapeAttr(lane.key) + '" title="押すと引っ込めます。右押しで色を変えます">'
             + '<span>' + escapeHtml(lane.name) + '</span></div>'
             + '<div class="track"' + wide + '>' + track + '</div></div>';
@@ -8059,8 +8060,8 @@ el('cal').addEventListener('contextmenu', async (e) => {
     if (who && who.dataset.key) {
         e.preventDefault();
         const key = who.dataset.key;
-        const now = laneColor(key);
-        popMenu(CAL_COLORS.map(([h, n]) => ({
+        const now = who.closest('.ln').style.getPropertyValue('--lane').trim();
+        popMenu(CAL_COLORS.filter(([h]) => LANE_COLORS.includes(h)).map(([h, n]) => ({
             name: (h === now ? '● ' : '　 ') + n + ' ── ' + who.textContent.trim(),
             run: async () => { calColors = { ...calColors, [key]: h }; window.amber.remember({ calColors }); await drawCal(); },
         })), at);
@@ -8116,12 +8117,12 @@ async function cmdCalSettings() {
             value: c.key,
         }));
         rows.push({ name: (calWeekend ? '✓　' : '　　') + '土日を出す', value: '*weekend', sub: calWeekend ? '' : '月〜金だけ出しています' });
-        rows.push({ name: 'この Mac の予定の色 ── ' + (calHereColor ? colorName(calHereColor) : '緑（既定）'), value: '*color', sub: '押すと選べます' });
+        rows.push({ name: '個人カレンダーの色 ── ' + (calHereColor ? colorName(calHereColor) : '緑（既定）'), value: '*color', sub: '押すと選べます' });
         const pick = await askPick('カレンダー表示設定', rows, '押すと出し入れできます。閉じるまで続けて選べます', true);
         if (pick === null) break;
         if (pick === '*weekend') { calWeekend = !calWeekend; window.amber.remember({ calWeekend }); continue; }
         if (pick === '*color') {
-            const c = await askPick('この Mac の予定の色', CAL_COLORS.map(([h, n]) => ({
+            const c = await askPick('個人カレンダーの色', CAL_COLORS.map(([h, n]) => ({
                 name: (h === (calHereColor || '#2f8a52') ? '● ' : '　 ') + n, value: h,
             })), '', true);
             if (c !== null) { calHereColor = c; window.amber.remember({ calHereColor }); paintHereColor(); }
@@ -8652,52 +8653,11 @@ const THEMES = [
 ];
 let theme = '';
 
-/// 明るい色か（cian-core の `is_light` と同じ・Rec. 601）。
-function lightColor(hex) {
-    const n = parseInt(String(hex).slice(1), 16);
-    const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-    return (299 * r + 587 * g + 114 * b) / 1000 > 128;
-}
-/// `a` を `b` へ `t` だけ寄せた色（0 なら a、1 なら b）。
-function mixColor(a, b, t) {
-    const rgb = (h) => [1, 3, 5].map((i) => parseInt(String(h).slice(i, i + 2), 16));
-    const [ar, ag, ab] = rgb(a);
-    const [br, bg, bb] = rgb(b);
-    const one = (x, y) => Math.round(x + (y - x) * t).toString(16).padStart(2, '0');
-    return '#' + one(ar, br) + one(ag, bg) + one(ab, bb);
-}
-
-/// amber の窓が使う十五の変数。cian の配色（十七の色）と装い（十三の変数）から組む。
+/// amber の窓が使う十五の変数。cian の色からの組み替えは `palettes.js` の
+/// `amberVarsOf`（電話も同じ算数で `Palettes.swift` を作る）。
 const THEME_VARS = ['--amber', '--amber-soft', '--amber-deep', '--bg', '--rail', '--list', '--paper',
     '--line', '--line-2', '--ink', '--ink-2', '--ink-3', '--sel', '--hover', '--brand-s'];
-function themeVars(name) {
-    const look = CIAN_LOOKS[name];
-    if (look) {
-        const light = lightColor(look.pane);
-        const deep = light ? look.dir : look.accent;
-        return { light, vars: {
-            '--paper': look.pane, '--bg': look.bg, '--rail': look['pane-off'],
-            '--list': mixColor(look.pane, look['pane-off'], 0.5),
-            '--line': look.line, '--line-2': mixColor(look.line, look.pane, 0.5),
-            '--ink': look.text, '--ink-2': mixColor(look.text, look.dim, 0.45), '--ink-3': look.dim,
-            '--amber': look.accent, '--amber-soft': look['accent-dim'], '--amber-deep': deep,
-            '--sel': look['sel-strong'], '--hover': look['row-hover'], '--brand-s': deep,
-        } };
-    }
-    const p = CIAN_PALETTES.find((x) => x.name === name);
-    if (!p) return null;
-    const light = lightColor(p.bg);
-    // 明るい紙では、リンクや升に乗る濃い側を字のほうへ寄せて読めるようにする。
-    const deep = light ? mixColor(p.accent, p.fg, 0.3) : p.accent;
-    return { light, vars: {
-        '--paper': p.bg, '--rail': p.popup, '--list': mixColor(p.bg, p.popup, 0.5),
-        '--bg': mixColor(p.bg, p.popup, 0.35),
-        '--line': mixColor(p.border, p.bg, 0.4), '--line-2': mixColor(p.border, p.bg, 0.7),
-        '--ink': p.fg, '--ink-2': mixColor(p.fg, p.dim, 0.45), '--ink-3': p.dim,
-        '--amber': p.accent, '--amber-soft': mixColor(p.accent, p.bg, 0.55), '--amber-deep': deep,
-        '--sel': p.sel, '--hover': mixColor(p.sel, p.bg, 0.5), '--brand-s': deep,
-    } };
-}
+const themeVars = (name) => amberVarsOf(name);
 
 /// いま暗いか。**Monaco と mermaid にも同じ答えを渡す** ── 別々に訊くと、
 /// テーマを替えた日にエディタだけ前の明暗で残る。

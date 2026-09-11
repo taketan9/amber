@@ -127,6 +127,7 @@ struct Where: View {
     /// よその予定表の出し入れ（依頼 456）。
     @State private var feeding = false
     @AppStorage("cian.look") private var look = Look.auto
+    @AppStorage("amber.palette") private var palette = ""
     @AppStorage("amber.font") private var font = Size.system
     @AppStorage("cian.autosave") private var autosave = true
 
@@ -293,6 +294,12 @@ struct Where: View {
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()
+                    // **配色は窓と同じ二十一**（依頼 499・cian と同じ）。選ぶと明暗も
+                    // その配色に従う。「琥珀」に戻せば上の見た目に従う。
+                    Picker("配色", selection: $palette) {
+                        Text("琥珀（上の見た目に従う）").tag("")
+                        ForEach(Palettes.all, id: \.name) { Text($0.label).tag($0.name) }
+                    }
                     // **字の大きさは、窓にもある**（⌘+ / ⌘−）── 電話にだけ
                     // 無いと、同じノートが端末によって読みやすさで分かれる。
                     Picker("文字の大きさ", selection: $font) {

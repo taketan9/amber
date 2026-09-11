@@ -805,10 +805,12 @@ await step('カレンダー：みんなの表は人ごとに色が違い、右�
     await drawCal();
     if (rows.length < 4) return '段が ' + rows.length + ' 本です';
     if (colors.some((c) => !c)) return '色の無い段があります: ' + JSON.stringify(colors);
-    if (new Set(colors.slice(0, 4)).size < 3) return '色が偏っています: ' + JSON.stringify(colors);
+    // 並んだ順に 青・ピンク・黄・緑・紫（五色を回す）。
+    if (new Set(colors.slice(0, 4)).size !== 4) return '色が偏っています: ' + JSON.stringify(colors);
+    if (colors[0] !== '#3b78c9' || colors[1] !== '#e0669c') return '並び順の色が違います: ' + JSON.stringify(colors);
     if (!menu.some((m) => m.includes('ピンク'))) return '色の献立が出ません: ' + JSON.stringify(menu);
     return got === '#3b78c9' ? true : '選んだ色になりません: ' + got;`, true);
-await step('カレンダー：この Mac の予定の色を選ぶと、札の色が変わる', `
+await step('カレンダー：個人カレンダーの色を選ぶと、札の色が変わる', `
     calHereColor = '#e8702a'; paintHereColor();
     const v = getComputedStyle(document.documentElement).getPropertyValue('--cal-here').trim();
     calHereColor = ''; paintHereColor();

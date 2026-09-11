@@ -50,6 +50,8 @@ struct Paper: UIViewRepresentable {
     /// **ノートには何も書いていない** ので、色は外から渡す。
     var came: [Int] = []
     var both: [Int] = []
+    /// 配色（依頼 499）── 面の CSS 変数に差す十五。空なら琥珀（明暗は `dark`）。
+    var palette: [String: String] = [:]
     /// 図を長押しされた（工房を開く）。
     var onFix: ((String) -> Void)?
     /// 触れないかたまり・リンクを一叩きしたときの、選ばせる小窓。
@@ -98,6 +100,7 @@ struct Paper: UIViewRepresentable {
         context.coordinator.parent = self
         context.coordinator.folder = folder
         context.coordinator.show(text, dark: dark, size: size)
+        context.coordinator.paint(web, palette)
         // **組み直すたびに敷き直す。** 札は組み直しで消えるので、
         // 一度きり渡すと、次に打った瞬間に色が消える。
         let js = "window.paint(\(came),\(both)); true"
@@ -198,6 +201,13 @@ struct Paper: UIViewRepresentable {
 
     window.onerror = (m, s, l) =>
       window.webkit.messageHandlers.trouble.postMessage(m + ' @' + l);
+
+    /// 配色（依頼 499）── 根に変数を直に差す。空なら琥珀に戻す。
+    window.setPalette = (vars) => {
+      const r = document.documentElement.style;
+      for (const k of ['--paper','--ink','--ink-2','--ink-3','--line','--line-2','--amber','--amber-soft','--amber-deep','--rail','--list','--bg','--sel','--hover','--brand-s']) r.removeProperty(k);
+      for (const [k, v] of Object.entries(vars || {})) r.setProperty(k, v);
+    };
 
     /// 組み上がった姿を置いて、打てるようにする。
     window.show = (html, text, dark) => {
@@ -666,6 +676,17 @@ struct Paper: UIViewRepresentable {
         private var shown = ""
         private var darkShown: Bool?
         private var sizeShown: Int?
+        private var paletteShown = ""
+
+        /// 配色を面に差す（変わったときだけ）。
+        func paint(_ web: WKWebView, _ vars: [String: String]) {
+            guard ready else { return }
+            let data = (try? JSONSerialization.data(withJSONObject: vars)) ?? Data("{}".utf8)
+            let json = String(data: data, encoding: .utf8) ?? "{}"
+            if json == paletteShown { return }
+            paletteShown = json
+            web.evaluateJavaScript("window.setPalette(\(json)); true")
+        }
         /// 升を押したところ ── 次に来る字は、面の上に既に出ている。
         private var ticking = false
 
@@ -674,6 +695,8 @@ struct Paper: UIViewRepresentable {
         func webView(_ web: WKWebView, didFinish: WKNavigation!) {
             ready = true
             shown = ""
+            paletteShown = ""
+            paint(web, parent.palette)
             show(parent.text, dark: parent.dark, size: parent.size)
         }
 
