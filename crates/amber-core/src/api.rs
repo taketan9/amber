@@ -451,15 +451,24 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 })
                 .unwrap_or_default();
             let was = crate::sync::recall(&root, who);
-            let steps: Vec<serde_json::Value> = crate::sync::plan(&here, &there, &was)
+            // こちらで改名して、まだ向こうに伝えていないもの（依頼 492）。
+            let moves = crate::sync::moves(&root, who);
+            let steps: Vec<serde_json::Value> = crate::sync::plan_with_moves(&here, &there, &was, &moves)
                 .into_iter()
                 .map(|s| {
+                    let from = match &s {
+                        crate::sync::Step::MoveThere { from, .. }
+                        | crate::sync::Step::MoveHere { from, .. } => Some(from.clone()),
+                        _ => None,
+                    };
                     let (id, rel) = match &s {
                         crate::sync::Step::Up { id, rel } => (id.clone(), rel.clone()),
                         crate::sync::Step::Down { id, rel }
                         | crate::sync::Step::DropThere { id, rel }
                         | crate::sync::Step::Clash { id, rel } => (Some(id.clone()), rel.clone()),
                         crate::sync::Step::DropHere { rel } => (None, rel.clone()),
+                        crate::sync::Step::MoveThere { id, to, .. }
+                        | crate::sync::Step::MoveHere { id, to, .. } => (Some(id.clone()), to.clone()),
                     };
                     // **ぶつかったら、分かれる前の姿の指紋を添える** ── 呼ぶ側は
                     // `baseread` でその中身を取り、三方向で混ぜる。
@@ -471,10 +480,64 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                             .unwrap_or(serde_json::Value::Null),
                         _ => serde_json::Value::Null,
                     };
-                    serde_json::json!({ "do": s.word(), "rel": rel, "id": id, "base": base })
+                    serde_json::json!({ "do": s.word(), "rel": rel, "id": id, "base": base, "from": from })
                 })
                 .collect();
             Ok(serde_json::json!({ "steps": steps }))
+        }
+
+        // **題に合わせて改名する**（依頼 492）。改名したら新しい道を返す。いつ
+        // 呼ぶかは呼ぶ側（題の欄から出た・ノートから離れた）。
+        "settle" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let note = std::path::PathBuf::from(arg(p, "note"));
+            match crate::naming::settle(&root, &note)? {
+                Some((to, rewrote)) => Ok(serde_json::json!({
+                    "path": to.display().to_string(), "renamed": true, "rewrote": rewrote,
+                })),
+                None => Ok(serde_json::json!({ "path": note.display().to_string(), "renamed": false, "rewrote": false })),
+            }
+        }
+
+        // 向こうで改名されたものを、こちらでも改名する（`movehere`）。その名前が
+        // 取られていれば番号を付け、**その改名は向こうへ伝えるものとして残す**。
+        "syncmove" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let from = root.join(arg(p, "from"));
+            let want = arg(p, "to");
+            let to = root.join(&want);
+            if !from.is_file() {
+                anyhow::bail!("{} がありません", from.display());
+            }
+            let (to, deviated) = if to.exists() {
+                let dir = to.parent().map(std::path::Path::to_path_buf).unwrap_or_else(|| root.clone());
+                let stem = to.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                let mut n = 2;
+                let mut at = dir.join(format!("{stem}.{n}.md"));
+                while at.exists() && n < 1000 {
+                    n += 1;
+                    at = dir.join(format!("{stem}.{n}.md"));
+                }
+                (at, true)
+            } else {
+                (to, false)
+            };
+            let rewrote = crate::naming::relocate(&root, &from, &to, deviated)?;
+            let rel = to
+                .strip_prefix(&root)
+                .map(|r| r.to_string_lossy().replace('\\', "/"))
+                .unwrap_or(want);
+            Ok(serde_json::json!({ "path": to.display().to_string(), "rel": rel, "deviated": deviated, "rewrote": rewrote }))
+        }
+
+        // 時刻の名前のまま残っているノートを、一度だけ題の名前に揃える（決めごと 7）。
+        "tidynames" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let done: Vec<serde_json::Value> = crate::naming::tidy_names(&root)
+                .into_iter()
+                .map(|(a, b)| serde_json::json!({ "from": a.display().to_string(), "to": b.display().to_string() }))
+                .collect();
+            Ok(serde_json::json!({ "renamed": done }))
         }
 
         // 一本の指紋（`sync::fingerprint`）── 上げるときに向こうへ札として付ける。
@@ -557,6 +620,12 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 }
             }
             crate::sync::remember(&root, who, &done, &gone)?;
+            // 伝え終わった改名（`movethere` を運んだ道）は忘れる。
+            let moved: Vec<String> = p["moved"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            crate::sync::forget_moves(&root, who, &moved);
             if keep_base {
                 // もう指されていない姿は捨てる ── 増えるだけの引き出しにしない。
                 let live: std::collections::HashSet<String> =

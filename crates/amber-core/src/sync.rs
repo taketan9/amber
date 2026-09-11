@@ -57,6 +57,11 @@ pub enum Step {
     DropThere { rel: String, id: String },
     /// 両方が変わった。**混ぜる**（混ぜ方は `merge` の仕事）。
     Clash { rel: String, id: String },
+    /// こちらで名前が変わった（依頼 492）── 向こうも改名する。**削除＋新規に
+    /// しない**（Drive の ID は同じまま・履歴も向こうの版も繋がったまま）。
+    MoveThere { from: String, to: String, id: String },
+    /// 向こうで名前が変わった ── こちらも改名する。
+    MoveHere { from: String, to: String, id: String },
 }
 
 impl Step {
@@ -67,6 +72,7 @@ impl Step {
             | Step::DropHere { rel }
             | Step::DropThere { rel, .. }
             | Step::Clash { rel, .. } => rel,
+            Step::MoveThere { to, .. } | Step::MoveHere { to, .. } => to,
         }
     }
 
@@ -77,9 +83,14 @@ impl Step {
             Step::DropHere { .. } => "drophere",
             Step::DropThere { .. } => "dropthere",
             Step::Clash { .. } => "clash",
+            Step::MoveThere { .. } => "movethere",
+            Step::MoveHere { .. } => "movehere",
         }
     }
 }
+
+/// こちらで改名して、**まだ向こうに伝えていない**もの（いまの道, 向こうがまだ持つ道）。
+pub type Move = (String, String);
 
 /// 手順を組む。
 ///
@@ -87,7 +98,65 @@ impl Step {
 /// ときの姿。**時刻はどこにも出てこない**（時刻で比べると、時計のずれた
 /// 端末が毎回勝つか毎回負ける）。
 pub fn plan(here: &[Here], there: &[There], was: &[Was]) -> Vec<Step> {
+    plan_with_moves(here, there, was, &[])
+}
+
+/// 手順を組む ── **改名も込みで**（依頼 492）。
+///
+/// 名前で突き合わせる前に、**ID で改名を見つける**。向こうの一本は ID で
+/// 同じままなので、こちらで改名したもの（`moves`）は向こうを改名し、向こうで
+/// 改名されたもの（憶えと違う道に同じ ID がある）はこちらを改名する。両方で
+/// 別の名前に変えていたら**向こうの名前に従う** ── 題そのものは中身の混ぜで
+/// 決まり、ファイル名は題に合わせて後から揃うので、ここで争わない。
+pub fn plan_with_moves(here: &[Here], there: &[There], was: &[Was], moves: &[Move]) -> Vec<Step> {
     use std::collections::BTreeMap;
+    let mut here: Vec<Here> = here.to_vec();
+    let mut there: Vec<There> = there.to_vec();
+    let mut was: Vec<Was> = was.to_vec();
+    let mut out = Vec::new();
+
+    // ── こちらの改名（憶えはもう新しい道・向こうはまだ古い道）──
+    for (now, old) in moves {
+        let Some(w) = was.iter().find(|w| &w.rel == now) else { continue };
+        let id = w.id.clone();
+        let Some(t) = there.iter_mut().find(|t| t.id == id) else { continue };
+        if &t.rel == old {
+            out.push(Step::MoveThere { from: old.clone(), to: now.clone(), id: id.clone() });
+            t.rel = now.clone();
+        } else if &t.rel != now {
+            // 向こうも別の名前に変えていた ── 向こうに従う。
+            let to = t.rel.clone();
+            out.push(Step::MoveHere { from: now.clone(), to: to.clone(), id: id.clone() });
+            rename_local(&mut here, &mut was, now, &to);
+        }
+    }
+
+    // ── 向こうの改名（同じ ID が、憶えと違う道にある）──
+    let mut skip: Vec<String> = Vec::new();
+    let mut skip_rels: Vec<String> = Vec::new();
+    for w in was.clone() {
+        let Some(t) = there.iter().find(|t| t.id == w.id) else { continue };
+        if t.rel == w.rel {
+            continue;
+        }
+        let to = t.rel.clone();
+        out.push(Step::MoveHere { from: w.rel.clone(), to: to.clone(), id: w.id.clone() });
+        // こちらにその名前の別のノートがある ── 改名は番号付きになるので、
+        // この回は名前を合わせるだけにして、中身はその次に運ぶ。
+        let taken = here.iter().any(|h| h.rel == to) && !was.iter().any(|x| x.rel == to && x.id == w.id);
+        if taken {
+            skip.push(w.id.clone());
+            skip_rels.push(w.rel.clone());
+        } else {
+            rename_local(&mut here, &mut was, &w.rel, &to);
+        }
+    }
+    if !skip.is_empty() {
+        there.retain(|t| !skip.contains(&t.id));
+        was.retain(|w| !skip.contains(&w.id));
+        here.retain(|h| !skip_rels.contains(&h.rel));
+    }
+
     let h: BTreeMap<&str, &Here> = here.iter().map(|x| (x.rel.as_str(), x)).collect();
     let t: BTreeMap<&str, &There> = there.iter().map(|x| (x.rel.as_str(), x)).collect();
     let w: BTreeMap<&str, &Was> = was.iter().map(|x| (x.rel.as_str(), x)).collect();
@@ -96,7 +165,6 @@ pub fn plan(here: &[Here], there: &[There], was: &[Was]) -> Vec<Step> {
     names.sort();
     names.dedup();
 
-    let mut out = Vec::new();
     for rel in names {
         let (a, b, c) = (h.get(rel), t.get(rel), w.get(rel));
         let step = match (a, b, c) {
@@ -150,6 +218,20 @@ pub fn plan(here: &[Here], there: &[There], was: &[Was]) -> Vec<Step> {
         }
     }
     out
+}
+
+/// 手順を組むあいだだけ、こちらの一本と憶えを新しい道で呼ぶ。
+fn rename_local(here: &mut [Here], was: &mut [Was], from: &str, to: &str) {
+    for h in here.iter_mut() {
+        if h.rel == from {
+            h.rel = to.to_string();
+        }
+    }
+    for w in was.iter_mut() {
+        if w.rel == from {
+            w.rel = to.to_string();
+        }
+    }
 }
 
 /* ── 前に合わせたときの姿を、憶えておく ── */
@@ -242,6 +324,92 @@ pub fn remember(root: &std::path::Path, who: &str, done: &[Was], gone: &[String]
     }
     std::fs::write(at, serde_json::to_string_pretty(&v)?)?;
     Ok(())
+}
+
+/// こちらで改名した（依頼 492）── 憶えの鍵を新しい道へ。`record` なら
+/// 「まだ向こうに伝えていない改名」として残す（向こうの改名を写すときは残さない）。
+///
+/// 相手ごとの憶えぜんぶに効く。憶えに無い一本（まだ一度も合わせていない）は
+/// 何も書かない ── 向こうには無いので、伝える改名も無い。
+pub fn moved(root: &std::path::Path, from: &str, to: &str, record: bool) {
+    let at = ledger(root);
+    let Some(mut v) = std::fs::read_to_string(ledger_now(root))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    else { return };
+    let Some(whos) = v.as_object_mut() else { return };
+    let mut touched = false;
+    for (_, who) in whos.iter_mut() {
+        let Some(who) = who.as_object_mut() else { continue };
+        let had = who
+            .get_mut("files")
+            .and_then(|f| f.as_object_mut())
+            .and_then(|f| f.remove(from));
+        let Some(entry) = had else { continue };
+        if let Some(f) = who.get_mut("files").and_then(|f| f.as_object_mut()) {
+            f.insert(to.to_string(), entry);
+        }
+        touched = true;
+        let m = who
+            .entry("moves".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        if !m.is_object() {
+            *m = serde_json::json!({});
+        }
+        let m = m.as_object_mut().unwrap();
+        // 続けて改名したら、向こうがまだ持つ道は最初のもの。
+        let origin = m
+            .remove(from)
+            .and_then(|o| o.as_str().map(str::to_string))
+            .unwrap_or_else(|| from.to_string());
+        if record && origin != to {
+            m.insert(to.to_string(), serde_json::Value::String(origin));
+        }
+    }
+    if touched {
+        crate::notebook::tidy(root);
+        if let Some(dir) = at.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(text) = serde_json::to_string_pretty(&v) {
+            let _ = std::fs::write(at, text);
+        }
+    }
+}
+
+/// まだ向こうに伝えていない改名（いまの道, 向こうがまだ持つ道）。
+pub fn moves(root: &std::path::Path, who: &str) -> Vec<Move> {
+    let Ok(text) = std::fs::read_to_string(ledger_now(root)) else { return Vec::new() };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return Vec::new() };
+    let Some(m) = v.get(who).and_then(|w| w.get("moves")).and_then(|m| m.as_object()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Move> = m
+        .iter()
+        .filter_map(|(now, old)| Some((now.clone(), old.as_str()?.to_string())))
+        .collect();
+    out.sort();
+    out
+}
+
+/// 伝え終わった改名を忘れる。
+pub fn forget_moves(root: &std::path::Path, who: &str, done: &[String]) {
+    if done.is_empty() {
+        return;
+    }
+    let at = ledger(root);
+    let Some(mut v) = std::fs::read_to_string(ledger_now(root))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    else { return };
+    if let Some(m) = v.get_mut(who).and_then(|w| w.get_mut("moves")).and_then(|m| m.as_object_mut()) {
+        for d in done {
+            m.remove(d);
+        }
+    }
+    if let Ok(text) = serde_json::to_string_pretty(&v) {
+        let _ = std::fs::write(at, text);
+    }
 }
 
 /// 中身の指紋。**時刻では比べない。**
@@ -406,6 +574,84 @@ mod tests {
     fn どちらにも無くなったものは_憶えを捨てるだけ() {
         let out = plan(&[], &[], &[w("a.md", "1", "x")]);
         assert!(out.is_empty(), "{out:?}");
+    }
+
+    #[test]
+    fn こちらで改名したら_向こうも改名する() {
+        // 憶えはもう新しい道、向こうはまだ古い道（`moved` がそうしておく）。
+        let was = vec![Was { rel: "旅.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }];
+        let there = vec![There { rel: "old.md".into(), id: "i".into(), tag: "x".into() }];
+        let mv = vec![("旅.md".to_string(), "old.md".to_string())];
+        let out = plan_with_moves(&[h("旅.md", "1")], &there, &was, &mv);
+        assert_eq!(out, vec![Step::MoveThere { from: "old.md".into(), to: "旅.md".into(), id: "i".into() }]);
+
+        // 改名して、さらに書いた ── 改名のあとに上げる。
+        let out = plan_with_moves(&[h("旅.md", "2")], &there, &was, &mv);
+        assert_eq!(out, vec![
+            Step::MoveThere { from: "old.md".into(), to: "旅.md".into(), id: "i".into() },
+            Step::Up { rel: "旅.md".into(), id: Some("i".into()) },
+        ]);
+
+        // 改名して、消した ── 向こうも消す（改名は伝えない）。
+        let out = plan_with_moves(&[], &there, &was, &mv);
+        assert_eq!(out, vec![
+            Step::MoveThere { from: "old.md".into(), to: "旅.md".into(), id: "i".into() },
+            Step::DropThere { rel: "旅.md".into(), id: "i".into() },
+        ]);
+    }
+
+    #[test]
+    fn 向こうで改名されたら_こちらも改名する() {
+        let was = vec![Was { rel: "old.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }];
+        let there = vec![There { rel: "旅.md".into(), id: "i".into(), tag: "x".into() }];
+        let out = plan_with_moves(&[h("old.md", "1")], &there, &was, &[]);
+        assert_eq!(out, vec![Step::MoveHere { from: "old.md".into(), to: "旅.md".into(), id: "i".into() }]);
+
+        // 向こうで改名して、さらに書かれた ── 改名のあとに下ろす。
+        let there2 = vec![There { rel: "旅.md".into(), id: "i".into(), tag: "y".into() }];
+        let out = plan_with_moves(&[h("old.md", "1")], &there2, &was, &[]);
+        assert_eq!(out, vec![
+            Step::MoveHere { from: "old.md".into(), to: "旅.md".into(), id: "i".into() },
+            Step::Down { rel: "旅.md".into(), id: "i".into() },
+        ]);
+
+        // **両方で別の名前に変えていたら、向こうに従う**（題は中身の混ぜで決まる）。
+        let was2 = vec![Was { rel: "こっち.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }];
+        let mv = vec![("こっち.md".to_string(), "old.md".to_string())];
+        let out = plan_with_moves(&[h("こっち.md", "1")], &there, &was2, &mv);
+        assert_eq!(out, vec![Step::MoveHere { from: "こっち.md".into(), to: "旅.md".into(), id: "i".into() }]);
+
+        // こちらにその名前の別のノートがある ── この回は名前だけ、中身は次に。
+        let out = plan_with_moves(&[h("old.md", "2"), h("旅.md", "9")], &there2, &was, &[]);
+        assert_eq!(out, vec![
+            Step::MoveHere { from: "old.md".into(), to: "旅.md".into(), id: "i".into() },
+            Step::Up { rel: "旅.md".into(), id: None },
+        ]);
+    }
+
+    #[test]
+    fn 改名の憶えは_続けて改名しても最初の道を持つ() {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path();
+        remember(r, "drive", &[Was { rel: "a.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }], &[]).unwrap();
+        moved(r, "a.md", "b.md", true);
+        moved(r, "b.md", "c.md", true);
+        assert_eq!(moves(r, "drive"), vec![("c.md".to_string(), "a.md".to_string())]);
+        assert_eq!(recall(r, "drive")[0].rel, "c.md");
+        // 元の名前に戻したら、伝える改名は無い。
+        moved(r, "c.md", "a.md", true);
+        assert!(moves(r, "drive").is_empty());
+        // 向こうの改名を写すときは、伝える改名として残さない。
+        moved(r, "a.md", "d.md", false);
+        assert!(moves(r, "drive").is_empty());
+        assert_eq!(recall(r, "drive")[0].rel, "d.md");
+        // 憶えに無い一本は、何も書かない。
+        moved(r, "z.md", "y.md", true);
+        assert!(moves(r, "drive").is_empty());
+        // 伝え終わったら忘れる。
+        moved(r, "d.md", "e.md", true);
+        forget_moves(r, "drive", &["e.md".to_string()]);
+        assert!(moves(r, "drive").is_empty());
     }
 
     #[test]

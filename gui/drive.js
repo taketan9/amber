@@ -381,6 +381,24 @@ function createDrive(opts) {
         return api('/drive/v3/files/' + q(id) + '?alt=media', { raw: true });
     }
 
+    /// 向こうの名前を変える（依頼 492）── 中身は運ばない。フォルダが変わる
+    /// なら親も付け替える。**ID は同じまま**（履歴も向こうの版も繋がったまま）。
+    async function rename({ id, rel }) {
+        const name = rel.split('/').pop();
+        const relDir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
+        const now = await api('/drive/v3/files/' + q(id) + '?fields=parents');
+        const want = await dir(relDir);
+        const had = (now && now.parents) || [];
+        let query = '';
+        if (want && !had.includes(want)) {
+            query = '&addParents=' + q(want) + (had.length ? '&removeParents=' + q(had.join(',')) : '');
+        }
+        await api('/drive/v3/files/' + q(id) + '?fields=id' + query, { method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name, appProperties: { rel } }) });
+        return { ok: true };
+    }
+
     /// 向こうで消す ── **ゴミ箱へ**（消さない。人が Drive で拾える）。
     async function trash(id) {
         await api('/drive/v3/files/' + q(id), { method: 'PATCH',
@@ -389,7 +407,7 @@ function createDrive(opts) {
     }
 
     return { signIn, signOut, account, token, whoAmI, tokenFile, secretFile,
-             list, upload, download, trash, home, by };
+             list, upload, download, rename, trash, home, by };
 }
 
 module.exports = { createDrive, pkce, authUrl, landing, CLIENT_ID, SCOPE };

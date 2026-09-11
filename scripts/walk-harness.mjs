@@ -133,6 +133,8 @@ export async function ready() {
     `, true);
     await step('同期を手だけにする', `
         syncAuto = false;
+        // 改名も手だけに（固定のファイル名で押して回るので）── 改名の段で入れる。
+        nameAuto = false;
         clearTimeout(syncTimer);
         // 開いた直後の一度目が裏で走っているなら、終わるまで待つ。
         for (let i = 0; i < 80 && syncBusy; i += 1) await new Promise((g) => setTimeout(g, 250));

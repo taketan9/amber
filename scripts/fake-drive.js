@@ -21,6 +21,7 @@
  *   GET  /_get?rel=…                 いま向こうにある字
  *   GET  /_list                      ぜんぶ
  *   POST /_trash { rel }             向こうで消した
+ *   POST /_move  { rel, to }         向こうで名前を変えた（ID はそのまま）
  *   POST /_reset                     まっさらに
  *   POST /_break { on }              繋がらない体（Drive の口だけ、返事をせずに切る）
  *
@@ -89,6 +90,15 @@ function start(port = 0) {
                 }
                 return json(200, meta(f));
             }
+            if (u.pathname === '/_move') {
+                const { rel, to } = JSON.parse(body || '{}');
+                const f = byRel(rel);
+                if (!f) return json(404, { error: 'ありません' });
+                f.name = to.split('/').pop();
+                f.appProperties = { ...f.appProperties, rel: to };
+                f.version = (f.version || 1) + 1;
+                return json(200, meta(f));
+            }
             if (u.pathname === '/_trash') {
                 const { rel } = JSON.parse(body || '{}');
                 const f = byRel(rel);
@@ -149,6 +159,11 @@ function start(port = 0) {
                     const m = JSON.parse(body || '{}');
                     if (m.trashed !== undefined) f.trashed = !!m.trashed;
                     if (m.name) f.name = m.name;
+                    if (m.appProperties) f.appProperties = { ...f.appProperties, ...m.appProperties };
+                    const add = u.searchParams.get('addParents');
+                    const rm = u.searchParams.get('removeParents');
+                    if (rm) f.parents = (f.parents || []).filter((x) => !rm.split(',').includes(x));
+                    if (add) f.parents = [...(f.parents || []), ...add.split(',')];
                     return json(200, meta(f));
                 }
                 if (req.method === 'DELETE') { files.delete(f.id); res.writeHead(204); return res.end(); }

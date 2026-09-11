@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('amber', {
     driveUpload: (args) => ipcRenderer.invoke('amber:driveUpload', args),
     driveDownload: (id) => ipcRenderer.invoke('amber:driveDownload', id),
     driveTrash: (id) => ipcRenderer.invoke('amber:driveTrash', id),
+    driveRename: (args) => ipcRenderer.invoke('amber:driveRename', args),
     deviceName: () => ipcRenderer.invoke('amber:deviceName'),
 
     /// 画面そのものの版。**エンジンの版とは別に要る** ── 同梱するときは

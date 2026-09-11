@@ -209,13 +209,61 @@ export async function syncWalk() {
         drawSyncState();
         return out;`, true);
 
+    // こちらで改名 → 向こうも改名（ID は同じまま・依頼 492）。
+    await step('同期：こちらで題を直すと、向こうのファイル名も変わる', `
+        nameAuto = true;
+        try {
+            await openNote(state.root + '/買い物.md');
+            el('title').textContent = '買いもの';
+            await titleDone(true);
+            if (!state.open.path.endsWith('/買いもの.md')) return '道が ' + state.open.path;
+            clearTimeout(syncTimer);
+            const r = await syncNow('手');
+            return r && r.moved === 1 ? true : JSON.stringify(r);
+        } finally { nameAuto = false; }`, true);
+    tally.ran += 1;
+    {
+        const there = await drive('/_list');
+        const rels = there.map((f) => f.appProperties.rel);
+        if (!rels.includes('買いもの.md') || rels.includes('買い物.md')) bad.push({ name: '同期：向こうも新しい名前', why: ['向こう: ' + rels.join(' / ')] });
+        const one = await drive('/_get?rel=買いもの.md');
+        if (!one.text || !one.text.includes('十個')) bad.push({ name: '同期：改名しても中身は同じ', why: [String(JSON.stringify(one.text)).slice(0, 120)] });
+    }
+    await step('同期：題を戻すと、向こうも戻る', `
+        nameAuto = true;
+        try {
+            el('title').textContent = '買い物';
+            await titleDone(true);
+            clearTimeout(syncTimer);
+            const r = await syncNow('手');
+            return r && r.moved === 1 ? true : JSON.stringify(r);
+        } finally { nameAuto = false; }`, true);
+
+    // 向こうで改名 → こちらも改名。
+    await drive('/_move', { rel: '太郎から.md', to: '太郎のメモ.md' });
+    await drive('/_put', { rel: '太郎のメモ.md', text: '---\ncreated: 2026-09-11\n---\n\n# 太郎のメモ\n\n電話で書いた。\n\n直した。\n', by: '太郎の iPhone' });
+    await step('同期：向こうで名前が変わると、こちらのファイルも変わる', `
+        const r = await syncNow('手');
+        if (!r || r.moved !== 1 || r.down !== 1) return JSON.stringify(r);
+        await new Promise((g) => setTimeout(g, 600));
+        if (state.notes.some((x) => x.path.endsWith('/太郎から.md'))) return '古い名前が残っています';
+        const n = state.notes.find((x) => x.path.endsWith('/太郎のメモ.md'));
+        return n && n.title === '太郎のメモ' ? true : '新しい名前が無い';`, true);
+    if (NOTES) {
+        tally.ran += 1;
+        try {
+            const got = readFileSync(NOTES + '/太郎のメモ.md', 'utf8');
+            if (!got.includes('# 太郎のメモ')) bad.push({ name: '同期：改名したファイルに新しい字', why: [JSON.stringify(got.slice(0, 80))] });
+        } catch (e) { bad.push({ name: '同期：改名したファイルに新しい字', why: [e.message] }); }
+    }
+
     // 向こうで消した → こちらはゴミ箱へ。
-    await drive('/_trash', { rel: '太郎から.md' });
+    await drive('/_trash', { rel: '太郎のメモ.md' });
     await step('同期：向こうで消したノートは、こちらでもゴミ箱へ', `
         const r = await syncNow('手');
         if (!r || r.gone !== 1) return JSON.stringify(r);
         await new Promise((g) => setTimeout(g, 600));
-        return state.notes.some((x) => x.title === '太郎から') ? '一覧に残っています' : true;`, true);
+        return state.notes.some((x) => x.title === '太郎のメモ') ? '一覧に残っています' : true;`, true);
 
     // こちらで消した → 向こうもゴミ箱へ。
     await step('同期：こちらで消したノートは、向こうでもゴミ箱へ', `

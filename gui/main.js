@@ -447,6 +447,7 @@ app.whenReady().then(() => {
     ipcMain.handle('amber:driveUpload', (_e, args) => drive.upload(args));
     ipcMain.handle('amber:driveDownload', (_e, id) => drive.download(id));
     ipcMain.handle('amber:driveTrash', (_e, id) => drive.trash(id));
+    ipcMain.handle('amber:driveRename', (_e, args) => drive.rename(args));
     ipcMain.handle('amber:deviceName', () => drive.by);
     // **どのクラウドに置くかを、選べるようにする。**
     //

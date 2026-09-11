@@ -1371,6 +1371,8 @@ async function openNote(path, opts) {
                 clearTimeout(readTimer);
                 await syncRead();
                 if (state.dirty) await save();
+                // 離れるノートの名前を、題に揃えてから（依頼 492・決めごと 2）。
+                if (state.open && state.open.path !== path) await settleName(state.open.path);
                 stashTab();
                 showing = path;
                 // **しまってあるなら、読み直さない。** 打ちかけの字を
@@ -1412,6 +1414,8 @@ async function openNote(path, opts) {
     clearTimeout(readTimer);
     await syncRead();
     if (state.dirty) await save();
+    // 離れるノートの名前を、題に揃えてから（依頼 492・決めごと 2）。
+    if (state.open && state.open.path !== path && !(opts && opts.guest)) await settleName(state.open.path);
     if (!editor) await makeEditor();
     let r;
     try {
@@ -1550,6 +1554,8 @@ async function titleDone(keep) {
         state.dirty = true;
         await save();
         say(to ? '題を「' + to + '」にしました' : '題を外しました（見出しから決まります）');
+        // **欄から出た瞬間に、ファイル名も題に**（依頼 492・決めごと 1）。
+        if (state.open) await settleName(state.open.path);
     } catch (e) {
         say('題を直せません: ' + why(e));
         drawTitle();
@@ -6676,6 +6682,7 @@ async function save() {
         state.dirty = false;
         el('state').textContent = '保存しました';
         syncSoon();
+        nameSoon();
         await freshenRow(path);
         drawStrip();
         setTimeout(() => {
@@ -9805,6 +9812,77 @@ async function loadSync() {
 // 開いた直後に一度 ── 献立の脇の「いま」は、押す前から正しくあること。
 loadSync();
 
+/* ── ファイル名は題に合わせる（依頼 492） ──
+ *
+ * **何という名前にするかは core（`settle`）、いつ改名するかはここ。**
+ * 題の欄から出たとき（`titleDone`）はその場で。見出しや一行目で題が決まる
+ * ノートは、**そのノートから離れたとき**（別のノートを開く・窓から出る・
+ * 打つ手が十秒止まったとき）── 打つたびに改名すると、「牛乳」を「牛乳と
+ * パン」に直すあいだにファイルが三度名前を変える。
+ */
+/// 勝手に改名するか。**総ざらいは切ってから回す** ── 固定のファイル名で
+/// 押して回るので、離れるたびに名前が変わると次の段が迷子になる。
+let nameAuto = true;
+let nameTimer = null;
+
+/// 改名したあと、道で持っているものを繋ぎ直す（タブ・戻る道・開いている
+/// ノート・混ぜた印）。棚の中のもの（履歴・憶え）は core が連れて行く。
+function afterRename(from, to) {
+    for (const t of tabs) {
+        if (t.path !== from) continue;
+        t.path = to;
+        if (t.keep && t.keep.open) t.keep.open = { ...t.keep.open, path: to };
+    }
+    if (showing === from) showing = to;
+    for (let i = 0; i < trail.length; i += 1) if (trail[i] === from) trail[i] = to;
+    if (incomings[from]) {
+        incomings[to] = { ...incomings[from], path: to };
+        delete incomings[from];
+        window.amber.remember({ incomings });
+    }
+    if (incoming && incoming.path === from) incoming.path = to;
+    if (state.open && state.open.path === from) {
+        state.open = { ...state.open, path: to };
+        window.amber.remember({ open: to });
+    }
+    rememberTabs();
+    // 見張りが「自分の書き込み」として読み飛ばせるように。
+    lastWrote = to;
+    lastWroteAt = Date.now();
+}
+
+/// 題に合わせて改名する。改名したら新しい道、しなければ null。
+async function settleName(path) {
+    if (!nameAuto || !path || state.guest || !state.root || !path.startsWith(state.root + '/')) return null;
+    let r;
+    try {
+        r = await ask('settle', { path: state.root, note: path });
+    } catch (e) {
+        say('名前を変えられません: ' + why(e));
+        return null;
+    }
+    if (!r || !r.renamed) return null;
+    afterRename(path, r.path);
+    await reload({ quiet: true });
+    // 本文の絵のリンクまで書き直されたなら、開いているものを読み直す。
+    if (r.rewrote && state.open && state.open.path === r.path && !state.dirty) {
+        await openNote(r.path, { walking: true });
+    }
+    return r.path;
+}
+
+/// 打つ手が止まって十秒したら、開いているノートの名前を揃える。
+function nameSoon() {
+    if (!nameAuto) return;
+    clearTimeout(nameTimer);
+    nameTimer = setTimeout(() => {
+        if (state.open && !state.dirty && !state.guest) settleName(state.open.path);
+    }, 10_000);
+}
+window.addEventListener('blur', () => {
+    if (state.open && !state.dirty && !state.guest) settleName(state.open.path);
+});
+
 /* ── 運ぶ ──
  *
  * **判断は core（`syncplan`）、運ぶのはここ。** 向こうの一覧を持ってきて、
@@ -9850,12 +9928,13 @@ async function syncNow(reason) {
     if (!syncAuto && reason !== '手') return null;
     syncBusy = true;
     drawSyncState();
-    const report = { reason, up: 0, down: 0, gone: 0, clash: 0, eyes: 0, trouble: [] };
+    const report = { reason, up: 0, down: 0, gone: 0, clash: 0, moved: 0, eyes: 0, trouble: [] };
     try {
         const remote = await window.amber.driveList();
         const plan = await ask('syncplan', { path: state.root, who: 'drive', remote });
         const done = [];
         const gone = [];
+        const moved = [];
         let touched = false;
         // **開いているノートを書き換えたか。** 見張り（`onChanged`）は、保存した
         // 直後の数秒はそのノートの変わりを「自分の跳ね返り」として捨てる ──
@@ -9890,6 +9969,24 @@ async function syncNow(reason) {
                     await window.amber.driveTrash(s.id);
                     gone.push(s.rel);
                     report.gone += 1;
+                } else if (s.do === 'movethere') {
+                    // こちらで改名した ── 向こうも改名する（ID は同じまま・依頼 492）。
+                    await window.amber.driveRename({ id: s.id, rel: s.rel });
+                    const there = remote.find((x) => x.id === s.id);
+                    done.push({ rel: s.rel, id: s.id, tag: there ? there.tag : '' });
+                    moved.push(s.rel);
+                    report.moved += 1;
+                } else if (s.do === 'movehere') {
+                    // 向こうで改名された ── こちらも改名する。
+                    const from = state.root + '/' + s.from;
+                    const wasOpen = !!(state.open && state.open.path === from);
+                    const r = await ask('syncmove', { path: state.root, from: s.from, to: s.rel });
+                    const there = remote.find((x) => x.id === s.id);
+                    done.push({ rel: r.rel, id: s.id, tag: there ? there.tag : '' });
+                    afterRename(from, r.path);
+                    report.moved += 1;
+                    touched = true;
+                    if (wasOpen) openTouched = true;
                 } else if (s.do === 'clash') {
                     // **両方が変わった ── 混ぜる。** 分かれる前の姿は `synced` が
                     // 取っておいたもの（無ければ空 ── ぜんぶがぶつかった場所になり、
@@ -9915,7 +10012,7 @@ async function syncNow(reason) {
                 report.trouble.push(s.rel + ': ' + why(e));
             }
         }
-        if (done.length || gone.length) await ask('synced', { path: state.root, who: 'drive', done, gone });
+        if (done.length || gone.length) await ask('synced', { path: state.root, who: 'drive', done, gone, moved });
         if (touched) await reload({ quiet: true });
         // 開いているノートが下りてきた ── 打ちかけでなければ、その字に開き直す
         // （帯と選び口もここで付く）。打ちかけなら、保存のときの混ぜに任せる。
@@ -9926,7 +10023,7 @@ async function syncNow(reason) {
         }
         syncLast = Date.now();
         syncTrouble = report.trouble.length ? report.trouble[0] : '';
-        if (report.up + report.down + report.gone + report.clash > 0) {
+        if (report.up + report.down + report.gone + report.clash + report.moved > 0) {
             syncFresh = { at: syncLast, ...report };
             clearTimeout(syncFreshTimer);
             syncFreshTimer = setTimeout(() => { syncFresh = null; drawSyncState(); }, 6000);
@@ -10054,6 +10151,7 @@ function drawSyncState() {
         if (syncFresh.down) parts.push('ダウンロード' + syncFresh.down + '本');
         if (syncFresh.gone) parts.push('ゴミ箱へ' + syncFresh.gone + '本');
         if (syncFresh.clash) parts.push('同じ行を両方で直したノート' + syncFresh.clash + '本');
+        if (syncFresh.moved) parts.push('名前の変更' + syncFresh.moved + '本');
         column('good', '同期しました ── ' + hhmm(syncFresh.at), parts.join('・'), []);
         return;
     }
@@ -10527,6 +10625,13 @@ const escapeAttr = escapeHtml;
     // 外から動いたら教えてもらう ── 同じフォルダを二つの端末で触るのが
     // このアプリの前提なのに、開き直すまで出てこなかった。
     sayIfBlind(await window.amber.watch(saved.root));
+    // 時刻の名前のまま残っているノートを、一度だけ題の名前に（依頼 492・決めごと 7）。
+    if (saved.root) {
+        try {
+            const got = await ask('tidynames', { path: saved.root });
+            for (const r of got.renamed || []) afterRename(r.from, r.to);
+        } catch { /* 揃えられなくても開ける */ }
+    }
     await loadPalette();
     if (saved.view === 'read' || saved.view === 'split' || saved.view === 'write') {
         view = saved.view;

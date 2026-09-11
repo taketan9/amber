@@ -177,6 +177,41 @@ await step('題を戻す', `
     el('title').textContent = '買い物';
     await titleDone(true);
     return whole().includes('title: 買い物');`, true);
+// 九の二。**ファイル名は題に合わせる**（依頼 492）── 欄から出た瞬間・離れたとき・同じ題。
+await step('名前：題の欄から出た瞬間に、ファイル名が題になる', `
+    nameAuto = true;
+    try {
+        await openNote(${path('買い物.md')});
+        el('title').textContent = '買いもの';
+        await titleDone(true);
+        if (!state.open.path.endsWith('/買いもの.md')) return '道が ' + state.open.path;
+        if (state.notes.some((n) => n.path.endsWith('/買い物.md'))) return '古い名前が一覧に残っています';
+        el('title').textContent = '買い物';
+        await titleDone(true);
+        return state.open.path.endsWith('/買い物.md') ? true : '戻した道が ' + state.open.path;
+    } finally { nameAuto = false; }`, true);
+if (NOTES) {
+    tally.ran += 1;
+    try { readFileSync(NOTES + '/買い物.md', 'utf8'); } catch (e) { bad.push({ name: '名前：ファイルも戻っている', why: [e.message] }); }
+}
+await step('名前：一行目で題が決まるノートは、離れたときに名前が揃う', `
+    nameAuto = true;
+    try {
+        await openNote(${path('改名.md')});
+        await openNote(${path('よくばり.md')});
+        const n = state.notes.find((x) => x.path.endsWith('/名前は一行目から.md'));
+        if (!n) return '揃っていません: ' + state.notes.filter((x) => /改名|一行目/.test(x.path)).map((x) => x.path.split('/').pop()).join(' / ');
+        return state.notes.some((x) => x.path.endsWith('/改名.md')) ? '古い名前が残っています' : true;
+    } finally { nameAuto = false; }`, true);
+await step('名前：同じ題は .2 になる', `
+    nameAuto = true;
+    try {
+        await openNote(${path('二本目.md')});
+        await openNote(${path('よくばり.md')});
+        const n = state.notes.find((x) => x.path.endsWith('/買い物.2.md'));
+        return n ? true : '無い: ' + state.notes.filter((x) => /買い物|二本目/.test(x.path)).map((x) => x.path.split('/').pop()).join(' / ');
+    } finally { nameAuto = false; }`, true);
+
 // **小窓を開ける命令は `await` しない。** ★ は置き場所を訊いてくる。
 await step('ブックマークに登録', `
     cmdStar();
@@ -609,6 +644,9 @@ await step('カレンダー：左の列から開ける', `
 `, true);
 
 await step('カレンダー：ひと月ぶんが出る', `
+    // **月から始める。** 見方は設定に憶えられているので、前に日や週で閉じて
+    // いれば日や週で開く ── 升目の数が合わなくなる（実際になった・2026-09-11）。
+    calView = 'month';
     calMonth = { y: 2026, m: 9 };
     calDay = '2026-09-09';
     await cmdCalendar();
@@ -1489,7 +1527,8 @@ await syncWalk();
 // 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => x.book === '歩き試し'
-            || /複製|新しいノート|週報|二台目/.test(x.title || ''))) {
+            || /複製|新しいノート|週報|二台目|名前は一行目から/.test(x.title || '')
+            || /買い物\.2\.md$/.test(x.path))) {
         try { await ask('delete', { path: n.path }); } catch { /* もう無い */ }
     }
     await reload({ quiet: true });

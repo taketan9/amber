@@ -14,6 +14,7 @@ pub mod history;
 pub mod ics;
 pub mod markdown;
 pub mod merge;
+pub mod naming;
 pub mod month;
 pub mod note;
 pub mod notebook;

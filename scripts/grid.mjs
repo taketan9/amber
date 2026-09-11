@@ -742,6 +742,8 @@ const t0 = Date.now();
             await new Promise((g) => setTimeout(g, 250));
         }
         if (!state.notes.length) return { bad: 'ノートが一本も読めません' };
+        // 網は固定の名前で開き直すので、題に合わせた改名は切る（依頼 492）。
+        nameAuto = false;
         await openNote(${note('網.md')});
         for (let i = 0; i < 40 && !editor; i += 1) await new Promise((g) => setTimeout(g, 100));
         return editor ? { ok: true } : { bad: 'エディタが起きません' };

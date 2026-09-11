@@ -292,6 +292,15 @@ pub fn came_back(root: &Path, rel: &str) -> Option<String> {
     Some(from)
 }
 
+/// ノートが改名された ── 憶えの鍵を新しい道へ（依頼 492）。憶えが無ければ何もしない。
+pub fn came_moved(root: &Path, from: &str, to: &str) {
+    let mut b = read(root);
+    if let Some(v) = b.came.remove(from) {
+        b.came.insert(to.to_string(), v);
+        let _ = write(root, &b);
+    }
+}
+
 /// Forget one, and everything under it.
 pub fn drop_star(root: &Path, folder: &str) -> anyhow::Result<()> {
     let mut b = read(root);

@@ -141,7 +141,15 @@ const ok = (yes, what, got) => {
         ok(c.id === a.id && (await d3.list()).find((x) => x.rel === '買い物.md').tag === 'p3', '上書きすると同じ id で指紋が変わる');
         await d3.trash(b.id);
         ok((await d3.list()).length === 1, 'ゴミ箱に入れると一覧から消える');
-        const got = await fetch(fd.url + '/_get?rel=買い物.md').then((r) => r.json());
+        // 改名（依頼 492）── 同じ ID のまま名前と道が変わり、フォルダが変われば親も付け替わる。
+        await d3.rename({ id: a.id, rel: '家族/買いもの.md' });
+        const moved = (await d3.list()).find((x) => x.id === a.id);
+        ok(moved && moved.rel === '家族/買いもの.md' && moved.tag === 'p3', '改名しても同じ id で、道が変わる', moved);
+        const raw = fd.files().get(a.id);
+        const famDir = [...fd.files().values()].find((f) => f.appProperties.amber === 'dir' && f.appProperties.rel === '家族');
+        ok(raw.name === '買いもの.md' && famDir && raw.parents.length === 1 && raw.parents[0] === famDir.id, 'Drive の名前と親フォルダも付け替わる', { name: raw.name, parents: raw.parents });
+        ok(await d3.download(a.id) === '# 買い物\n\n- 牛乳 2本\n', '中身はそのまま');
+        const got = await fetch(fd.url + '/_get?rel=' + encodeURIComponent('家族/買いもの.md')).then((r) => r.json());
         ok(got.text === '# 買い物\n\n- 牛乳 2本\n', '向こうの端末を演じる口からも同じ字が見える');
         fd.close();
     }
