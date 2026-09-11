@@ -656,6 +656,28 @@ body.mac #top { padding-top: 30px; }
   white-space: nowrap; cursor: pointer;
 }
 #band .act:hover { text-decoration: underline; }
+#band .nav { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+#band .k {
+  font-size: 12px; padding: 1px 9px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--paper); color: var(--ink); cursor: pointer;
+}
+#band .k.go { background: var(--amber); border-color: var(--amber); }
+#band .fld { flex-basis: 100%; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+#band .fld b { color: var(--amber-deep); }
+/* ぶつかった場所の、その場の選び口。**字ではない**（書き戻さない）。 */
+#read .gadget {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  margin: 10px 0 2px; padding: 5px 10px; font-size: 12px; line-height: 1.6;
+  border: 1px solid var(--amber); border-radius: 8px 8px 0 0;
+  background: color-mix(in srgb, var(--amber) 10%, var(--paper));
+}
+#read .gadget b { font-weight: 600; color: var(--amber-deep); }
+#read .gadget button {
+  font-size: 12px; padding: 1px 9px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--paper); color: var(--ink); cursor: pointer; font-family: inherit;
+}
+#read .gadget button.go { background: var(--amber); border-color: var(--amber); }
+#read .gadget .hint { color: var(--ink-2); }
 /* 来た行。**地色だけ** ── 字も並びも動かさない。 */
 #read .came { background: color-mix(in srgb, var(--amber) 12%, transparent); }
 /* 同じ場所を二人が書いて、両方残したところ。**ここだけ強くする** ──

@@ -598,6 +598,16 @@ async function press(md, where, at, hit) {
            '上に空の升が置かれる', box.innerHTML);
     }
 
+    say('面の道具（選び口）は、字に戻さない');
+    {
+        await draw('ひとつ。\n\nふたつ。');
+        const g = document.createElement('div');
+        g.className = 'gadget';
+        g.innerHTML = '<b>同じ行を両方で直していました</b><button>こちらを残す</button>';
+        box.firstElementChild.before(g);
+        ok(paperToMd(box, '') === 'ひとつ。\n\nふたつ。\n', '選び口の字が本文に混ざらない', paperToMd(box, ''));
+    }
+
     say('注記の札は、行として数えない');
     {
         const r = await press('> [!NOTE]\n> 覚えておくこと。', '覚えて', 0, () => checkBack(box));

@@ -1905,6 +1905,8 @@ function armPaper(box, text, open) {
 function paperToMd(box, head) {
     const out = [];
     for (const node of box.children) {
+        // **面の道具（選び口など）は字ではない。** 書き戻さない。
+        if (node.classList && node.classList.contains('gadget')) continue;
         if (richBlock(node)) {
             // **書いてあった字をそのまま返す。** 図や枠を読み解いて
             // 組み直すより、触らせないほうが失わない。
@@ -1928,6 +1930,7 @@ function paperToMd(box, head) {
 function blockToMd(node, depth = 0) {
     if (node.nodeType === 3) return node.data.trim() ? node.data : null;
     if (node.nodeType !== 1) return null;
+    if (node.classList.contains('gadget')) return null;      // 面の道具 ── 字ではない
     const pad = '  '.repeat(depth);
     // 注記は `> [!NOTE]` に戻す。**種類の札は中身ではない**ので、
     // 見出しの一行（`.alert-h`）は書き出さず、class から取り直す。
@@ -6282,14 +6285,41 @@ function loadIncoming() {
 /// 「同時に書いた控え」「あちらでも書き換えられています」と言っている）。
 function drawBand() {
     const b = el('band');
-    if (!incoming || !incoming.came.length) { b.hidden = true; b.innerHTML = ''; return; }
-    const n = incoming.came.length;
-    const what = incoming.eyes
-        ? '同じところを二人が更新しました。どちらにするか決めてください'
-        : 'ほかの人が ' + n + ' 行更新しました';
-    b.className = incoming.eyes ? 'eyes' : '';
+    const spots = (incoming && incoming.spots) || [];
+    const fields = (incoming && incoming.fields) || [];
+    if (!incoming || (!incoming.came.length && !spots.length && !fields.length)) {
+        b.hidden = true;
+        b.innerHTML = '';
+        return;
+    }
+    const who = (incoming.who || '向こう');
     b.hidden = false;
-    b.innerHTML = '<span class="dot"></span><span>' + what + '</span>'
+    if (spots.length || fields.length) {
+        // **ぶつかった場所がある** ── 数と、飛ぶ道と、まとめて選ぶ道
+        // （本人が決めた姿・2026-09-11・artifact「ぶつかったところを選ぶ」）。
+        const n = spots.length + fields.length;
+        b.className = 'eyes';
+        b.innerHTML = '<span class="dot"></span><span>' + escapeHtml(who) + 'と同じところを直していました ── '
+            + n + ' か所。選ぶまでは両方残っています</span>'
+            + '<span class="nav">'
+            + '<button class="k" data-go="-1">← 前</button><button class="k" data-go="1">次 →</button>'
+            + '<button class="k" data-all="ours">ぜんぶこちら</button>'
+            + '<button class="k" data-all="theirs">ぜんぶ' + escapeHtml(who) + '</button></span>'
+            + fields.map((f, i) => '<span class="fld">'
+                + '<b>' + escapeHtml(fieldName(f.key)) + '</b>を両方で変えていました ── こちら「' + escapeHtml(f.ours) + '」／'
+                + escapeHtml(who) + '「' + escapeHtml(f.theirs) + '」'
+                + '<button class="k go" data-f="' + i + '" data-w="ours">こちらを残す</button>'
+                + '<button class="k" data-f="' + i + '" data-w="theirs">' + escapeHtml(who) + 'を残す</button>'
+                + (f.key === 'tags' ? '<button class="k" data-f="' + i + '" data-w="both">両方</button>' : '')
+                + '</span>').join('');
+        for (const x of b.querySelectorAll('[data-go]')) x.onclick = () => stepGadget(Number(x.dataset.go));
+        for (const x of b.querySelectorAll('[data-all]')) x.onclick = () => chooseAll(x.dataset.all);
+        for (const x of b.querySelectorAll('[data-f]')) x.onclick = () => chooseField(Number(x.dataset.f), x.dataset.w);
+        return;
+    }
+    const n = incoming.came.length;
+    b.className = '';
+    b.innerHTML = '<span class="dot"></span><span>ほかの人が ' + n + ' 行更新しました</span>'
         + '<button class="act">ほかの人が更新したところを確認した</button>';
     b.querySelector('.act').onclick = () => {
         incoming = null;
@@ -6297,6 +6327,166 @@ function drawBand() {
         drawBand();
         paintIncoming();
     };
+}
+
+/// 前書きの鍵の、人の言葉。
+function fieldName(key) {
+    return { title: '題', tags: 'タグ', created: '作った日', remind: '通知' }[key] || key;
+}
+
+/// 改行を行に含めたまま、行に割る（core の `records` と同じ割り方）。
+function rowsOf(text) {
+    return text ? text.split(/(?<=\n)/) : [];
+}
+
+/// ぶつかった場所を、いまの字の中で探す ── **行の中身で**。こちらの行の
+/// 直後に向こうの行が並んでいる。見つからなければ -1（人がもう直した）。
+function spotAt(rows, spot) {
+    const o = spot.ours;
+    const t = spot.theirs;
+    const n = o.length + t.length;
+    if (!n) return -1;
+    for (let i = 0; i + n <= rows.length; i += 1) {
+        let ok = true;
+        for (let k = 0; k < o.length && ok; k += 1) if (rows[i + k] !== o[k]) ok = false;
+        for (let k = 0; k < t.length && ok; k += 1) if (rows[i + o.length + k] !== t[k]) ok = false;
+        if (ok) return i;
+    }
+    return -1;
+}
+
+/// 読む面の、その行を持つかたまり（`paintIncoming` と同じ探し方）。
+function blockOfLine(rd, line) {
+    for (const b of rd.children) {
+        const from = Number(b.dataset.line);
+        if (Number.isNaN(from)) continue;
+        const span = Number(b.dataset.span) || 1;
+        if (from <= line && line < from + span) return b;
+    }
+    return null;
+}
+
+/// ぶつかった場所の**その場の選び口**を、読む面に置く。
+///
+/// 三択（こちらを残す／〇〇を残す／両方）── 消した側があっても同じ形
+/// （本人が決めた・2026-09-11）。選び口は字ではないので、書き戻さない
+/// （`paperToMd` が `.gadget` を飛ばす）。
+function placeGadgets() {
+    const rd = el('read');
+    for (const g of rd.querySelectorAll('.gadget')) g.remove();
+    if (!incoming || !incoming.spots || !incoming.spots.length) return;
+    const rows = rowsOf(whole());
+    const who = incoming.who || '向こう';
+    incoming.spots.forEach((spot, n) => {
+        const at = spotAt(rows, spot);
+        if (at < 0) return;
+        const top = blockOfLine(rd, at);
+        if (!top) return;
+        const g = document.createElement('div');
+        g.className = 'gadget';
+        g.contentEditable = 'false';
+        const what = !spot.ours.length ? 'こちらは消し、' + who + 'は直していました'
+            : !spot.theirs.length ? 'こちらは直し、' + who + 'は消していました'
+            : '同じ行を両方で直していました';
+        const hint = !spot.ours.length ? '（こちらを残す ＝ ' + who + 'の行が消えます）'
+            : !spot.theirs.length ? '（' + who + 'を残す ＝ この行が消えます）' : '';
+        g.innerHTML = '<b>' + escapeHtml(what) + '</b>'
+            + '<button class="go" data-w="ours">こちらを残す</button>'
+            + '<button data-w="theirs">' + escapeHtml(who) + 'を残す</button>'
+            + '<button data-w="both">両方</button>'
+            + (hint ? '<span class="hint">' + escapeHtml(hint) + '</span>' : '');
+        for (const x of g.querySelectorAll('button')) {
+            x.onmousedown = (e) => e.preventDefault();
+            x.onclick = () => chooseSpot(n, x.dataset.w);
+        }
+        top.before(g);
+    });
+}
+
+/// 前後の選び口へ。
+function stepGadget(dir) {
+    const gs = [...el('read').querySelectorAll('.gadget')];
+    if (!gs.length) return;
+    const box = el('read').getBoundingClientRect();
+    const mid = box.top + box.height / 2;
+    // いま見えているまん中より下の最初のもの（次）／上の最後のもの（前）。
+    const to = dir > 0
+        ? (gs.find((g) => g.getBoundingClientRect().top > mid + 8) || gs[0])
+        : ([...gs].reverse().find((g) => g.getBoundingClientRect().top < mid - 8) || gs[gs.length - 1]);
+    to.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+/// 字を丸ごと差し替えて保存する（前書きも含めて）。
+async function putWhole(text) {
+    const cut = await ask('split', { text });
+    state.head = cut.head || '';
+    loading = true;
+    editor.setValue(cut.body || '');
+    loading = false;
+    state.dirty = true;
+    await save();
+}
+
+/// 一つ選ぶ。`which` は ours / theirs / both。
+async function chooseSpot(n, which) {
+    if (!incoming || !incoming.spots || !incoming.spots[n]) return;
+    const spot = incoming.spots[n];
+    const rows = rowsOf(whole());
+    const at = spotAt(rows, spot);
+    if (at >= 0 && which !== 'both') {
+        const drop = which === 'ours'
+            ? [...Array(spot.theirs.length).keys()].map((k) => at + spot.ours.length + k)
+            : [...Array(spot.ours.length).keys()].map((k) => at + k);
+        if (drop.length) {
+            const kept = rows.filter((_, i) => !drop.includes(i));
+            const shift = (k) => (drop.includes(k) ? -1 : k - drop.filter((d) => d < k).length);
+            incoming.came = incoming.came.map(shift).filter((k) => k >= 0);
+            incoming.both = incoming.both.map(shift).filter((k) => k >= 0);
+            await putWhole(kept.join(''));
+        }
+    } else if (at >= 0) {
+        // 両方残す ── 向こうの行の「両方残した」の印は外す（もう決めた）。
+        const from = at + spot.ours.length;
+        incoming.both = incoming.both.filter((k) => k < from || k >= from + spot.theirs.length);
+    }
+    incoming.spots.splice(n, 1);
+    if (!incoming.spots.length && !(incoming.fields || []).length && !incoming.came.length) incoming = null;
+    keepIncoming();
+    drawBand();
+    await drawRead();
+}
+
+/// ぜんぶ、こちら（か向こう）で。
+async function chooseAll(which) {
+    while (incoming && incoming.spots && incoming.spots.length) {
+        await chooseSpot(0, which);
+    }
+    while (incoming && incoming.fields && incoming.fields.length) {
+        await chooseField(0, which);
+    }
+}
+
+/// 前書きの鍵を選ぶ。タグの「両方」は和集合。
+async function chooseField(n, which) {
+    if (!incoming || !incoming.fields || !incoming.fields[n]) return;
+    const f = incoming.fields[n];
+    let value = which === 'theirs' ? f.theirs : f.ours;
+    if (which === 'both' && f.key === 'tags') {
+        const list = (v) => String(v).replace(/^\[|\]$/g, '').split(',').map((x) => x.trim()).filter(Boolean);
+        value = '[' + [...new Set([...list(f.ours), ...list(f.theirs)])].join(', ') + ']';
+    }
+    try {
+        const got = await ask('setfield', { text: whole(), key: f.key, value: value || null });
+        if (typeof got.text === 'string') await putWhole(got.text);
+    } catch (e) {
+        say('直せません: ' + why(e));
+        return;
+    }
+    incoming.fields.splice(n, 1);
+    if (!incoming.spots.length && !incoming.fields.length && !incoming.came.length) incoming = null;
+    keepIncoming();
+    drawBand();
+    await drawRead();
 }
 
 /// 来た行に、地色を敷く。
@@ -6312,6 +6502,7 @@ function drawBand() {
 function paintIncoming() {
     const rd = el('read');
     for (const b of rd.querySelectorAll('.came, .both')) b.classList.remove('came', 'both');
+    for (const g of rd.querySelectorAll('.gadget')) g.remove();
     if (!incoming) return;
 
     // 行番号 → いちばん深い持ち主。
@@ -6342,6 +6533,7 @@ function paintIncoming() {
     };
     paint(incoming.came, 'came');
     paint(incoming.both, 'both');
+    placeGadgets();
 }
 
 /// 向こうと混ぜて、書き戻す。返すのは混ざった字（駄目なら `null`）。
@@ -6382,6 +6574,9 @@ async function mergeIn(path, ours, was) {
         say('混ぜた結果が空になりました。書き戻していません');
         return null;
     }
+    // **混ぜる前のこちらの姿を、必ず履歴に残す**（Git の ORIG_HEAD の写し）──
+    // 選び間違えても「混ぜる前に戻す」が一手でできる。
+    try { await ask('keep', { root: state.root, path, text: ours, gap: 0, force: true }); } catch { /* 履歴が置けなくても混ぜる */ }
     try {
         const w = await ask('write', { path, text: got.text, force: true });
         if (w && w.stamp) state.stamp = w.stamp;
@@ -6394,11 +6589,19 @@ async function mergeIn(path, ours, was) {
     // **誰が書いたかは、言えない。** ノートはただの Markdown で、名前は
     // どこにも書いていない（書かないと決めた ── 依頼 320）。分からない
     // ことを分かったように言わない。
+    // ぶつかった場所は**行の中身で**憶える（行番号は打つたびに動く）。
+    const rows = rowsOf(got.text);
     incoming = {
         path,
         came: got.came || [],
         both: got.both || [],
         eyes: !!got.eyes,
+        who: '向こう',
+        spots: (got.spots || []).map((sp) => ({
+            ours: rows.slice(sp.ours[0], sp.ours[0] + sp.ours[1]),
+            theirs: rows.slice(sp.theirs[0], sp.theirs[0] + sp.theirs[1]),
+        })),
+        fields: got.fields || [],
     };
     keepIncoming();
     // 混ざった字を面へ。**caret は飛ばさない**ので、組み直しはこのあと。

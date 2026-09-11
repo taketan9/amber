@@ -136,6 +136,11 @@ const path = (n) => `state.root + '/${n}'`;
 // 起きていないことがある ── 一度きりで見ると、たまに落ちる検査になる
 // （実際に何度か落ちた）。**時々鳴る検査は、無いより悪い。**
 await step('読み込み直す', `
+    // **窓の台本が読み終わるまで待つ。** CDP の口が開いた直後は、まだ
+    // renderer.js が評価されていないことがある（reload is not defined）。
+    for (let i = 0; i < 40 && typeof reload !== 'function'; i += 1) {
+        await new Promise((g) => setTimeout(g, 250));
+    }
     for (let i = 0; i < 20; i += 1) {
         await reload({ quiet: true });
         if (state.notes.length > 0) return true;
@@ -782,10 +787,27 @@ await step('カレンダー：予定を足すと、ノートが一本できる',
     setTimeout(() => closeSheet('走査の予定'), 300);
     setTimeout(() => closeSheet('11:00'), 700);
     calAdd(calDay);
-    await new Promise((g) => setTimeout(g, 3000));
-    if (state.notes.length !== was + 1) return 'ノートが増えていません';
-    const made = calSlots.filter((s) => s.day === '2026-09-11' && s.title === '走査の予定');
-    if (made.length !== 1) return '足した日に出ていません';
+    // **出るまで待つ**（六秒まで）── 組み直しはノートの数で遅くなる。
+    // 出なかったときは、何が出ていたかを言う（「出ていません」では直せない）。
+    let made = [];
+    const t0 = performance.now();
+    for (let i = 0; i < 60; i += 1) {
+        await new Promise((g) => setTimeout(g, 250));
+        // **予定として出た一件を数える。** 同じ日に「書いたノート」としても
+        // 並ぶ（作った日が今日なら）── そちらは数えない。2026-09-11 に走らせて
+        // 初めて二件になり、日付に釣られる検査だと分かった。
+        made = calSlots.filter((s) => s.day === '2026-09-11' && s.title === '走査の予定' && s.kind === 'once');
+        if (made.length) break;
+    }
+    const took = Math.round(performance.now() - t0);
+    if (state.notes.length !== was + 1) return 'ノートが増えていません（' + el('say').textContent + '）';
+    // **三秒を超えたら遅い**（人が待てる上限・大きいノートの検査と同じ考え）。
+    if (made.length === 1 && took > 3000) return '出るまで ' + took + ' ミリ秒かかりました（3000 まで）';
+    if (made.length !== 1) {
+        return '足した日に出ていません: ' + made.length + ' 件 hereOn=' + hereOn + ' 言い分=' + JSON.stringify(el('say').textContent)
+            + ' その日=' + JSON.stringify(calSlots.filter((s) => s.day === '2026-09-11' && s.kind !== 'note')
+                .map((s) => [s.kind, s.title, [...String(s.title)].map((c) => c.charCodeAt(0).toString(16)).join(' '), s.at, s.day]));
+    }
     if (made[0].at !== '11:00') return '時刻が ' + made[0].at + ' です';
     calShut();
     return true;
@@ -1418,6 +1440,78 @@ if (NOTES) {
         }
     } catch (e) {
         bad.push({ name: '混ぜる：ファイルにも両方ある', why: [e.message] });
+    }
+}
+
+/* ── 二十の一の二。**同じ行を両方で直した**（依頼 487・網の決めごと） ──
+ *
+ * 別々の場所なら黙って混ざる（上）。同じ行なら**両方残して、帯と選び口が
+ * 出て、人が選ぶ**。選んだら片方が消えて、帯が消える。
+ */
+// **先にこちらを打ちかけにしてから、向こうが書く。** 打ちかけでないと、
+// 窓は外の変わりを黙って拾い直す（依頼 480）ので、ぶつかりようがない。
+await step('同じ行：こちらで同じ行を打ちかけにする', `
+    const was = whole();
+    if (!was.includes('おわりの行。')) return '「おわりの行。」が見当たりません';
+    const now = was.replace('おわりの行。', 'おわりの行。こちらが直した。');
+    loading = true;
+    editor.setValue(state.head ? now.slice(state.head.length) : now);
+    loading = false;
+    state.dirty = true;
+    return true;`, true);
+if (NOTES) {
+    ran += 1;
+    try {
+        const at = NOTES + '/混ぜる.md';
+        const was = readFileSync(at, 'utf8');
+        writeFileSync(at, was.replace('おわりの行。', 'おわりの行。向こうが直した。'));
+    } catch (e) {
+        bad.push({ name: '同じ行：横から書き換える', why: [e.message] });
+    }
+    await sleep(2800);
+}
+await step('同じ行：保存すると両方残り、帯と選び口が出る', `
+    state.dirty = true;
+    await save();
+    await new Promise((g) => setTimeout(g, 1500));
+    const out = whole();
+    if (!out.includes('おわりの行。こちらが直した。')) return 'こちらの行が消えました';
+    if (!out.includes('おわりの行。向こうが直した。')) return '向こうの行が消えました（両方残るはず）';
+    if (!incoming || !incoming.spots || incoming.spots.length !== 1) {
+        return 'ぶつかった場所が ' + (incoming && incoming.spots ? incoming.spots.length : 'なし') + ' か所です（1 のはず）';
+    }
+    if (el('band').hidden) return '帯が出ていません';
+    if (!el('band').textContent.includes('か所')) return '帯が数を言っていません: ' + el('band').textContent;
+    setView('read');
+    await new Promise((g) => setTimeout(g, 700));
+    const g = el('read').querySelector('.gadget');
+    if (!g) return '読む面に選び口が出ていません';
+    if (!g.querySelector('button')) return '選び口にボタンがありません';
+    // **選び口の字は、書き戻しに混ざらない。**
+    const back = paperToMd(el('read'), state.head);
+    if (back === null) return '選び口を置いたら字に戻せなくなりました';
+    if (back.includes('こちらを残す')) return '選び口の字が本文に混ざります';
+    return true;`, true);
+await step('同じ行：「こちらを残す」を押すと、向こうの行が消えて帯も消える', `
+    const g = el('read').querySelector('.gadget');
+    if (!g) return '選び口がありません';
+    g.querySelector('button[data-w="ours"]').click();
+    await new Promise((g) => setTimeout(g, 1500));
+    const out = whole();
+    if (out.includes('おわりの行。向こうが直した。')) return '向こうの行が残っています';
+    if (!out.includes('おわりの行。こちらが直した。')) return 'こちらの行まで消えました';
+    if (el('read').querySelector('.gadget')) return '選び口が残っています';
+    if (!el('band').hidden && el('band').textContent.includes('か所')) return '帯が「か所」のまま残っています';
+    return true;`, true);
+if (NOTES) {
+    ran += 1;
+    try {
+        const got = readFileSync(NOTES + '/混ぜる.md', 'utf8');
+        if (got.includes('向こうが直した') || !got.includes('こちらが直した')) {
+            bad.push({ name: '同じ行：ファイルにも選んだほうだけ', why: ['ファイル: ' + JSON.stringify(got.slice(0, 200))] });
+        }
+    } catch (e) {
+        bad.push({ name: '同じ行：ファイルにも選んだほうだけ', why: [e.message] });
     }
 }
 
