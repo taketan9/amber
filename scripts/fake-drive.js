@@ -22,6 +22,7 @@
  *   GET  /_list                      ぜんぶ
  *   POST /_trash { rel }             向こうで消した
  *   POST /_reset                     まっさらに
+ *   POST /_break { on }              繋がらない体（Drive の口だけ、返事をせずに切る）
  *
  * **判断はしない。** 置かれたものを置かれたまま持つだけ。
  */
@@ -31,6 +32,7 @@ const http = require('node:http');
 function start(port = 0) {
     let files = new Map();     // id → { id, name, mimeType, parents, appProperties, text, trashed, md5 }
     let seq = 0;
+    let broken = false;        // 繋がらない体（`/_break`）
     const md5 = (t) => require('node:crypto').createHash('md5').update(t).digest('hex');
     const id = () => 'f' + (++seq).toString(36).padStart(6, '0');
 
@@ -68,7 +70,8 @@ function start(port = 0) {
             if (u.pathname === '/about') return json(200, { user: { displayName: '試し 太郎', emailAddress: 'taro@example.com' } });
 
             // ── 向こうの端末を演じる口 ──
-            if (u.pathname === '/_reset') { files = new Map(); return json(200, { ok: true }); }
+            if (u.pathname === '/_reset') { files = new Map(); broken = false; return json(200, { ok: true }); }
+            if (u.pathname === '/_break') { broken = !!JSON.parse(body || '{}').on; return json(200, { broken }); }
             if (u.pathname === '/_list') return json(200, [...files.values()].filter((f) => !f.trashed).map(meta));
             if (u.pathname === '/_get') {
                 const f = byRel(u.searchParams.get('rel'));
@@ -94,6 +97,8 @@ function start(port = 0) {
             }
 
             // ── Drive の API（使うぶんだけ） ──
+            // 繋がらない体 ── 返事をせずに切る（窓には fetch failed に見える）。
+            if (broken) { req.socket.destroy(); return; }
             if (req.method === 'GET' && u.pathname === '/drive/v3/files') {
                 const q = u.searchParams.get('q') || '';
                 let out = [...files.values()];

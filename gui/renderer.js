@@ -6783,6 +6783,8 @@ async function reload(opts) {
         drawDrawer();
         drawCloud();
         drawList();
+        // 開いた直後は `state.root` がまだ無くて描けていない ── ここで描く。
+        drawSyncState();
     } catch (e) {
         if (!opts || !opts.quiet) say('読めません: ' + why(e));
     }
@@ -9798,6 +9800,7 @@ async function loadSync() {
     // サインインしているなら、時計を回して一度合わせる。
     // 開いた直後は少し待ってから ── 一覧と面が組み上がる前に裏で運ばない。
     if (syncAccount.signedIn) { syncClock(); syncSoon(6000); } else { clearInterval(syncTick); syncTick = null; }
+    drawSyncState();
 }
 // 開いた直後に一度 ── 献立の脇の「いま」は、押す前から正しくあること。
 loadSync();
@@ -9821,6 +9824,14 @@ let syncTick = null;
 let syncLast = null;
 let syncTrouble = '';
 let syncLastReport = null;
+/// 「あとで」を押したか（この窓を開いているあいだだけ。次に開いたら、また
+/// 列を出す ── 本人が決めた・2026-09-11・案い）。
+let syncLater = false;
+/// 困りはじめた時刻（列に「hh:mm から」と出す）。
+let syncTroubleSince = null;
+/// 運んだ直後の数（数秒だけ色つきの列に出す）。
+let syncFresh = null;
+let syncFreshTimer = null;
 
 function syncSoon(ms = 3000) {
     if (!syncAccount.signedIn) return;
@@ -9838,6 +9849,7 @@ async function syncNow(reason) {
     if (!syncAccount.signedIn || syncBusy || !state.root || state.guest) return null;
     if (!syncAuto && reason !== '手') return null;
     syncBusy = true;
+    drawSyncState();
     const report = { reason, up: 0, down: 0, gone: 0, clash: 0, eyes: 0, trouble: [] };
     try {
         const remote = await window.amber.driveList();
@@ -9914,12 +9926,19 @@ async function syncNow(reason) {
         }
         syncLast = Date.now();
         syncTrouble = report.trouble.length ? report.trouble[0] : '';
+        if (report.up + report.down + report.gone + report.clash > 0) {
+            syncFresh = { at: syncLast, ...report };
+            clearTimeout(syncFreshTimer);
+            syncFreshTimer = setTimeout(() => { syncFresh = null; drawSyncState(); }, 6000);
+        }
     } catch (e) {
         syncTrouble = why(e);
         report.trouble.push(why(e));
     } finally {
         syncBusy = false;
         syncLastReport = report;
+        if (syncTrouble) syncTroubleSince = syncTroubleSince || Date.now();
+        else syncTroubleSince = null;
         drawSyncState();
     }
     return report;
@@ -9950,9 +9969,96 @@ function noteIncoming(path, got, who) {
     }
 }
 
-/// いまの様子を出す（献立の脇の字と、困ったときの一言）。
+/// 困りごとを、人の言葉と次に押すものに。
+function syncTroubleFace(t) {
+    const e = String(t || '');
+    if (!navigator.onLine || /fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EAI_AGAIN|socket hang up|network/i.test(e)) {
+        return { text: 'インターネットに繋がっていないようです。次回接続時に同期します。', button: '接続確認する', go: 'retry' };
+    }
+    if (/サインインが切れ|invalid_grant|unauthorized|401/i.test(e)) {
+        return { text: 'Google のサインインが切れています。もう一度サインインしてください。', button: 'Google でサインイン', go: 'signin' };
+    }
+    if (/insufficient|storage|quota|507/i.test(e)) {
+        return { text: 'Google Drive の空きが足りないようです。空けてから、もう一度お試しください。', button: 'もう一度試す', go: 'retry' };
+    }
+    return { text: e, button: 'もう一度試す', go: 'retry' };
+}
+
+/// **いまの様子を、一覧の頭に**（依頼 491・本人が決めた案甲・2026-09-11）。
+///
+/// 色つきの列（`#syncsay`）は三つのときだけ ── まだ始めていない・困っている・
+/// 運んだ直後（数秒）。それ以外は一行（`#syncmark`）。画面の字は
+/// 「アップロード」「ダウンロード」「同期」── 上げる・下ろす・運ぶは中の言葉。
 function drawSyncState() {
-    if (syncTrouble) say('同期できません: ' + syncTrouble);
+    const box = el('syncsay');
+    const mark = el('syncmark');
+    const hhmm = (t) => new Date(t).toTimeString().slice(0, 5);
+    const hide = (x) => { x.hidden = true; x.innerHTML = ''; };
+    if (state.guest || !state.root) { hide(box); hide(mark); return; }
+    const who = syncAccount.who || {};
+
+    // 一行のほう。
+    const line = (dot, text, act) => {
+        mark.innerHTML = '<span class="dot ' + dot + '"></span><span class="t">' + escapeHtml(text) + '</span>'
+            + (act ? '<button type="button">' + escapeHtml(act.name) + '</button>' : '');
+        if (act) mark.querySelector('button').onclick = act.run;
+        mark.hidden = false;
+    };
+    // 列のほう。
+    const column = (cls, head, text, acts) => {
+        box.className = cls;
+        box.innerHTML = '<b>' + escapeHtml(head) + '</b>' + (text ? '<span>' + escapeHtml(text) + '</span>' : '')
+            + (acts && acts.length ? '<div class="act">' + acts.map((a, i) =>
+                '<button type="button" data-n="' + i + '"' + (a.quiet ? ' class="quiet"' : '') + '>' + escapeHtml(a.name) + '</button>').join('') + '</div>' : '');
+        for (const b of box.querySelectorAll('button')) b.onclick = acts[Number(b.dataset.n)].run;
+        box.hidden = false;
+    };
+
+    if (!syncAccount.signedIn) {
+        if (!syncLater) {
+            hide(mark);
+            column('before', 'まだ同期していません',
+                'ノートはこのパソコンだけにあります。iPhone や家族と同じノートを使うには、Google でサインインします。',
+                [{ name: '同期をはじめる', run: () => cmdSync() },
+                 { name: 'あとで', quiet: true, run: () => { syncLater = true; drawSyncState(); } }]);
+        } else {
+            hide(box);
+            line('off', '同期していません ・ ', { name: '同期をはじめる', run: () => cmdSync() });
+        }
+        return;
+    }
+    if (syncBusy) {
+        hide(box);
+        line('busy', '同期しています…');
+        return;
+    }
+    if (syncTrouble) {
+        hide(mark);
+        const f = syncTroubleFace(syncTrouble);
+        column('bad', '同期できません ── ' + hhmm(syncTroubleSince || Date.now()) + ' から', f.text,
+            [{ name: f.button, run: async () => {
+                if (f.go === 'signin') {
+                    try { await window.amber.driveSignOut(); } catch { /* 鍵はもう死んでいる */ }
+                    syncTrouble = ''; syncTroubleSince = null;
+                    await cmdSync();
+                    return;
+                }
+                syncNow('手');
+            } }]);
+        return;
+    }
+    if (syncFresh) {
+        hide(mark);
+        const parts = [];
+        if (syncFresh.up) parts.push('アップロード' + syncFresh.up + '本');
+        if (syncFresh.down) parts.push('ダウンロード' + syncFresh.down + '本');
+        if (syncFresh.gone) parts.push('ゴミ箱へ' + syncFresh.gone + '本');
+        if (syncFresh.clash) parts.push('同じ行を両方で直したノート' + syncFresh.clash + '本');
+        column('good', '同期しました ── ' + hhmm(syncFresh.at), parts.join('・'), []);
+        return;
+    }
+    hide(box);
+    line('', '同期しています' + (syncLast ? ' ・ 最終 ' + hhmm(syncLast) : '') + (who.email ? ' ・ ' + who.email : ''));
 }
 
 /// サインインが駄目だったときの言い分を、**人が次に何をすればよいか**の形に。

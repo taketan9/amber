@@ -42,6 +42,21 @@ export async function syncWalk() {
         const one = await drive('/_get?rel=買い物.md');
         if (!one.text || !one.text.includes('- 牛乳')) bad.push({ name: '同期：向こうの字がこちらと同じ', why: [String(JSON.stringify(one.text)).slice(0, 120)] });
     }
+    await step('同期の様子：運んだ直後は色つきの列に「アップロードN本」', `
+        const box = el('syncsay');
+        if (box.hidden) return '列が出ていません';
+        if (!box.classList.contains('good')) return '色が ' + box.className + ' です';
+        const t = box.textContent;
+        if (!t.includes('同期しました') || !/アップロード\\d+本/.test(t)) return JSON.stringify(t);
+        if (/上げ|下ろ|運/.test(t)) return '中の言葉が出ています: ' + t;
+        return true;`, true);
+    await step('同期の様子：数秒で一行に縮み、最終の時刻とメールアドレスが出る', `
+        for (let i = 0; i < 40 && !el('syncsay').hidden; i += 1) await new Promise((g) => setTimeout(g, 250));
+        if (!el('syncsay').hidden) return '列が消えません';
+        const m = el('syncmark');
+        if (m.hidden) return '一行が出ていません';
+        const t = m.textContent;
+        return t.includes('同期しています') && t.includes('最終') && t.includes('@') ? true : JSON.stringify(t);`, true);
     await step('同期：二度目は何も運ばない', `
         const r = await syncNow('手');
         return r && r.up === 0 && r.down === 0 && r.clash === 0 ? true : JSON.stringify(r);`, true);
@@ -152,6 +167,47 @@ export async function syncWalk() {
             bad.push({ name: '同期：選んだあとの字が向こうにも', why: [String(JSON.stringify(one.text)).slice(0, 160)] });
         }
     }
+
+    // 繋がらないとき → 赤い列と「接続確認する」。繋がれば、押して直る。
+    await drive('/_break', { on: true });
+    await step('同期の様子：繋がらないと赤い列に「接続確認する」', `
+        const r = await syncNow('手');
+        if (!r || !r.trouble.length) return '困りごとになりません: ' + JSON.stringify(r);
+        const box = el('syncsay');
+        if (box.hidden || !box.classList.contains('bad')) return '赤い列が出ていません: ' + box.className;
+        const t = box.textContent;
+        if (!t.includes('同期できません') || !t.includes('インターネットに繋がっていないようです')) return JSON.stringify(t);
+        const b = box.querySelector('button');
+        return b && b.textContent === '接続確認する' ? true : 'ボタンが ' + (b && b.textContent) + ' です';`, true);
+    await drive('/_break', { on: false });
+    await step('同期の様子：「接続確認する」を押すと、繋がっていれば直る', `
+        el('syncsay').querySelector('button').click();
+        for (let i = 0; i < 40 && (syncBusy || !el('syncsay').hidden); i += 1) await new Promise((g) => setTimeout(g, 250));
+        if (!el('syncsay').hidden) return '赤い列が残っています: ' + el('syncsay').textContent;
+        const t = el('syncmark').textContent;
+        return t.includes('同期しています') ? true : JSON.stringify(t);`, true);
+
+    // サインインする前の姿（この窓ではサインイン済みなので、様子だけ作って見る）。
+    await step('同期の様子：始める前は「まだ同期していません」の列と二つのボタン', `
+        const was = syncAccount;
+        syncAccount = { signedIn: false };
+        drawSyncState();
+        const box = el('syncsay');
+        const bs = [...box.querySelectorAll('button')].map((b) => b.textContent);
+        const t = box.textContent;
+        let out = true;
+        if (box.hidden || !box.classList.contains('before')) out = '列が出ていません: ' + box.className;
+        else if (!t.includes('まだ同期していません')) out = JSON.stringify(t);
+        else if (bs.join('/') !== '同期をはじめる/あとで') out = 'ボタンが ' + bs.join('/') + ' です';
+        else {
+            box.querySelectorAll('button')[1].click();
+            if (!box.hidden) out = '「あとで」で列が消えません';
+            else if (!el('syncmark').textContent.includes('同期していません')) out = '一行が ' + el('syncmark').textContent;
+        }
+        syncAccount = was;
+        syncLater = false;
+        drawSyncState();
+        return out;`, true);
 
     // 向こうで消した → こちらはゴミ箱へ。
     await drive('/_trash', { rel: '太郎から.md' });

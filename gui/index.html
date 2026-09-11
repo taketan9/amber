@@ -364,6 +364,39 @@ body.mac #listhead { padding-top: 30px; }
 /* クラウドの置き土産。**黙って足りない一覧を見せない** ── 落ちてきていない
    ノートも、同時に書いた控えも、amber の側では直せないが、言わないと
    「ノートが消えた」にしか見えない。 */
+/* 同期の様子（一覧の頭）。色は `#cloudsay` と同じ作り ── 決めた色を地に薄く混ぜる。 */
+#syncsay { flex: none; border-bottom: 1px solid var(--line-2); padding: 9px 16px; font-size: 11.5px; line-height: 1.5; }
+#syncsay[hidden], #syncmark[hidden] { display: none !important; }
+#syncsay b { display: block; font-size: 12.5px; }
+#syncsay span { display: block; color: var(--ink-2); }
+#syncsay .act { margin-top: 6px; display: flex; gap: 6px; }
+#syncsay .act button {
+  font-size: 12px; font-weight: 600; color: #3a2408; background: var(--amber);
+  border: 1px solid var(--amber-deep); border-radius: 6px; padding: 3px 12px;
+}
+#syncsay .act button:hover { filter: brightness(1.05); }
+#syncsay .act button.quiet { color: var(--ink-2); background: transparent; border-color: var(--line); font-weight: 500; }
+#syncsay .act button.quiet:hover { background: var(--hover); }
+#syncsay.before { background: color-mix(in srgb, var(--amber) 16%, var(--list)); }
+#syncsay.before b { color: var(--amber-deep); }
+#syncsay.good { background: color-mix(in srgb, #3f7d4e 11%, var(--list)); }
+#syncsay.good b { color: #3f7d4e; }
+#syncsay.bad { background: color-mix(in srgb, #b8433a 11%, var(--list)); }
+#syncsay.bad b { color: #b8433a; }
+@media (prefers-color-scheme: dark) {
+  #syncsay.good b { color: #8fc79b; }
+  #syncsay.bad b { color: #e8867d; }
+}
+#syncmark {
+  flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 16px;
+  font-size: 11.5px; color: var(--ink-2); border-bottom: 1px solid var(--line-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#syncmark .dot { width: 7px; height: 7px; border-radius: 50%; background: #3f7d4e; flex: none; }
+#syncmark .dot.busy { background: var(--amber); }
+#syncmark .dot.off { background: var(--ink-3); }
+#syncmark .t { overflow: hidden; text-overflow: ellipsis; }
+#syncmark button { color: var(--amber-deep); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; padding: 0; }
 #cloudsay { flex: none; border-bottom: 1px solid var(--line-2); }
 #cloudsay[hidden] { display: none !important; }
 #cloudsay .c { padding: 8px 16px; font-size: 11.5px; line-height: 1.55; }
@@ -1491,6 +1524,10 @@ body.dropping::after {
       </div>
       <div id="drawers"></div>
     </div>
+    <!-- **同期の様子**（依頼 491・案甲）。色つきの列は、始める前・運んだ直後・
+         困ったときだけ。ふだんは一行（`#syncmark`）。 -->
+    <div id="syncsay" hidden></div>
+    <div id="syncmark" hidden></div>
     <div id="drawer" hidden></div>
     <div id="cloudsay" hidden></div>
     <!-- **選んでいる間だけ出る帯。** 何本選んでいるかと、まとめてすること
