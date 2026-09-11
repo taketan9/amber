@@ -1132,10 +1132,19 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         }
 
         // Move a note into another notebook, pictures and all.
+        //
+        // `root` を渡されたら、履歴の棚・共有から戻る場所・同期の憶えも連れて行く
+        // （依頼 496）── 同期は「消して新しく上げる」ではなく「名前が変わった」として運ぶ。
         "move" => {
             let note = std::path::PathBuf::from(arg(p, "path"));
             let dir = std::path::PathBuf::from(arg(p, "dir"));
             let at = crate::note::move_to(&note, &dir)?;
+            if let Some(root) = p["root"].as_str().filter(|r| !r.is_empty()) {
+                let root = std::path::PathBuf::from(root);
+                if at != note {
+                    crate::naming::carry(&root, &note, &at, true);
+                }
+            }
             Ok(serde_json::json!({ "path": at.display().to_string() }))
         }
 

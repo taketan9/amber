@@ -239,6 +239,23 @@ export async function syncWalk() {
             return r && r.moved === 1 ? true : JSON.stringify(r);
         } finally { nameAuto = false; }`, true);
 
+    // フォルダへ移す → 向こうも同じ ID のまま道が変わる（依頼 496）。
+    await step('同期：フォルダへ移すと、向こうも同じ ID のまま道が変わる', `
+        const before = (await window.amber.driveList()).find((x) => x.rel === '買い物.md');
+        if (!before) return '向こうに 買い物.md がありません';
+        const r0 = await ask('move', { path: state.root + '/買い物.md', dir: state.root + '/家族', root: state.root });
+        await reload({ quiet: true });
+        clearTimeout(syncTimer);
+        const r = await syncNow('手');
+        if (!r || r.moved !== 1 || r.gone !== 0 || r.up !== 0) return JSON.stringify(r);
+        const after = (await window.amber.driveList()).find((x) => x.rel === '家族/買い物.md');
+        if (!after || after.id !== before.id) return '向こうの道か ID が違います: ' + JSON.stringify(after);
+        // 戻す。
+        await ask('move', { path: r0.path, dir: state.root, root: state.root });
+        await reload({ quiet: true });
+        const r2 = await syncNow('手');
+        return r2 && r2.moved === 1 ? true : JSON.stringify(r2);`, true);
+
     // 向こうで改名 → こちらも改名。
     await drive('/_move', { rel: '太郎から.md', to: '太郎のメモ.md' });
     await drive('/_put', { rel: '太郎のメモ.md', text: '---\ncreated: 2026-09-11\n---\n\n# 太郎のメモ\n\n電話で書いた。\n\n直した。\n', by: '太郎の iPhone' });

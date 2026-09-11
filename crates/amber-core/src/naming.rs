@@ -196,7 +196,14 @@ pub fn relocate(root: &Path, from: &Path, to: &Path, record_move: bool) -> anyho
 
     // ── ノートそのもの ──
     std::fs::rename(from, to)?;
+    carry(root, from, to, record_move);
+    Ok(rewrote)
+}
 
+/// 道で憶えているものを、新しい道へ連れて行く ── 履歴の棚・共有から戻る場所・
+/// 同期の憶え。**改名でもフォルダ移動でも同じ一本**（`move` op もここを通る・
+/// 依頼 496）。ノートそのものはもう動いたあとに呼ぶ。
+pub fn carry(root: &Path, from: &Path, to: &Path, record_move: bool) {
     // ── 履歴の棚（`.amber/history/<道>/`）──
     if let (Some(a), Some(b)) = (crate::history::shelf(root, from), crate::history::shelf(root, to)) {
         if a.is_dir() && !b.exists() {
@@ -206,13 +213,11 @@ pub fn relocate(root: &Path, from: &Path, to: &Path, record_move: bool) -> anyho
             let _ = std::fs::rename(&a, &b);
         }
     }
-
     // ── 道で憶えているもの ──
     if let (Some(fr), Some(tr)) = (rel_of(root, from), rel_of(root, to)) {
         crate::notebook::came_moved(root, &fr, &tr);
         crate::sync::moved(root, &fr, &tr, record_move);
     }
-    Ok(rewrote)
 }
 
 fn stem_of(p: &Path) -> String {
@@ -360,6 +365,25 @@ mod tests {
         assert_eq!(was[0].rel, "旅.md");
         assert_eq!(was[0].id, "i");
         assert_eq!(crate::sync::moves(r, "drive"), vec![("旅.md".to_string(), "2026-09-06 19-18-30.md".to_string())]);
+    }
+
+    #[test]
+    fn フォルダへ移しても_同期の憶えと履歴が付いてくる() {
+        let d = root();
+        let r = d.path();
+        let at = r.join("旅.md");
+        std::fs::write(&at, "# 旅\n").unwrap();
+        crate::history::keep(r, &at, "前の姿", 0, true, false).unwrap();
+        crate::sync::remember(r, "drive", &[crate::sync::Was {
+            rel: "旅.md".into(), hash: "h".into(), id: "i".into(), tag: "t".into(),
+        }], &[]).unwrap();
+        let to = crate::note::move_to(&at, &r.join("仕事")).unwrap();
+        carry(r, &at, &to, true);
+        assert_eq!(to, r.join("仕事/旅.md"));
+        assert!(crate::history::shelf(r, &to).unwrap().is_dir(), "履歴の棚が付いてこない");
+        let was = crate::sync::recall(r, "drive");
+        assert_eq!(was[0].rel, "仕事/旅.md");
+        assert_eq!(crate::sync::moves(r, "drive"), vec![("仕事/旅.md".to_string(), "旅.md".to_string())]);
     }
 
     #[test]

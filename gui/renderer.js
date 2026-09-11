@@ -961,7 +961,7 @@ async function manyMove() {
         // もう居るところへは動かさない。
         if ((note.book || '') === to) { now.add(note.path); continue; }
         try {
-            const r = await ask('move', { path: note.path, dir });
+            const r = await ask('move', { path: note.path, dir, root: state.root });
             moved++;
             if (r && r.path) now.add(r.path);
         } catch { failed++; now.add(note.path); }
@@ -8810,7 +8810,7 @@ async function railRename(kind, what) {
                 const sub = (n.book || '').slice(what.length).replace(/^\//, '');
                 const dir = state.root + '/' + name + (sub ? '/' + sub : '');
                 await ask('mkbook', { dir });
-                await ask('move', { path: n.path, dir });
+                await ask('move', { path: n.path, dir, root: state.root });
             }
             await window.amber.trash(state.root + '/' + what);
         } else {
@@ -9648,7 +9648,7 @@ function homeOf(note) {
 /// そこへ戻せるように。`opts.home` は戻した先で、言葉にするために持つ。
 async function moveNote(to, opts) {
     try {
-        const r = await ask('move', { path: state.open.path, dir: state.root + (to ? '/' + to : '') });
+        const r = await ask('move', { path: state.open.path, dir: state.root + (to ? '/' + to : ''), root: state.root });
         // **憶えるのは移せてから。** 移せなかった回の憶えが残ると、次に
         // 外した人が身に覚えのないフォルダへ連れて行かれる。
         try {
@@ -9689,7 +9689,7 @@ async function cmdMove() {
     try {
         // 書きかけを置いていかない ── 移した先に古い字が残る。
         if (state.dirty) await save();
-        const r = await ask('move', { path: state.open.path, dir });
+        const r = await ask('move', { path: state.open.path, dir, root: state.root });
         await reload({ quiet: true });
         await openNote(r.path);
         say(to ? '「' + to + '」へ移しました' : 'いちばん上へ移しました');
