@@ -1340,8 +1340,8 @@ body.dropping::after {
   background: color-mix(in srgb, #3b78c9 24%, var(--paper)) }
 /* **この機械の予定表のものは、直せる。** よそ（読むだけ）と、自分の
    ノート（琥珀）と、三つを見分けられるように。 */
-#calbox .d .ev.here { border-left-color: #2f8a52;
-  background: color-mix(in srgb, #2f8a52 24%, var(--paper)) }
+#calbox .d .ev.here { border-left-color: var(--cal-here, #2f8a52);
+  background: color-mix(in srgb, var(--cal-here, #2f8a52) 24%, var(--paper)) }
 /* チームの予定は紫（日・週の表と揃える）。**月の表だけ色が無いと、
    同じ予定が見方によって別のものに見える。** */
 #calbox .d .ev.team { border-left-color: #8e5cb3;
@@ -1380,8 +1380,8 @@ body.dropping::after {
   border-left: 3px solid var(--amber-deep); background: color-mix(in srgb, var(--amber) 30%, var(--paper)); cursor: pointer; }
 #calbox .blk.away { border-left-color: #3b78c9;
   background: color-mix(in srgb, #3b78c9 26%, var(--paper)) }
-#calbox .blk.here { border-left-color: #2f8a52;
-  background: color-mix(in srgb, #2f8a52 26%, var(--paper)) }
+#calbox .blk.here { border-left-color: var(--cal-here, #2f8a52);
+  background: color-mix(in srgb, var(--cal-here, #2f8a52) 26%, var(--paper)) }
 #calbox .blk.team { border-left-color: #8e5cb3;
   background: color-mix(in srgb, #8e5cb3 26%, var(--paper)) }
 /* 中身の見えない予定は縞 ── どの見方でも同じ顔で出す。 */
@@ -1409,7 +1409,7 @@ body.dropping::after {
    いて、そちらの `padding-left: 16px` が段にも効き、その段の目盛りだけ
    16 ずれていた（実際にずれた）── 一般的すぎる名前は、いつか必ず当たる。 */
 #calbox .crowd .ln { display: flex; border-bottom: 1px solid var(--line);
-  min-height: 3.2rem; padding: 0 }
+  min-height: 3.2rem; padding: 0; --lane: var(--amber) }
 /* **段の下地は、時間ぶんの幅を持つ。** 日は一日を横に流すので、幅を
    画面のぶんしか取らないと、区切り線と段の下線が途中で切れる。 */
 #calbox .crowd:not(.wk) .rows, #calbox .crowd:not(.wk) .ln,
@@ -1434,7 +1434,7 @@ body.dropping::after {
 #calbox .crowd .who.away::before,
 #calbox .crowd .who.team::before { content: ''; flex: none; width: 3px; height: 1.1em;
   border-radius: 2px; margin-right: .4rem; background: var(--amber); }
-#calbox .crowd .who.here::before { background: #2f8a52 }
+#calbox .crowd .who.here::before { background: var(--cal-here, #2f8a52) }
 #calbox .crowd .who.away::before { background: #3b78c9 }
 #calbox .crowd .who.team::before { background: #8e5cb3 }
 #calbox .crowd .track { flex: none; position: relative; display: flex; padding: 3px 0 }
@@ -1447,10 +1447,17 @@ body.dropping::after {
   border-left: 3px solid var(--amber-deep); background: color-mix(in srgb, var(--amber) 30%, var(--paper)); }
 #calbox .crowd .bar.away { border-left-color: #3b78c9;
   background: color-mix(in srgb, #3b78c9 28%, var(--paper)) }
-#calbox .crowd .bar.here { border-left-color: #2f8a52;
-  background: color-mix(in srgb, #2f8a52 28%, var(--paper)) }
+#calbox .crowd .bar.here { border-left-color: var(--cal-here, #2f8a52);
+  background: color-mix(in srgb, var(--cal-here, #2f8a52) 28%, var(--paper)) }
 #calbox .crowd .bar.team { border-left-color: #8e5cb3;
   background: color-mix(in srgb, #8e5cb3 28%, var(--paper)) }
+/* **人ごとに色を変える**（依頼 498・本人「花木は青、山田はピンク、佐藤は黄」）。
+   段（`.ln`）が `--lane` を持ち、その段の帯・札・名前の印はぜんぶその色。
+   種類の色（この Mac・よそ・チーム）より、人の色が勝つ。 */
+#calbox .crowd .ln[style*="--lane"] .bar, #calbox .crowd .ln[style*="--lane"] .chip {
+  border-left-color: var(--lane); background: color-mix(in srgb, var(--lane) 30%, var(--paper)); }
+#calbox .crowd .ln[style*="--lane"] .who::before { background: var(--lane) }
+#calbox .crowd .ln[style*="--lane"] .span { background: color-mix(in srgb, var(--lane) 22%, var(--paper)) }
 /* 中身の見えない予定は、**縞にする** ── 「取れなかった」ではなく
    「見せてもらえていない」ことが、一目で分かるように。 */
 #calbox .crowd .bar.shut, #calbox .crowd .chip.shut { color: var(--ink-2);
@@ -1498,7 +1505,7 @@ body.dropping::after {
   background: color-mix(in srgb, #6f9fd8 16%, transparent) }
 #calbox .allday .ad.team { border-left-color: #8e5cb3;
   background: color-mix(in srgb, #b98ad0 16%, transparent) }
-#calbox .allday .ad.here { border-left-color: #2f8a52;
+#calbox .allday .ad.here { border-left-color: var(--cal-here, #2f8a52);
   background: color-mix(in srgb, #5fa87a 16%, transparent) }
 </style>
 </head>

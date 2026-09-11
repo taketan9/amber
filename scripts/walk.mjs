@@ -782,6 +782,39 @@ await step('カレンダー：出さない予定表のものは、どの見方�
     if (week) return '隠したのに週に出ています';
     return back ? true : '戻しても出ません';`, true);
 
+await step('カレンダー：みんなの表は人ごとに色が違い、右押しで色を選べる', `
+    calView = 'week'; calGroup = true; calDay = '2026-09-09';
+    const was = teamPeople;
+    teamPeople = [{ name: '花木', mail: 'hanaki@example.com' }, { name: '山田', mail: 'yamada@example.com' }, { name: '佐藤', mail: 'sato@example.com' }];
+    await drawCal();
+    const rows = [...el('cal').querySelectorAll('.crowd .ln')];
+    const colors = rows.map((r) => r.style.getPropertyValue('--lane').trim());
+    const who = el('cal').querySelector('.crowd .rows .who[data-key="team:hanaki@example.com"]');
+    let menu = [];
+    if (who) {
+        who.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 300 }));
+        await new Promise((g) => setTimeout(g, 200));
+        menu = [...el('more').querySelectorAll('button')].map((b) => b.textContent);
+        closeMenu();
+    }
+    calColors = { 'team:hanaki@example.com': '#3b78c9' };
+    await drawCal();
+    const blue = el('cal').querySelector('.crowd .ln .who[data-key="team:hanaki@example.com"]');
+    const got = blue && blue.closest('.ln').style.getPropertyValue('--lane').trim();
+    teamPeople = was; calColors = {}; calGroup = false; calView = 'month';
+    await drawCal();
+    if (rows.length < 4) return '段が ' + rows.length + ' 本です';
+    if (colors.some((c) => !c)) return '色の無い段があります: ' + JSON.stringify(colors);
+    if (new Set(colors.slice(0, 4)).size < 3) return '色が偏っています: ' + JSON.stringify(colors);
+    if (!menu.some((m) => m.includes('ピンク'))) return '色の献立が出ません: ' + JSON.stringify(menu);
+    return got === '#3b78c9' ? true : '選んだ色になりません: ' + got;`, true);
+await step('カレンダー：この Mac の予定の色を選ぶと、札の色が変わる', `
+    calHereColor = '#e8702a'; paintHereColor();
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--cal-here').trim();
+    calHereColor = ''; paintHereColor();
+    const back = getComputedStyle(document.documentElement).getPropertyValue('--cal-here').trim();
+    return v === '#e8702a' && back === '' ? true : JSON.stringify([v, back]);`, true);
+
 await step('カレンダー：予定を足す小窓は、空のまま登録できず・終日なら時刻を選べない', `
     setTimeout(() => {
         el('evtitle').value = '';

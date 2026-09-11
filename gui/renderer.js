@@ -7170,6 +7170,29 @@ let calGroup = false;
 let calHide = [];
 /// 土日を出すか（本人・2026-09-11・設定で選ぶ）。既定は出す。
 let calWeekend = true;
+/// この Mac の予定の色（依頼 498・本人「オレンジっぽい色が好き」）。既定は淡い緑。
+let calHereColor = '';
+/// 人ごとの色（みんなの表・段の鍵 → 色）。決めていない人は名前から一つ選ぶ。
+let calColors = {};
+
+/// 選べる色。**名前で呼べる十色** ── 明るい紙でも暗い紙でも読める濃さ。
+const CAL_COLORS = [
+    ['#e8702a', 'オレンジ'], ['#3b78c9', '青'], ['#e0669c', 'ピンク'], ['#d9a400', '黄'],
+    ['#2f8a52', '緑'], ['#8e5cb3', '紫'], ['#1fa3a3', '水色'], ['#c0392b', '赤'],
+    ['#7a5c3a', '茶'], ['#5a6b7f', '灰'],
+];
+const colorName = (hex) => (CAL_COLORS.find(([h]) => h === hex) || [])[1] || hex;
+/// その人の色。決めてあればそれ、無ければ鍵から一つ（同じ人はいつも同じ色）。
+function laneColor(key) {
+    if (calColors[key]) return calColors[key];
+    let h = 0;
+    for (const c of String(key)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    return CAL_COLORS[h % CAL_COLORS.length][0];
+}
+function paintHereColor() {
+    if (calHereColor) document.documentElement.style.setProperty('--cal-here', calHereColor);
+    else document.documentElement.style.removeProperty('--cal-here');
+}
 
 /// 出す予定だけ（隠した予定表のものを落とす）。**どの見方でも同じ一本**を通す
 /// ── 月だけ隠せていない、が起きないように。ノートは落とさない。
@@ -7505,8 +7528,8 @@ function drawCrowd() {
 
     const rows = lanes.map((lane) => {
         const track = calView === 'day' ? crowdDay(lane, days[0]) : crowdWeek(lane, days);
-        return '<div class="ln"><div class="who ' + lane.kind + '"'
-            + ' data-key="' + escapeAttr(lane.key) + '" title="押すと引っ込めます">'
+        return '<div class="ln" style="--lane:' + laneColor(lane.key) + '"><div class="who ' + lane.kind + '"'
+            + ' data-key="' + escapeAttr(lane.key) + '" title="押すと引っ込めます。右押しで色を変えます">'
             + '<span>' + escapeHtml(lane.name) + '</span></div>'
             + '<div class="track"' + wide + '>' + track + '</div></div>';
     }).join('');
@@ -8030,11 +8053,23 @@ el('cal').addEventListener('dblclick', async (e) => {
 });
 
 el('cal').addEventListener('contextmenu', async (e) => {
+    const at = { x: e.clientX, y: e.clientY };
+    // 人の名前の上 ── その人の色を選ぶ（依頼 498）。
+    const who = e.target.closest('.crowd .rows .who');
+    if (who && who.dataset.key) {
+        e.preventDefault();
+        const key = who.dataset.key;
+        const now = laneColor(key);
+        popMenu(CAL_COLORS.map(([h, n]) => ({
+            name: (h === now ? '● ' : '　 ') + n + ' ── ' + who.textContent.trim(),
+            run: async () => { calColors = { ...calColors, [key]: h }; window.amber.remember({ calColors }); await drawCal(); },
+        })), at);
+        return;
+    }
     const item = calItemAt(e);
     const spot = calSpotAt(e);
     if (!item && !spot) return;
     e.preventDefault();
-    const at = { x: e.clientX, y: e.clientY };
     const rows = [];
     if (item) {
         if (item.kind === 'here' && item.at) {
@@ -8081,9 +8116,17 @@ async function cmdCalSettings() {
             value: c.key,
         }));
         rows.push({ name: (calWeekend ? '✓　' : '　　') + '土日を出す', value: '*weekend', sub: calWeekend ? '' : '月〜金だけ出しています' });
+        rows.push({ name: 'この Mac の予定の色 ── ' + (calHereColor ? colorName(calHereColor) : '緑（既定）'), value: '*color', sub: '押すと選べます' });
         const pick = await askPick('カレンダー表示設定', rows, '押すと出し入れできます。閉じるまで続けて選べます', true);
         if (pick === null) break;
         if (pick === '*weekend') { calWeekend = !calWeekend; window.amber.remember({ calWeekend }); continue; }
+        if (pick === '*color') {
+            const c = await askPick('この Mac の予定の色', CAL_COLORS.map(([h, n]) => ({
+                name: (h === (calHereColor || '#2f8a52') ? '● ' : '　 ') + n, value: h,
+            })), '', true);
+            if (c !== null) { calHereColor = c; window.amber.remember({ calHereColor }); paintHereColor(); }
+            continue;
+        }
         calHide = calHide.includes(pick) ? calHide.filter((k) => k !== pick) : calHide.concat(pick);
         window.amber.remember({ calHide });
     }
@@ -10914,6 +10957,9 @@ const escapeAttr = escapeHtml;
     calGroup = !!saved.calGroup;
     if (Array.isArray(saved.calHide)) calHide = saved.calHide.filter((k) => typeof k === 'string');
     if (saved.calWeekend === false) calWeekend = false;
+    if (typeof saved.calHereColor === 'string' && /^#[0-9a-f]{6}$/i.test(saved.calHereColor)) calHereColor = saved.calHereColor;
+    if (saved.calColors && typeof saved.calColors === 'object') calColors = saved.calColors;
+    paintHereColor();
     if (typeof saved.teamFile === 'string') { teamFile = saved.teamFile; teamClock(); }
     noBins = Array.isArray(saved.noBins) ? saved.noBins : [];
     incomings = (saved.incomings && typeof saved.incomings === 'object') ? saved.incomings : {};
