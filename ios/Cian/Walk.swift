@@ -343,6 +343,11 @@ enum Walk {
             }
         }
 
+        // ── 五。「表示」の面の網（位置 × 操作・`Mesh`） ────
+        let grid = await Mesh.run()
+        ran += grid.ran
+        bad.append(contentsOf: grid.bad)
+
         finish()
     }
 

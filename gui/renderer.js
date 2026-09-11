@@ -2736,6 +2736,13 @@ function blockAs(box, what) {
     if (/^h[1-6]$/.test(what) || what === 'p') {
         if (cell && box.contains(cell)) return false;
         lineToPara(box);
+        // 見出しに字下げは無い ── 項目と同じく外す（網の決めごと 9 と同じ筋・2026-09-11）。
+        if (what !== 'p') {
+            for (const l of pickedLines(box)) {
+                const first = l.firstChild;
+                if (first && first.nodeType === 3) first.data = first.data.replace(/^\u3000+/, '');
+            }
+        }
         cmd('formatBlock', what);
         return true;
     }

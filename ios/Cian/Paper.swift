@@ -543,18 +543,28 @@ struct Paper: UIViewRepresentable {
     /// `deleteContentBackward` として `beforeinput` に出る。
     const back = (e) => {
       if (e.isComposing) return;
+      // 選んで消すときは、表を壊さないほうが先に受ける（窓と同じ・`checkCut`）。
+      if (checkCut(box)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
       if (!checkBack(box)) return;
       e.preventDefault();
       box.dispatchEvent(new Event('input'));
     };
+    /// 行末の Delete（外付けの鍵盤・fn+delete）── 次が記号付きの行なら何も
+    /// 起きない（窓と同じ・`checkDel`・網の決めごと 2）。
+    const fwd = (e) => {
+      if (e.isComposing) return;
+      if (checkCut(box)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
+      if (!checkDel(box)) return;
+      e.preventDefault();
+    };
     box.addEventListener('keydown', (e) => {
-      if (e.key !== 'Backspace' || e.keyCode === 229) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      back(e);
+      if (e.keyCode === 229 || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'Backspace') back(e);
+      else if (e.key === 'Delete') fwd(e);
     });
     box.addEventListener('beforeinput', (e) => {
-      if (e.inputType !== 'deleteContentBackward') return;
-      back(e);
+      if (e.inputType === 'deleteContentBackward') back(e);
+      else if (e.inputType === 'deleteContentForward') fwd(e);
     });
 
     /// 外付けの鍵盤の Tab。**電話に Tab は無い**（下の帯のボタンが本線）が、

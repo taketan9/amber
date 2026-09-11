@@ -540,7 +540,8 @@ function expect(c) {
         }
         case '見出し': {
             if (kind === 'empty') return stay('空の面では、字を打つまで書かない');
-            if (['p', 'before', 'after', 'last', 'one', 'between', 'pad'].includes(kind)) return line('# ' + bt);
+            if (kind === 'pad') return line('# ' + bt.slice(1));
+            if (['p', 'before', 'after', 'last', 'one', 'between'].includes(kind)) return line('# ' + bt);
             if (kind === 'h' || kind === 'h1only') return line('## ' + text);
             return undefined;
         }

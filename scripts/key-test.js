@@ -435,6 +435,14 @@ async function press(md, where, at, hit) {
         ok(!box.querySelector('li:empty'), '空の項目を残さない', box.innerHTML);
     }
 
+    say('字下げた段落を見出しにすると、字下げは外れる（網の決めごと 9 の筋）');
+    {
+        await draw('　字下げた段落。');
+        caretAt(find('字下げた'), 0);
+        blockAs(box, 'h2');
+        ok(!box.textContent.startsWith('　'), '面の上で字下げが消えている', box.textContent);
+    }
+
     say('表のセルでは、一覧にしない');
     {
         const t = '| a | b |\n| --- | --- |\n| 1 | 2 |';
