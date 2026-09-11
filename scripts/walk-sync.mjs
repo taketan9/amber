@@ -276,7 +276,8 @@ export async function syncWalk() {
         clearTimeout(syncTimer);
         const r = await syncNow('手');
         if (!r || r.moved !== 1 || r.gone !== 0 || r.up !== 0) return JSON.stringify(r);
-        const after = (await window.amber.driveList()).find((x) => x.rel === '家族/買い物.md');
+        const name = note.path.split('/').pop();
+        const after = (await window.amber.driveList()).find((x) => x.rel === '家族/' + name);
         if (!after || after.id !== before.id) return '向こうの道か ID が違います: ' + JSON.stringify(after);
         // 戻す（もといたフォルダへ）。
         await ask('move', { path: r0.path, dir: note.path.slice(0, note.path.lastIndexOf('/')), root: state.root });
