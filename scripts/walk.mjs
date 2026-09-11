@@ -706,6 +706,65 @@ await step('カレンダー：予定に出ているノートを、升目でも�
     return hits === 1 ? true : '面談が ' + hits + ' 回出ています';
 `, true);
 
+await step('カレンダー：升目を二度押しすると、その日に予定を足す小窓が出る', `
+    calView = 'month'; calGroup = false; calMonth = { y: 2026, m: 9 }; calDay = '2026-09-09';
+    await drawCal();
+    const cell = el('cal').querySelector('.d[data-day="2026-09-17"]');
+    cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: 10, clientY: 10 }));
+    await new Promise((g) => setTimeout(g, 300));
+    const open = !el('evform').hidden;
+    const head = el('evform').querySelector('.hd').textContent;
+    el('evcancel').click();
+    if (!open) return '小窓が出ません';
+    return head.includes('9/17') || head.includes('17日') || head.includes('09-17') ? true : '日が違います: ' + head;`, true);
+await step('カレンダー：右押しすると「予定を追加」の献立が出る', `
+    const cell = el('cal').querySelector('.d[data-day="2026-09-17"]');
+    cell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 300 }));
+    await new Promise((g) => setTimeout(g, 250));
+    const rows = [...el('more').querySelectorAll('button')].map((b) => b.textContent);
+    closeMenu();
+    return rows.some((r) => r.includes('予定を追加')) ? true : JSON.stringify(rows);`, true);
+await step('カレンダー：予定の上で右押しすると、直す道が出る', `
+    const chip = el('cal').querySelector('.d[data-day="2026-09-09"] .ev[data-at]');
+    if (!chip) return '面談の札がありません';
+    chip.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 300 }));
+    await new Promise((g) => setTimeout(g, 250));
+    const rows = [...el('more').querySelectorAll('button')].map((b) => b.textContent);
+    closeMenu();
+    return rows.some((r) => r.includes('ノートを開く')) && rows.some((r) => r.includes('予定を追加')) ? true : JSON.stringify(rows);`, true);
+await step('カレンダー：土日を隠すと、月は五列・週は五本になる', `
+    calWeekend = false;
+    calView = 'month';
+    await drawCal();
+    const cells = el('cal').querySelectorAll('.d[data-day]').length;
+    calView = 'week';
+    await drawCal();
+    const lanes = el('cal').querySelectorAll('.lane').length;
+    calWeekend = true;
+    calView = 'month';
+    await drawCal();
+    const back = el('cal').querySelectorAll('.d[data-day]').length;
+    if (cells !== 22) return '九月の平日が ' + cells + ' 日あります（22 のはず）';
+    if (lanes !== 5) return '週が ' + lanes + ' 本です';
+    return back === 30 ? true : '戻すと ' + back + ' 日です';`, true);
+await step('カレンダー：出さない予定表のものは、どの見方にも出ない', `
+    calHide = ['me'];
+    calView = 'month';
+    await drawCal();
+    // 予定の札（.ev.once）が消えていること ── 面談は「その日に書いたノート」としても
+    // 並ぶので、字で見ると残る。
+    const month = !!el('cal').querySelector('.ev.once, .ev.repeat');
+    calView = 'week'; calDay = '2026-09-09';
+    await drawCal();
+    const week = !!el('cal').querySelector('.blk, .ad');
+    calHide = [];
+    calView = 'month';
+    await drawCal();
+    const back = !!el('cal').querySelector('.ev.once');
+    if (month) return '隠したのに月に出ています';
+    if (week) return '隠したのに週に出ています';
+    return back ? true : '戻しても出ません';`, true);
+
 await step('カレンダー：予定を足す小窓は、空のまま登録できず・終日なら時刻を選べない', `
     setTimeout(() => {
         el('evtitle').value = '';

@@ -6,7 +6,7 @@
 // 2画面ファイラではないので、要らないものを継ぐと、そこから太る。
 
 const { app, BrowserWindow, ipcMain, dialog, clipboard, nativeTheme,
-        nativeImage, shell, Notification, safeStorage } = require('electron');
+        nativeImage, shell, Notification, safeStorage, powerSaveBlocker } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -31,6 +31,12 @@ const { createDrive } = require('./drive');
 // （依頼 148 で決めたこと ── 設定キーとバンドル ID は動かさない）。
 app.setPath('userData', path.join(app.getPath('appData'), 'amber'));
 app.setName('ambər');
+// **走査のあいだは、macOS に眠らされない。** 試す窓は本人の窓の後ろに隠れるので、
+// App Nap で描く側が止められ、段の途中で返事が来なくなる（固まったように見えた・
+// 2026-09-11・四度）。人の道には出ない ── 走査（`walk.sh`）だけが旗を立てる。
+if (process.env.AMBER_AWAKE) {
+    app.whenReady().then(() => powerSaveBlocker.start('prevent-app-suspension'));
+}
 
 /// 渡された `.md` は、開いたら**単発で**出す。
 ///

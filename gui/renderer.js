@@ -7168,6 +7168,18 @@ let calGroup = false;
 /// 出さない人（段の鍵）。**全員を並べると読めない** ── 十五人の段から
 /// 三人を探すのは、目でやる仕事としては重い（依頼 473）。憶える。
 let calHide = [];
+/// 土日を出すか（本人・2026-09-11・設定で選ぶ）。既定は出す。
+let calWeekend = true;
+
+/// 出す予定だけ（隠した予定表のものを落とす）。**どの見方でも同じ一本**を通す
+/// ── 月だけ隠せていない、が起きないように。ノートは落とさない。
+function calShown() {
+    return calSlots.filter((s) => s.kind === 'note' || !calHide.includes(whoOf(s).key));
+}
+/// 出す日だけ（土日を隠すなら平日だけ）。
+function calDaysOf(days) {
+    return calWeekend ? days : days.filter((d) => (new Date(d + 'T00:00:00').getDay() + 6) % 7 < 5);
+}
 /// その月ぶんの予定（core の `month` が返したまま）。
 let calSlots = [];
 /// **カレンダーは、面の一つ**（依頼 478）。
@@ -7264,12 +7276,12 @@ async function drawCal() {
     pick.hidden = !grouped;
     if (grouped) {
         const all = crowdLanes(calView === 'day' ? [calDay] : weekOf(calDay), true).length;
-        const on = all - calHide.length;
+        const on = Math.max(0, all - calHide.length);
         pick.textContent = calHide.length ? '人を選ぶ（' + on + '/' + all + '）' : '人を選ぶ';
     }
 
     box.querySelector('.mo').textContent = calTitle();
-    const plans = calSlots.filter((s) => s.kind !== 'note').length;
+    const plans = calShown().filter((s) => s.kind !== 'note').length;
     box.querySelector('.sum').textContent = plans ? plans + ' 件の予定' : '予定はありません';
     // **いつ時点の紙かを出す。** チームの予定は置き換わる一枚を読んで
     // いるだけなので、これが無いと古い紙を今の予定だと思って読む。
@@ -7302,10 +7314,17 @@ async function drawCal() {
     for (let i = 0; i < lead; i += 1) cells.push(null);
     for (let d = 1; d <= days; d += 1) cells.push(ymd(calMonth.y, calMonth.m - 1, d));
     while (cells.length % 7) cells.push(null);
+    // 土日を隠すなら、七つのうち五つ（月〜金）だけ並べる。
+    const wide = calWeekend ? 7 : 5;
+    const shownCells = calWeekend ? cells : cells.filter((_, i) => i % 7 < 5);
+    box.querySelector('.dow').style.gridTemplateColumns = 'repeat(' + wide + ',1fr)';
+    box.querySelector('.days').style.gridTemplateColumns = 'repeat(' + wide + ',1fr)';
+    for (const i of box.querySelectorAll('.dow .sat, .dow .sun')) i.hidden = !calWeekend;
+    const visible = calShown();
 
-    box.querySelector('.days').innerHTML = cells.map((day) => {
+    box.querySelector('.days').innerHTML = shownCells.map((day) => {
         if (!day) return '<div class="d dim"></div>';
-        const mine = calSlots.filter((s) => s.day === day);
+        const mine = visible.filter((s) => s.day === day);
         const plans = mine.filter((s) => s.kind !== 'note');
         const shown = new Set(plans.map((s) => s.path));
         // **予定が先、ノートは後。** 数が溢れたときに残したいのは予定。
@@ -7313,7 +7332,8 @@ async function drawCal() {
         const sorted = plans.concat(
             mine.filter((s) => s.kind === 'note' && !shown.has(s.path)));
         const chips = sorted.slice(0, 3).map((s) =>
-            '<span class="ev ' + s.kind + (s.shut ? ' shut' : '') + '">'
+            '<span class="ev ' + s.kind + (s.shut ? ' shut' : '') + '"'
+            + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '') + '>'
             + (s.at ? escapeHtml(s.at) + ' ' : '') + escapeHtml(s.title) + '</span>').join('');
         const rest = sorted.length > 3 ? '<span class="more">ほか ' + (sorted.length - 3) + '</span>' : '';
         const marks = (day === today ? ' today' : '') + (day === calDay ? ' on' : '');
@@ -7358,11 +7378,12 @@ const mins = (t) => {
 /// 高さの元は一時間 = `HOUR_PX`。終わりの時刻が無いもの（amber 自身の
 /// 予定は「その時刻」しか持たない）は、三十分ぶんの高さにする ──
 /// 潰れて読めないより、少し大きいほうがよい。
-const HOUR_PX = 48;   // index.html の 3rem と合わせる
+const HOUR_PX = 56;   // index.html の 3.5rem と合わせる
 function drawHours() {
     const box = el('cal');
-    const days = calView === 'day' ? [calDay] : weekOf(calDay);
+    const days = calView === 'day' ? [calDay] : calDaysOf(weekOf(calDay));
     const today = ymd(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+    const calSlotsShown = calShown();
 
     // 終日の段（曜日の見出しも兼ねる）。
     const ad = box.querySelector('.allday');
@@ -7373,7 +7394,7 @@ function drawHours() {
         // **終日の段は「予定」だけ。** その日に書いたノートはここではなく、
         // 右のその日の欄に出る ── 段に混ぜると、時刻つきの予定が上と下に
         // 二度並ぶ（実際にそう見えた）。
-        const whole = calSlots.filter((s) => s.day === d && !s.at && s.kind !== 'note');
+        const whole = calSlotsShown.filter((s) => s.day === d && !s.at && s.kind !== 'note');
         return '<div><div class="hd' + mark + '">' + weekName(d) + ' '
             + Number(d.slice(8)) + '</div>'
             + whole.map((s) => '<div class="ad ' + s.kind + '"'
@@ -7389,7 +7410,7 @@ function drawHours() {
     cols.innerHTML = '<div class="clock">'
         + hours.map((h) => '<div>' + h + '</div>').join('') + '</div>'
         + days.map((d) => {
-            const timed = calSlots.filter((s) => s.day === d && s.at);
+            const timed = calSlotsShown.filter((s) => s.day === d && s.at);
             const blocks = timed.map((s) => {
                 const from = mins(s.at);
                 if (from === null) return '';
@@ -7407,7 +7428,7 @@ function drawHours() {
 
     // **朝が見えているところから始める。** 開いた瞬間に真夜中が出ていると、
     // 毎回スクロールしてから見ることになる。いちばん早い予定か、七時。
-    const early = calSlots
+    const early = calSlotsShown
         .filter((s) => days.includes(s.day) && s.at)
         .map((s) => mins(s.at)).filter((n) => n !== null);
     const from = early.length ? Math.min(...early) : 7 * 60;
@@ -7457,12 +7478,12 @@ function crowdLanes(days, whole) {
 
 /// 一時間ぶんの横幅（日のとき）。字が読める幅を確保して、足りなければ
 /// 横に流す ── 一日を画面幅に押し込むと、三十分の会議が線になる。
-const CROWD_HOUR = 72;
+const CROWD_HOUR = 84;
 
 /// **横に時間（または日付）、縦に人。**
 function drawCrowd() {
     const box = el('cal');
-    const days = calView === 'day' ? [calDay] : weekOf(calDay);
+    const days = calView === 'day' ? [calDay] : calDaysOf(weekOf(calDay));
     const lanes = crowdLanes(days);
     // **一日は横に流す。週は流さない。** 一日を画面幅に押し込むと三十分の
     // 会議が線になるので幅を決め打ちにするが、週の七日は画面に収まる
@@ -7915,13 +7936,11 @@ el('cal').addEventListener('click', async (e) => {
     // 週の「みんな」で、空いている升目を押したらその日を選ぶ。
     const box3 = e.target.closest('.crowd .cell');
     if (box3) { calDay = box3.dataset.day; await drawCal(); return; }
-    // 週と日の表で、何もないところを押したら**その時刻で**足す。
+    // 週と日の表で、何もないところを押したら**その日を選ぶ**。足すのは
+    // 二度押しか右押し（本人・2026-09-11）── 一度押しで小窓が開くのは早すぎた。
     const lane = e.target.closest('.lane');
     if (lane && !e.target.closest('.blk')) {
-        const box2 = lane.getBoundingClientRect();
-        const h = Math.max(0, Math.min(23, Math.floor((e.clientY - box2.top) / HOUR_PX)));
-        calDay = lane.dataset.day;
-        await calAdd(calDay, String(h).padStart(2, '0') + ':00');
+        if (calDay !== lane.dataset.day) { calDay = lane.dataset.day; await drawCal(); }
         return;
     }
     const ad = e.target.closest('.ad');
@@ -7950,6 +7969,126 @@ el('cal').addEventListener('click', async (e) => {
     if (cell) { calDay = cell.dataset.day; await drawCal(); }
 });
 
+
+/* ── 二度押しと右押し（依頼 494） ──
+ *
+ * **押した場所に足す。押したものを直す。** 月・週・日・みんなの表、どれでも
+ * 同じ二つ ── 何も無いところなら「その日・その時刻に予定を足す」、予定の
+ * 上なら「それを直す」（この Mac の予定はタイトルと削除、ノートの予定は
+ * そのノートを開く、よそとチームは読むだけ）。二度押しはすぐ、右押しは
+ * 献立を出してから。
+ */
+
+/// 押した場所が指す日と時刻（`{ day, at }`・at は無いこともある）。
+function calSpotAt(e) {
+    const lane = e.target.closest('.lane');
+    if (lane) {
+        const r = lane.getBoundingClientRect();
+        const m = Math.max(0, Math.min(23 * 60 + 45, Math.floor((e.clientY - r.top) / HOUR_PX * 4) * 15));
+        return { day: lane.dataset.day, at: String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0') };
+    }
+    const track = e.target.closest('.crowd .track');
+    if (track) {
+        if (calView === 'day') {
+            const r = track.getBoundingClientRect();
+            const m = Math.max(0, Math.min(23 * 60 + 45, Math.floor((e.clientX - r.left) / CROWD_HOUR * 4) * 15));
+            return { day: calDay, at: String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0') };
+        }
+        const cell = e.target.closest('.crowd .cell');
+        return { day: cell ? cell.dataset.day : calDay, at: '' };
+    }
+    const cell = e.target.closest('.d[data-day]');
+    if (cell) return { day: cell.dataset.day, at: '' };
+    const col = e.target.closest('.allday > div[data-day]');
+    if (col) return { day: col.dataset.day, at: '' };
+    return null;
+}
+
+/// 押した予定（`.ev` `.blk` `.ad` `.bar` `.chip` `.span`）。無ければ null。
+function calItemAt(e) {
+    const it = e.target.closest('.ev, .blk, .ad, .crowd .bar, .crowd .chip, .crowd .span');
+    if (!it) return null;
+    const kind = ['here', 'away', 'team', 'note', 'once', 'repeat'].find((k) => it.classList.contains(k)) || '';
+    return { el: it, kind, at: it.dataset.at || '' };
+}
+
+/// 押した予定を直す（この Mac の予定）か、開く（ノート）か、読むだけと言うか。
+async function calEditItem(item) {
+    if (item.kind === 'here' && item.at) { await hereEdit(item.at); return; }
+    if (item.at) { calShut(); await openNote(item.at); return; }
+    say(item.kind === 'team' ? 'チームの予定表は読むだけです' : 'よその予定表のものなので、ここでは直せません');
+}
+
+el('cal').addEventListener('dblclick', async (e) => {
+    const item = calItemAt(e);
+    if (item) { e.preventDefault(); await calEditItem(item); return; }
+    const spot = calSpotAt(e);
+    if (!spot) return;
+    e.preventDefault();
+    calDay = spot.day;
+    await calAdd(spot.day, spot.at || undefined);
+});
+
+el('cal').addEventListener('contextmenu', async (e) => {
+    const item = calItemAt(e);
+    const spot = calSpotAt(e);
+    if (!item && !spot) return;
+    e.preventDefault();
+    const at = { x: e.clientX, y: e.clientY };
+    const rows = [];
+    if (item) {
+        if (item.kind === 'here' && item.at) {
+            rows.push({ name: 'タイトルを修正する', run: () => hereEdit(item.at) });
+            rows.push({ name: '予定を削除する', run: async () => {
+                if (!await askYes('この予定を削除しますか')) return;
+                const got = await window.amber.cal(['drop', item.at]);
+                if (!got || got.error) { say('削除できません: ' + (got?.error || '返事がありません')); return; }
+                await drawCal();
+            } });
+        } else if (item.at) {
+            rows.push({ name: 'ノートを開く', run: () => calEditItem(item) });
+        } else {
+            rows.push({ name: item.kind === 'team' ? 'チームの予定（読むだけ）' : 'よその予定（読むだけ）', dim: true });
+        }
+    }
+    const day = spot ? spot.day : calDay;
+    const when = spot && spot.at ? dayName(day) + ' ' + spot.at : dayName(day);
+    rows.push({ name: when + ' に予定を追加', sep: rows.length > 0, run: () => { calDay = day; return calAdd(day, spot && spot.at ? spot.at : undefined); } });
+    popMenu(rows, at);
+});
+
+/* ── 表示の設定（依頼 494）── どの予定表を出すか・土日を出すか ── */
+
+/// 予定表の一覧。この Mac の予定表（無ければ空）・よその予定表・チーム・自分のノート。
+async function calSources() {
+    const out = [{ key: 'me', name: '自分のノート（日付を書いたノート）' }];
+    if (hereOn) {
+        const got = await window.amber.cal(['calendars']);
+        for (const c of (got && got.calendars) || []) out.push({ key: 'here:' + c, name: c + '（この Mac）' });
+    }
+    for (const a of away) out.push({ key: 'away:' + a.name, name: a.name + '（カレンダー設定で足したもの）' });
+    for (const w of teamPeople) out.push({ key: 'team:' + (w.mail || w.name), name: w.name + '（チーム）' });
+    // 隠しているのに一覧に無いもの（もう無い予定表）も出す ── 戻せないと困る。
+    for (const k of calHide) if (!out.some((x) => x.key === k)) out.push({ key: k, name: k.replace(/^[a-z]+:/, '') });
+    return out;
+}
+
+async function cmdCalSettings() {
+    for (;;) {
+        const rows = (await calSources()).map((c) => ({
+            name: (calHide.includes(c.key) ? '　　' : '✓　') + c.name,
+            sub: calHide.includes(c.key) ? '出していません' : '',
+            value: c.key,
+        }));
+        rows.push({ name: (calWeekend ? '✓　' : '　　') + '土日を出す', value: '*weekend', sub: calWeekend ? '' : '月〜金だけ出しています' });
+        const pick = await askPick('カレンダー表示設定', rows, '押すと出し入れできます。閉じるまで続けて選べます', true);
+        if (pick === null) break;
+        if (pick === '*weekend') { calWeekend = !calWeekend; window.amber.remember({ calWeekend }); continue; }
+        calHide = calHide.includes(pick) ? calHide.filter((k) => k !== pick) : calHide.concat(pick);
+        window.amber.remember({ calHide });
+    }
+    if (calOn) await drawCal();
+}
 
 /* ── よその予定表（依頼 456） ── */
 
@@ -8082,6 +8221,7 @@ const CMDS = [
     { id: 'sub', name: 'カレンダー設定追加', sub: 'Google カレンダーなどの iCal の URL を読みます',
       app: true, run: cmdSubscribe },
     { id: 'unsub', name: 'カレンダー設定解除', app: true, run: cmdUnsubscribe },
+    { id: 'calset', name: 'カレンダー表示設定', sub: 'どの予定表を出すか・土日を出すか', app: true, run: cmdCalSettings },
     // **合言葉を打つまで、どこにも出ない**（依頼 473）。
     //
     // 会社の Outlook は外から読める形を一つも出さないので、別の道具が
@@ -10684,6 +10824,7 @@ const escapeAttr = escapeHtml;
     if (['month', 'week', 'day'].includes(saved.calView)) calView = saved.calView;
     calGroup = !!saved.calGroup;
     if (Array.isArray(saved.calHide)) calHide = saved.calHide.filter((k) => typeof k === 'string');
+    if (saved.calWeekend === false) calWeekend = false;
     if (typeof saved.teamFile === 'string') { teamFile = saved.teamFile; teamClock(); }
     noBins = Array.isArray(saved.noBins) ? saved.noBins : [];
     incomings = (saved.incomings && typeof saved.incomings === 'object') ? saved.incomings : {};

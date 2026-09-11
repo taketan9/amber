@@ -57,6 +57,12 @@ switch what {
 case "ask":
     out(["ok": ask()])
 
+// この Mac の予定表の名前（表示の設定で、出す・出さないを選ぶのに使う）。
+case "calendars":
+    need()
+    let names = store.calendars(for: .event).map { $0.title }.sorted()
+    out(["ok": true, "calendars": names])
+
 case "month":
     need()
     guard args.count >= 3, let year = Int(args[1]), let month = Int(args[2]) else {

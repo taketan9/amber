@@ -27,9 +27,11 @@ let id = 0;
 const waits = new Map();
 /// 窓が言ったこと（error と warning と、飛んだ例外）。
 let noise = [];
+let pausedAt = null;
 ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.id && waits.has(m.id)) { waits.get(m.id)(m); waits.delete(m.id); return; }
+    if (m.method === 'Debugger.paused') { if (pausedAt) pausedAt(m.params); return; }
     if (m.method === 'Runtime.consoleAPICalled' && ['error', 'assert'].includes(m.params.type)) {
         noise.push('console: ' + m.params.args
             .map((a) => a.value ?? a.description ?? '?').join(' ').slice(0, 200));
@@ -73,10 +75,18 @@ export async function run(src) {
             sleep(2000).then(() => null),
         ]);
         if (!alive) {
+            // 眠らされているだけかもしれない ── 十秒おいてもう一度だけ訊く。
+            await sleep(10000);
+            const again = await Promise.race([
+                send('Runtime.evaluate', { expression: '1+1', returnByValue: true }),
+                sleep(3000).then(() => null),
+            ]);
+            if (again) return { bad: '返ってきません（窓は十秒ほど止まっていた）' };
             // **固まった窓に、残りの段を押しても意味が無い** ── 一段ごとに十秒
-            // 待って二時間かける前に、ここで報せて止まる。
-            bad.push({ name: '（ここで窓が固まった）', why: ['この段の途中で 1+1 も返らなくなった'] });
-            report();
+            // 待って二時間かける前に、**どこで回っているか**を取って止まる。
+            // 回りっぱなしの JS も `Debugger.pause` なら止められる（次の割り込みで）。
+            const where = await whereStuck();
+            return { bad: '窓が固まっている（1+1 も返らない）', frozen: true, where };
         }
         return { bad: '返ってきません（窓は生きている・' + (busy && busy.result && busy.result.result ? busy.result.result.value : '?') + '）' };
     }
@@ -108,6 +118,11 @@ export async function step(name, src, want) {
     `);
     const why = [];
     if (r.bad) why.push(r.bad);
+    if (r.frozen) {
+        why.push(...(r.where || []));
+        bad.push({ name, why });
+        report();
+    }
     if (said.length) why.push(...said);
     if (back.value && back.value !== 'ok' && back.value !== 'skip') why.push(back.value);
     if (typeof want === 'function') {
@@ -128,6 +143,20 @@ const QUIET = [
     'net::ERR_FILE_NOT_FOUND',         // 試す場所に置いていない絵
 ];
 
+
+/// 固まった窓の、いまの呼び出しの列（上から六つ）。取れなければ空。
+async function whereStuck() {
+    const got = new Promise((go) => { pausedAt = go; });
+    send('Debugger.enable');
+    send('Debugger.pause');
+    const p = await Promise.race([got, sleep(6000).then(() => null)]);
+    pausedAt = null;
+    if (!p) return ['（止められませんでした ── 描く側そのものが応えない）'];
+    const rows = (p.callFrames || []).slice(0, 8).map((f) =>
+        (f.functionName || '（無名）') + ' @ ' + String(f.url || '').split('/').pop() + ':' + (f.location.lineNumber + 1));
+    send('Debugger.resume');
+    return rows.length ? rows : ['（列が空）'];
+}
 
 /// 落ちたものの帳面と、動かした数。
 export const tally = { ran: 0 };
