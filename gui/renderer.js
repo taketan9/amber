@@ -1740,6 +1740,24 @@ el('read').addEventListener('paste', (e) => {
     e.preventDefault();
     const html = e.clipboardData.getData('text/html');
     const clean = html && html.trim() ? webClean(html, clipBase(html)) : null;
+    // **表のセルには字だけ（改行は空白に）。項目には字だけ（改行ごとに
+    // 項目を増やす）。** かたまりのまま入れると、セルでは見出しの字だけが
+    // 混ざって一覧が消え、項目では一覧が入れ子になった（網が捕まえた・
+    // 2026-09-10・本人が決めた）。
+    {
+        const plain = e.clipboardData.getData('text/plain')
+            || (clean ? [...clean.children].map((n) => n.textContent).join('\n') : '');
+        const line = lineAt(el('read'));
+        if (line && line.closest('td, th')) {
+            document.execCommand('insertText', false, plain.replace(/\s*\n\s*/g, ' ').trim());
+            return;
+        }
+        if (line && line.tagName === 'LI') {
+            pasteLines(el('read'), plain.split('\n'));
+            readChanged();
+            return;
+        }
+    }
     // **読む面には、組んだ形のまま入れる。** 字（`## 段取り`）を入れると
     // そのまま `##` という字が出る ── 実際にそうなった。均したあとの札は
     // amber が知っているものだけなので、そのまま食える。
@@ -1919,12 +1937,22 @@ function blockToMd(node, depth = 0) {
             .filter((c) => !c.classList.contains('alert-h'))
             .map((c) => blockToMd(c))
             .filter((x) => x !== null).join('\n\n');
+        // **中身が空なら札だけ。** `>` の行を足すと、読む面で入れた直後の
+        // 注記（`> [!NOTE]`）が次の保存で `> [!NOTE]⏎>` に変わる ── 同期先に
+        // 差分が一度飛ぶ（網が捕まえた・2026-09-10）。
+        if (!body.trim()) return '> [!' + kind.toUpperCase() + ']';
         return ['> [!' + kind.toUpperCase() + ']',
                 ...body.split('\n').map((l) => (l ? '> ' + l : '>'))].join('\n');
     }
     switch (node.tagName) {
-        case 'H1': case 'H2': case 'H3': case 'H4': case 'H5': case 'H6':
-            return '#'.repeat(Number(node.tagName[1])) + ' ' + inlineToMd(node);
+        case 'H1': case 'H2': case 'H3': case 'H4': case 'H5': case 'H6': {
+            // **字の無い見出しは書かない。** 面には出ている（打てる形）が、
+            // 字を打つまでファイルには出さない（本人が決めた・2026-09-11・
+            // 網の決めごと 7）── 空の `# ` が同期先へ飛ばない。
+            const t = inlineToMd(node);
+            if (!edges(t)) return null;
+            return '#'.repeat(Number(node.tagName[1])) + ' ' + t;
+        }
         case 'UL': case 'OL': {
             // **字に戻すあいだ、画面には一切触らない。**
             //
@@ -1942,6 +1970,10 @@ function blockToMd(node, depth = 0) {
             let n = (Number(node.getAttribute('start')) || 1) - 1;
             for (const li of node.children) {
                 if (li.tagName !== 'LI') continue;
+                // **字の無い項目は書かない**（入れ子も無ければ）── 項目の末尾で
+                // Enter を押した瞬間の `- ` や `- [ ] ` を、字を打つまでファイルに
+                // 出さない（本人が決めた・2026-09-11・網の決めごと 11）。
+                if (!edges(inlineToMd(li)) && !li.querySelector(':scope > ul, :scope > ol')) continue;
                 n += 1;
                 const mark = li.querySelector(':scope > .box');
                 // **書いた印を、そのまま返す。** `* ` を `- ` に、`1) ` を
@@ -1959,10 +1991,13 @@ function blockToMd(node, depth = 0) {
                 rows.push(pad + head + inlineToMd(li).trim());
                 // 入れ子は項目の中に居る。字の上では、その項目の下に付く。
                 for (const x of li.children) {
-                    if (['UL', 'OL'].includes(x.tagName)) rows.push(blockToMd(x, depth + 1));
+                    if (['UL', 'OL'].includes(x.tagName)) {
+                        const inner = blockToMd(x, depth + 1);
+                        if (inner !== null) rows.push(inner);
+                    }
                 }
             }
-            return rows.join('\n');
+            return rows.length ? rows.join('\n') : null;
         }
         case 'TABLE': {
             const rows = [...node.querySelectorAll('tr')];
@@ -2003,7 +2038,16 @@ function blockToMd(node, depth = 0) {
             return null;
         default: {
             const t = edges(inlineToMd(node));
-            return t === '' ? null : pad + t;
+            // **段落の中に潜った一覧を、落とさない。** Chromium の
+            // `insertOrderedList` は `<p>` の中に `<ol>` を作ることがあり
+            // （`<p><ol><li>…</li></ol></p>`）、`inlineToMd` は一覧を飛ばす
+            // ので、**その行が丸ごと消えていた**（網が捕まえた・2026-09-10・
+            // 段落で「番号リスト」を押すと段落が消える）。中の一覧は、
+            // かたまりとして続けて書く ── 失うよりは、形が少し違うほうがよい。
+            const lists = [...node.children].filter((c) => ['UL', 'OL'].includes(c.tagName))
+                .map((c) => blockToMd(c, depth)).filter((x) => x !== null);
+            if (!lists.length) return t === '' ? null : pad + t;
+            return [...(t === '' ? [] : [pad + t]), ...lists].join('\n\n');
         }
     }
 }
@@ -2114,6 +2158,19 @@ function checkEnter(li) {
         return true;
     }
 
+    // **行頭で押したら、上に空の升を置く。** 後ろの字を次へ送ると、済んだ
+    // 升（`[x]`）が字の無い行に残り、字のほうが新しい空の升に付く ──
+    // 保存すると `- [x] やった` が `- [ ] やった` に変わる（網が捕まえた・
+    // 2026-09-11）。字は自分の升と一緒に居る。
+    if (atHead(li)) {
+        const above = document.createElement('li');
+        above.className = 'task';
+        putBox(above);
+        above.append(document.createElement('br'));
+        li.before(above);
+        landBackIn(li, 0);
+        return true;
+    }
     // 途中で押したら、後ろの字を次の升へ持っていく（点や番号と同じ）。
     const cut = sel.getRangeAt(0).cloneRange();
     cut.setEndAfter(li.lastChild);
@@ -2377,6 +2434,23 @@ function atTail(node) {
     return bit.textContent.length === 0;
 }
 
+/// 項目の**自分の字**の末尾に caret が居るか（入れ子の一覧は数えない）。
+function atOwnTail(li) {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
+    const r = sel.getRangeAt(0).cloneRange();
+    r.selectNodeContents(li);
+    try {
+        r.setStart(sel.anchorNode, sel.anchorOffset);
+    } catch {
+        return false;
+    }
+    const bit = r.cloneContents();
+    for (const b of bit.querySelectorAll('.box, ul, ol')) b.remove();
+    // 入れ子の手前の改行（組んだ HTML の字下げ）は、字ではない。
+    return bit.textContent.trim().length === 0;
+}
+
 /// ノートの**先頭**が触れないかたまりなら、その上に降りられる一行を置く。
 ///
 /// `tailStop` の対。**末尾には既にあった**（表や罫線で終わるノートに caret を
@@ -2418,8 +2492,18 @@ function checkReturn(box) {
     if (!/^H[1-6]$/.test(line.tagName)) return false;
     const sel = getSelection();
     if (!sel || !sel.rangeCount) return false;
-    // 先頭で押したら、上に空の段落（既定と同じ）── 見出しは見出しのまま。
-    if (atHead(line)) return false;
+    // 先頭で押したら、上に空の**段落** ── 見出しは見出しのまま。
+    //
+    // **既定に任せない。** Chromium の既定は、見出しの先頭の Enter で
+    // **空の見出し**を上に作る（`<h1><br></h1>`）── 字に戻すと `# ` の一行が
+    // ファイルに残る（網が捕まえた・2026-09-10）。`PAPER.ja.md` 六章の乙は
+    // 「上に空の段落が一つ入る」なので、こちらで置く。
+    if (atHead(line)) {
+        const p = document.createElement('p');
+        p.append(document.createElement('br'));
+        line.before(p);
+        return true;
+    }
 
     // 後ろの字を、新しい段落へ連れていく（末尾で押したなら空の段落）。
     const cut = sel.getRangeAt(0).cloneRange();
@@ -2457,6 +2541,23 @@ function nextCell(cell) {
     const to = below.children[at] || below.children[below.children.length - 1];
     if (to) landBackIn(to, 0);
     return true;
+}
+
+/// 引用・注記の中の Enter は、**改行**（`<br>`）。
+///
+/// 既定は段落を割る ── 引用では字に戻すとき二つの段落が並びの行に均される
+/// のに、注記では `>` の空行が挟まり、同じ箱なのに手触りが違っていた（網が
+/// 捕まえた・2026-09-10・本人が決めた「引用と同じ（改行）」・2026-09-11）。
+/// 空の行での Enter は `quitEnter`（箱から出る）が先に受ける。
+/// 受けたら `true`。
+function quoteEnter(box) {
+    const line = lineAt(box);
+    if (!line) return false;
+    const wrap = line.closest('blockquote, .alert');
+    if (!wrap || !box.contains(wrap)) return false;
+    if (line.tagName === 'LI' || /^H[1-6]$/.test(line.tagName)) return false;
+    if (!line.textContent.trim()) return false;
+    return checkSoftReturn(box);
 }
 
 /// 段落の中の改行（`Shift+Enter`）。
@@ -2540,25 +2641,105 @@ function unwrapBlock(box, tag) {
     return true;
 }
 
-/// 一覧から、選んだ項目を出して段落にする。
+/// 一覧から、選んだ項目を出して段落にする。**行頭の Backspace と同じ割り方**
+/// （`unlist`）── 一覧はそこで割れ、下の項目も入れ子も残る。
 function unwrapList(box) {
     const lines = pickedLines(box).filter((n) => n.tagName === 'LI');
     let last = null;
     for (const li of lines) {
-        const list = li.parentElement;
-        if (!list || !['UL', 'OL'].includes(list.tagName)) continue;
-        const p = document.createElement('p');
-        for (const x of [...li.childNodes]) {
-            if (x.nodeType === 1 && x.classList?.contains('box')) continue;
-            p.append(x);
-        }
-        if (!p.childNodes.length) p.append(document.createElement('br'));
-        list.before(p);
-        li.remove();
-        if (!list.children.length) list.remove();
-        last = p;
+        if (unlist(li)) last = li;
     }
-    if (last) landBackIn(last, 0);
+    // `unlist` は自分で caret を置くので、ここでは何もしない。
+    return !!last || true;
+}
+
+/// 一行を、素の段落にする（項目なら記号を外す・見出しなら `#` を外す）。
+///
+/// **一行は、見出しか項目か、どちらか一つ。** 項目の行を見出しにするときは、
+/// 先に点を外す（`PAPER.ja.md` 六章の丙・本人が決めた「点付きが見出しに
+/// なっても驚かない」）。`formatBlock` を項目にそのまま掛けると、Chromium は
+/// 一覧を割って**空の見出しと空の項目を作り、字を落とす**（網が捕まえた・
+/// 2026-09-10・一覧の行で「見出し」を押すと字が消える）。
+function lineToPara(box) {
+    for (const line of pickedLines(box)) {
+        if (line.tagName === 'LI') unlist(line);
+    }
+}
+
+/// `execCommand` が段落の中に作ってしまった一覧を、外へ出す。
+///
+/// Chromium の `insertOrderedList` は、隣に一覧が無い段落では
+/// `<p><ol><li>…</li></ol></p>` を作る（`<ul>` も同じ）── 段落の中の一覧は
+/// 字に戻す側が知らず、**その行が丸ごと消えていた**。皮を剥いで、一覧を
+/// かたまりにする。元の行の札は一覧へ持たせる。
+function tidyLists(box) {
+    for (const wrap of [...box.querySelectorAll(':scope > p, :scope > div, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6')]) {
+        const lists = [...wrap.children].filter((c) => ['UL', 'OL'].includes(c.tagName));
+        if (!lists.length) continue;
+        // 一覧のほかに字が無いなら、皮だけ剥ぐ。字があるなら、字を段落に
+        // 残して一覧を後ろに出す。
+        for (const list of lists) keepMark(wrap, list);
+        const rest = [...wrap.childNodes].filter((c) => !lists.includes(c));
+        const text = rest.map((c) => c.textContent).join('').trim();
+        if (text) {
+            wrap.after(...lists);
+        } else {
+            wrap.replaceWith(...lists);
+        }
+    }
+}
+
+/// かたまりの種類を変える（見出し・箇条書き・番号・引用）。**窓と電話で一組。**
+///
+/// 決めごと（`PAPER.ja.md` 六章の丙）はぜんぶここに:
+///   - 同じボタンで、付けると外す（中で押したら外れる）
+///   - 一行は、見出しか項目か、どちらか一つ（点を付ける前に見出しを落とし、
+///     見出しにする前に点を外す）
+///   - **表のセルの中では、一覧にしない** ── Markdown の表のセルに一覧は
+///     書けず、`insertOrderedList` はセルの字を消す（網が捕まえた・
+///     2026-09-10）。受けて、何もしない（`false` を返す）
+function blockAs(box, what) {
+    const sel = getSelection();
+    let n = sel && sel.rangeCount ? sel.anchorNode : null;
+    if (n && n.nodeType === 3) n = n.parentElement;
+    const cell = n && n.closest ? n.closest('td, th') : null;
+    const cmd = (name, arg) => {
+        try { document.execCommand(name, false, arg); } catch { /* 軽い DOM には無い */ }
+    };
+    if (what === 'ul' || what === 'ol') {
+        if (cell && box.contains(cell)) return false;
+        if (inside(box, what.toUpperCase())) { unwrapList(box); return true; }
+        // 別の種類の項目なら、**その一行だけ種類を替える**（本人が決めた・2026-09-10）。
+        const items = pickedLines(box).filter((l) => l.tagName === 'LI');
+        if (items.length) {
+            for (const li of items) switchItem(li, what.toUpperCase());
+            return true;
+        }
+        flattenHeads(box);
+        cmd(what === 'ul' ? 'insertUnorderedList' : 'insertOrderedList');
+        tidyLists(box);
+        // 字下げは外す ── 項目に字下げは無い（本人が決めた・2026-09-11・網の決めごと 9）。
+        for (const li of pickedLines(box).filter((l) => l.tagName === 'LI')) {
+            const first = li.firstChild && li.firstChild.classList && li.firstChild.classList.contains('box')
+                ? li.firstChild.nextSibling : li.firstChild;
+            if (first && first.nodeType === 3) first.data = first.data.replace(/^\u3000+/, '');
+        }
+        return true;
+    }
+    if (what === 'blockquote') {
+        if (inside(box, 'blockquote')) { unwrapBlock(box, 'blockquote'); return true; }
+        // 項目の行は、段落にしてから引用に（一覧はそこで割れる・本人が決めた・2026-09-10）。
+        lineToPara(box);
+        cmd('formatBlock', 'blockquote');
+        return true;
+    }
+    if (/^h[1-6]$/.test(what) || what === 'p') {
+        if (cell && box.contains(cell)) return false;
+        lineToPara(box);
+        cmd('formatBlock', what);
+        return true;
+    }
+    cmd('formatBlock', what);
     return true;
 }
 
@@ -2656,28 +2837,82 @@ function checkBack(box) {
     return false;
 }
 
+/// **行末の Delete は、次の行が素の段落のときだけ繋ぐ。**
+///
+/// 行頭の Backspace は「この行の記号を一つ外す」（升が黙って消えないため）。
+/// その裏で、行末の Delete は**次の行の記号を消さない** ── 既定に任せると
+/// `- [ ] やること⏎- [x] やった` が `- [ ] やることやった` になり（升が
+/// 一つ消える）、表の最後のセルは下の段落を吸い込み、枠は丸ごと消えて下の
+/// 段落と繋がった（網が捕まえた・2026-09-10・本人が決めた「次が記号付きの
+/// 行なら、何も起きない」・2026-09-11）。段落と段落は、これまで通り繋がる。
+/// 受けたら `true`（何もしない）。
+function checkDel(box) {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
+    const line = lineAt(box);
+    if (!line) return false;
+    // **項目の「終わり」は、入れ子の手前。** 入れ子を持つ項目は `textContent`
+    // に子の字まで含むので、`atTail` では終わりにならず、既定の Delete が
+    // 入れ子の一つめを親に吸い込んだ（`- ふたつ入れ子`・網が捕まえた・
+    // 2026-09-11）。
+    if (!(line.tagName === 'LI' ? atOwnTail(line) : atTail(line))) return false;
+    // セルの終わり ── 表の外を吸い込まない。
+    const cell = line.closest('td, th');
+    if (cell && box.contains(cell)) return true;
+    // 項目の終わり ── 次の項目（入れ子も）の記号を消さない。
+    if (line.tagName === 'LI') return true;
+    // 引用・注記の中の段落 ── 同じ箱の中の次の段落とは繋がる。箱の終わりでは止まる。
+    let here = line;
+    while (here.parentElement && here.parentElement !== box) here = here.parentElement;
+    if (here !== line) {
+        const next = line.nextElementSibling;
+        return !(next && next.tagName === 'P');
+    }
+    const next = here.nextElementSibling;
+    if (!next) return false;                            // ノートの末尾 ── 既定（何も起きない）
+    return next.tagName !== 'P';                        // 次が素の段落でなければ、何もしない
+}
+
 /// 見出しを段落にする（字はそのまま）。
 function asPara(line) {
+    landBackIn(toPara(line), 0);
+    return true;
+}
+
+/// 見出しを段落に掛け替えて、その段落を返す。
+function toPara(line) {
     const p = document.createElement('p');
     p.append(...line.childNodes);
     keepMark(line, p);
     line.replaceWith(p);
-    landBackIn(p, 0);
-    return true;
+    return p;
 }
 
 /// 項目の記号を外して、段落にする。**一覧はそこで割れ、下の項目は残る。**
 function unlist(li) {
-    const list = li.parentElement;
+    let list = li.parentElement;
     if (!list || !['UL', 'OL'].includes(list.tagName)) return false;
+    // **入れ子の項目は、いちばん外まで出してから段落にする。** 親の項目の
+    // 中に段落は置けない ── 置くと字に戻すとき親の字に繋がる
+    // （`- ふたつ入れ子`・網が捕まえた・2026-09-10）。
+    for (let n = 0; n < 8 && list.parentElement && list.parentElement.tagName === 'LI'; n += 1) {
+        outdent(li);
+        list = li.parentElement;
+    }
     const p = document.createElement('p');
+    // **入れ子は連れていかない ── 残す。** 段落の中に一覧を入れると、字に
+    // 戻す側が飛ばして**入れ子が丸ごと消える**（網が捕まえた・2026-09-10・
+    // 一覧の途中の行頭で Backspace を押すと、その下の入れ子が消えた）。
+    // 入れ子の項目は、下に残る項目の頭に並べる。
+    const nested = [];
     // 升も一緒に外れる ── 記号を外すとは、そういうこと。
     for (const x of [...li.childNodes]) {
         if (x.nodeType === 1 && x.classList?.contains('box')) continue;
+        if (x.nodeType === 1 && ['UL', 'OL'].includes(x.tagName)) { nested.push(...x.children); continue; }
         p.append(x);
     }
     if (!p.childNodes.length) p.append(document.createElement('br'));
-    const rest = [];
+    const rest = [...nested];
     for (let x = li.nextElementSibling; x; x = x.nextElementSibling) rest.push(x);
     list.after(p);
     if (rest.length) {
@@ -2755,6 +2990,134 @@ function outOfDress() {
             if (document.queryCommandState(k)) document.execCommand(k, false, null);
         }
     } catch { /* 消せなくても、出たことは変わらない */ }
+    return true;
+}
+
+/// 升（押せるボタン）を、項目の頭に置く。`checkEnter` と同じ形。
+function putBox(li) {
+    const box = document.createElement('button');
+    box.type = 'button';
+    box.className = 'box';
+    box.setAttribute('aria-pressed', 'false');
+    box.contentEditable = 'false';
+    li.classList.add('task');
+    li.prepend(box);
+    return box;
+}
+
+/// 空の注記・引用に、**打てる一行**を置く。
+///
+/// core は中身の無い注記を札だけで組む（`<div class="alert"><p class="alert-h">`）
+/// ── caret を置く先が無く、読む面から入れた注記に**何も打てなかった**
+/// （網が捕まえた・2026-09-10・本人が決めた「打てる空の行を中に置く」）。
+/// 空のままなら字に戻すとき落ちる（`blockToMd` は中身が空なら札だけ書く）。
+function fillAlerts(box) {
+    for (const wrap of box.querySelectorAll(':scope > .alert, :scope > blockquote')) {
+        if (wrap.querySelector(':scope > p:not(.alert-h), :scope > ul, :scope > ol, :scope > table, :scope > pre, :scope > blockquote, :scope > h1, :scope > h2, :scope > h3')) continue;
+        const p = document.createElement('p');
+        p.append(document.createElement('br'));
+        wrap.append(p);
+    }
+}
+
+/// **升は、caret の一行に。** 付いていれば外す。
+///
+/// 前は core の `mark` にかたまり丸ごとを渡していたので、四つの項目が
+/// 一度に升になり、引用は引用ごと外れ、見出しは `- [ ] # 見出し` になった
+/// （網が捕まえた・2026-09-10・本人が決めた「caret の一行だけ。点・番号・
+/// 引用・見出し・字下げは外して升に」）。表のセルでは何もしない（`false`）。
+function checkLine(box) {
+    const line = lineAt(box);
+    if (!line) return false;
+    if (line.closest('td, th')) return false;
+    if (line.tagName === 'LI') {
+        const had = line.querySelector(':scope > .box');
+        if (had) { had.remove(); line.classList.remove('task'); return true; }
+        const at = caretIn(line);
+        putBox(line);
+        landBackIn(line, at);
+        return true;
+    }
+    // 見出しは段落に。引用・注記の中なら、その一行を外へ。
+    let p = /^H[1-6]$/.test(line.tagName) ? toPara(line) : line;
+    const wrap = p.closest('blockquote, .alert');
+    if (wrap && box.contains(wrap)) {
+        const rest = [];
+        for (let x = p.nextElementSibling; x; x = x.nextElementSibling) rest.push(x);
+        wrap.after(p);
+        if (rest.length) {
+            const more = wrap.cloneNode(false);
+            more.removeAttribute('data-line');
+            more.removeAttribute('data-md');
+            const label = wrap.querySelector(':scope > .alert-h');
+            if (label) more.append(label.cloneNode(true));
+            more.append(...rest);
+            p.after(more);
+        }
+        if (!wrap.querySelector(':scope > p:not(.alert-h), :scope > ul, :scope > ol')) wrap.remove();
+    }
+    // 字下げは外す（項目に字下げは無い）。
+    const first = p.firstChild;
+    if (first && first.nodeType === 3) first.data = first.data.replace(/^\u3000+/, '');
+    const li = document.createElement('li');
+    li.append(...p.childNodes);
+    if (!li.childNodes.length) li.append(document.createElement('br'));
+    const ul = document.createElement('ul');
+    keepMark(p, ul);
+    ul.append(li);
+    p.replaceWith(ul);
+    putBox(li);
+    landBackIn(li, li.textContent.length);
+    return true;
+}
+
+/// 項目の種類を替える（点 ⇄ 番号）。**その一行だけ ── 一覧はそこで割れる。**
+///
+/// 既定の `insertOrderedList` を点の項目に掛けると、空の項目が増え、
+/// 押した位置で結果が変わり、升の行では升だけが外に出た（網が捕まえた・
+/// 2026-09-10・本人が決めた「その一行だけ種類を替える」）。升は連れていく
+/// （`1. [ ] やること` は Markdown が持っている形）。
+function switchItem(li, tag) {
+    const list = li.parentElement;
+    if (!list || !['UL', 'OL'].includes(list.tagName) || list.tagName === tag) return false;
+    const at = caretIn(li);
+    const rest = [];
+    for (let x = li.nextElementSibling; x; x = x.nextElementSibling) rest.push(x);
+    const mine = document.createElement(tag);
+    list.after(mine);
+    mine.append(li);
+    // 書いた印（`- `・`2. `）は元の種類のもの ── 憶えたままだと点のまま書かれる。
+    if (li.dataset) delete li.dataset.mark;
+    if (rest.length) {
+        const more = document.createElement(list.tagName);
+        more.append(...rest);
+        mine.after(more);
+    }
+    if (!list.children.length) list.remove();
+    landBackIn(li, at);
+    return true;
+}
+
+/// 貼られた字を、項目の中へ ── **改行ごとに項目を増やす。**
+///
+/// 項目の中に見出しや一覧を貼ると、見出しの字が項目の字に混ざり、一覧は
+/// 入れ子になった（網が捕まえた・2026-09-10・本人が決めた「項目には字だけ、
+/// 改行ごとに項目を増やす」）。
+function pasteLines(box, lines) {
+    const line = lineAt(box);
+    if (!line || line.tagName !== 'LI') return false;
+    const rows = lines.filter((t, i) => i === 0 || t.trim());
+    try { document.execCommand('insertText', false, rows[0] || ''); } catch { /* 軽い DOM */ }
+    let at = line;
+    const task = !!line.querySelector(':scope > .box');
+    for (const t of rows.slice(1)) {
+        const li = document.createElement('li');
+        if (task) putBox(li);
+        li.append(document.createTextNode(t));
+        at.after(li);
+        at = li;
+    }
+    if (at !== line) landBackIn(at, at.textContent.length);
     return true;
 }
 
@@ -3042,13 +3405,27 @@ el('read').addEventListener('keydown', (e) => {
     // **`⇧Enter` は段落の中の改行。** Enter は新しい段落 ── Word・Docs・
     // Notion の手がそのまま動く（本人が決めた・2026-09-08）。
     if (e.shiftKey) {
-        if (!checkSoftReturn(el('read'))) return;
+        if (checkSoftReturn(el('read'))) {
+            e.preventDefault();
+            readChanged();
+            return;
+        }
+        // **見出しと項目の中では、Enter と同じ**（`PAPER.ja.md` 六章の乙）。
+        // 既定に任せると `<br>` が見出しの中に入り、`# 見⏎出し` の形で
+        // ファイルに残る（網が捕まえた・2026-09-10）── 下の Enter の道を
+        // そのまま通し、どれも受けなければ段落を割る既定を自分で呼ぶ。
+        const line = lineAt(el('read'));
+        if (!line || !(line.tagName === 'LI' || /^H[1-6]$/.test(line.tagName))) return;
+        const li = line.tagName === 'LI' ? line : null;
         e.preventDefault();
+        if (!(li ? checkEnter(li) : false) && !quitEnter(n) && !checkReturn(el('read'))) {
+            document.execCommand('insertParagraph');
+        }
         readChanged();
         return;
     }
     const li = n.closest('li');
-    if (!(li ? checkEnter(li) : false) && !quitEnter(n) && !checkReturn(el('read'))) return;
+    if (!(li ? checkEnter(li) : false) && !quitEnter(n) && !checkReturn(el('read')) && !quoteEnter(el('read'))) return;
     e.preventDefault();
     readChanged();
 });
@@ -3093,7 +3470,12 @@ el('read').addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     // 選んで消すときは、表を壊さないほうが先に受ける。
     if (checkCut(el('read'))) { e.preventDefault(); readChanged(); return; }
-    if (e.code !== 'Backspace') return;
+    if (e.code === 'Delete') {
+        // **枠のすぐ上の行末では、何も起きない**（`checkDel`）── 既定は
+        // 枠を丸ごと消して下の段落と繋ぐ（網が捕まえた・2026-09-10）。
+        if (checkDel(el('read'))) e.preventDefault();
+        return;
+    }
     if (!checkBack(el('read'))) return;
     e.preventDefault();
     readChanged();
@@ -3220,9 +3602,13 @@ async function cmdAlert() {
         { name: '警告', sub: '取り返しがつかないこと', value: 'CAUTION' },
     ], 'GitHub でも同じ形で出ます');
     if (kind === null) return;
-    const body = '> [!' + kind + ']\n> ';
-    if (onRead()) await readPut(body);
-    else put(body);
+    if (onRead()) {
+        // **札だけ入れて、中の打てる行に caret を降ろす**（本人が決めた・2026-09-10）。
+        // `> ` の行を書くと、次の保存で `>` に変わって差分が一度飛ぶ。
+        await readSourceEdit((md) => (md.trim() ? md + '\n\n' : '') + '> [!' + kind + ']', null, 'inside');
+        return;
+    }
+    put('> [!' + kind + ']\n> ');
 }
 
 /* ── 表 ── */
@@ -3395,34 +3781,32 @@ function readDress(cmd) {
 }
 
 /// かたまりの種類を変える道具（見出し・箇条書き・引用）。
+///
+/// **判断は切り出しの側（`blockAs`）** ── 同じボタンで付けると外す・一行は
+/// 見出しか項目かどちらか一つ・表のセルでは一覧にしない。電話も同じ関数を
+/// 呼ぶので、押し心地が端末で分かれない。
 function readBlockAs(what) {
     const box = el('read');
     box.focus();
-    // **一行は、見出しか項目か、どちらか一つ。** `- ## 見出し` は書けはする
-    // が、読む人にも書く人にも意味が無い ── しかも `blockToMd` は一覧の中の
-    // 見出しを知らないので、**見た目は見出しのまま、保存すると黙って落ちる**。
-    // 落とすなら**押した瞬間に見えて落ちる**（本人：「自分で選んだ操作だから
-    // 驚かない」・2026-09-08）。
-    if (what === 'ul' || what === 'ol') flattenHeads(box);
-
-    // **同じボタンで、付けると外す。** 引用の中で「引用」を押したら外れる ──
-    // 行頭の Backspace で出るのは一行ずつで、長い引用では手が疲れる
-    // （本人が求めた道・2026-09-08）。Word の太字と同じ手触り。
-    if (what === 'blockquote' && inside(box, 'blockquote')) {
-        unwrapBlock(box, 'blockquote');
-        readChanged();
-        return;
-    }
-    if ((what === 'ul' || what === 'ol') && inside(box, what.toUpperCase())) {
-        unwrapList(box);
-        readChanged();
-        return;
-    }
-
-    if (what === 'ul') document.execCommand('insertUnorderedList');
-    else if (what === 'ol') document.execCommand('insertOrderedList');
-    else document.execCommand('formatBlock', false, what);
+    if (!blockAs(box, what)) { say('表の中では使えません'); return; }
     readChanged();
+}
+
+/// 升 ── caret の一行に（`checkLine`・窓と電話で一組）。
+function readCheck() {
+    const box = el('read');
+    box.focus();
+    if (!checkLine(box)) { if (inCell()) say('表の中では使えません'); return; }
+    readChanged();
+}
+
+/// caret が表のセルの中に居るか（読む面）。
+function inCell() {
+    const sel = getSelection();
+    let n = sel && sel.rangeCount ? sel.anchorNode : null;
+    if (n && n.nodeType === 3) n = n.parentElement;
+    const cell = n && n.closest ? n.closest('td, th') : null;
+    return !!cell && el('read').contains(cell);
 }
 
 /// 字そのものを書き換える道具（チェック・リンク・表…）。
@@ -3471,8 +3855,15 @@ async function readSourceEdit(change, node, stay) {
 function landAfter(n, stay) {
     const box = el('read');
     const kids = [...box.children];
-    const to = stay ? kids[n] : (kids[n + 1] || kids[kids.length - 1]);
+    let to = stay ? kids[n] : (kids[n + 1] || kids[kids.length - 1]);
     if (!to) return;
+    // **中へ降りる** ── 注記を入れたら、その打てる行に立つ。
+    if (stay === 'inside') {
+        to = kids[n + 1] || to;
+        const inner = to.querySelector(':scope > p:not(.alert-h)');
+        if (inner) to = inner;
+        stay = false;
+    }
     box.focus();
     const r = document.createRange();
     r.selectNodeContents(to);
@@ -3555,7 +3946,9 @@ const MARKS = [
     [
         ['見出し', '⌘1', () => onRead() ? readHeading() : applyMark('heading')],
         ['箇条書き', '⌘⇧8', () => onRead() ? readBlockAs('ul') : applyMark('line', '- ')],
-        ['チェックリスト', '⌘⇧9', () => onRead() ? readMark('line', '- [ ] ', true) : applyMark('line', '- [ ] ')],
+        // **表のセルでは何もしない** ── 表の字ぜんぶに `- [ ] ` が付く
+        // （網が捕まえた・2026-09-10）。
+        ['チェックリスト', '⌘⇧9', () => onRead() ? readCheck() : applyMark('line', '- [ ] ')],
         ['番号リスト', '⌘⇧7', () => onRead() ? readBlockAs('ol') : applyMark('line', '1. ')],
         ['太字', '⌘B', () => onRead() ? readDress('bold') : applyMark('wrap', '**')],
         ['画像', '', pickPicture],
@@ -3850,7 +4243,13 @@ const firstWord = (words) => String(words || '').split(' ')[0] || '';
 /// **板は閉じない。** 顔文字は続けて置くもので（「👍✨」）、一つ入れる
 /// たびに開き直させない。閉じるのは Esc か、外を押したとき。
 function putFace(ch) {
-    if (onRead()) {
+    // **並べて表示では、憶えている caret で決める。** 板を押した時点で焦点は
+    // 板の欄に移っているので `onRead()`（いまの選び目）は読む面を指さない
+    // ── 読む面に打っていた絵文字がコードの面へ入る（網が捕まえた・
+    // 2026-09-10）。
+    const spotInRead = caretSpot && el('read').contains(
+        caretSpot.startContainer.nodeType === 3 ? caretSpot.startContainer.parentNode : caretSpot.startContainer);
+    if (onRead() || (view === 'split' && spotInRead)) {
         // **憶えている場所へ戻してから入れる。** `focus()` だけでは caret が
         // 先頭に落ち、ノートの頭に入る（依頼 461）。
         if (!caretBack(el('read'))) el('read').focus();
@@ -4153,6 +4552,8 @@ async function drawRead() {
     tailStop();
     // 先頭が図や枠なら、その上にも降りられる一行を（`tailStop` の対）。
     headStop(el('read'));
+    // 空の注記・引用に、打てる一行を。
+    fillAlerts(el('read'));
     // **札を配るのが先。** 絵や図はこのあと札を掛け替える（`<pre>` →
     // `<div class="mermaid">`、`<img>` → `<figure>`）ので、掛け替える前に
     // 元の字を持たせておかないと、引き継ぐものが無い ── 図を入れたノートで

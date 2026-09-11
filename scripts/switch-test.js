@@ -102,7 +102,7 @@ global.ask = async (method, params) => {
     + cut('function sameNote(')
     // `drawRead` は組んだあと、先頭が図や枠なら降りられる一行を置く
     // （`headStop`・依頼 402）── 本物を渡す（写すと、写した側だけが直る）。
-    + cut('function richBlock(') + cut('function headStop(')
+    + cut('function richBlock(') + cut('function headStop(') + cut('function fillAlerts(')
     + cut('async function syncRead(') + cut('async function drawRead('));
 
 let bad = 0;

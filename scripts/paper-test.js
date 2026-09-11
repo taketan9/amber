@@ -124,8 +124,18 @@ console.log('升の行で改行すると');
     caret(li.lastChild, li.lastChild.length);
     ok(checkEnter(li) === true, '字のある升で押すと、受ける');
     ok(box.querySelectorAll('li > .box').length === 2, '次の行にも升が付く');
-    ok(paperToMd(box, '') === '- [ ] ひとつめ\n- [ ] \n', '字にすると升が二つ',
+    // **空の升は、字を打つまでファイルに出さない**（本人が決めた・2026-09-11・
+    // 網の決めごと 11）── 面には二つ見えているが、字は一つ。
+    ok(paperToMd(box, '') === '- [ ] ひとつめ\n', '字にすると、空の升はまだ書かれない',
        paperToMd(box, ''));
+    {
+        const second = box.querySelectorAll('li')[1];
+        const typed = document.createTextNode('ふたつめ');
+        second.append(typed);
+        ok(paperToMd(box, '') === '- [ ] ひとつめ\n- [ ] ふたつめ\n', '字を打った瞬間に、二つめが書かれる',
+           paperToMd(box, ''));
+        typed.remove();     // 続きの試し（空の升で降りる）は、空のまま
+    }
 
     // 何も書かずにもう一度 ── 一覧から降りる。
     li = box.querySelectorAll('li')[1];

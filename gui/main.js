@@ -277,6 +277,12 @@ function makeWindow() {
         if (level < 2) return;                 // 0=log 1=info 2=warning 3=error
         console.error(`[窓] ${message}` + (at ? `  (${at}:${line})` : ''));
     });
+    // **描く側が死んだら、なぜ死んだかを端末に出す。** 網を回している最中に
+    // 窓が黙って消えた（2026-09-11・二十分走ったあと）── 落ちたのか、
+    // 記憶を使い切ったのかが、これが無いとどこにも残らない。
+    win.webContents.on('render-process-gone', (_e, why) => {
+        console.error(`[窓] 描く側が消えました: ${why.reason} (exit ${why.exitCode})`);
+    });
     win.loadFile(path.join(__dirname, 'index.html'));
     // 描く側が立ち上がってから渡す ── 先に送っても受け取る耳がない。
     win.webContents.once('did-finish-load', () => {

@@ -1,7 +1,8 @@
 #!/bin/zsh
 # 窓の総ざらいを、**安全な場所で**一回やる。
 #
-#     scripts/walk.sh
+#     scripts/walk.sh            # 総ざらい（walk.mjs）
+#     scripts/walk.sh grid       # 網 ── 位置×操作の総当たり（grid.mjs）
 #
 # やること: 試す場所を作る → 設定を退避 → 窓を出す → `walk.mjs` を走らせる
 #          → 窓を閉じる → 設定を戻す → 試す場所を消す
@@ -158,6 +159,11 @@ fn main() {}
 ![amber の印](attachments/amber.png)
 MD
 
+# **網が使うノート**（`grid.mjs`）。中身は網が毎回置き換える ── ここに
+# あるのは「一本ある」ことと前書きだけ。前書きの無いほうも一本。
+printf -- '---\ntitle: 網\ncreated: 2026-09-01\n---\n\nここは網が使うノートです。\n' > "$notes/網.md"
+printf -- '一行目の段落。\n\n二行目の段落。\n' > "$notes/網なし.md"
+
 # **よそから来た形のノート。** Windows で作られたもの・古い日本語のもの。
 # core は読んだときの文字コード・BOM・改行のまま書き戻すが、**窓を通した
 # ときもそうか**は誰も見ていなかった。
@@ -189,12 +195,19 @@ python3 "$here/team-fixture.py" "$work/team.csv"
 }
 
 # ── 窓を出す ──
-(cd "$root/gui" && HOME="$work/home" npx electron --remote-debugging-port="$port" . \
+# **タイマーの絞りを切る。** 窓が隠れる（画面が消える・ほかの窓の下に
+# 入る）と、Chromium は数分でタイマーを一分に一度まで絞る ── 夜通し回した
+# 網が七時間かかり、「返ってきません」が混ざった（2026-09-10）。
+(cd "$root/gui" && HOME="$work/home" npx electron --remote-debugging-port="$port" \
+  --disable-background-timer-throttling --disable-renderer-backgrounding \
+  --disable-features=IntensiveWakeUpThrottling . \
   >"$work/win.log" 2>&1 &)
 for i in $(seq 1 40); do
   curl -s -m 1 "http://127.0.0.1:$port/json" >/dev/null 2>&1 && break
   sleep 0.5
 done
 
+# どの台本を走らせるか（既定は総ざらい）。
+script="${1:-walk}"
 SITE="http://127.0.0.1:$siteport/" PORT="$port" NOTES="$notes" TEAMCSV="$work/team.csv" \
-  node "$here/walk.mjs"
+  node "$here/$script.mjs"

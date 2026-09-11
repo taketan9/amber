@@ -213,6 +213,8 @@ struct Paper: UIViewRepresentable {
         if (!/^[a-z]+:/i.test(src)) img.src = 'amber://note/' + src;
       }
       armPaper(box, text, true);
+      // 空の注記・引用に、打てる一行を（窓と同じ）。
+      fillAlerts(box);
       // **絵は `<figure>` で包む ── 窓の `findPictures` と同じ形にする。**
       //
       // 包まないと `<img>` は段の中の札のままで、字に戻すとき
@@ -439,24 +441,24 @@ struct Paper: UIViewRepresentable {
       //
       // **一行は、見出しか項目か、どちらか一つ** ── 点を付ける前に見出しを
       // 落とす（`- ## 見出し` は `blockToMd` が知らず、保存すると黙って落ちる）。
+      //
+      // **かたまりの種類は、切り出しの `blockAs` が決める**（窓と一組）──
+      // 表のセルでは一覧にしない・項目を見出しにするときは点を外す・
+      // 段落の中に潜った一覧を外へ出す。ここに別の答えを書くと、同じ
+      // ノートが端末によって別の字になる。
       if (what === 'bold') document.execCommand('bold');
       else if (what === 'italic') document.execCommand('italic');
       else if (what === 'strike') document.execCommand('strikeThrough');
       else if (what === 'ul' || what === 'ol') {
-        if (inside(box, what.toUpperCase())) unwrapList(box);
-        else {
-          flattenHeads(box);
-          document.execCommand(what === 'ul' ? 'insertUnorderedList' : 'insertOrderedList');
-        }
+        if (!blockAs(box, what)) return;
       } else if (what === 'quote') {
-        if (inside(box, 'blockquote')) unwrapBlock(box, 'blockquote');
-        else document.execCommand('formatBlock', false, 'blockquote');
+        blockAs(box, 'blockquote');
       } else if (what === 'check') check();
       else if (what === 'head') {
         // 押すたびに深くなる ── 窓と同じ（`#` → `##` → `###` → 無し）。
         const n = here();
         const now = n && /^H[1-6]$/.test(n.tagName) ? Number(n.tagName[1]) : 0;
-        document.execCommand('formatBlock', false, now >= 3 ? 'p' : 'h' + (now + 1));
+        if (!blockAs(box, now >= 3 ? 'p' : 'h' + (now + 1))) return;
       } else if (what === 'para') {
         // **段落を割る。** 電話の Return は改行なので、ここが「新しい段落」。
         // 窓の Enter と同じ答えを通す（升・引用・見出し・表 → それ以外は
@@ -471,7 +473,7 @@ struct Paper: UIViewRepresentable {
       } else if (what.startsWith('mv:')) move(what.slice(3));
       else if (what === 'in') checkTab(box, false);
       else if (what === 'out') checkTab(box, true);
-      else if (what.startsWith('h')) document.execCommand('formatBlock', false, what);
+      else if (what.startsWith('h')) { if (!blockAs(box, what)) return; }
       box.dispatchEvent(new Event('input'));
     };
 
@@ -499,20 +501,9 @@ struct Paper: UIViewRepresentable {
     /// 前に置く ── 升は `<button class="box">` で、`paperToMd` はそれを
     /// 見て `- [ ]` に戻す。
     function check() {
-      const n = here();
-      if (!n || n.closest('li')?.querySelector(':scope > .box')) return;
-      if (n.tagName !== 'LI' && !n.closest('li')) {
-        document.execCommand('insertUnorderedList');
-      }
-      const li = here()?.closest?.('li') || box.querySelector('li:focus-within');
-      const at = li || here();
-      if (!at || at.querySelector(':scope > .box')) return;
-      const mark = document.createElement('button');
-      mark.type = 'button';
-      mark.className = 'box';
-      mark.setAttribute('aria-pressed', 'false');
-      mark.contentEditable = 'false';
-      at.prepend(mark);
+      // **判断は切り出しの `checkLine`**（窓と一組）── caret の一行だけ升に
+      // し、付いていれば外す。表のセルでは何もしない。
+      checkLine(box);
     }
 
     /// 升の行の Enter は、窓と同じ関数（`checkEnter`）に渡す。
@@ -535,6 +526,7 @@ struct Paper: UIViewRepresentable {
       if (li ? checkEnter(li) : false) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
       if (quitEnter(n)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
       if (checkReturn(box)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
+      if (quoteEnter(box)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
       if (!checkSoftReturn(box)) return;
       e.preventDefault();
       box.dispatchEvent(new Event('input'));

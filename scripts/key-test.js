@@ -217,7 +217,12 @@ async function press(md, where, at, hit) {
         ok(r.md === '## 見出し\n\nの途中\n', '途中で押したら、後ろは段落', r.md);
 
         r = await press('## 見出し', '見出し', 0, () => checkReturn(box));
-        ok(r.took === false, '先頭では既定に任せる（上に空の段落）', r.took);
+        // **既定に任せない** ── Chromium は空の見出しを上に作り、`# ` の一行が
+        // ファイルに残る（網が捕まえた・2026-09-10）。
+        ok(r.took === true, '先頭では受ける（上に空の段落を置く）', r.took);
+        ok(r.md === '## 見出し\n', '空の段落は字に出ない（見出しは見出しのまま）', r.md);
+        ok(box.firstElementChild.tagName === 'P' && box.children[1].tagName === 'H2',
+           '上に置かれたのは段落で、見出しではない', box.innerHTML);
 
         r = await press('ふつうの段落。', 'ふつう', 3, () => checkReturn(box));
         ok(r.took === false, '段落では既定に任せる', r.took);
@@ -255,9 +260,19 @@ async function press(md, where, at, hit) {
     say('触れないかたまりは、一打では消えない');
     {
         const md = '```\nコード\n```\n\nそのあと。';
-        const r = await press(md, 'そのあと', 0, () => checkBack(box));
+        let r = await press(md, 'そのあと', 0, () => checkBack(box));
         ok(r.took === true, '枠のすぐ下の行頭では、何も起きない（受けて止める）', r.took);
         ok(r.md === md + '\n', '字は一文字も動いていない', r.md);
+
+        // Delete の裏（網が捕まえた・2026-09-10 ── 既定は枠を消して下と繋ぐ）。
+        const up = 'そのまえ。\n\n```\nコード\n```\n\nそのあと。';
+        r = await press(up, 'そのまえ。', 5, () => checkDel(box));
+        ok(r.took === true, '枠のすぐ上の行末の Delete は、何も起きない（受けて止める）', r.took);
+        ok(r.md === up + '\n', '字は一文字も動いていない', r.md);
+        r = await press(up, 'そのまえ。', 2, () => checkDel(box));
+        ok(r.took === false, '行の途中の Delete は、字を消す鍵のまま', r.took);
+        r = await press(up, 'そのあと。', 5, () => checkDel(box));
+        ok(r.took === false, '隣が枠でなければ、既定のまま', r.took);
     }
 
     say('選んで飾る ── 一行は見出しか項目か、どちらか一つ');
@@ -362,6 +377,217 @@ async function press(md, where, at, hit) {
         headStop(box);
         ok(box.firstElementChild.textContent.includes('ふつう'),
            '先頭が触れるものなら、何も置かない', box.firstElementChild.textContent);
+    }
+
+    say('記号を外しても、入れ子は失わない（網が捕まえた・2026-09-10）');
+    {
+        const md = '- ひとつ\n- ふたつ\n  - 入れ子\n- みっつ';
+        let r = await press(md, 'ふたつ', 0, () => checkBack(box));
+        ok(r.md === '- ひとつ\n\nふたつ\n\n- 入れ子\n- みっつ\n',
+           '行頭の Backspace で、入れ子は下の項目の頭に残る', r.md);
+
+        await draw(md);
+        caretAt(find('ふたつ'), 0);
+        unwrapList(box);
+        ok(paperToMd(box, '') === '- ひとつ\n\nふたつ\n\n- 入れ子\n- みっつ\n',
+           '「箇条書き」で外しても同じ', paperToMd(box, ''));
+    }
+
+    say('段落の中に潜った一覧を、落とさない（Chromium の insertOrderedList の形）');
+    {
+        // `execCommand` は軽い DOM に無いので、Chromium が作る形を手で置く。
+        // **`innerHTML` では作れない** ── 字の上では `<p><ol>` は読めない形なので、
+        // 読む側が `<p></p><ol>…</ol><p></p>` に直してしまう。DOM の手で組む。
+        const nest = (outer, innerTag, text, lead) => {
+            box.innerHTML = '';
+            const wrap = document.createElement(outer);
+            wrap.dataset.line = '0';
+            wrap.dataset.span = '1';
+            if (lead) wrap.append(document.createTextNode(lead));
+            const list = document.createElement(innerTag);
+            const li = document.createElement('li');
+            li.textContent = text;
+            list.append(li);
+            wrap.append(list);
+            box.append(wrap);
+        };
+        await draw('段落。');
+        nest('p', 'ol', '最後の段落。');
+        ok(paperToMd(box, '') === '1. 最後の段落。\n', '字に戻すとき、一覧として書く', paperToMd(box, ''));
+        tidyLists(box);
+        ok(box.firstElementChild.tagName === 'OL', '皮を剥ぐと一覧がかたまりになる', box.innerHTML);
+        ok(box.firstElementChild.dataset.line === '0', '元の行の札は一覧へ移る', box.firstElementChild.dataset.line);
+
+        nest('p', 'ul', '項目', '字。');
+        ok(paperToMd(box, '') === '字。\n\n- 項目\n', '字と一覧が混ざっていても、両方残る', paperToMd(box, ''));
+        tidyLists(box);
+        ok([...box.children].map((n) => n.tagName).join(',') === 'P,UL', '字は段落に残り、一覧は後ろへ', box.innerHTML);
+    }
+
+    say('項目を見出しにすると、点が外れる（丙）');
+    {
+        await draw('- ひとつ\n- ふたつ\n- みっつ');
+        caretAt(find('ふたつ'), 0);
+        // `formatBlock` は軽い DOM に無い ── 手前の「点を外す」だけを見る。
+        blockAs(box, 'h2');
+        ok(paperToMd(box, '') === '- ひとつ\n\nふたつ\n\n- みっつ\n',
+           '見出しにする前に、点が外れて段落になる', paperToMd(box, ''));
+        ok(!box.querySelector('li:empty'), '空の項目を残さない', box.innerHTML);
+    }
+
+    say('表のセルでは、一覧にしない');
+    {
+        const t = '| a | b |\n| --- | --- |\n| 1 | 2 |';
+        await draw(t);
+        caretAt(box.querySelector('td'), 0);
+        ok(blockAs(box, 'ul') === false, '受けずに、何もしない');
+        ok(paperToMd(box, '') === t + '\n', '表は一文字も変わらない', paperToMd(box, ''));
+        ok(blockAs(box, 'h1') === false, '見出しも同じ');
+    }
+
+    say('升は、caret の一行に（本人が決めた・2026-09-10）');
+    {
+        const md = '- ひとつ\n- ふたつ\n  - 入れ子\n- みっつ';
+        await draw(md);
+        caretAt(find('ふたつ'), 0);
+        ok(checkLine(box) === true, '項目で受ける');
+        ok(paperToMd(box, '') === '- ひとつ\n- [ ] ふたつ\n  - 入れ子\n- みっつ\n', 'その一行だけ升になる', paperToMd(box, ''));
+        caretAt(find('ふたつ'), 0);
+        checkLine(box);
+        ok(paperToMd(box, '') === md + '\n', 'もう一度押すと外れる（点は残る）', paperToMd(box, ''));
+
+        await draw('## 見出し');
+        caretAt(find('見出し'), 0);
+        checkLine(box);
+        ok(paperToMd(box, '') === '- [ ] 見出し\n', '見出しは # が外れて升に', paperToMd(box, ''));
+
+        await draw('> 一行目\n\n> 二行目');
+        caretAt(find('一行目'), 0);
+        checkLine(box);
+        ok(paperToMd(box, '') === '- [ ] 一行目\n\n> 二行目\n', '引用の行は、引用から出て升に', paperToMd(box, ''));
+
+        await draw('　字下げた段落。');
+        caretAt(find('字下げた'), 0);
+        checkLine(box);
+        ok(paperToMd(box, '') === '- [ ] 字下げた段落。\n', '字下げは外れる', paperToMd(box, ''));
+        // 字の上では `trim()` が `　` を落とすので、**面の側**でも外れていることを見る
+        // （外さないと、次に組み直すまで面に `　` が残る）。
+        ok(!box.querySelector('li').textContent.startsWith('　'), '面の上でも字下げが消えている', box.querySelector('li').textContent);
+
+        const t = '| a | b |\n| --- | --- |\n| 1 | 2 |';
+        await draw(t);
+        caretAt(box.querySelector('td'), 0);
+        ok(checkLine(box) === false, '表のセルでは何もしない');
+        ok(paperToMd(box, '') === t + '\n', '表は変わらない', paperToMd(box, ''));
+    }
+
+    say('項目の種類を替える ── その一行だけ（本人が決めた・2026-09-10）');
+    {
+        await draw('- ひとつ\n- ふたつ\n  - 入れ子\n- みっつ');
+        caretAt(find('ふたつ'), 0);
+        blockAs(box, 'ol');
+        ok(paperToMd(box, '') === '- ひとつ\n\n1. ふたつ\n  - 入れ子\n\n- みっつ\n', '点の項目が番号になり、一覧はそこで割れる', paperToMd(box, ''));
+
+        await draw('- [ ] やること\n- [x] やった');
+        caretAt(find('やること'), 0);
+        blockAs(box, 'ol');
+        ok(paperToMd(box, '') === '1. [ ] やること\n\n- [x] やった\n', '升は連れていく', paperToMd(box, ''));
+
+        await draw('1. 一番\n2. 二番');
+        caretAt(find('二番'), 0);
+        blockAs(box, 'ul');
+        ok(paperToMd(box, '') === '1. 一番\n\n- 二番\n', '番号の項目が点になる', paperToMd(box, ''));
+    }
+
+    say('項目で「引用」を押すと、段落にしてから引用に（本人が決めた・2026-09-10）');
+    {
+        await draw('- ひとつ\n- ふたつ\n  - 入れ子\n- みっつ');
+        caretAt(find('入れ子'), 0);
+        blockAs(box, 'blockquote');
+        // `formatBlock` は軽い DOM に無い ── 段落まで出ることを見る。
+        ok(paperToMd(box, '') === '- ひとつ\n- ふたつ\n\n入れ子\n\n- みっつ\n', '入れ子の項目でも字は消えず、外へ出る', paperToMd(box, ''));
+    }
+
+    say('空の注記に、打てる一行（本人が決めた・2026-09-10）');
+    {
+        await draw('> [!NOTE]\n\n次。');
+        ok(!box.querySelector('.alert > p:not(.alert-h)'), '組んだ直後は中身の行が無い');
+        fillAlerts(box);
+        ok(!!box.querySelector('.alert > p:not(.alert-h)'), '打てる一行が置かれる');
+        ok(paperToMd(box, '') === '> [!NOTE]\n\n次。\n', '空のままなら字に出ない（札だけ）', paperToMd(box, ''));
+    }
+
+    say('項目に貼ると、改行ごとに項目が増える（本人が決めた・2026-09-10）');
+    {
+        await draw('- [ ] やること\n- [x] やった');
+        caretAt(find('やること'), 4);
+        pasteLines(box, ['一つめ', '二つめ', '三つめ']);
+        // 一行目の `insertText` は軽い DOM に無いので、増えた項目だけ見る。
+        ok(paperToMd(box, '') === '- [ ] やること\n- [ ] 二つめ\n- [ ] 三つめ\n- [x] やった\n', '升の項目には升つきで増える', paperToMd(box, ''));
+    }
+
+    say('行末の Delete ── 次が記号付きの行なら、何も起きない（本人が決めた・2026-09-11）');
+    {
+        let r = await press('- [ ] やること\n- [x] やった', 'やること', 4, () => checkDel(box));
+        ok(r.took === true, '項目の終わりでは受けて止める', r.took);
+        ok(r.md === '- [ ] やること\n- [x] やった\n', '次の升は消えない', r.md);
+
+        r = await press('段落。\n\n- ひとつ', '段落。', 3, () => checkDel(box));
+        ok(r.took === true, '次が一覧なら、段落の終わりでも止める', r.took);
+
+        r = await press('段落。\n\n## 見出し', '段落。', 3, () => checkDel(box));
+        ok(r.took === true, '次が見出しでも止める', r.took);
+
+        r = await press('一つめ。\n\n二つめ。', '一つめ。', 4, () => checkDel(box));
+        ok(r.took === false, '段落と段落は、既定のまま繋がる', r.took);
+
+        r = await press('一つめ。\n\n二つめ。', '一つめ。', 1, () => checkDel(box));
+        ok(r.took === false, '行の途中は、字を消す鍵のまま', r.took);
+
+        const t = '| a | b |\n| --- | --- |\n| 1 | 2 |\n\n下。';
+        r = await press(t, '2', 1, () => checkDel(box));
+        ok(r.took === true, 'セルの終わりでは、下の段落を吸い込まない', r.took);
+
+        r = await press('> 一行目\n>\n> 二行目', '一行目', 3, () => checkDel(box));
+        ok(r.took === false, '引用の中の段落同士は繋がる（既定）', r.took);
+    }
+
+    say('空の記号だけの行は、字を打つまで書かない（本人が決めた・2026-09-11）');
+    {
+        box.innerHTML = '<h1><br></h1><p>字。</p>';
+        ok(paperToMd(box, '') === '字。\n', '空の見出しは書かれない', paperToMd(box, ''));
+        box.innerHTML = '<ul><li>ひとつ</li><li><br></li></ul>';
+        ok(paperToMd(box, '') === '- ひとつ\n', '空の項目は書かれない', paperToMd(box, ''));
+        box.innerHTML = '<ul><li><br></li></ul>';
+        ok(paperToMd(box, '') === '\n', '項目が一つも無ければ一覧ごと消える', paperToMd(box, ''));
+        box.innerHTML = '<ul><li><ul><li>入れ子</li></ul></li></ul>';
+        ok(paperToMd(box, '') === '- \n  - 入れ子\n', '字が無くても入れ子があれば残る（親の行は要る）', paperToMd(box, ''));
+    }
+
+    say('引用・注記の途中の Enter は、改行（本人が決めた・2026-09-11）');
+    {
+        let r = await press('> [!NOTE]\n> 注記の本文', '注記の本文', 2, () => quoteEnter(box));
+        ok(r.took === true, '注記の途中で受ける', r.took);
+        ok(r.md === '> [!NOTE]\n> 注記\n> の本文\n', '段落に割れず、改行になる', r.md);
+
+        r = await press('> 引用の一行目', '引用の一行目', 3, () => quoteEnter(box));
+        ok(r.md === '> 引用の\n> 一行目\n', '引用でも同じ', r.md);
+
+        r = await press('ふつうの段落。', 'ふつう', 2, () => quoteEnter(box));
+        ok(r.took === false, '箱の外では受けない', r.took);
+    }
+
+    say('入れ子を持つ項目の行末の Delete・済んだ升の行頭の Enter（網が捕まえた・2026-09-11）');
+    {
+        let r = await press('- ふたつ\n  - 入れ子', 'ふたつ', 3, () => checkDel(box));
+        ok(r.took === true, '入れ子を持つ項目の字の終わりで、受けて止める', r.took);
+        ok(r.md === '- ふたつ\n  - 入れ子\n', '入れ子は吸い込まれない', r.md);
+
+        r = await press('- [x] やった', 'やった', 0, () => checkEnter(find('やった')));
+        ok(r.took === true, '済んだ升の行頭で受ける', r.took);
+        ok(r.md === '- [x] やった\n', 'チェックは字と一緒に残る（空の升は書かれない）', r.md);
+        ok(box.querySelectorAll('li').length === 2 && box.querySelector('li .box').getAttribute('aria-pressed') === 'false',
+           '上に空の升が置かれる', box.innerHTML);
     }
 
     say('注記の札は、行として数えない');
