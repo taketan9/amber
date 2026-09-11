@@ -10218,19 +10218,41 @@ async function syncNow(reason) {
             const isOpen = !!(state.open && state.open.path === at);
             try {
                 if (s.do === 'up') {
-                    const got = await ask('read', { path: at });
                     const print = (await ask('syncprint', { path: at })).print;
-                    const r = await window.amber.driveUpload({ rel: s.rel, text: got.text, print, id: s.id || undefined });
+                    // 絵は bytes のまま（描く側を通さない・依頼 497）。
+                    const r = s.bin
+                        ? await window.amber.driveUploadFile({ rel: s.rel, file: at, print, id: s.id || undefined })
+                        : await window.amber.driveUpload({ rel: s.rel, text: (await ask('read', { path: at })).text, print, id: s.id || undefined });
                     done.push({ rel: s.rel, id: r.id, tag: r.tag });
                     report.up += 1;
                 } else if (s.do === 'down') {
-                    const text = await window.amber.driveDownload(s.id);
-                    await ask('syncdown', { path: at, text });
+                    if (s.bin) {
+                        await window.amber.driveDownloadFile({ id: s.id, to: at });
+                    } else {
+                        const text = await window.amber.driveDownload(s.id);
+                        await ask('syncdown', { path: at, text });
+                    }
                     const there = remote.find((x) => x.id === s.id);
                     done.push({ rel: s.rel, id: s.id, tag: there ? there.tag : '' });
                     report.down += 1;
                     touched = true;
                     if (isOpen) openTouched = true;
+                } else if (s.do === 'clash' && s.bin) {
+                    // **絵は混ぜられない。** こちらを残し、向こうのものは `名前.2.png` として
+                    // 隣に置く（失うよりよい）。隣に置いた一枚は、次の同期で新しく上がる。
+                    const dot = at.lastIndexOf('.');
+                    let beside = at.slice(0, dot) + '.2' + at.slice(dot);
+                    for (let n = 3; n < 100; n += 1) {
+                        try { await ask('syncprint', { path: beside }); } catch { break; }
+                        beside = at.slice(0, dot) + '.' + n + at.slice(dot);
+                    }
+                    await window.amber.driveDownloadFile({ id: s.id, to: beside });
+                    const print = (await ask('syncprint', { path: at })).print;
+                    const r = await window.amber.driveUploadFile({ rel: s.rel, file: at, print, id: s.id });
+                    done.push({ rel: s.rel, id: r.id, tag: r.tag });
+                    report.up += 1;
+                    report.down += 1;
+                    touched = true;
                 } else if (s.do === 'drophere') {
                     // 向こうで消え、こちらは触っていない ── **ゴミ箱へ**（消さない）。
                     await window.amber.trash(at);

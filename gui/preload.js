@@ -61,6 +61,8 @@ contextBridge.exposeInMainWorld('amber', {
     driveList: () => ipcRenderer.invoke('amber:driveList'),
     driveUpload: (args) => ipcRenderer.invoke('amber:driveUpload', args),
     driveDownload: (id) => ipcRenderer.invoke('amber:driveDownload', id),
+    driveUploadFile: (args) => ipcRenderer.invoke('amber:driveUploadFile', args),
+    driveDownloadFile: (args) => ipcRenderer.invoke('amber:driveDownloadFile', args),
     driveTrash: (id) => ipcRenderer.invoke('amber:driveTrash', id),
     driveRename: (args) => ipcRenderer.invoke('amber:driveRename', args),
     deviceName: () => ipcRenderer.invoke('amber:deviceName'),

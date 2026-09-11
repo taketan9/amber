@@ -446,6 +446,7 @@ Taketan が頼んだことが、いまも満たされているか。`python3 scr
 | 494 | 2026-09-11 | カレンダー（本人）: 出す予定表を絞れるように（Google の誕生日は要らない）、表示が小さく色が淡くて読みにくい、土日を出すかは設定で、日・週・月・みんなの表で**二度押しと右押し**すると押した場所に予定を足す／押した予定を直す | ⚙「カレンダー表示設定」（`cmdCalSettings`・どの予定表を出すか＝`calHide` をどの見方にも効かせる `calShown`・「土日を出す」＝`calWeekend`）。Mac の予定表の名前は `amber-cal calendars`。字を大きく色を濃く（`#calbox`）。二度押し＝`calSpotAt`/`calItemAt` で押した日・時刻か予定を取り、足す／直す。右押し＝同じものを献立で。週と日の表の一度押しは日を選ぶだけに | `gui/renderer.js ~ function calSpotAt\(` |
 | 495 | 2026-09-12 | 隣の cian は選べるテーマが三倍以上ある。**全テーマを全く同一に合わせたい**（amber も cian と同じに） | cian の十八の配色（`cian-core/src/theme.rs` の `PRESETS`）と窓の三つの装い（白磁・陰翳・端末譲り）を `gui/palettes.js` に写し、amber の変数（十五）に組み替えて着せる（`themeVars`・`setTheme`）。並びも cian と同じ。琥珀の三つは頭に残す。ayu と紙は cian の表に譲った。写しが古くなれば `scripts/themes-test.js` が鳴る（`--write` で作り直す） | `gui/palettes.js ~ const CIAN_PALETTES` |
 | 496 | 2026-09-12 | フォルダへ移したノートも、同期では「消して新しく上げる」ではなく**名前が変わった**として運ぶ（依頼 492 の残り） | `move` op に `root` を渡すと、改名と同じ一本（`naming::carry`）で履歴の棚・共有から戻る場所・同期の憶えを連れて行き、次の同期が `movethere`（Drive は同じ ID で名前と親フォルダを付け替え）になる。窓の四か所の `move` は `root` を渡す | `crates/amber-core/src/naming.rs ~ pub fn carry\(` |
+| 497 | 2026-09-12 | 絵（`attachments/` の中）も同期で運ぶ ── 絵を貼ったノートが、向こうの端末で絵だけ欠けていた | `sync::assets` が `attachments/` の絵をノートと同じ手順書に乗せる（道は `仕事/attachments/段取り-123.png`）。bytes は描く側を通さず主の側で読み書き（`driveUploadFile`／`driveDownloadFile`・仮の名で書いてから改名）。両方が変わった絵は混ぜられないので、こちらを残して向こうのものは `名前.2.png` として隣に置く。分かれる前の姿は取っておかない | `crates/amber-core/src/sync.rs ~ pub fn assets\(` |
 
 ## 増やすとき
 

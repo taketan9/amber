@@ -291,6 +291,7 @@ function createDrive(opts) {
             headers: { ...(init.headers || {}), authorization: 'Bearer ' + access },
         });
         if (r.status === 204) return null;
+        if (init.bytes && r.ok) return Buffer.from(await r.arrayBuffer());
         const text = await r.text();
         if (!r.ok) {
             let why = 'HTTP ' + r.status;
@@ -360,16 +361,27 @@ function createDrive(opts) {
     }
 
     /// 一本上げる（`id` があれば上書き）。返すのは `{ id, tag }`。
-    async function upload({ rel, text, print, id }) {
+    /// 絵の種類（拡張子から）。知らなければ octet-stream。
+    function mimeOf(name) {
+        const e = (name.split('.').pop() || '').toLowerCase();
+        return { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+                 heic: 'image/heic', bmp: 'image/bmp', svg: 'image/svg+xml' }[e] || 'application/octet-stream';
+    }
+
+    /// 一本上げる（`id` があれば上書き）。字（`text`）か、絵（`bytes`・依頼 497）。返すのは `{ id, tag }`。
+    async function upload({ rel, text, bytes, print, id }) {
         const relDir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
         const parent = id ? null : await dir(relDir);
-        const meta = { name: rel.split('/').pop(), mimeType: 'text/markdown',
+        const mime = bytes ? mimeOf(rel) : 'text/markdown';
+        const meta = { name: rel.split('/').pop(), mimeType: mime,
                        appProperties: { amber: 'note', rel, print, by } };
         if (parent) meta.parents = [parent];
         const boundary = 'amber' + crypto.randomBytes(8).toString('hex');
-        const body = '--' + boundary + '\r\ncontent-type: application/json; charset=UTF-8\r\n\r\n'
-            + JSON.stringify(meta) + '\r\n--' + boundary + '\r\ncontent-type: text/markdown; charset=UTF-8\r\n\r\n'
-            + text + '\r\n--' + boundary + '--';
+        const head = Buffer.from('--' + boundary + '\r\ncontent-type: application/json; charset=UTF-8\r\n\r\n'
+            + JSON.stringify(meta) + '\r\n--' + boundary + '\r\ncontent-type: ' + mime
+            + (bytes ? '' : '; charset=UTF-8') + '\r\n\r\n', 'utf8');
+        const tail = Buffer.from('\r\n--' + boundary + '--', 'utf8');
+        const body = Buffer.concat([head, bytes ? Buffer.from(bytes) : Buffer.from(text, 'utf8'), tail]);
         const path = '/upload/drive/v3/files' + (id ? '/' + q(id) : '') + '?uploadType=multipart&fields=id,md5Checksum';
         const got = await api(path, { method: id ? 'PATCH' : 'POST',
             headers: { 'content-type': 'multipart/related; boundary=' + boundary }, body });
@@ -379,6 +391,11 @@ function createDrive(opts) {
     /// 一本下ろす（字）。
     async function download(id) {
         return api('/drive/v3/files/' + q(id) + '?alt=media', { raw: true });
+    }
+
+    /// 一本下ろす（絵・そのままの bytes）。
+    async function downloadBytes(id) {
+        return api('/drive/v3/files/' + q(id) + '?alt=media', { bytes: true });
     }
 
     /// 向こうの名前を変える（依頼 492）── 中身は運ばない。フォルダが変わる
@@ -407,7 +424,7 @@ function createDrive(opts) {
     }
 
     return { signIn, signOut, account, token, whoAmI, tokenFile, secretFile,
-             list, upload, download, rename, trash, home, by };
+             list, upload, download, downloadBytes, rename, trash, home, by };
 }
 
 module.exports = { createDrive, pkce, authUrl, landing, CLIENT_ID, SCOPE };

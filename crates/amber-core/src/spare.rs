@@ -38,7 +38,7 @@ pub struct Spare {
 /// 人が置いた別のものを、amber が勝手に「使われていない」と呼ばない。
 const KINDS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "svg"];
 
-fn is_picture(name: &str) -> bool {
+pub fn is_picture(name: &str) -> bool {
     name.rsplit_once('.')
         .map(|(_, e)| KINDS.contains(&e.to_lowercase().as_str()))
         .unwrap_or(false)

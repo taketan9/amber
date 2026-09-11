@@ -427,7 +427,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 crate::survey::Limits { depth: 6, rows: 4000, hidden: false, ..Default::default() },
                 &stop,
             );
-            let here: Vec<crate::sync::Here> = found
+            let mut here: Vec<crate::sync::Here> = found
                 .iter()
                 .map(|f| crate::sync::Here {
                     rel: f.rel.clone(),
@@ -436,6 +436,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     ),
                 })
                 .collect();
+            // 絵も一緒に（依頼 497）。
+            here.extend(crate::sync::assets(&root));
             let there: Vec<crate::sync::There> = p["remote"]
                 .as_array()
                 .map(|a| {
@@ -480,7 +482,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                             .unwrap_or(serde_json::Value::Null),
                         _ => serde_json::Value::Null,
                     };
-                    serde_json::json!({ "do": s.word(), "rel": rel, "id": id, "base": base, "from": from })
+                    serde_json::json!({ "do": s.word(), "rel": rel, "id": id, "base": base, "from": from,
+                                        "bin": crate::sync::is_asset(&rel) })
                 })
                 .collect();
             Ok(serde_json::json!({ "steps": steps }))
@@ -611,6 +614,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 let dir = root.join(".amber").join("base");
                 std::fs::create_dir_all(&dir)?;
                 for d in &done {
+                    // 絵の分かれる前の姿は取っておかない（混ぜないので要らない）。
+                    if crate::sync::is_asset(&d.rel) {
+                        continue;
+                    }
                     let at = dir.join(&d.hash);
                     if !at.exists() {
                         if let Ok(bytes) = std::fs::read(root.join(&d.rel)) {

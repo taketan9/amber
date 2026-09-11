@@ -31,13 +31,22 @@ export async function syncWalk() {
         if (!r) return '運びませんでした（' + JSON.stringify({ signed: syncAccount.signedIn, busy: syncBusy, root: !!state.root }) + '）';
         if (r.trouble.length) return '困りごと: ' + r.trouble[0];
         const notes = state.notes.filter((n) => !n.guest).length;
-        return r.up === notes ? true : r.up + ' 本しか上がりません（' + notes + ' 本のはず）';`, true);
+        // 絵も乗る（依頼 497）ので、上がる数はノートの数より多い。
+        return r.up >= notes ? true : r.up + ' 本しか上がりません（' + notes + ' 本のはず）';`, true);
     tally.ran += 1;
     {
         const there = await drive('/_list');
         const rels = there.map((f) => f.appProperties.rel);
         if (!rels.includes('よくばり.md') || !rels.includes('仕事/段取り.md')) {
             bad.push({ name: '同期：向こうに同じ道で並ぶ', why: ['向こうの一覧: ' + rels.slice(0, 8).join(' / ')] });
+        }
+        if (!rels.includes('attachments/amber.png')) bad.push({ name: '同期：絵も上がる', why: ['向こうの一覧に attachments/amber.png がありません'] });
+        const pic = await drive('/_get?rel=' + encodeURIComponent('attachments/amber.png'));
+        if (NOTES) {
+            try {
+                const mine = readFileSync(NOTES + '/attachments/amber.png').toString('base64');
+                if (pic.b64 !== mine) bad.push({ name: '同期：絵は bytes のまま上がる', why: ['向こうの bytes が違います（' + String(pic.b64 || '').length + ' / ' + mine.length + '）'] });
+            } catch (e) { bad.push({ name: '同期：絵は bytes のまま上がる', why: [e.message] }); }
         }
         const one = await drive('/_get?rel=買い物.md');
         if (!one.text || !one.text.includes('- 牛乳')) bad.push({ name: '同期：向こうの字がこちらと同じ', why: [String(JSON.stringify(one.text)).slice(0, 120)] });
@@ -60,6 +69,20 @@ export async function syncWalk() {
     await step('同期：二度目は何も運ばない', `
         const r = await syncNow('手');
         return r && r.up === 0 && r.down === 0 && r.clash === 0 ? true : JSON.stringify(r);`, true);
+
+    // 向こうが絵を一枚置いた → こちらに bytes のまま下りてくる（依頼 497）。
+    const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await drive('/_put', { rel: 'attachments/太郎の絵.png', b64: PNG1, by: '太郎の iPhone' });
+    await step('同期：向こうが置いた絵が、こちらに bytes のまま下りてくる', `
+        const r = await syncNow('手');
+        return r && r.down === 1 && !r.trouble.length ? true : JSON.stringify(r);`, true);
+    if (NOTES) {
+        tally.ran += 1;
+        try {
+            const got = readFileSync(NOTES + '/attachments/太郎の絵.png').toString('base64');
+            if (got !== PNG1) bad.push({ name: '同期：下りた絵の bytes', why: ['違います'] });
+        } catch (e) { bad.push({ name: '同期：下りた絵の bytes', why: [e.message] }); }
+    }
 
     // 向こうが一本置いた。
     await drive('/_put', { rel: '太郎から.md', text: '---\ncreated: 2026-09-11\n---\n\n# 太郎から\n\n電話で書いた。\n', by: '太郎の iPhone' });
@@ -241,17 +264,21 @@ export async function syncWalk() {
 
     // フォルダへ移す → 向こうも同じ ID のまま道が変わる（依頼 496）。
     await step('同期：フォルダへ移すと、向こうも同じ ID のまま道が変わる', `
-        const before = (await window.amber.driveList()).find((x) => x.rel === '買い物.md');
-        if (!before) return '向こうに 買い物.md がありません';
-        const r0 = await ask('move', { path: state.root + '/買い物.md', dir: state.root + '/家族', root: state.root });
+        // 総ざらいの途中では 買い物.md が別のフォルダに居ることがある ── 一覧から探す。
+        const note = state.notes.find((n) => n.path.endsWith('/買い物.md'));
+        if (!note) return '買い物.md がありません';
+        const rel0 = note.path.slice(state.root.length + 1);
+        const before = (await window.amber.driveList()).find((x) => x.rel === rel0);
+        if (!before) return '向こうに ' + rel0 + ' がありません';
+        const r0 = await ask('move', { path: note.path, dir: state.root + '/家族', root: state.root });
         await reload({ quiet: true });
         clearTimeout(syncTimer);
         const r = await syncNow('手');
         if (!r || r.moved !== 1 || r.gone !== 0 || r.up !== 0) return JSON.stringify(r);
         const after = (await window.amber.driveList()).find((x) => x.rel === '家族/買い物.md');
         if (!after || after.id !== before.id) return '向こうの道か ID が違います: ' + JSON.stringify(after);
-        // 戻す。
-        await ask('move', { path: r0.path, dir: state.root, root: state.root });
+        // 戻す（もといたフォルダへ）。
+        await ask('move', { path: r0.path, dir: note.path.slice(0, note.path.lastIndexOf('/')), root: state.root });
         await reload({ quiet: true });
         const r2 = await syncNow('手');
         return r2 && r2.moved === 1 ? true : JSON.stringify(r2);`, true);

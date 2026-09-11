@@ -234,6 +234,52 @@ fn rename_local(here: &mut [Here], was: &mut [Was], from: &str, to: &str) {
     }
 }
 
+/// **絵も運ぶ**（依頼 497）── `attachments/` の中の絵を、ノートと同じ手順書に乗せる。
+///
+/// 道は `仕事/attachments/段取り-123.png` のように、ノートと同じルートからの道。
+/// 中身は字ではないので混ぜられない ── 両方が変わったら、こちらを残して向こうの
+/// ものは `名前.2.png` として隣に置く（失うよりよい）。それは呼ぶ側の仕事。
+pub fn assets(root: &std::path::Path) -> Vec<Here> {
+    let mut out = Vec::new();
+    let mut dirs = vec![(root.to_path_buf(), 0usize)];
+    while let Some((dir, depth)) = dirs.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            let path = e.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if name == "attachments" {
+                let Ok(pics) = std::fs::read_dir(&path) else { continue };
+                for pic in pics.flatten() {
+                    let n = pic.file_name().to_string_lossy().into_owned();
+                    if n.starts_with('.') || !crate::spare::is_picture(&n) || !pic.path().is_file() {
+                        continue;
+                    }
+                    let at = pic.path();
+                    let Ok(rel) = at.strip_prefix(root) else { continue };
+                    let bytes = std::fs::read(&at).unwrap_or_default();
+                    out.push(Here { rel: rel.to_string_lossy().replace('\\', "/"), hash: fingerprint(&bytes) });
+                }
+            } else if depth < 6 {
+                dirs.push((path, depth + 1));
+            }
+        }
+    }
+    out.sort_by(|a, b| a.rel.cmp(&b.rel));
+    out
+}
+
+/// 絵の道か（同じ手順書の中で、字として読まないもの）。
+pub fn is_asset(rel: &str) -> bool {
+    rel.rsplit_once('/').map(|(d, _)| d.ends_with("attachments") || d == "attachments").unwrap_or(false)
+        && crate::spare::is_picture(rel.rsplit('/').next().unwrap_or(rel))
+}
+
 /* ── 前に合わせたときの姿を、憶えておく ── */
 
 /// 憶えの置き場所。**ノートの隣ではなく `.amber` の中** ── これは amber の
@@ -652,6 +698,25 @@ mod tests {
         moved(r, "d.md", "e.md", true);
         forget_moves(r, "drive", &["e.md".to_string()]);
         assert!(moves(r, "drive").is_empty());
+    }
+
+    #[test]
+    fn 絵も_手順書に乗る() {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path();
+        std::fs::create_dir_all(r.join("attachments")).unwrap();
+        std::fs::create_dir_all(r.join("仕事/attachments")).unwrap();
+        std::fs::create_dir_all(r.join(".amber/attachments")).unwrap();
+        std::fs::write(r.join("attachments/a-1.png"), [1u8, 2]).unwrap();
+        std::fs::write(r.join("attachments/note.txt"), "x").unwrap();
+        std::fs::write(r.join("仕事/attachments/b-2.jpg"), [3u8]).unwrap();
+        std::fs::write(r.join(".amber/attachments/hidden.png"), [4u8]).unwrap();
+        let got = assets(r);
+        let rels: Vec<&str> = got.iter().map(|h| h.rel.as_str()).collect();
+        assert_eq!(rels, vec!["attachments/a-1.png", "仕事/attachments/b-2.jpg"]);
+        assert_eq!(got[0].hash, fingerprint(&[1u8, 2]));
+        assert!(is_asset("attachments/a-1.png") && is_asset("仕事/attachments/b.jpg"));
+        assert!(!is_asset("attachments.md") && !is_asset("仕事/b.jpg") && !is_asset("attachments/x.txt"));
     }
 
     #[test]

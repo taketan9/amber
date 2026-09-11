@@ -41,25 +41,33 @@ function start(port = 0) {
     const meta = (f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, parents: f.parents,
         appProperties: f.appProperties, md5Checksum: f.md5, trashed: f.trashed, version: String(f.version || 1) });
 
-    /// multipart/related を、metadata（JSON）と中身（字）に割る。
+    /// multipart/related を、metadata（JSON）と中身に割る。**bytes のまま**（絵が通る）。
     function parts(body, type) {
         const m = /boundary="?([^";]+)"?/.exec(type || '');
         if (!m) return null;
-        const chunks = body.split('--' + m[1]).filter((c) => c.trim() && c.trim() !== '--');
+        const sep = Buffer.from('--' + m[1]);
         const out = [];
-        for (const c of chunks) {
-            const at = c.indexOf('\r\n\r\n');
-            const head = c.slice(0, at);
-            let text = c.slice(at + 4);
-            if (text.endsWith('\r\n')) text = text.slice(0, -2);
-            out.push({ head, text });
+        let at = body.indexOf(sep);
+        while (at >= 0) {
+            const next = body.indexOf(sep, at + sep.length);
+            const chunk = body.subarray(at + sep.length, next >= 0 ? next : body.length);
+            at = next;
+            if (chunk.length < 4 || chunk.subarray(0, 2).toString() === '--') continue;
+            const cut = chunk.indexOf('\r\n\r\n');
+            if (cut < 0) continue;
+            const head = chunk.subarray(0, cut).toString('utf8');
+            let bytes = chunk.subarray(cut + 4);
+            if (bytes.length >= 2 && bytes.subarray(bytes.length - 2).toString() === '\r\n') bytes = bytes.subarray(0, bytes.length - 2);
+            out.push({ head, bytes, text: bytes.toString('utf8') });
         }
         return out;
     }
 
     const server = http.createServer(async (req, res) => {
-        let body = '';
-        for await (const c of req) body += c;
+        const chunks = [];
+        for await (const c of req) chunks.push(Buffer.from(c));
+        const bodyBytes = Buffer.concat(chunks);
+        const body = bodyBytes.toString('utf8');
         const u = new URL(req.url, 'http://127.0.0.1');
         const json = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
         try {
@@ -76,16 +84,20 @@ function start(port = 0) {
             if (u.pathname === '/_list') return json(200, [...files.values()].filter((f) => !f.trashed).map(meta));
             if (u.pathname === '/_get') {
                 const f = byRel(u.searchParams.get('rel'));
-                return f ? json(200, { text: f.text, ...meta(f) }) : json(404, { error: 'ありません' });
+                return f ? json(200, { text: f.bytes ? undefined : f.text, b64: f.bytes ? f.bytes.toString('base64') : undefined, ...meta(f) })
+                         : json(404, { error: 'ありません' });
             }
             if (u.pathname === '/_put') {
-                const { rel, text, by } = JSON.parse(body || '{}');
+                // `text`（字）か `b64`（絵）。
+                const { rel, text, b64, by } = JSON.parse(body || '{}');
+                const bytes = b64 ? Buffer.from(b64, 'base64') : null;
+                const content = bytes || Buffer.from(String(text || ''), 'utf8');
                 let f = byRel(rel);
-                const print = 'x' + md5(text);
-                if (f) { f.text = text; f.md5 = md5(text); f.version = (f.version || 1) + 1; f.appProperties = { ...f.appProperties, print, by: by || '太郎の iPhone' }; }
+                const print = 'x' + md5(content);
+                if (f) { f.text = bytes ? '' : text; f.bytes = bytes; f.md5 = md5(content); f.version = (f.version || 1) + 1; f.appProperties = { ...f.appProperties, print, by: by || '太郎の iPhone' }; }
                 else {
-                    f = { id: id(), name: rel.split('/').pop(), mimeType: 'text/markdown', parents: ['root'], version: 1,
-                          appProperties: { amber: 'note', rel, print, by: by || '太郎の iPhone' }, text, md5: md5(text), trashed: false };
+                    f = { id: id(), name: rel.split('/').pop(), mimeType: bytes ? 'image/png' : 'text/markdown', parents: ['root'], version: 1,
+                          appProperties: { amber: 'note', rel, print, by: by || '太郎の iPhone' }, text: bytes ? '' : text, bytes, md5: md5(content), trashed: false };
                     files.set(f.id, f);
                 }
                 return json(200, meta(f));
@@ -128,10 +140,12 @@ function start(port = 0) {
             }
             const up = /^\/upload\/drive\/v3\/files(?:\/([^/?]+))?$/.exec(u.pathname);
             if (up && (req.method === 'POST' || req.method === 'PATCH')) {
-                const ps = parts(body, req.headers['content-type']);
+                const ps = parts(bodyBytes, req.headers['content-type']);
                 if (!ps || ps.length < 2) return json(400, { error: { message: 'multipart が読めません' } });
                 const m = JSON.parse(ps[0].text || '{}');
-                const text = ps[1].text;
+                const isText = /text\//.test(ps[1].head) || /text\//.test(m.mimeType || '');
+                const text = isText ? ps[1].text : '';
+                const bytes = isText ? null : Buffer.from(ps[1].bytes);
                 let f = up[1] ? files.get(up[1]) : null;
                 if (up[1] && !f) return json(404, { error: { message: 'ありません' } });
                 if (!f) {
@@ -142,7 +156,8 @@ function start(port = 0) {
                 if (m.name) f.name = m.name;
                 if (m.appProperties) f.appProperties = { ...f.appProperties, ...m.appProperties };
                 f.text = text;
-                f.md5 = md5(text);
+                f.bytes = bytes;
+                f.md5 = md5(bytes || text);
                 f.version = (f.version || 0) + 1;
                 return json(200, meta(f));
             }
@@ -151,6 +166,7 @@ function start(port = 0) {
                 const f = files.get(one[1]);
                 if (!f) return json(404, { error: { message: 'ありません' } });
                 if (req.method === 'GET' && u.searchParams.get('alt') === 'media') {
+                    if (f.bytes) { res.writeHead(200, { 'content-type': f.mimeType || 'application/octet-stream' }); return res.end(f.bytes); }
                     res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' });
                     return res.end(f.text);
                 }

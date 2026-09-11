@@ -452,6 +452,21 @@ app.whenReady().then(() => {
     ipcMain.handle('amber:driveList', () => drive.list());
     ipcMain.handle('amber:driveUpload', (_e, args) => drive.upload(args));
     ipcMain.handle('amber:driveDownload', (_e, id) => drive.download(id));
+    // 絵（依頼 497）── bytes は描く側を通さず、ここで読んで上げ、下ろして置く。
+    ipcMain.handle('amber:driveUploadFile', async (_e, { rel, file, print, id }) => {
+        const bytes = await fs.promises.readFile(String(file));
+        return drive.upload({ rel, bytes, print, id });
+    });
+    ipcMain.handle('amber:driveDownloadFile', async (_e, { id, to }) => {
+        const bytes = await drive.downloadBytes(id);
+        const at = String(to);
+        await fs.promises.mkdir(path.dirname(at), { recursive: true });
+        // 仮の名で書いてから改名 ── 途中で切れても半端な絵を残さない。
+        const tmp = at + '.amber-part';
+        await fs.promises.writeFile(tmp, bytes);
+        await fs.promises.rename(tmp, at);
+        return { ok: true, bytes: bytes.length };
+    });
     ipcMain.handle('amber:driveTrash', (_e, id) => drive.trash(id));
     ipcMain.handle('amber:driveRename', (_e, args) => drive.rename(args));
     ipcMain.handle('amber:deviceName', () => drive.by);
