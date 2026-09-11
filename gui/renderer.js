@@ -7723,26 +7723,91 @@ function teamClock() {
 
 
 
+/// 予定を足す小窓（依頼 493）── **タイトル・終日・開始・終了**を一枚で。
+/// 時刻は打たせず、十五分刻みから選ばせる。開始を選ぶと終了は一時間後に
+/// 置いておく。終日なら時刻は選べない。返すのは `{ title, allDay, start, end }`、
+/// やめたら null。
+let evDone = null;
+function askEvent(head, at0) {
+    const box = el('evform');
+    const title = el('evtitle');
+    const all = el('evall');
+    const start = el('evstart');
+    const end = el('evend');
+    const err = el('everr');
+    if (!start.options.length) {
+        const opts = ['<option value="">--:--</option>'];
+        for (let h = 0; h < 24; h += 1) {
+            for (const m of ['00', '15', '30', '45']) {
+                const t = String(h).padStart(2, '0') + ':' + m;
+                opts.push('<option value="' + t + '">' + t + '</option>');
+            }
+        }
+        start.innerHTML = opts.join('');
+        end.innerHTML = opts.join('');
+    }
+    const plus = (t, min) => {
+        const [h, m] = t.split(':').map(Number);
+        const n = Math.min(h * 60 + m + min, 23 * 60 + 45);
+        return String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
+    };
+    box.querySelector('.hd').textContent = head;
+    title.value = '';
+    all.checked = false;
+    start.value = at0 || '';
+    end.value = at0 ? plus(at0, 60) : '';
+    err.hidden = true;
+    const gate = () => { start.disabled = all.checked; end.disabled = all.checked; };
+    gate();
+    all.onchange = () => { gate(); err.hidden = true; };
+    start.onchange = () => { if (start.value) end.value = plus(start.value, 60); err.hidden = true; };
+    const shut = (v) => {
+        box.hidden = true;
+        if (evDone) { const f = evDone; evDone = null; f(v); }
+        if (editor && !box.contains(document.activeElement)) editor.focus();
+    };
+    const go = () => {
+        const t = title.value.trim().replace(/\s+/g, ' ');
+        if (!t) { err.textContent = 'タイトルを入れてください'; err.hidden = false; title.focus(); return; }
+        if (!all.checked) {
+            if (!start.value) { err.textContent = '開始の時刻を選んでください（終日なら「終日」に印を）'; err.hidden = false; start.focus(); return; }
+            if (!end.value) { err.textContent = '終了の時刻を選んでください'; err.hidden = false; end.focus(); return; }
+            if (end.value <= start.value) { err.textContent = '終了は開始より後にしてください'; err.hidden = false; end.focus(); return; }
+        }
+        shut({ title: t, allDay: all.checked, start: all.checked ? '' : start.value, end: all.checked ? '' : end.value });
+    };
+    el('evok').onclick = go;
+    el('evcancel').onclick = () => shut(null);
+    box.onmousedown = (e) => { if (e.target === box) shut(null); };
+    box.onkeydown = (e) => {
+        e.stopPropagation();
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.code === 'Escape') { e.preventDefault(); shut(null); }
+        else if (isEnter(e) && e.target === title) { e.preventDefault(); go(); }
+    };
+    box.hidden = false;
+    title.focus();
+    return new Promise((resolve) => { evDone = resolve; });
+}
+
 /// **その日に予定を足す。** 足すのは新しいノートで、日付は前書きに書く
 /// ── 「ノートに日付を書くと予定になる」（依頼 73）が既にあるので、
 /// カレンダーのためだけの保存場所を作らない。
 async function calAdd(day, at0) {
     // **この機械の予定表が使えるなら、そちらへ**（依頼 462）── 普通の
     // カレンダーとして期待されるのはそれ。使えないときだけノートを作る。
-    const title = await askText('予定を足す（' + dayName(day) + '）', '',
-        hereOn ? 'この機械の予定表に入ります。時刻は次に訊きます'
-               : 'ノートが一本できます。時刻は次に訊きます');
-    if (title === null || !title.trim()) return;
-    const at = await askText('何時から', at0 || '09:00', '空のままなら終日');
-    if (at === null) return;
+    const ev = await askEvent('予定を足す（' + dayName(day) + '）', at0);
+    if (!ev) return;
+    const title = ev.title;
     if (hereOn) {
-        const got = await window.amber.cal(['add', title.trim(), day, at.trim()]);
+        const got = await window.amber.cal(['add', title, day, ev.start, ev.end]);
         if (!got || got.error) { say('足せません: ' + (got?.error || '返事がありません')); return; }
         await drawCal();
-        say('「' + title.trim() + '」を ' + dayName(day) + ' に足しました');
+        say('「' + title + '」を ' + dayName(day) + ' に足しました');
         return;
     }
-    const when = at.trim() ? day + ' ' + at.trim() : day;
+    // ノートに持てるのは始まりだけ（`remind:`）── 終わりの時刻はノートには書かない。
+    const when = ev.start ? day + ' ' + ev.start : day;
     try {
         const made = await window.amber.call('new', {
             dir: state.root, title: title.trim(),
@@ -7766,16 +7831,16 @@ async function calAdd(day, at0) {
 async function hereEdit(id) {
     const one = calSlots.find((s) => s.kind === 'here' && s.path === id);
     const pick = await askPick('この予定をどうしますか',
-        [{ name: '題を直す', value: 'rename' }, { name: '消す', value: 'drop' }],
+        [{ name: 'タイトルを修正する', value: 'rename' }, { name: '予定を削除する', value: 'drop' }],
         one ? one.title : '', true);
     if (pick === null) return;
     if (pick === 'rename') {
-        const to = await askText('題を直す', one ? one.title : '');
+        const to = await askText('タイトルを修正する', one ? one.title : '');
         if (to === null || !to.trim()) return;
         const got = await window.amber.cal(['rename', id, to.trim()]);
         if (!got || got.error) { say('直せません: ' + (got?.error || '返事がありません')); return; }
     } else {
-        if (!await askYes('この予定を消しますか')) return;
+        if (!await askYes('この予定を削除しますか')) return;
         const got = await window.amber.cal(['drop', id]);
         if (!got || got.error) { say('消せません: ' + (got?.error || '返事がありません')); return; }
     }
@@ -7898,7 +7963,7 @@ let awaySlots = [];
 
 /// 予定表を一つ増やす。
 async function cmdSubscribe() {
-    const url = await askText('よその予定表を読む', '',
+    const url = await askText('カレンダー設定追加', '',
         'Google カレンダーなら「設定 → カレンダーの統合 → 非公開 URL（iCal 形式）」');
     if (url === null || !url.trim()) return;
     say('取りに行っています…');
@@ -7924,7 +7989,7 @@ async function cmdSubscribe() {
 /// 購読しているものを見て、やめる。
 async function cmdUnsubscribe() {
     if (!away.length) { say('読んでいる予定表はありません'); return; }
-    const pick = await askPick('読むのをやめる予定表',
+    const pick = await askPick('カレンダー設定解除',
         away.map((a) => ({ name: a.name, sub: readableUrl(a.url).slice(0, 60), value: a.url })),
         '選ぶと、読むのをやめます（向こうの予定表は何も変わりません）', true);
     if (pick === null) return;
@@ -8012,11 +8077,11 @@ const CMDS = [
     // **絞り込みは、命令ではなくなった。** タグ・フォルダ・期間の三つは
     // 一覧の頭に引き出しとして常に出ている ── 命令の表から呼ぶものが
     // 別にあると、同じことを頼む道が二つになる。
-    { id: 'cal', name: 'カレンダー', sub: '予定と、その日のノートを一枚で',
-      app: true, run: cmdCalendar },
-    { id: 'sub', name: 'よその予定表を読む', sub: 'Google カレンダーなどの iCal の URL',
+    // **⚙ には出さない**（本人・2026-09-11）── 左の列にカレンダーが居る。表には残す。
+    { id: 'cal', name: 'カレンダー', sub: '予定と、その日のノートを一枚で', run: cmdCalendar },
+    { id: 'sub', name: 'カレンダー設定追加', sub: 'Google カレンダーなどの iCal の URL を読みます',
       app: true, run: cmdSubscribe },
-    { id: 'unsub', name: 'よその予定表を読むのをやめる', app: true, run: cmdUnsubscribe },
+    { id: 'unsub', name: 'カレンダー設定解除', app: true, run: cmdUnsubscribe },
     // **合言葉を打つまで、どこにも出ない**（依頼 473）。
     //
     // 会社の Outlook は外から読める形を一つも出さないので、別の道具が
@@ -8068,8 +8133,8 @@ const CMDS = [
     // 下まで来ない ── 同じ行い（ノートを入れる）は同じ場所に。
     { id: 'bring', name: 'ノートを取り込む', app: true, sep: true, run: cmdBring },
     { id: 'welcome', name: '見本のノートを入れる', app: true, run: cmdWelcome },
-    { id: 'spare', name: 'ノートから使われていない画像を削除', app: true,
-      sub: '小さく見て、選んでゴミ箱へ', run: cmdSpare },
+    { id: 'spare', name: '不要添付削除', app: true,
+      sub: 'ノートから使われていない画像を削除', run: cmdSpare },
     { id: 'backup', name: 'バックアップ', app: true, run: cmdBackup },
     { id: 'restore', name: 'バックアップから戻す', app: true, run: cmdRestore },
     { id: 'root', name: 'ambər 保存ディレクトリ変更', app: true, run: cmdRoot },
@@ -8098,7 +8163,7 @@ const CMDS = [
 const LOOSE_KEYS = [
     ['一覧を上下する', '↑ ↓ / J K', '一覧を見ているとき'],
     ['そのノートを開いて打つ', 'Enter', '一覧を見ているとき'],
-    ['ゴミ箱へ入れる', 'Delete', '選んでいるノートを（訊いてから）'],
+    ['ゴミ箱へ入れる', 'Delete', '選んでいるノートを（確認してから）'],
     ['ノートを探す', '/', '一覧を見ているとき'],
     ['閉じる・やめる', 'Esc', 'ポップアップ・ツール・大きい画面から'],
     ['次のマスへ', 'Tab', '表の中で（⇧Tab で前へ、最後で押すと行が増える）'],

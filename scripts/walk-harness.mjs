@@ -61,7 +61,25 @@ export async function run(src) {
         }),
         sleep(Number(process.env.PATIENCE || 8000)).then(() => 'まった'),
     ]);
-    if (r === 'まった') return { bad: '返ってきません（小窓が開いたまま待っている？）' };
+    if (r === 'まった') {
+        // **どこで待っているかを言う。** 窓の JS が回りっぱなしなら 1+1 も返らず、
+        // 約束が解けないだけなら 1+1 は返る ── 直す場所がまるで違う。
+        const alive = await Promise.race([
+            send('Runtime.evaluate', { expression: '1+1', returnByValue: true }),
+            sleep(2000).then(() => null),
+        ]);
+        const busy = await Promise.race([
+            send('Runtime.evaluate', { expression: 'JSON.stringify({ syncBusy, veil: !el("veil").hidden, ev: !el("evform").hidden, dirty: state.dirty })', returnByValue: true }),
+            sleep(2000).then(() => null),
+        ]);
+        if (!alive) {
+            // **固まった窓に、残りの段を押しても意味が無い** ── 一段ごとに十秒
+            // 待って二時間かける前に、ここで報せて止まる。
+            bad.push({ name: '（ここで窓が固まった）', why: ['この段の途中で 1+1 も返らなくなった'] });
+            report();
+        }
+        return { bad: '返ってきません（窓は生きている・' + (busy && busy.result && busy.result.result ? busy.result.result.value : '?') + '）' };
+    }
     const bad = r.result?.exceptionDetails;
     if (bad) {
         return { bad: String(bad.exception?.description || bad.text).split('\n')[0].slice(0, 300) };

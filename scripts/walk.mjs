@@ -647,6 +647,7 @@ await step('カレンダー：ひと月ぶんが出る', `
     // **月から始める。** 見方は設定に憶えられているので、前に日や週で閉じて
     // いれば日や週で開く ── 升目の数が合わなくなる（実際になった・2026-09-11）。
     calView = 'month';
+    calGroup = false;
     calMonth = { y: 2026, m: 9 };
     calDay = '2026-09-09';
     await cmdCalendar();
@@ -662,6 +663,7 @@ await step('カレンダー：ひと月ぶんが出る', `
 `, true);
 
 await step('カレンダー：日・週・月を切り替えられる', `
+    calGroup = false;   // 設定に憶えられた「みんなの表」が入っていると、時間の表は出ない
     calMonth = { y: 2026, m: 9 };
     calDay = '2026-09-09';
     for (const v of ['week', 'day', 'month']) {
@@ -704,11 +706,41 @@ await step('カレンダー：予定に出ているノートを、升目でも�
     return hits === 1 ? true : '面談が ' + hits + ' 回出ています';
 `, true);
 
+await step('カレンダー：予定を足す小窓は、空のまま登録できず・終日なら時刻を選べない', `
+    setTimeout(() => {
+        el('evtitle').value = '';
+        el('evok').click();
+    }, 200);
+    const p = askEvent('試し', '');
+    await new Promise((g) => setTimeout(g, 400));
+    const e1 = el('everr').hidden ? '' : el('everr').textContent;
+    el('evtitle').value = '空の時刻';
+    el('evstart').value = '';
+    el('evok').click();
+    await new Promise((g) => setTimeout(g, 100));
+    const e2 = el('everr').hidden ? '' : el('everr').textContent;
+    el('evall').checked = true;
+    el('evall').dispatchEvent(new Event('change'));
+    const off = el('evstart').disabled && el('evend').disabled;
+    el('evok').click();
+    const got = await p;
+    if (!e1.includes('タイトル')) return 'タイトル無しで通っています: ' + JSON.stringify(e1);
+    if (!e2.includes('開始')) return '時刻無しで通っています: ' + JSON.stringify(e2);
+    if (!off) return '終日なのに時刻を選べます';
+    return got && got.allDay && got.title === '空の時刻' && got.start === '' ? true : JSON.stringify(got);
+`, true);
+
 await step('カレンダー：予定を足すと、ノートが一本できる', `
     const was = state.notes.length;
     calDay = '2026-09-11';
-    setTimeout(() => closeSheet('走査の予定'), 300);
-    setTimeout(() => closeSheet('11:00'), 700);
+    // 小窓は一枚（依頼 493）── タイトルを打ち、開始を選び、登録を押す。
+    setTimeout(() => {
+        el('evtitle').value = '走査の予定';
+        el('evstart').value = '11:00';
+        el('evstart').dispatchEvent(new Event('change'));
+        if (el('evend').value !== '12:00') { closeSheet(null); el('evcancel').click(); return; }
+        el('evok').click();
+    }, 300);
     calAdd(calDay);
     // **出るまで待つ**（六秒まで）── 組み直しはノートの数で遅くなる。
     // 出なかったときは、何が出ていたかを言う（「出ていません」では直せない）。

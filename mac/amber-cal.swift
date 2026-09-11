@@ -116,7 +116,13 @@ case "add":
         e.isAllDay = true
         e.endDate = start
     } else {
-        e.endDate = start.addingTimeInterval(3600)
+        // 終わりの時刻（依頼 493）── 渡されなければ一時間後。
+        let until: String? = args.count >= 5 && !args[4].isEmpty ? args[4] : nil
+        if let u = until, let endAt = f.date(from: args[2] + " " + u), endAt > start {
+            e.endDate = endAt
+        } else {
+            e.endDate = start.addingTimeInterval(3600)
+        }
     }
     do { try store.save(e, span: .thisEvent) } catch { no(error.localizedDescription) }
     out(["ok": true, "id": e.eventIdentifier ?? ""])

@@ -210,7 +210,11 @@ sleep 0.5
 # **タイマーの絞りを切る。** 窓が隠れる（画面が消える・ほかの窓の下に
 # 入る）と、Chromium は数分でタイマーを一分に一度まで絞る ── 夜通し回した
 # 網が七時間かかり、「返ってきません」が混ざった（2026-09-10）。
-(cd "$root/gui" && HOME="$work/home" AMBER_DRIVE_URL="http://127.0.0.1:$driveport" AMBER_DRIVE_TOKEN=fake \
+# **引き出し（`userData`）は隔離しない。** 一度 `app.setPath('userData')` を試す場所に
+# 向けてみたが、まっさらな引き出しで開いた窓は数分で固まった（Chromium が鍵束に
+# 訊きに行って、裏の側が止まる ── 2026-09-11・二度）。設定は上の写しと戻しで守り、
+# **走っているあいだは本人の窓を触らない**（本人が変えた見方が巻き戻る）。
+(cd "$root/gui" && env HOME="$work/home" AMBER_DRIVE_URL="http://127.0.0.1:$driveport" AMBER_DRIVE_TOKEN=fake \
   npx electron --remote-debugging-port="$port" \
   --disable-background-timer-throttling --disable-renderer-backgrounding \
   --disable-features=IntensiveWakeUpThrottling . \
