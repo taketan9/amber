@@ -51,21 +51,23 @@ const ok = (yes, what, got) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amber-drive-'));
     const vault = { dir, encrypt: (t) => Buffer.from('v1:' + t), decrypt: (b) => String(b).slice(3) };
     let lastAuth = null;
+    let page = null;
     /// 「ブラウザ」── 許可の画面の URL を受け取って、折り返し先へ自分で戻る。
+    /// **待たない**（本物のブラウザも別の生き物）── 折り返しへの返事は、
+    /// 鍵の交換が済んでから来る。
     const open = async (url) => {
         lastAuth = new URL(url);
         const back = new URL(lastAuth.searchParams.get('redirect_uri'));
         back.searchParams.set('code', 'the-code');
         back.searchParams.set('state', lastAuth.searchParams.get('state'));
-        const r = await fetch(back);
-        const page = await r.text();
-        ok(page.includes('ambər に戻ってください'), 'ブラウザには「戻ってください」の一枚が出る', page.slice(0, 80));
+        page = fetch(back).then((r) => r.text());
     };
     const drive = createDrive({ open, vault, tokenUrl: at + '/token', revokeUrl: at + '/revoke', aboutUrl: at + '/about', authUrl: at + '/auth' });
 
     console.log('サインイン');
     const got = await drive.signIn();
     ok(got.ok === true, 'サインインできる', got);
+    ok((await page).includes('サインインできました'), 'ブラウザには、交換が済んでから「できました」の一枚が出る');
     ok(lastAuth.searchParams.get('code_challenge_method') === 'S256', '許可の URL に PKCE の要約が付く');
     ok(lastAuth.searchParams.get('access_type') === 'offline' && lastAuth.searchParams.get('prompt') === 'consent', '戻す鍵をもらう頼み方');
     ok(lastAuth.searchParams.get('scope') === 'https://www.googleapis.com/auth/drive.file', 'スコープは drive.file だけ');
@@ -91,16 +93,18 @@ const ok = (yes, what, got) => {
 
     console.log('違う state は受けない');
     {
+        let bogusPage = null;
         const bogus = async (url) => {
             const u = new URL(url);
             const back = new URL(u.searchParams.get('redirect_uri'));
             back.searchParams.set('code', 'x');
             back.searchParams.set('state', 'wrong');
-            await fetch(back);
+            bogusPage = fetch(back).then((r) => r.text());
         };
         const d2 = createDrive({ open: bogus, vault: { ...vault, dir: fs.mkdtempSync(path.join(os.tmpdir(), 'amber-drive2-')) }, tokenUrl: at + '/token', patience: 2000 });
         const r = await d2.signIn();
         ok(!!r.error, '受けずに断る', r);
+        ok((await bogusPage).includes('できませんでした'), 'ブラウザにも「できませんでした」と出る');
     }
 
     console.log('やめる');

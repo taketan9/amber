@@ -159,14 +159,27 @@ function createDrive(opts) {
         const state = b64url(crypto.randomBytes(16));
         let settle;
         const got = new Promise((go) => { settle = go; });
+        // **ブラウザへの返事は、鍵の交換が済んでから。** 先に「できました」と
+        // 出しておいて交換で断られると、ブラウザは成功・窓は失敗の顔になる
+        // （実際にそうなった・2026-09-11）。
+        let browser = null;
+        const tell = (ok) => {
+            if (!browser) return;
+            browser.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+            browser.end(landing(ok));
+            browser = null;
+        };
         const server = http.createServer((req, res) => {
             const u = new URL(req.url, 'http://127.0.0.1');
             if (u.pathname !== '/') { res.writeHead(404); res.end(); return; }
             const ok = u.searchParams.get('state') === state && u.searchParams.get('code');
-            res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-            res.end(landing(!!ok));
-            settle(ok ? { code: u.searchParams.get('code') }
-                      : { error: u.searchParams.get('error') || '返事の形が違います' });
+            browser = res;
+            if (!ok) {
+                tell(false);
+                settle({ error: u.searchParams.get('error') || '返事の形が違います' });
+                return;
+            }
+            settle({ code: u.searchParams.get('code') });
         });
         await new Promise((go, no) => {
             server.once('error', no);
@@ -193,10 +206,12 @@ function createDrive(opts) {
             };
             kept.who = await whoAmI(kept.access).catch(() => null);
             store(kept);
+            tell(true);
             return { ok: true, who: kept.who };
         } catch (e) {
             // 端末にも残す ── 窓の一言は消えるが、`run.sh` の端末には残る。
             console.error('[同期] サインインできません:', e.message);
+            tell(false);
             return { error: e.message };
         } finally {
             clearTimeout(timer);
