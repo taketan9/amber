@@ -452,6 +452,7 @@ Taketan が頼んだことが、いまも満たされているか。`python3 scr
 | 500 | 2026-09-12 | iPhone でも同期（Google でサインイン一回・上げ下ろし・改名・絵・両方向の消し）。窓と同じ作り | `ios/Cian/Drive.swift`（OAuth 2.0 PKCE・`ASWebAuthenticationSession`・折り返しは iOS 用クライアントの URL スキーム・鍵はキーチェーン・Drive の一覧／上げ／下ろし／ゴミ箱／改名は窓の `drive.js` と同じ札）と `Syncing.swift`（窓の `syncNow` の写し・判断は core の `syncplan`・打ちかけでない札だけ読み直す）。設定に「同期」、一覧の頭に一行。保存の三秒後・三十秒ごと・前に出たとき。走査（`walk-phone.sh`）は偽の Drive を相手に上げ・下ろし・直し・改名・絵・消しを押す | `ios/Cian/Syncing.swift ~ func now\(` |
 | 501 | 2026-09-12 | iPhone にも、同じ行を両方で直したときの選び口を（本人「まだ無いものは今のうちに」） | 札（`Desk.Tab`）が `spots`・`fields`・`who` を持ち（行の中身で・引き出しに憶える）、帯に「〇〇と同じところを N か所で直しています」と「選ぶ」。小窓（`Choosing`）で一つずつ「こちらを残す／〇〇を残す／両方」、上に「ぜんぶ」。選ぶ算数は窓の `chooseSpot`／`chooseField` の写し（`Desk.rowsOf`・`spotAt`）。保存の衝突でも同期のぶつかりでも同じ札 | `ios/Cian/Choosing.swift ~ struct Choosing: View` |
 | 502 | 2026-09-12 | iPhone でも、ファイル名を題に合わせる | 電話には題の欄が無いので、**離れたとき**（札を閉じる・別の札に替える）に core の `settle` で揃え、置き場所を開いたときに `tidynames` で時刻名を一度だけ揃える。改名した札は新しい道の札に差し替える。同期は改名として運ぶ（`movethere`） | `ios/Cian/Desk.swift ~ func settle\(` |
+| 503 | 2026-09-12 | iPhone の設定の文言を窓版に合わせる | 「ambər 保存ディレクトリ変更」「ノートを取り込む」「カレンダー設定追加」「不要添付削除」（説明に「ノートから使われていない画像を…」）。「見た目」と「配色」の二つの選び口は、窓の「テーマ」と同じ一つの表（琥珀 ── iPhone に合わせる／明るい／暗い、そのあとに cian と同じ二十一・同じ鍵）に | `ios/Cian/Where.swift ~ Picker\("テーマ"` |
 
 ## 増やすとき
 

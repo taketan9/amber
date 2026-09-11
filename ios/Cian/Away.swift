@@ -141,7 +141,7 @@ struct Feeds: View {
                          + "非公開 URL（iCal 形式）」のアドレスです。")
                 }
             }
-            .navigationTitle("よその予定表")
+            .navigationTitle("カレンダー設定")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } }

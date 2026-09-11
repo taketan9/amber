@@ -131,6 +131,22 @@ struct Where: View {
     @ObservedObject private var sync = Syncing.shared
     @State private var signingIn = false
     @State private var signInSaid: String?
+
+    /// 窓の `THEMES` と同じ鍵 ── 空は琥珀（iPhone に合わせる）、`amber-light`／`amber-dark`
+    /// は琥珀の明暗、それ以外は配色の名前。
+    private var themeKey: Binding<String> {
+        Binding(
+            get: { palette.isEmpty ? (look == .light ? "amber-light" : look == .dark ? "amber-dark" : "") : palette },
+            set: { key in
+                switch key {
+                case "": palette = ""; look = .auto
+                case "amber-light": palette = ""; look = .light
+                case "amber-dark": palette = ""; look = .dark
+                default: palette = key
+                }
+            }
+        )
+    }
     @AppStorage("amber.font") private var font = Size.system
     @AppStorage("cian.autosave") private var autosave = true
 
@@ -214,7 +230,7 @@ struct Where: View {
                         dismiss()
                         choose()
                     } label: {
-                        Label("保存場所を選ぶ…", systemImage: "folder")
+                        Label("ambər 保存ディレクトリ変更", systemImage: "folder")
                     }
                 } header: {
                     Text("場所")
@@ -248,7 +264,7 @@ struct Where: View {
                         dismiss()
                         bringIn()
                     } label: {
-                        Label("インポート", systemImage: "square.and.arrow.down")
+                        Label("ノートを取り込む", systemImage: "square.and.arrow.down")
                     }
                     // The other half of 「バックアップ」. Without it a zip is
                     // a thing you can make and never use, which is not a
@@ -265,12 +281,12 @@ struct Where: View {
                     Button {
                         feeding = true
                     } label: {
-                        Label("よその予定表を読む", systemImage: "calendar.badge.plus")
+                        Label("カレンダー設定追加", systemImage: "calendar.badge.plus")
                     }
                     Button {
                         sparing = true
                     } label: {
-                        Label("ノートから使われていない画像を削除", systemImage: "photo.badge.checkmark")
+                        Label("不要添付削除", systemImage: "photo.badge.checkmark")
                     }
                     // The scope is a choice because backing up is
                     // something people do *before* something — before a
@@ -296,9 +312,9 @@ struct Where: View {
                         Label("バックアップ", systemImage: "square.and.arrow.up")
                     }
                 } header: {
-                    Text("バックアップとインポート")
+                    Text("バックアップと取り込み")
                 } footer: {
-                    Text("インポートした .md はこのフォルダにコピーされます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。")
+                    Text("取り込んだ .md はこのフォルダにコピーされます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。「不要添付削除」は、ノートから使われていない画像を小さく見て、選んでゴミ箱へ。")
                 }
 
                 Section {
@@ -337,15 +353,13 @@ struct Where: View {
                 }
 
                 Section {
-                    Picker("見た目", selection: $look) {
-                        ForEach(Look.allCases) { Text($0.label).tag($0) }
-                    }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
-                    // **配色は窓と同じ二十一**（依頼 499・cian と同じ）。選ぶと明暗も
-                    // その配色に従う。「琥珀」に戻せば上の見た目に従う。
-                    Picker("配色", selection: $palette) {
-                        Text("琥珀（上の見た目に従う）").tag("")
+                    // **窓の「テーマ」と同じ一つの表**（本人「文言を窓版に合わせて」・2026-09-12）
+                    // ── 琥珀の三つ（iPhone に合わせる・明るい・暗い）と、cian と同じ二十一。
+                    // 琥珀を選ぶと `look`、配色を選ぶと `palette`（明暗はその配色に従う）。
+                    Picker("テーマ", selection: themeKey) {
+                        Text("琥珀 ── iPhone に合わせる").tag("")
+                        Text("琥珀 ── 明るい").tag("amber-light")
+                        Text("琥珀 ── 暗い").tag("amber-dark")
                         ForEach(Palettes.all, id: \.name) { Text($0.label).tag($0.name) }
                     }
                     // **字の大きさは、窓にもある**（⌘+ / ⌘−）── 電話にだけ
@@ -354,12 +368,12 @@ struct Where: View {
                         ForEach(Size.allCases) { Text($0.label).tag($0) }
                     }
                 } header: {
-                    Text("見た目")
+                    Text("テーマ")
                 } footer: {
                     // Three and not two: a phone that goes dark at sunset is
                     // the common case, and a switch with no way back to it
                     // is a switch that gets set once and regretted.
-                    Text("「iPhone に合わせる」は、夜になると暗くなる設定にしているときに一緒に暗くなります。")
+                    Text("「琥珀 ── iPhone に合わせる」は、夜になると暗くなる設定にしているときに一緒に暗くなります。白磁から下は Mac と同じ配色（同じ並び）です。")
                 }
             }
             // The zip exists before the share sheet opens, so what is being
