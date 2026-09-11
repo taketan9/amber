@@ -52,6 +52,11 @@ contextBridge.exposeInMainWorld('amber', {
     ring: (title, body) => ipcRenderer.invoke('amber:ring', title, body),
     /// 貼り付けられた画像の生バイト（base64）。
     clipboardImage: () => ipcRenderer.invoke('amber:clipboardImage'),
+    /// Google Drive との繋ぎ ── サインインする・やめる・様子を訊く。
+    /// 鍵そのものは描く側に渡さない（OS に触る側が持つ）。
+    driveSignIn: () => ipcRenderer.invoke('amber:driveSignIn'),
+    driveSignOut: () => ipcRenderer.invoke('amber:driveSignOut'),
+    driveAccount: () => ipcRenderer.invoke('amber:driveAccount'),
 
     /// 画面そのものの版。**エンジンの版とは別に要る** ── 同梱するときは
     /// 実行ファイルだけ差し替えられるので、この二つはずれうる。

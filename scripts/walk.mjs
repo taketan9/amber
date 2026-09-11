@@ -425,6 +425,8 @@ const LATER = [
     ['ambər について', `cmdAbout();`],
     ['ノートを探す', `openFind();`],
     ['期間で絞る', `openDrawer('when');`],
+    // 同期 ── サインインしていなければ「Google でサインイン」の小窓が出て、閉じられる。
+    ['同期', `cmdSync();`],
 ];
 for (const [name, call] of LATER) {
     await step('命令：' + name, `

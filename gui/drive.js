@@ -1,0 +1,256 @@
+'use strict';
+// Google Drive との繋ぎ ── **OS に触る側**（窓の主・Node）。
+//
+// ここにあるのは「サインインする・鍵を持つ・鍵を新しくする・やめる」だけ。
+// 何を上げ下ろしするかの判断は core（`sync::plan`）で、ここは運ぶだけ
+// （`PLANS.ja.md` 一章「通信は core に入れない」）。
+//
+// # 使う人がやること
+//
+// 「Google でサインイン」を押す → いつものブラウザが開く → 「許可」を押す
+// → 窓に戻る。以上（本人が決めた・2026-09-11・案 甲）。URL を打たせない、
+// Google の設定画面を触らせない。
+//
+// # 仕組み（OAuth 2.0・PKCE・折り返しは 127.0.0.1）
+//
+// amber は「公開クライアント」（RFC 8252）── 秘密を持てない前提の設計で、
+// 盗まれて困る鍵は **PKCE**（毎回その場で作る使い捨ての合言葉）に置き換わって
+// いる。クライアント ID は秘密ではない（Joplin も同じ形で焼き込んで配っている）。
+//
+//   1. 使い捨ての合言葉（verifier）と、その要約（challenge）を作る
+//   2. 127.0.0.1 の空いている番号で、一度だけ返事を受ける小さな口を開く
+//   3. ブラウザで Google の許可の画面へ（challenge と折り返し先を添えて）
+//   4. Google がブラウザを折り返し先へ戻す ── そこに「code」が付いている
+//   5. code と verifier を Google に渡して、鍵（token）と交換する
+//
+// # 鍵の置き場所
+//
+// `userData/drive.token`。**暗号化して置く**（Electron の `safeStorage` ──
+// mac はキーチェーン、Windows は DPAPI）。ノートの隣には置かない ── あそこは
+// フォルダと一緒に旅をする。
+//
+// # クライアント シークレット
+//
+// Google はデスクトップ向けの登録にもシークレットを発行し、「インストール型の
+// シークレットは秘密として扱わない」と書いている。**repo には置かない。**
+// 要るなら `userData/google.json` の `{"secret": "..."}` から読む（本人の
+// 手元にだけある）。PKCE だけで通るなら、置かなくてよい。
+
+const crypto = require('node:crypto');
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+
+/// 登録済みのクライアント（`PLANS.ja.md` 一章）。**秘密ではない。**
+const CLIENT_ID = '306373349806-bskgnk86ciamokeeblmoqgi3t88sqqmf.apps.googleusercontent.com';
+const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
+const ABOUT_URL = 'https://www.googleapis.com/drive/v3/about?fields=user';
+
+const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+/// PKCE の合言葉と要約。
+function pkce() {
+    const verifier = b64url(crypto.randomBytes(32));
+    const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
+    return { verifier, challenge };
+}
+
+/// 許可の画面の URL。
+function authUrl({ clientId, redirect, challenge, state, authUrl }) {
+    const u = new URL(authUrl || AUTH_URL);
+    u.searchParams.set('client_id', clientId || CLIENT_ID);
+    u.searchParams.set('redirect_uri', redirect);
+    u.searchParams.set('response_type', 'code');
+    u.searchParams.set('scope', SCOPE);
+    u.searchParams.set('code_challenge', challenge);
+    u.searchParams.set('code_challenge_method', 'S256');
+    // **戻す鍵（refresh token）をもらう。** 無いと一時間で切れて、毎日
+    // サインインさせることになる。
+    u.searchParams.set('access_type', 'offline');
+    u.searchParams.set('prompt', 'consent');
+    u.searchParams.set('state', state);
+    return u.href;
+}
+
+/// ブラウザに見せる、折り返しの一枚。**普通の日本語で、一言だけ。**
+function landing(ok) {
+    const say = ok
+        ? 'サインインできました。ambər に戻ってください。このタブは閉じてかまいません。'
+        : 'サインインできませんでした。ambər に戻って、もう一度お試しください。';
+    return '<!doctype html><meta charset="utf-8"><title>ambər</title>'
+        + '<body style="font-family:-apple-system,Hiragino Sans,sans-serif;padding:3rem;line-height:1.8;color:#2a2011;background:#fffdf8">'
+        + '<p style="font-size:1.2rem">' + say + '</p></body>';
+}
+
+/// 繋ぎを作る。**OS の部品は外から渡す**（試験では偽物を渡せるように）。
+///
+/// - `open(url)`      ── ブラウザで開く（窓では `shell.openExternal`）
+/// - `vault`          ── 鍵の置き場所（`{ dir, encrypt, decrypt }`）
+/// - `secretFile`     ── クライアント シークレットの置き場所（無ければ無し）
+/// - `fetch`          ── 既定は Node の fetch
+function createDrive(opts) {
+    const {
+        open,
+        vault,
+        clientId = CLIENT_ID,
+        tokenUrl = TOKEN_URL,
+        authUrl: authAt = AUTH_URL,
+        revokeUrl = REVOKE_URL,
+        aboutUrl = ABOUT_URL,
+        fetch: doFetch = globalThis.fetch,
+        patience = 180_000,
+    } = opts;
+    const tokenFile = path.join(vault.dir, 'drive.token');
+    const secretFile = path.join(vault.dir, 'google.json');
+
+    function secret() {
+        try {
+            const j = JSON.parse(fs.readFileSync(secretFile, 'utf8'));
+            return typeof j.secret === 'string' && j.secret ? j.secret : null;
+        } catch {
+            return null;
+        }
+    }
+
+    /// 持っている鍵（無ければ null）。
+    function load() {
+        try {
+            const raw = fs.readFileSync(tokenFile);
+            return JSON.parse(vault.decrypt(raw));
+        } catch {
+            return null;
+        }
+    }
+
+    function store(tok) {
+        fs.mkdirSync(vault.dir, { recursive: true });
+        fs.writeFileSync(tokenFile, vault.encrypt(JSON.stringify(tok)));
+    }
+
+    function forget() {
+        try { fs.unlinkSync(tokenFile); } catch { /* もう無い */ }
+    }
+
+    /// Google と鍵を交換する（初回は code、以後は refresh）。
+    async function exchange(body) {
+        const form = new URLSearchParams({ client_id: clientId, ...body });
+        const s = secret();
+        if (s) form.set('client_secret', s);
+        const r = await doFetch(tokenUrl, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: form.toString(),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.access_token) {
+            const why = j.error_description || j.error || ('HTTP ' + r.status);
+            throw new Error(why);
+        }
+        return j;
+    }
+
+    /// **サインイン。** ブラウザを開き、折り返しを待ち、鍵を交換して仕舞う。
+    /// 返すのは `{ ok: true, who }` か `{ error }`（人に見せる言い分）。
+    async function signIn() {
+        const { verifier, challenge } = pkce();
+        const state = b64url(crypto.randomBytes(16));
+        let settle;
+        const got = new Promise((go) => { settle = go; });
+        const server = http.createServer((req, res) => {
+            const u = new URL(req.url, 'http://127.0.0.1');
+            if (u.pathname !== '/') { res.writeHead(404); res.end(); return; }
+            const ok = u.searchParams.get('state') === state && u.searchParams.get('code');
+            res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+            res.end(landing(!!ok));
+            settle(ok ? { code: u.searchParams.get('code') }
+                      : { error: u.searchParams.get('error') || '返事の形が違います' });
+        });
+        await new Promise((go, no) => {
+            server.once('error', no);
+            server.listen(0, '127.0.0.1', go);
+        });
+        const port = server.address().port;
+        const redirect = 'http://127.0.0.1:' + port;
+        const timer = setTimeout(() => settle({ error: '時間切れです（三分待ちました）' }), patience);
+        try {
+            await open(authUrl({ clientId, redirect, challenge, state, authUrl: authAt }));
+            const back = await got;
+            if (back.error) return { error: back.error };
+            const tok = await exchange({
+                code: back.code, code_verifier: verifier,
+                grant_type: 'authorization_code', redirect_uri: redirect,
+            });
+            const now = Date.now();
+            const kept = {
+                access: tok.access_token,
+                refresh: tok.refresh_token || null,
+                until: now + Math.max(60, Number(tok.expires_in || 3600) - 60) * 1000,
+                scope: tok.scope || SCOPE,
+                who: null,
+            };
+            kept.who = await whoAmI(kept.access).catch(() => null);
+            store(kept);
+            return { ok: true, who: kept.who };
+        } catch (e) {
+            return { error: e.message };
+        } finally {
+            clearTimeout(timer);
+            server.close();
+        }
+    }
+
+    /// 誰としてサインインしているか（表示名とメール）。
+    async function whoAmI(access) {
+        const r = await doFetch(aboutUrl, { headers: { authorization: 'Bearer ' + access } });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        const u = j.user || {};
+        return { name: u.displayName || '', email: u.emailAddress || '' };
+    }
+
+    /// いま使える鍵。**切れそうなら黙って新しくする。** 無ければ null。
+    async function token() {
+        const kept = load();
+        if (!kept) return null;
+        if (Date.now() < kept.until) return kept.access;
+        if (!kept.refresh) return null;
+        try {
+            const tok = await exchange({ refresh_token: kept.refresh, grant_type: 'refresh_token' });
+            const next = {
+                ...kept,
+                access: tok.access_token,
+                until: Date.now() + Math.max(60, Number(tok.expires_in || 3600) - 60) * 1000,
+            };
+            store(next);
+            return next.access;
+        } catch {
+            return null;
+        }
+    }
+
+    /// サインインの様子。
+    function account() {
+        const kept = load();
+        return kept ? { signedIn: true, who: kept.who, expired: Date.now() >= kept.until && !kept.refresh }
+                    : { signedIn: false };
+    }
+
+    /// やめる ── Google 側の許可も取り消して、鍵を捨てる。
+    async function signOut() {
+        const kept = load();
+        forget();
+        if (kept) {
+            try {
+                await doFetch(revokeUrl + '?token=' + encodeURIComponent(kept.refresh || kept.access), { method: 'POST' });
+            } catch { /* 取り消せなくても、こちらの鍵は捨てた */ }
+        }
+        return { ok: true };
+    }
+
+    return { signIn, signOut, account, token, whoAmI, tokenFile, secretFile };
+}
+
+module.exports = { createDrive, pkce, authUrl, landing, CLIENT_ID, SCOPE };

@@ -438,6 +438,7 @@ Taketan が頼んだことが、いまも満たされているか。`python3 scr
 | 486 | 2026-09-11 | 網を電話の「表示」の面でも回す（窓で通ったことは電話で通ったことにならない） | `ios/Cian/Mesh.swift` ── 本物の面（`Paper.page`）を同じ配管で建て、`walk-phone.sh` の最後に七百五十六とおり押す。決めごとの表は窓の `grid.mjs` の写し。あわせて電話にも行末の Delete（`checkDel`）と選んで消すときの表の守り（`checkCut`）を繋いだ。見出しにした行の字下げは外す | `ios/Cian/Mesh.swift ~ enum Mesh` |
 | 487 | 2026-09-11 | 混ぜ方は **Git のマージの仕組みを可能な限りそのまま**取り込むこと。別々の場所は混ぜ、同じ場所は両方残して人に選ばせる。一致は空白を含めた完全一致 | `merge.rs` を `git merge-file` の写しに置き換えた（Myers ＋ `xdl_change_compact` の塊ずらし ＋ `xdl_do_merge` の重なり判定 ＋ zealous の同じ行の外出し ＋ 三行以下のあいだの巻き込み）。ぶつかった場所は `spots`（こちらの行の範囲と向こうの行の範囲）、前書きの鍵は `fields` で返す。**Git を正解に、でたらめな直し四百通りで一字一句同じ**ことを見張る試験と、失わないことの性質の試験（三千通り）を置いた | `crates/amber-core/src/merge.rs ~ fn agrees_with_git_merge_file` |
 | 488 | 2026-09-11 | 同じ場所を両方で直したら、**競合として見せて、どちらを採るか選ばせる**。削除も同じ三択の形（こちらを残す／〇〇を残す／両方）。相手は「その版を書いた人と端末」の名前で。タグも同じ | 窓の読む面に、ぶつかった場所ごとの選び口（`placeGadgets`・`.gadget` は字ではないので `paperToMd` が飛ばす）。帯（`drawBand`）に数と前・次・ぜんぶ。ぶつかった場所は**行の中身**で憶える（行番号は打つたびに動く）。前書きの鍵は帯の中で（`chooseField`・タグの「両方」は和集合）。混ぜる前のこちらは履歴に必ず残す（`gap: 0`） | `gui/renderer.js ~ function placeGadgets\(` |
+| 489 | 2026-09-11 | 同期は **Google Drive の API を amber の中から**（案 甲）。使う人は ⚙ →「同期」→「Google でサインイン」→ ブラウザで「許可」→ 窓に戻る、だけ。URL を打たせない・Google の設定画面を触らせない | `gui/drive.js` ── OAuth 2.0 の PKCE（毎回その場で作る使い捨ての合言葉）と 127.0.0.1 の折り返し。鍵は `safeStorage` で暗号化して `userData/drive.token` に。クライアント シークレットは repo に置かず、要るなら `userData/google.json` から。切れた鍵は黙って新しくする。やめると Google 側の許可も取り消す。偽の Google で一周する試験（`scripts/drive-test.js`） | `gui/drive.js ~ function createDrive\(` |
 
 ## 増やすとき
 

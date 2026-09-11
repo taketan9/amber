@@ -8051,6 +8051,7 @@ const CMDS = [
     { id: 'backup', name: 'バックアップ', app: true, run: cmdBackup },
     { id: 'restore', name: 'バックアップから戻す', app: true, run: cmdRestore },
     { id: 'root', name: 'ambər 保存ディレクトリ変更', app: true, run: cmdRoot },
+    { id: 'sync', name: '同期', app: true, sub: '同期していません', run: cmdSync },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'ambər について', app: true, run: cmdAbout },
     { id: 'history', name: '過去バージョン', need: 'note', menu: true, run: () => cmdHistory() },
@@ -8227,6 +8228,7 @@ function openMenu(at, which) {
         if (c.id === 'rail') return { ...c, name: railOff ? '左の列を出す' : '左の列を畳む' };
         if (c.id === 'list') return { ...c, name: listOff ? '一覧を出す' : '一覧を畳む' };
         if (c.id === 'root') return { ...c, sub: shortPath(state.root) };
+        if (c.id === 'sync') return { ...c, sub: syncLabel() };
         if (c.id === 'toshare') {
             if (state.open && state.open.shared) {
                 // **押す前に、どこへ戻るかを言う。** 「いちばん上へ」と
@@ -9766,6 +9768,47 @@ async function cmdRestore() {
     } catch (e) {
         say('戻せません: ' + why(e));
     }
+}
+
+/* ── 同期（Google Drive）── */
+
+/// いまの様子（献立の脇に出す）。**押す前に、いまどうなっているかを見せる。**
+let syncAccount = { signedIn: false };
+function syncLabel() {
+    if (!syncAccount.signedIn) return '同期していません';
+    const who = syncAccount.who || {};
+    return 'Google Drive' + (who.email ? '（' + who.email + '）' : '');
+}
+async function loadSync() {
+    try { syncAccount = await window.amber.driveAccount(); } catch { syncAccount = { signedIn: false }; }
+}
+
+/// 「同期」。**押すのは三つ、打つのは Google のパスワードだけ**（本人が決めた・
+/// 2026-09-11・案 甲）── amber の中で「Google でサインイン」を押す →
+/// ブラウザで「許可」→ 窓に戻る。URL は打たせない。
+async function cmdSync() {
+    await loadSync();
+    if (!syncAccount.signedIn) {
+        const go = await askPick('同期', [
+            { name: 'Google でサインイン', sub: 'ブラウザが開きます。「許可」を押したら、この窓に戻ってください', value: 'in' },
+        ], 'Mac と iPhone で同じノートを使えるようにします。amber が触れるのは、amber が作ったファイルだけです', true);
+        if (go !== 'in') return;
+        say('ブラウザで Google にサインインしてください…');
+        let got;
+        try { got = await window.amber.driveSignIn(); } catch (e) { got = { error: why(e) }; }
+        if (!got || got.error) { say('サインインできませんでした: ' + (got ? got.error : '返事がありません')); return; }
+        await loadSync();
+        const who = got.who || {};
+        say('Google にサインインしました' + (who.email ? '（' + who.email + '）' : ''));
+        return;
+    }
+    const go = await askPick('同期', [
+        { name: '同期をやめる', sub: 'Google のサインインを外します。ノートは消えません', value: 'out' },
+    ], 'いま: ' + syncLabel(), true);
+    if (go !== 'out') return;
+    try { await window.amber.driveSignOut(); } catch (e) { say('やめられません: ' + why(e)); return; }
+    await loadSync();
+    say('同期をやめました');
 }
 
 async function cmdRoot() {

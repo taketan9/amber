@@ -6,13 +6,14 @@
 // 2画面ファイラではないので、要らないものを継ぐと、そこから太る。
 
 const { app, BrowserWindow, ipcMain, dialog, clipboard, nativeTheme,
-        nativeImage, shell, Notification } = require('electron');
+        nativeImage, shell, Notification, safeStorage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
 const { execFile } = require('node:child_process');
 const { Engine } = require('./engine');
+const { createDrive } = require('./drive');
 
 // **名前を先に決める。** これが `userData` の置き場所を決めるので、
 // 決めないと憶えごとが `.../Electron/` に入り、Electron を使う他のものと
@@ -414,6 +415,26 @@ app.whenReady().then(() => {
         return { put };
     });
     ipcMain.handle('amber:remember', (_e, patch) => remember(patch));
+
+    // ── Google Drive との繋ぎ（`drive.js`）── サインインだけ。運ぶのは次。
+    //
+    // 鍵は `safeStorage` で暗号化して `userData` に置く（mac はキーチェーン）。
+    // 暗号化が使えない機械（Linux の一部）では、鍵を置かない ── 平文で置く
+    // くらいなら、毎回サインインしてもらうほうがよい。
+    const drive = createDrive({
+        open: (url) => shell.openExternal(url),
+        vault: {
+            dir: app.getPath('userData'),
+            encrypt: (text) => {
+                if (!safeStorage.isEncryptionAvailable()) throw new Error('この機械では鍵を安全に置けません');
+                return safeStorage.encryptString(text);
+            },
+            decrypt: (buf) => safeStorage.decryptString(Buffer.from(buf)),
+        },
+    });
+    ipcMain.handle('amber:driveSignIn', () => drive.signIn());
+    ipcMain.handle('amber:driveSignOut', () => drive.signOut());
+    ipcMain.handle('amber:driveAccount', () => drive.account());
     // **どのクラウドに置くかを、選べるようにする。**
     //
     // どのサービスも机の上では「ただのフォルダ」なので、amber は同期の
