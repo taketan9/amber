@@ -22,132 +22,15 @@
  * String.fromCharCode(10)。
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-
-const PORT = process.env.PORT || 9333;
-/// 試し場のノートが置いてある道（`walk.sh` が渡す）。
-const NOTES = process.env.NOTES || '';
-
-/* ── 窓と話す ── */
-
-const tabs = await (await fetch(`http://127.0.0.1:${PORT}/json`)).json();
-const page = tabs.find((x) => x.type === 'page');
-if (!page) {
-    console.error(`窓が見つかりません（${PORT} で出ていますか）`);
-    process.exit(2);
-}
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-await new Promise((go, no) => { ws.onopen = go; ws.onerror = no; });
-
-let id = 0;
-const waits = new Map();
-/// 窓が言ったこと（error と warning と、飛んだ例外）。
-let noise = [];
-ws.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    if (m.id && waits.has(m.id)) { waits.get(m.id)(m); waits.delete(m.id); return; }
-    if (m.method === 'Runtime.consoleAPICalled' && ['error', 'assert'].includes(m.params.type)) {
-        noise.push('console: ' + m.params.args
-            .map((a) => a.value ?? a.description ?? '?').join(' ').slice(0, 200));
-    }
-    if (m.method === 'Runtime.exceptionThrown') {
-        const d = m.params.exceptionDetails;
-        noise.push('例外: ' + String(d.exception?.description || d.text).split('\n')[0].slice(0, 200));
-    }
-};
-const send = (method, params) => new Promise((go) => {
-    const n = ++id;
-    waits.set(n, go);
-    ws.send(JSON.stringify({ id: n, method, params }));
-});
-await send('Runtime.enable');
-
-const sleep = (ms) => new Promise((go) => setTimeout(go, ms));
-
-/// 窓の中で一つ動かす。返ってくるのは値か、落ちた理由。
-///
-/// **待ちきりにしない。** 小窓を開ける命令を `await` すると、閉じる人が
-/// いないので永久に返ってこない ── 総ざらいが黙って止まる（実際に止めた）。
-/// 待つのをやめたことは、落第として出す。
-async function run(src) {
-    const r = await Promise.race([
-        send('Runtime.evaluate', {
-            expression: `(async () => { ${src} })()`,
-            awaitPromise: true, returnByValue: true, userGesture: true,
-        }),
-        sleep(Number(process.env.PATIENCE || 8000)).then(() => 'まった'),
-    ]);
-    if (r === 'まった') return { bad: '返ってきません（小窓が開いたまま待っている？）' };
-    const bad = r.result?.exceptionDetails;
-    if (bad) {
-        return { bad: String(bad.exception?.description || bad.text).split('\n')[0].slice(0, 300) };
-    }
-    return { value: r.result?.result?.value };
-}
-
-/* ── 見張りながら、一つ動かす ── */
-
-const bad = [];
-let ran = 0;
-
-/// `name` を動かして、落ちなかったか・言わなかったか・戻せるかを見る。
-///
-/// `want` を渡すと、返り値がそれと合うかも見る（合わなければ落第）。
-async function step(name, src, want) {
-    noise = [];
-    ran += 1;
-    const r = await run(src);
-    await sleep(Number(process.env.WAIT || 260));
-    const said = noise.filter((s) => !QUIET.some((q) => s.includes(q)));
-    // **触ったあと、まだ字に戻せるか。** ここが `null` になったノートは、
-    // 見た目は何ともないのに、そこから先の保存が黙って止まる。
-    const back = await run(`
-        if (!state.open || view === 'write') return 'skip';
-        return paperToMd(el('read'), state.head) === null ? 'もう字に戻せません' : 'ok';
-    `);
-    const why = [];
-    if (r.bad) why.push(r.bad);
-    if (said.length) why.push(...said);
-    if (back.value && back.value !== 'ok' && back.value !== 'skip') why.push(back.value);
-    if (typeof want === 'function') {
-        // 見張り方を渡された ── 速さのように、値そのものではなく
-        // 「その範囲か」を見たいとき。
-        const said2 = want(r.value);
-        if (said2 !== true) why.push(String(said2));
-    } else if (want !== undefined && r.value !== want) {
-        why.push(`返り値が ${JSON.stringify(r.value)}（ほしいのは ${JSON.stringify(want)}）`);
-    }
-    if (why.length) bad.push({ name, why });
-}
-
-/// **黙って見逃すもの。** 窓のせいでないもの・試す場所のせいのもの。
-const QUIET = [
-    'Autofill.enable',                 // CDP を繋いだときに Chromium が言う
-    'Request Autofill.setAddresses',
-    'net::ERR_FILE_NOT_FOUND',         // 試す場所に置いていない絵
-];
+import { step, run, bad, tally, sleep, ready, report, NOTES } from './walk-harness.mjs';
+import { syncWalk } from './walk-sync.mjs';
 
 /* ── 総ざらい ── */
 
 const path = (n) => `state.root + '/${n}'`;
 
 // 一。開いて、見る
-//
-// **エンジンが立ち上がるのを待つ。** 窓が出た直後の一回目は、まだ子が
-// 起きていないことがある ── 一度きりで見ると、たまに落ちる検査になる
-// （実際に何度か落ちた）。**時々鳴る検査は、無いより悪い。**
-await step('読み込み直す', `
-    // **窓の台本が読み終わるまで待つ。** CDP の口が開いた直後は、まだ
-    // renderer.js が評価されていないことがある（reload is not defined）。
-    for (let i = 0; i < 40 && typeof reload !== 'function'; i += 1) {
-        await new Promise((g) => setTimeout(g, 250));
-    }
-    for (let i = 0; i < 20; i += 1) {
-        await reload({ quiet: true });
-        if (state.notes.length > 0) return true;
-        await new Promise((g) => setTimeout(g, 250));
-    }
-    return 'ノートが一本も読めません';
-`, true);
+await ready();
 await step('ノートを開く（よくばり）', `await openNote(${path('よくばり.md')}); return !!state.open;`, true);
 await step('表示 → コード', `setView('write'); return view;`, 'write');
 await step('コード → 並べて表示', `setView('split'); return view;`, 'split');
@@ -1336,7 +1219,7 @@ for (const [name, ok, why] of SHAPES) {
         await new Promise((g) => setTimeout(g, 1500));
         return whole().includes('本文です。あ');`, true);
     if (!NOTES) continue;
-    ran += 1;
+    tally.ran += 1;
     try {
         const bytes = readFileSync(NOTES + '/' + name);
         if (!ok(bytes)) bad.push({ name: 'バイト：' + name, why: [why] });
@@ -1406,7 +1289,7 @@ await step('混ぜる：開く', `
 
 if (NOTES) {
     // **向こうの端末が、末尾に一行足した。**
-    ran += 1;
+    tally.ran += 1;
     try {
         const at = NOTES + '/混ぜる.md';
         const was = readFileSync(at, 'utf8');
@@ -1433,7 +1316,7 @@ await step('混ぜる：こちらでも打って、両方残る', `
     return true;`, true);
 
 if (NOTES) {
-    ran += 1;
+    tally.ran += 1;
     try {
         const got = readFileSync(NOTES + '/混ぜる.md', 'utf8');
         if (!got.includes('こちらが足した字') || !got.includes('向こうが足した行')) {
@@ -1462,7 +1345,7 @@ await step('同じ行：こちらで同じ行を打ちかけにする', `
     state.dirty = true;
     return true;`, true);
 if (NOTES) {
-    ran += 1;
+    tally.ran += 1;
     try {
         const at = NOTES + '/混ぜる.md';
         const was = readFileSync(at, 'utf8');
@@ -1506,7 +1389,7 @@ await step('同じ行：「こちらを残す」を押すと、向こうの行�
     if (!el('band').hidden && el('band').textContent.includes('か所')) return '帯が「か所」のまま残っています';
     return true;`, true);
 if (NOTES) {
-    ran += 1;
+    tally.ran += 1;
     try {
         const got = readFileSync(NOTES + '/混ぜる.md', 'utf8');
         if (got.includes('向こうが直した') || !got.includes('こちらが直した')) {
@@ -1600,6 +1483,9 @@ if (NOTES) {
     `, true);
 }
 
+// 二十の三。同期 ── 偽の Drive と上げ下ろし（`walk-sync.mjs`）。
+await syncWalk();
+
 // 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => x.book === '歩き試し'
@@ -1610,23 +1496,4 @@ await step('片づける', `
     return true;`, true);
 
 /* ── 報せ ── */
-
-console.log('');
-if (times.length) {
-    console.log('大きいノート（一万二千行）で測ったもの:');
-    for (const t of times) console.log('  ' + t);
-    console.log('');
-}
-if (!bad.length) {
-    console.log(`${ran} とおり動かして、落ちたものはありません`);
-    ws.close();
-    process.exit(0);
-}
-console.log(`${ran} とおり動かして、${bad.length} 件おかしいです`);
-console.log('');
-for (const b of bad) {
-    console.log('✗ ' + b.name);
-    for (const w of b.why) console.log('   ' + w);
-}
-ws.close();
-process.exit(1);
+report(times);

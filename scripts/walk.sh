@@ -27,6 +27,7 @@ port="${PORT:-9333}"
 quit() {
   pkill -f 'Electron.*remote-debugging-port='"$port" 2>/dev/null || true
   pkill -f "http.server $siteport" 2>/dev/null || true
+  pkill -f "fake-drive.js $driveport" 2>/dev/null || true
   sleep 1
   # **設定を戻すのは、何があっても。** ここを飛ばすと本人の窓が変わる。
   if [ -f "$work/amber.json.mine" ]; then
@@ -188,6 +189,13 @@ python3 "$here/team-fixture.py" "$work/team.csv"
 
 (cd "$work/site" && python3 -m http.server "$siteport" >/dev/null 2>&1 &)
 
+# **偽の Google Drive**（`scripts/fake-drive.js`）── 同期の上げ下ろしを、Google
+# 無しで回す。窓には `AMBER_DRIVE_URL` と `AMBER_DRIVE_TOKEN` で「そこを
+# Google だと思え・サインインは済んでいる」と教える。人が使う道には出ない。
+driveport="${DRIVEPORT:-8732}"
+(node "$here/fake-drive.js" "$driveport" >/dev/null 2>&1 &)
+sleep 0.5
+
 # **エンジンを作り直してから出す。** 窓は起動時の実行ファイルを掴んだまま
 # なので、直したはずの判断が効かないまま「通りました」になる（実際になった）。
 (cd "$root" && cargo build -q -p amber-server) || {
@@ -198,7 +206,8 @@ python3 "$here/team-fixture.py" "$work/team.csv"
 # **タイマーの絞りを切る。** 窓が隠れる（画面が消える・ほかの窓の下に
 # 入る）と、Chromium は数分でタイマーを一分に一度まで絞る ── 夜通し回した
 # 網が七時間かかり、「返ってきません」が混ざった（2026-09-10）。
-(cd "$root/gui" && HOME="$work/home" npx electron --remote-debugging-port="$port" \
+(cd "$root/gui" && HOME="$work/home" AMBER_DRIVE_URL="http://127.0.0.1:$driveport" AMBER_DRIVE_TOKEN=fake \
+  npx electron --remote-debugging-port="$port" \
   --disable-background-timer-throttling --disable-renderer-backgrounding \
   --disable-features=IntensiveWakeUpThrottling . \
   >"$work/win.log" 2>&1 &)
@@ -210,4 +219,4 @@ done
 # どの台本を走らせるか（既定は総ざらい）。
 script="${1:-walk}"
 SITE="http://127.0.0.1:$siteport/" PORT="$port" NOTES="$notes" TEAMCSV="$work/team.csv" \
-  node "$here/$script.mjs"
+  DRIVE="http://127.0.0.1:$driveport" node "$here/$script.mjs"

@@ -57,6 +57,12 @@ contextBridge.exposeInMainWorld('amber', {
     driveSignIn: () => ipcRenderer.invoke('amber:driveSignIn'),
     driveSignOut: () => ipcRenderer.invoke('amber:driveSignOut'),
     driveAccount: () => ipcRenderer.invoke('amber:driveAccount'),
+    /// 運ぶ ── 一覧・上げる・下ろす・向こうで消す。何を運ぶかは core（`syncplan`）。
+    driveList: () => ipcRenderer.invoke('amber:driveList'),
+    driveUpload: (args) => ipcRenderer.invoke('amber:driveUpload', args),
+    driveDownload: (id) => ipcRenderer.invoke('amber:driveDownload', id),
+    driveTrash: (id) => ipcRenderer.invoke('amber:driveTrash', id),
+    deviceName: () => ipcRenderer.invoke('amber:deviceName'),
 
     /// 画面そのものの版。**エンジンの版とは別に要る** ── 同梱するときは
     /// 実行ファイルだけ差し替えられるので、この二つはずれうる。

@@ -48,6 +48,10 @@ const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const ABOUT_URL = 'https://www.googleapis.com/drive/v3/about?fields=user';
+const API_URL = 'https://www.googleapis.com';
+/// Drive の中の、amber の置き場所の名前。**名前で選ぶ人のために**（Drive の
+/// 画面で見たとき、ここにあると分かる）。
+const HOME_NAME = 'ambər';
 
 const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
@@ -100,8 +104,13 @@ function createDrive(opts) {
         authUrl: authAt = AUTH_URL,
         revokeUrl = REVOKE_URL,
         aboutUrl = ABOUT_URL,
+        apiUrl = API_URL,
         fetch: doFetch = globalThis.fetch,
         patience = 180_000,
+        /// この端末の名前（向こうの端末に「誰の版か」と見せる札）。
+        by = 'Mac',
+        /// 試験のための鍵（あれば、サインイン無しで使える）。
+        fakeToken = null,
     } = opts;
     const tokenFile = path.join(vault.dir, 'drive.token');
     const secretFile = path.join(vault.dir, 'google.json');
@@ -117,6 +126,10 @@ function createDrive(opts) {
 
     /// 持っている鍵（無ければ null）。
     function load() {
+        if (fakeToken) {
+            return { access: fakeToken, refresh: null, until: Date.now() + 3_600_000,
+                     who: { name: '試し', email: 'test@example.com' } };
+        }
         try {
             const raw = fs.readFileSync(tokenFile);
             return JSON.parse(vault.decrypt(raw));
@@ -267,7 +280,116 @@ function createDrive(opts) {
         return { ok: true };
     }
 
-    return { signIn, signOut, account, token, whoAmI, tokenFile, secretFile };
+    /* ── Drive を読み書きする（運ぶだけ。何を運ぶかは core が決める） ── */
+
+    /// Drive の API を一つ叩く。鍵が無ければ、人の言葉で断る。
+    async function api(pathAndQuery, init = {}) {
+        const access = await token();
+        if (!access) throw new Error('同期のサインインが切れています。⚙ の「同期」からもう一度サインインしてください');
+        const r = await doFetch(apiUrl + pathAndQuery, {
+            ...init,
+            headers: { ...(init.headers || {}), authorization: 'Bearer ' + access },
+        });
+        if (r.status === 204) return null;
+        const text = await r.text();
+        if (!r.ok) {
+            let why = 'HTTP ' + r.status;
+            try { why = JSON.parse(text).error.message || why; } catch { /* 字のまま */ }
+            throw new Error(why);
+        }
+        return init.raw ? text : (text ? JSON.parse(text) : null);
+    }
+
+    const q = (s) => encodeURIComponent(s);
+    let homeId = null;
+    const dirIds = new Map();      // 'フォルダ/入れ子' → id
+
+    /// amber の置き場所（無ければ作る）。
+    async function home() {
+        if (homeId) return homeId;
+        const got = await api('/drive/v3/files?q=' + q(`name='${HOME_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents`) + '&fields=files(id,name)');
+        if (got.files && got.files.length) { homeId = got.files[0].id; return homeId; }
+        const made = await api('/drive/v3/files?fields=id', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: HOME_NAME, mimeType: 'application/vnd.google-apps.folder', parents: ['root'],
+                                   appProperties: { amber: 'home' } }),
+        });
+        homeId = made.id;
+        return homeId;
+    }
+
+    /// ノートのフォルダ（`家族/買い物`）を Drive の上にも作る ── Drive の画面で
+    /// 見る人のため。札（`rel`）が本物で、フォルダは見た目。
+    async function dir(relDir) {
+        if (!relDir) return home();
+        if (dirIds.has(relDir)) return dirIds.get(relDir);
+        if (!dirIds.size) {
+            // 一度だけ、amber が作ったフォルダをぜんぶ読む。
+            const got = await api('/drive/v3/files?q=' + q(`appProperties has { key='amber' and value='dir' } and trashed=false`) + '&fields=files(id,appProperties)&pageSize=1000');
+            for (const f of got.files || []) if (f.appProperties && f.appProperties.rel) dirIds.set(f.appProperties.rel, f.id);
+            if (dirIds.has(relDir)) return dirIds.get(relDir);
+        }
+        const up = relDir.includes('/') ? relDir.slice(0, relDir.lastIndexOf('/')) : '';
+        const parent = await dir(up);
+        const made = await api('/drive/v3/files?fields=id', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: relDir.split('/').pop(), mimeType: 'application/vnd.google-apps.folder', parents: [parent],
+                                   appProperties: { amber: 'dir', rel: relDir } }),
+        });
+        dirIds.set(relDir, made.id);
+        return made.id;
+    }
+
+    /// 向こうにあるノートの一覧 ── `[{ rel, id, tag, by }]`。
+    /// `tag` は上げた側が付けた指紋（無ければ Drive の md5）。
+    async function list() {
+        const out = [];
+        let pageToken = '';
+        do {
+            const got = await api('/drive/v3/files?q=' + q(`appProperties has { key='amber' and value='note' } and trashed=false`)
+                + '&fields=nextPageToken,files(id,name,md5Checksum,appProperties)&pageSize=1000'
+                + (pageToken ? '&pageToken=' + q(pageToken) : ''));
+            for (const f of got.files || []) {
+                const ap = f.appProperties || {};
+                if (!ap.rel) continue;
+                out.push({ rel: ap.rel, id: f.id, tag: ap.print || f.md5Checksum || '', by: ap.by || '' });
+            }
+            pageToken = got.nextPageToken || '';
+        } while (pageToken);
+        return out;
+    }
+
+    /// 一本上げる（`id` があれば上書き）。返すのは `{ id, tag }`。
+    async function upload({ rel, text, print, id }) {
+        const relDir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
+        const parent = id ? null : await dir(relDir);
+        const meta = { name: rel.split('/').pop(), mimeType: 'text/markdown',
+                       appProperties: { amber: 'note', rel, print, by } };
+        if (parent) meta.parents = [parent];
+        const boundary = 'amber' + crypto.randomBytes(8).toString('hex');
+        const body = '--' + boundary + '\r\ncontent-type: application/json; charset=UTF-8\r\n\r\n'
+            + JSON.stringify(meta) + '\r\n--' + boundary + '\r\ncontent-type: text/markdown; charset=UTF-8\r\n\r\n'
+            + text + '\r\n--' + boundary + '--';
+        const path = '/upload/drive/v3/files' + (id ? '/' + q(id) : '') + '?uploadType=multipart&fields=id,md5Checksum';
+        const got = await api(path, { method: id ? 'PATCH' : 'POST',
+            headers: { 'content-type': 'multipart/related; boundary=' + boundary }, body });
+        return { id: got.id, tag: print };
+    }
+
+    /// 一本下ろす（字）。
+    async function download(id) {
+        return api('/drive/v3/files/' + q(id) + '?alt=media', { raw: true });
+    }
+
+    /// 向こうで消す ── **ゴミ箱へ**（消さない。人が Drive で拾える）。
+    async function trash(id) {
+        await api('/drive/v3/files/' + q(id), { method: 'PATCH',
+            headers: { 'content-type': 'application/json' }, body: JSON.stringify({ trashed: true }) });
+        return { ok: true };
+    }
+
+    return { signIn, signOut, account, token, whoAmI, tokenFile, secretFile,
+             list, upload, download, trash, home, by };
 }
 
 module.exports = { createDrive, pkce, authUrl, landing, CLIENT_ID, SCOPE };

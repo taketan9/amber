@@ -6346,22 +6346,34 @@ function spotAt(rows, spot) {
     const t = spot.theirs;
     const n = o.length + t.length;
     if (!n) return -1;
+    // **末尾の改行は見ない。** 控えた行はファイルの字（最後の行にも改行が
+    // ある）、いまの字はエディタの字（前書きを切るときに末尾の改行が落ちる）
+    // ── 最後の行がぶつかった場所だと、そこだけ合わなかった。
+    const same = (a, b) => a !== undefined && a.replace(/\n$/, '') === b.replace(/\n$/, '');
     for (let i = 0; i + n <= rows.length; i += 1) {
         let ok = true;
-        for (let k = 0; k < o.length && ok; k += 1) if (rows[i + k] !== o[k]) ok = false;
-        for (let k = 0; k < t.length && ok; k += 1) if (rows[i + o.length + k] !== t[k]) ok = false;
+        for (let k = 0; k < o.length && ok; k += 1) if (!same(rows[i + k], o[k])) ok = false;
+        for (let k = 0; k < t.length && ok; k += 1) if (!same(rows[i + o.length + k], t[k])) ok = false;
         if (ok) return i;
     }
     return -1;
 }
 
-/// 読む面の、その行を持つかたまり（`paintIncoming` と同じ探し方）。
+/// 読む面の、その行を持ついちばん外のかたまり。
+///
+/// **中の行番号も見る。** 箇条書きの外側の札は最初の項目の一行ぶんしか
+/// 持たない（項目ごとに札があるので）── 外側だけ見ると、二つ目以降の項目が
+/// どのかたまりのものでもなくなり、選び口が置けなかった（実際に置けなかった）。
 function blockOfLine(rd, line) {
     for (const b of rd.children) {
         const from = Number(b.dataset.line);
         if (Number.isNaN(from)) continue;
-        const span = Number(b.dataset.span) || 1;
-        if (from <= line && line < from + span) return b;
+        let end = from + (Number(b.dataset.span) || 1);
+        for (const c of b.querySelectorAll('[data-line]')) {
+            const at = Number(c.dataset.line);
+            if (!Number.isNaN(at)) end = Math.max(end, at + (Number(c.dataset.span) || 1));
+        }
+        if (from <= line && line < end) return b;
     }
     return null;
 }
@@ -6663,6 +6675,7 @@ async function save() {
         state.base = text;
         state.dirty = false;
         el('state').textContent = '保存しました';
+        syncSoon();
         await freshenRow(path);
         drawStrip();
         setTimeout(() => {
@@ -9777,13 +9790,170 @@ let syncAccount = { signedIn: false };
 function syncLabel() {
     if (!syncAccount.signedIn) return '同期していません';
     const who = syncAccount.who || {};
-    return 'Google Drive' + (who.email ? '（' + who.email + '）' : '');
+    const at = syncLast ? '・最終 ' + new Date(syncLast).toTimeString().slice(0, 5) : '';
+    return 'Google Drive' + (who.email ? '（' + who.email + '）' : '') + at;
 }
 async function loadSync() {
     try { syncAccount = await window.amber.driveAccount(); } catch { syncAccount = { signedIn: false }; }
+    // サインインしているなら、時計を回して一度合わせる。
+    // 開いた直後は少し待ってから ── 一覧と面が組み上がる前に裏で運ばない。
+    if (syncAccount.signedIn) { syncClock(); syncSoon(6000); } else { clearInterval(syncTick); syncTick = null; }
 }
 // 開いた直後に一度 ── 献立の脇の「いま」は、押す前から正しくあること。
 loadSync();
+
+/* ── 運ぶ ──
+ *
+ * **判断は core（`syncplan`）、運ぶのはここ。** 向こうの一覧を持ってきて、
+ * 手順書をもらい、一つずつやって、運べたぶんだけ憶えてもらう（`synced`）。
+ * 途中で切れても、運べたぶんは憶えに残る ── 次に続きから。
+ *
+ * いつ運ぶか: 保存して三秒後・三十秒ごと・窓に戻ったとき・サインインした
+ * とき。**打っている最中には触らない** ── 下ろしたものは、ファイルが変わった
+ * ときの道（見張り → 拾い直す・打ちかけなら保存のときに混ぜる）で面に届く。
+ */
+let syncBusy = false;
+/// 勝手に運ぶか。**総ざらいは、これを切ってから順に押す**（保存のたびに裏で
+/// 運ぶと、見張っている数が動く）。手で呼ぶ `syncNow('手')` は切っても通る。
+let syncAuto = true;
+let syncTimer = null;
+let syncTick = null;
+let syncLast = null;
+let syncTrouble = '';
+let syncLastReport = null;
+
+function syncSoon(ms = 3000) {
+    if (!syncAccount.signedIn) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => syncNow('保存'), ms);
+}
+function syncClock() {
+    clearInterval(syncTick);
+    syncTick = setInterval(() => syncNow('時計'), 30_000);
+}
+window.addEventListener('focus', () => { if (syncAccount.signedIn) syncNow('戻った'); });
+
+/// 一度、合わせる。返すのは何を運んだかの数（試験が見る）。
+async function syncNow(reason) {
+    if (!syncAccount.signedIn || syncBusy || !state.root || state.guest) return null;
+    if (!syncAuto && reason !== '手') return null;
+    syncBusy = true;
+    const report = { reason, up: 0, down: 0, gone: 0, clash: 0, eyes: 0, trouble: [] };
+    try {
+        const remote = await window.amber.driveList();
+        const plan = await ask('syncplan', { path: state.root, who: 'drive', remote });
+        const done = [];
+        const gone = [];
+        let touched = false;
+        // **開いているノートを書き換えたか。** 見張り（`onChanged`）は、保存した
+        // 直後の数秒はそのノートの変わりを「自分の跳ね返り」として捨てる ──
+        // 同期が下ろした字はそこに紛れて、面が古いまま残る（実際に残った）。
+        // だから同期は自分で開き直す（打ちかけなら触らない ── 保存のときに混ざる）。
+        let openTouched = false;
+        for (const s of plan.steps || []) {
+            const at = state.root + '/' + s.rel;
+            const isOpen = !!(state.open && state.open.path === at);
+            try {
+                if (s.do === 'up') {
+                    const got = await ask('read', { path: at });
+                    const print = (await ask('syncprint', { path: at })).print;
+                    const r = await window.amber.driveUpload({ rel: s.rel, text: got.text, print, id: s.id || undefined });
+                    done.push({ rel: s.rel, id: r.id, tag: r.tag });
+                    report.up += 1;
+                } else if (s.do === 'down') {
+                    const text = await window.amber.driveDownload(s.id);
+                    await ask('syncdown', { path: at, text });
+                    const there = remote.find((x) => x.id === s.id);
+                    done.push({ rel: s.rel, id: s.id, tag: there ? there.tag : '' });
+                    report.down += 1;
+                    touched = true;
+                    if (isOpen) openTouched = true;
+                } else if (s.do === 'drophere') {
+                    // 向こうで消え、こちらは触っていない ── **ゴミ箱へ**（消さない）。
+                    await window.amber.trash(at);
+                    gone.push(s.rel);
+                    report.gone += 1;
+                    touched = true;
+                } else if (s.do === 'dropthere') {
+                    await window.amber.driveTrash(s.id);
+                    gone.push(s.rel);
+                    report.gone += 1;
+                } else if (s.do === 'clash') {
+                    // **両方が変わった ── 混ぜる。** 分かれる前の姿は `synced` が
+                    // 取っておいたもの（無ければ空 ── ぜんぶがぶつかった場所になり、
+                    // 両方残って人が選ぶ。失うよりよい）。
+                    const theirs = await window.amber.driveDownload(s.id);
+                    const ours = (await ask('read', { path: at })).text;
+                    const base = s.base ? (await ask('baseread', { path: state.root, hash: s.base })).text : null;
+                    const got = await ask('merge', { was: base || '', ours, theirs });
+                    // 混ぜる前のこちらを履歴に（Git の ORIG_HEAD の写し）。
+                    try { await ask('keep', { root: state.root, path: at, text: ours, gap: 0, force: true }); } catch { /* 履歴が置けなくても混ぜる */ }
+                    await ask('syncdown', { path: at, text: got.text });
+                    const print = (await ask('syncprint', { path: at })).print;
+                    const r = await window.amber.driveUpload({ rel: s.rel, text: got.text, print, id: s.id });
+                    done.push({ rel: s.rel, id: r.id, tag: r.tag });
+                    const there = remote.find((x) => x.id === s.id);
+                    noteIncoming(at, got, there && there.by ? there.by : '向こう');
+                    report.clash += 1;
+                    if (got.eyes) report.eyes += 1;
+                    touched = true;
+                    if (isOpen) openTouched = true;
+                }
+            } catch (e) {
+                report.trouble.push(s.rel + ': ' + why(e));
+            }
+        }
+        if (done.length || gone.length) await ask('synced', { path: state.root, who: 'drive', done, gone });
+        if (touched) await reload({ quiet: true });
+        // 開いているノートが下りてきた ── 打ちかけでなければ、その字に開き直す
+        // （帯と選び口もここで付く）。打ちかけなら、保存のときの混ぜに任せる。
+        if (openTouched && state.open && !state.dirty && !calOn) {
+            clearTimeout(readTimer);
+            await syncRead();
+            if (!state.dirty) await openNote(state.open.path, { walking: true });
+        }
+        syncLast = Date.now();
+        syncTrouble = report.trouble.length ? report.trouble[0] : '';
+    } catch (e) {
+        syncTrouble = why(e);
+        report.trouble.push(why(e));
+    } finally {
+        syncBusy = false;
+        syncLastReport = report;
+        drawSyncState();
+    }
+    return report;
+}
+
+/// 向こうと混ぜた印（来た行・ぶつかった場所）を、そのノートに憶えさせる。
+/// 開いていれば帯と選び口を出す。
+function noteIncoming(path, got, who) {
+    const rows = rowsOf(got.text);
+    const entry = {
+        path,
+        came: got.came || [],
+        both: got.both || [],
+        eyes: !!got.eyes,
+        who,
+        spots: (got.spots || []).map((sp) => ({
+            ours: rows.slice(sp.ours[0], sp.ours[0] + sp.ours[1]),
+            theirs: rows.slice(sp.theirs[0], sp.theirs[0] + sp.theirs[1]),
+        })),
+        fields: got.fields || [],
+    };
+    incomings[path] = entry;
+    window.amber.remember({ incomings });
+    if (state.open && state.open.path === path) {
+        incoming = entry;
+        drawBand();
+        paintIncoming();
+    }
+}
+
+/// いまの様子を出す（献立の脇の字と、困ったときの一言）。
+function drawSyncState() {
+    if (syncTrouble) say('同期できません: ' + syncTrouble);
+}
 
 /// サインインが駄目だったときの言い分を、**人が次に何をすればよいか**の形に。
 function signInTrouble(err) {

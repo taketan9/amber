@@ -421,8 +421,16 @@ app.whenReady().then(() => {
     // 鍵は `safeStorage` で暗号化して `userData` に置く（mac はキーチェーン）。
     // 暗号化が使えない機械（Linux の一部）では、鍵を置かない ── 平文で置く
     // くらいなら、毎回サインインしてもらうほうがよい。
+    // **試験のときは、偽の Drive を指す**（`scripts/fake-drive.js`・`walk.sh`）。
+    // `AMBER_DRIVE_URL` があれば Google の代わりにそこへ、`AMBER_DRIVE_TOKEN` が
+    // あればサインイン無しでその鍵を使う。人が使う道には出ない。
+    const fakeAt = process.env.AMBER_DRIVE_URL || '';
     const drive = createDrive({
         open: (url) => shell.openExternal(url),
+        by: os.hostname().replace(/\.local$/, '') || 'Mac',
+        ...(fakeAt ? { tokenUrl: fakeAt + '/token', authUrl: fakeAt + '/auth', revokeUrl: fakeAt + '/revoke',
+                       aboutUrl: fakeAt + '/about', apiUrl: fakeAt } : {}),
+        ...(process.env.AMBER_DRIVE_TOKEN ? { fakeToken: process.env.AMBER_DRIVE_TOKEN } : {}),
         vault: {
             dir: app.getPath('userData'),
             encrypt: (text) => {
@@ -435,6 +443,11 @@ app.whenReady().then(() => {
     ipcMain.handle('amber:driveSignIn', () => drive.signIn());
     ipcMain.handle('amber:driveSignOut', () => drive.signOut());
     ipcMain.handle('amber:driveAccount', () => drive.account());
+    ipcMain.handle('amber:driveList', () => drive.list());
+    ipcMain.handle('amber:driveUpload', (_e, args) => drive.upload(args));
+    ipcMain.handle('amber:driveDownload', (_e, id) => drive.download(id));
+    ipcMain.handle('amber:driveTrash', (_e, id) => drive.trash(id));
+    ipcMain.handle('amber:deviceName', () => drive.by);
     // **どのクラウドに置くかを、選べるようにする。**
     //
     // どのサービスも机の上では「ただのフォルダ」なので、amber は同期の

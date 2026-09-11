@@ -461,10 +461,52 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         | crate::sync::Step::Clash { id, rel } => (Some(id.clone()), rel.clone()),
                         crate::sync::Step::DropHere { rel } => (None, rel.clone()),
                     };
-                    serde_json::json!({ "do": s.word(), "rel": rel, "id": id })
+                    // **ぶつかったら、分かれる前の姿の指紋を添える** ── 呼ぶ側は
+                    // `baseread` でその中身を取り、三方向で混ぜる。
+                    let base = match &s {
+                        crate::sync::Step::Clash { .. } => was
+                            .iter()
+                            .find(|w| w.rel == rel)
+                            .map(|w| serde_json::Value::String(w.hash.clone()))
+                            .unwrap_or(serde_json::Value::Null),
+                        _ => serde_json::Value::Null,
+                    };
+                    serde_json::json!({ "do": s.word(), "rel": rel, "id": id, "base": base })
                 })
                 .collect();
             Ok(serde_json::json!({ "steps": steps }))
+        }
+
+        // 一本の指紋（`sync::fingerprint`）── 上げるときに向こうへ札として付ける。
+        "syncprint" => {
+            let bytes = std::fs::read(arg(p, "path")).unwrap_or_default();
+            Ok(serde_json::json!({ "print": crate::sync::fingerprint(&bytes) }))
+        }
+
+        // 向こうから下ろしたものを置く。**親のフォルダが無ければ作り、仮の名で
+        // 書いてから改名する**（Git の object の書き方の写し）── 途中で切れても
+        // 半端なノートを残さない。
+        "syncdown" => {
+            let path = std::path::PathBuf::from(arg(p, "path"));
+            let text = arg(p, "text");
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let tmp = path.with_extension("md.amber-part");
+            std::fs::write(&tmp, text.as_bytes())?;
+            std::fs::rename(&tmp, &path)?;
+            Ok(serde_json::json!({
+                "ok": true,
+                "stamp": crate::stamp::of(&path).as_ref().map(stamp_json),
+            }))
+        }
+
+        // 分かれる前の姿の中身（`synced` が取っておいたもの）。無ければ null。
+        "baseread" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let hash = arg(p, "hash");
+            let at = root.join(".amber").join("base").join(&hash);
+            Ok(serde_json::json!({ "text": std::fs::read_to_string(at).ok() }))
         }
 
         // 運び終わったぶんを憶える。
@@ -474,6 +516,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "synced" => {
             let root = std::path::PathBuf::from(arg(p, "path"));
             let who = p["who"].as_str().unwrap_or("drive");
+            // **合わせた姿の中身を取っておく**（Git の merge base の写し）──
+            // 指紋だけでは三方向に混ぜられない。`.amber/base/<指紋>` に置く。
+            let keep_base = p["base"].as_bool().unwrap_or(true);
             let done: Vec<crate::sync::Was> = p["done"]
                 .as_array()
                 .map(|a| {
@@ -499,7 +544,33 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .as_array()
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
                 .unwrap_or_default();
+            if keep_base {
+                let dir = root.join(".amber").join("base");
+                std::fs::create_dir_all(&dir)?;
+                for d in &done {
+                    let at = dir.join(&d.hash);
+                    if !at.exists() {
+                        if let Ok(bytes) = std::fs::read(root.join(&d.rel)) {
+                            let _ = std::fs::write(&at, bytes);
+                        }
+                    }
+                }
+            }
             crate::sync::remember(&root, who, &done, &gone)?;
+            if keep_base {
+                // もう指されていない姿は捨てる ── 増えるだけの引き出しにしない。
+                let live: std::collections::HashSet<String> =
+                    crate::sync::recall(&root, who).into_iter().map(|w| w.hash).collect();
+                if let Ok(rd) = std::fs::read_dir(root.join(".amber").join("base")) {
+                    for e in rd.flatten() {
+                        if let Some(name) = e.file_name().to_str() {
+                            if !live.contains(name) {
+                                let _ = std::fs::remove_file(e.path());
+                            }
+                        }
+                    }
+                }
+            }
             Ok(serde_json::json!({ "kept": done.len(), "dropped": gone.len() }))
         }
 

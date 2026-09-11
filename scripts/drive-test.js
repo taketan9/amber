@@ -119,6 +119,33 @@ const ok = (yes, what, got) => {
     ok(/^[A-Za-z0-9_-]{43,}$/.test(p1.verifier) && /^[A-Za-z0-9_-]{43}$/.test(p1.challenge), 'base64url の形', p1);
 
     fake.close();
+
+    console.log('運ぶ ── 偽の Drive に、上げて・並べて・下ろして・ゴミ箱へ');
+    {
+        const { start } = require('./fake-drive');
+        const fd = await start();
+        const d3 = createDrive({ open: async () => {}, vault: { ...vault, dir: fs.mkdtempSync(path.join(os.tmpdir(), 'amber-drive3-')) },
+            apiUrl: fd.url, fakeToken: 'fake', by: '試しの Mac' });
+        ok((await d3.list()).length === 0, 'はじめは空');
+        const a = await d3.upload({ rel: '買い物.md', text: '# 買い物\n\n- 牛乳\n', print: 'p1' });
+        ok(!!a.id && a.tag === 'p1', '一本上げると id と指紋が返る', a);
+        const b = await d3.upload({ rel: '家族/週末.md', text: '# 週末\n', print: 'p2' });
+        const seen = await d3.list();
+        ok(seen.length === 2, '二本並ぶ', seen);
+        const fam = seen.find((x) => x.rel === '家族/週末.md');
+        ok(fam && fam.id === b.id && fam.tag === 'p2' && fam.by === '試しの Mac', '入れ子の道と、誰が上げたかが札に', fam);
+        const dirs = [...fd.files().values()].filter((f) => f.appProperties.amber === 'dir');
+        ok(dirs.length === 1 && dirs[0].appProperties.rel === '家族', 'Drive の上にもフォルダができる', dirs.map((x) => x.appProperties));
+        ok(await d3.download(a.id) === '# 買い物\n\n- 牛乳\n', '下ろすと同じ字');
+        const c = await d3.upload({ rel: '買い物.md', text: '# 買い物\n\n- 牛乳 2本\n', print: 'p3', id: a.id });
+        ok(c.id === a.id && (await d3.list()).find((x) => x.rel === '買い物.md').tag === 'p3', '上書きすると同じ id で指紋が変わる');
+        await d3.trash(b.id);
+        ok((await d3.list()).length === 1, 'ゴミ箱に入れると一覧から消える');
+        const got = await fetch(fd.url + '/_get?rel=買い物.md').then((r) => r.json());
+        ok(got.text === '# 買い物\n\n- 牛乳 2本\n', '向こうの端末を演じる口からも同じ字が見える');
+        fd.close();
+    }
+
     console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');
     process.exit(bad ? 1 : 0);
 })();
