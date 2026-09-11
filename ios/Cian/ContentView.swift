@@ -227,6 +227,10 @@ struct ContentView: View {
         .onChange(of: store.notes) { _, _ in answer() }
         .task {
             store.restore()
+            // 同期（依頼 500）── 棚と机を渡して、サインインしていれば時計を回す。
+            Syncing.shared.store = store
+            Syncing.shared.desk = desk
+            Syncing.shared.load()
             // What the routines owed while the phone was doing something
             // else. Asked for once, on the way in — see `Bell` for why this
             // is the moment and not nine on a Wednesday.
@@ -639,6 +643,14 @@ struct ContentView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
+                // **同期の様子は一覧の頭に**（依頼 500・窓と同じ場所）。
+                if store.at.isEmpty {
+                    SyncLine()
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 4, trailing: 16))
+                }
+
                 // 並べ替えとフィルタ。**窓と同じ場所** ── 一覧のすぐ上に
                 // 二つ並ぶ。最上段に置くと、作るボタンと同じ高さに座って
                 // 「よく使うもの」に見えてしまう（前はそうなっていた）。
@@ -1047,6 +1059,7 @@ struct Waking: ViewModifier {
             // 開いている札まで組み直されて、打った字が消えることがある。
             if desk.tabs.contains(where: { $0.dirty }) { return }
             store.reload()
+            Task { await Syncing.shared.now("戻った") }
         }
     }
 }
@@ -1073,6 +1086,51 @@ struct Seeking: ViewModifier {
                 }
         } else {
             content
+        }
+    }
+}
+
+/// 一覧の頭の一行 ── 「● 同期しています ・ 最終 hh:mm ・ メールアドレス」。
+/// 困っているときは赤く、その言い分と「接続確認する」。始める前は灰色で
+/// 「同期していません」（始めるのは設定から）。
+struct SyncLine: View {
+    @ObservedObject private var sync = Syncing.shared
+
+    var body: some View {
+        if !sync.signedIn {
+            HStack(spacing: 6) {
+                Circle().fill(Color.secondary).frame(width: 7, height: 7)
+                Text("同期していません ・ 設定の「同期」から始められます").font(.footnote).foregroundStyle(.secondary)
+            }
+        } else if !sync.trouble.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("同期できません" + (sync.troubleSince.map { " ── " + Syncing.hhmm($0) + " から" } ?? ""))
+                    .font(.footnote.weight(.semibold)).foregroundStyle(Color(red: 0.72, green: 0.26, blue: 0.23))
+                Text(sync.troubleFace.text).font(.footnote).foregroundStyle(.secondary)
+                if sync.troubleFace.again {
+                    Button(sync.troubleFace.button) { Task { await sync.now("手") } }
+                        .font(.footnote.weight(.semibold))
+                }
+            }
+        } else if let fresh = sync.fresh {
+            var parts: [String] = []
+            let _ = { () -> Void in
+                if fresh.up > 0 { parts.append("アップロード\(fresh.up)本") }
+                if fresh.down > 0 { parts.append("ダウンロード\(fresh.down)本") }
+                if fresh.gone > 0 { parts.append("ゴミ箱へ\(fresh.gone)本") }
+                if fresh.clash > 0 { parts.append("同じ行を両方で直したノート\(fresh.clash)本") }
+                if fresh.moved > 0 { parts.append("名前の変更\(fresh.moved)本") }
+            }()
+            VStack(alignment: .leading, spacing: 2) {
+                Text("同期しました" + (sync.last.map { " ── " + Syncing.hhmm($0) } ?? ""))
+                    .font(.footnote.weight(.semibold)).foregroundStyle(Color(red: 0.25, green: 0.49, blue: 0.32))
+                Text(parts.joined(separator: "・")).font(.footnote).foregroundStyle(.secondary)
+            }
+        } else {
+            HStack(spacing: 6) {
+                Circle().fill(sync.busy ? Color("AccentColor") : Color(red: 0.25, green: 0.49, blue: 0.32)).frame(width: 7, height: 7)
+                Text(sync.line).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+            }
         }
     }
 }

@@ -20,6 +20,7 @@ work="${TMPDIR:-/tmp}/amber-phone-walk"
 
 quit() {
   [ -n "$site" ] && kill "$site" 2>/dev/null
+  pkill -f "fake-drive.js $driveport" 2>/dev/null || true
   rm -rf "$work"
 }
 trap quit EXIT INT TERM
@@ -45,6 +46,9 @@ printf 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:%s\r\nBEGIN:VEVENT\r\nDTS
 # 片づけのときに本体が生き残る。
 python3 -m http.server "$port" --directory "$work" >/dev/null 2>&1 &
 site=$!
+# **偽の Google Drive**（依頼 500）── 電話の同期を Google 無しで回す。
+driveport="${DRIVEPORT:-8733}"
+(node "$here/fake-drive.js" "$driveport" >/dev/null 2>&1 &)
 
 boot=$(xcrun simctl list devices booted | grep -o '([0-9A-F-]\{36\})' | head -1 | tr -d '()')
 if [ -z "$boot" ]; then
@@ -72,6 +76,8 @@ xcrun simctl privacy "$boot" grant calendar "$app" >/dev/null 2>&1 || true
 
 out="$work/out.txt"
 SIMCTL_CHILD_SITE="http://127.0.0.1:$port/" \
+  SIMCTL_CHILD_AMBER_DRIVE_URL="http://127.0.0.1:$driveport" SIMCTL_CHILD_AMBER_DRIVE_TOKEN=fake \
+  SIMCTL_CHILD_AMBER_DEVICE="試しの iPhone" \
   xcrun simctl launch --console-pty "$boot" "$app" --walk 2>&1 | tee "$out" || true
 xcrun simctl uninstall "$boot" "$app" >/dev/null 2>&1 || true
 

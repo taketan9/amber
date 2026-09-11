@@ -1055,6 +1055,8 @@ final class NotesStore: ObservableObject {
         if answer["conflict"] as? Bool == true {
             return .conflict(why: answer["why"] as? String ?? "開いたあとで更新されています")
         }
+        // 保存の三秒後に同期（依頼 500・窓の `syncSoon` と同じ）。
+        Syncing.shared.soon()
         return .ok(stamp: answer["stamp"] as? String ?? "")
     }
 

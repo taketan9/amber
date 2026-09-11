@@ -128,6 +128,9 @@ struct Where: View {
     @State private var feeding = false
     @AppStorage("cian.look") private var look = Look.auto
     @AppStorage("amber.palette") private var palette = ""
+    @ObservedObject private var sync = Syncing.shared
+    @State private var signingIn = false
+    @State private var signInSaid: String?
     @AppStorage("amber.font") private var font = Size.system
     @AppStorage("cian.autosave") private var autosave = true
 
@@ -159,6 +162,51 @@ struct Where: View {
                             Label("この iPhone の中に戻す", systemImage: "iphone")
                         }
                     }
+                }
+
+                Section {
+                    if sync.signedIn {
+                        if let who = sync.who, !who.email.isEmpty {
+                            LabeledContent("Google", value: who.email)
+                        }
+                        LabeledContent("最終", value: sync.last.map(Syncing.hhmm) ?? "まだ")
+                        Button {
+                            Task { await sync.now("手") }
+                        } label: {
+                            Label(sync.busy ? "同期しています…" : "いま同期する", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(sync.busy)
+                        Button(role: .destructive) {
+                            Task { await sync.signOut() }
+                        } label: {
+                            Label("同期をやめる", systemImage: "xmark.circle")
+                        }
+                    } else {
+                        Button {
+                            signingIn = true
+                            Task {
+                                defer { signingIn = false }
+                                do {
+                                    let who = try await sync.signIn()
+                                    signInSaid = "Google にサインインしました" + (who.email.isEmpty ? "" : "（" + who.email + "）")
+                                } catch {
+                                    signInSaid = "サインインできませんでした: " + error.localizedDescription
+                                }
+                            }
+                        } label: {
+                            Label(signingIn ? "ブラウザで「許可」を押してください…" : "Google でサインイン", systemImage: "person.crop.circle.badge.checkmark")
+                        }
+                        .disabled(signingIn)
+                    }
+                    if let said = signInSaid {
+                        Text(said).font(.footnote).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("同期")
+                } footer: {
+                    Text(sync.signedIn
+                         ? "Mac と同じノートを Google Drive の「ambər」フォルダで使っています。保存の三秒後・三十秒ごと・この画面に戻ったときに同期します。"
+                         : "Mac と iPhone で同じノートを使えるようにします。ambər が触れるのは、ambər が作ったファイルだけです。")
                 }
 
                 Section {

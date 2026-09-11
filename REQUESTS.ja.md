@@ -449,6 +449,7 @@ Taketan が頼んだことが、いまも満たされているか。`python3 scr
 | 497 | 2026-09-12 | 絵（`attachments/` の中）も同期で運ぶ ── 絵を貼ったノートが、向こうの端末で絵だけ欠けていた | `sync::assets` が `attachments/` の絵をノートと同じ手順書に乗せる（道は `仕事/attachments/段取り-123.png`）。bytes は描く側を通さず主の側で読み書き（`driveUploadFile`／`driveDownloadFile`・仮の名で書いてから改名）。両方が変わった絵は混ぜられないので、こちらを残して向こうのものは `名前.2.png` として隣に置く。分かれる前の姿は取っておかない | `crates/amber-core/src/sync.rs ~ pub fn assets\(` |
 | 498 | 2026-09-12 | グループカレンダーは人ごとに色を変えて（花木は青・山田はピンク・佐藤は黄のように）。個人のカレンダーは既定の色を選べるように（いまは淡い緑、本人はオレンジが好き） | 段ごとに `--lane`（`laneColor`: 決めてあればその色、無ければ並んだ順に五色（青・ピンク・黄・緑・紫）を回す）。名前の右押しで色を選ぶ（`calColors`）。個人カレンダーの色は「カレンダー表示設定」の「個人カレンダーの色」で十色から（`calHereColor` → `--cal-here`） | `gui/renderer.js ~ function laneColor\(` |
 | 499 | 2026-09-12 | iPhone の配色も cian と同じ二十一に揃える（本人「進めておいて」） | `ios/Cian/Palettes.swift` を `themes-test --write` が窓と同じ元・同じ算数（`palettes.js` の `amberVarsOf`）から作る。設定の「見た目」の下に「配色」。選ぶと明暗はその配色に従い、面（WKWebView）は `window.setPalette` で十五の変数を差し、面の地もその配色に。tint はシアンのまま（依頼 75）、iOS の一覧などの地は iOS の色のまま（明暗だけ従う） | `ios/Cian/Palettes.swift ~ enum Palettes` |
+| 500 | 2026-09-12 | iPhone でも同期（Google でサインイン一回・上げ下ろし・改名・絵・両方向の消し）。窓と同じ作り | `ios/Cian/Drive.swift`（OAuth 2.0 PKCE・`ASWebAuthenticationSession`・折り返しは iOS 用クライアントの URL スキーム・鍵はキーチェーン・Drive の一覧／上げ／下ろし／ゴミ箱／改名は窓の `drive.js` と同じ札）と `Syncing.swift`（窓の `syncNow` の写し・判断は core の `syncplan`・打ちかけでない札だけ読み直す）。設定に「同期」、一覧の頭に一行。保存の三秒後・三十秒ごと・前に出たとき。走査（`walk-phone.sh`）は偽の Drive を相手に上げ・下ろし・直し・改名・絵・消しを押す | `ios/Cian/Syncing.swift ~ func now\(` |
 
 ## 増やすとき
 

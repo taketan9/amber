@@ -343,12 +343,102 @@ enum Walk {
             }
         }
 
+        // ── 四の二。同期（偽の Drive を相手に・依頼 500） ────
+        if let drive = ProcessInfo.processInfo.environment["AMBER_DRIVE_URL"] {
+            await syncWalk(store, drive)
+        }
+
         // ── 五。「表示」の面の網（位置 × 操作・`Mesh`） ────
         let grid = await Mesh.run()
         ran += grid.ran
         bad.append(contentsOf: grid.bad)
 
         finish()
+    }
+
+    /// 偽の Drive（`scripts/fake-drive.js`）に、上げて・下ろして・改名を写して・消す。
+    /// 向こうの端末は `/_put` `/_move` `/_trash` で演じる（窓の `walk-sync.mjs` と同じ）。
+    private static func syncWalk(_ store: NotesStore, _ drive: String) async {
+        func talk(_ path: String, _ body: [String: Any]? = nil) async -> [String: Any] {
+            var req = URLRequest(url: URL(string: drive + path)!)
+            if let body {
+                req.httpMethod = "POST"
+                req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            }
+            guard let (data, _) = try? await URLSession.shared.data(for: req) else { return [:] }
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { return obj }
+            if let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] { return ["list": arr] }
+            return [:]
+        }
+        func rels() async -> [String] {
+            let got = await talk("/_list")
+            return (got["list"] as? [[String: Any]] ?? []).compactMap { ($0["appProperties"] as? [String: Any])?["rel"] as? String }
+        }
+        _ = await talk("/_reset", [:])
+        let sync = Syncing.shared
+        sync.store = store
+        sync.auto = false
+        sync.load()
+        await step("同期：サインイン済みに見える") { sync.signedIn ? nil : "サインインしていないことになっています" }
+        await step("同期：一度目でこちらのノートがぜんぶ上がる") {
+            guard let r = await sync.now("手") else { return "運びませんでした" }
+            if let t = r.trouble.first { return "困りごと: " + t }
+            return r.up >= store.notes.count ? nil : "\(r.up) 本しか上がりません（\(store.notes.count) 本のはず）"
+        }
+        await step("同期：向こうに同じ道で並ぶ") {
+            let there = await rels()
+            return there.contains("ambər へようこそ.md") ? nil : "向こうの一覧: " + there.prefix(6).joined(separator: " / ")
+        }
+        await step("同期：二度目は何も運ばない") {
+            guard let r = await sync.now("手") else { return "運びませんでした" }
+            return r.up == 0 && r.down == 0 && r.clash == 0 ? nil : "\(r.up)/\(r.down)/\(r.clash)"
+        }
+        _ = await talk("/_put", ["rel": "太郎から.md", "text": "---\ncreated: 2026-09-12\n---\n\n# 太郎から\n\nMac で書いた。\n", "by": "太郎の Mac"])
+        await step("同期：向こうが置いたノートが、こちらに来る") {
+            guard let r = await sync.now("手") else { return "運びませんでした" }
+            if r.down != 1 { return "下りたのが \(r.down) 本" }
+            return store.notes.contains { $0.title == "太郎から" } ? nil : "一覧に出ません"
+        }
+        await step("同期：こちらで直すと、向こうに上がる") {
+            guard let note = store.notes.first(where: { $0.title == "太郎から" }) else { return "太郎から がありません" }
+            let (text, stamp) = try store.open(note)
+            _ = try store.save(note, text: text + "\niPhone で足した。\n", stamp: stamp)
+            guard let r = await sync.now("手") else { return "運びませんでした" }
+            if r.up != 1 { return "上がったのが \(r.up) 本" }
+            let got = await talk("/_get?rel=" + ("太郎から.md".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""))
+            return (got["text"] as? String ?? "").contains("iPhone で足した。") ? nil : "向こうの字が古いままです"
+        }
+        _ = await talk("/_move", ["rel": "太郎から.md", "to": "太郎のメモ.md"])
+        await step("同期：向こうで名前が変わると、こちらのファイルも変わる") {
+            guard let r = await sync.now("手") else { return "運びませんでした" }
+            if r.moved != 1 { return "改名が \(r.moved) 本（\(r.trouble.joined(separator: " / ")))" }
+            let here = store.notes.map { $0.path.split(separator: "/").last.map(String.init) ?? "" }
+            if here.contains("太郎から.md") { return "古い名前が残っています" }
+            return here.contains("太郎のメモ.md") ? nil : "新しい名前がありません: " + here.prefix(6).joined(separator: " / ")
+        }
+        let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        _ = await talk("/_put", ["rel": "attachments/太郎の絵.png", "b64": png, "by": "太郎の Mac"])
+        await step("同期：向こうが置いた絵が、bytes のまま下りてくる") {
+            guard let r = await sync.now("手") else { return "運びませんでした" }
+            if r.down != 1 { return "下りたのが \(r.down) 本（\(r.trouble.joined(separator: " / ")))" }
+            let at = store.rootPath + "/attachments/太郎の絵.png"
+            guard let data = FileManager.default.contents(atPath: at) else { return "絵がありません" }
+            return data.base64EncodedString() == png ? nil : "bytes が違います"
+        }
+        _ = await talk("/_trash", ["rel": "太郎のメモ.md"])
+        await step("同期：向こうで消したノートは、こちらからも消える") {
+            guard let r = await sync.now("手") else { return "運びませんでした" }
+            if r.gone != 1 { return "消えたのが \(r.gone) 本（\(r.trouble.joined(separator: " / ")))" }
+            return store.notes.contains { $0.title == "太郎のメモ" } ? "一覧に残っています" : nil
+        }
+        await step("同期：こちらで消したノートは、向こうでもゴミ箱へ") {
+            guard let note = store.notes.first(where: { $0.title == "ストラテジーパターン" }) else { return "ノートがありません" }
+            try store.remove(note)
+            guard let r = await sync.now("手") else { return "運びませんでした" }
+            if r.gone != 1 { return "消えたのが \(r.gone) 本" }
+            return (await rels()).contains("ストラテジーパターン.md") ? "向こうに残っています" : nil
+        }
+        sync.auto = true
     }
 
     private static func finish() {

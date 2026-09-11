@@ -52,8 +52,8 @@ enum Cian {
     /// から**渡してくれる ── 札（`.名前.md.icloud`）しか無いノートを
     /// 開いたときに、「無い」ではなく中身が返る。
     /// 書くほうを通すと、書いている間だけあちらが止まる。
-    private static let writers: Set<String> = ["write", "keep"]
-    private static let readers: Set<String> = ["read", "blocks", "html", "oldtext"]
+    private static let writers: Set<String> = ["write", "keep", "syncdown"]
+    private static let readers: Set<String> = ["read", "blocks", "html", "oldtext", "syncprint"]
 
     private static func coordinated(_ method: String, _ params: [String: Any]) -> URL? {
         guard writers.contains(method) || readers.contains(method),
