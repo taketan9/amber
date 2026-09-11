@@ -639,6 +639,14 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 "came": m.came,
                 "both": m.both,
                 "eyes": m.needs_eyes(),
+                // ぶつかった場所（人が三択で選ぶ）── こちらの行の範囲と、その直後の向こうの行の範囲。
+                "spots": m.spots.iter().map(|s| serde_json::json!({
+                    "ours": [s.ours.0, s.ours.1], "theirs": [s.theirs.0, s.theirs.1],
+                })).collect::<Vec<_>>(),
+                // 前書きでぶつかった鍵（本文にはこちらの値が置いてある）。
+                "fields": m.fields.iter().map(|f| serde_json::json!({
+                    "key": f.key, "ours": f.ours, "theirs": f.theirs,
+                })).collect::<Vec<_>>(),
             }))
         }
 
