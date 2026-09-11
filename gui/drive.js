@@ -195,6 +195,8 @@ function createDrive(opts) {
             store(kept);
             return { ok: true, who: kept.who };
         } catch (e) {
+            // 端末にも残す ── 窓の一言は消えるが、`run.sh` の端末には残る。
+            console.error('[同期] サインインできません:', e.message);
             return { error: e.message };
         } finally {
             clearTimeout(timer);

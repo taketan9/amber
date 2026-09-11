@@ -9782,6 +9782,24 @@ function syncLabel() {
 async function loadSync() {
     try { syncAccount = await window.amber.driveAccount(); } catch { syncAccount = { signedIn: false }; }
 }
+// 開いた直後に一度 ── 献立の脇の「いま」は、押す前から正しくあること。
+loadSync();
+
+/// サインインが駄目だったときの言い分を、**人が次に何をすればよいか**の形に。
+function signInTrouble(err) {
+    const e = String(err || '');
+    if (/client_secret/i.test(e)) {
+        return 'Google が「クライアント シークレット」を求めています。'
+            + '手元のシークレットを ~/Library/Application Support/amber/google.json に'
+            + ' {"secret": "…"} の形で置いて、もう一度お試しください';
+    }
+    if (/access_denied/i.test(e)) {
+        return 'Google に断られました（アクセスをブロック）。テスト利用者に、いま使ったアカウントを足してください';
+    }
+    if (/時間切れ/.test(e)) return 'ブラウザで「許可」を押す前に、三分が過ぎました。もう一度お試しください';
+    if (/安全に置けません/.test(e)) return e;
+    return 'サインインできませんでした: ' + e;
+}
 
 /// 「同期」。**押すのは三つ、打つのは Google のパスワードだけ**（本人が決めた・
 /// 2026-09-11・案 甲）── amber の中で「Google でサインイン」を押す →
@@ -9796,7 +9814,13 @@ async function cmdSync() {
         say('ブラウザで Google にサインインしてください…');
         let got;
         try { got = await window.amber.driveSignIn(); } catch (e) { got = { error: why(e) }; }
-        if (!got || got.error) { say('サインインできませんでした: ' + (got ? got.error : '返事がありません')); return; }
+        if (!got || got.error) {
+            // **消えない形で言う。** 帯の一言は数秒で消え、見逃すと「押したのに
+            // 何も起きない」にしか見えない（実際に見逃された・2026-09-11）。
+            await askPick('サインインできませんでした', [{ name: '閉じる', value: 0 }],
+                signInTrouble(got ? got.error : '返事がありません'), true);
+            return;
+        }
         await loadSync();
         const who = got.who || {};
         say('Google にサインインしました' + (who.email ? '（' + who.email + '）' : ''));
