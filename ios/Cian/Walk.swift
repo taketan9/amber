@@ -351,6 +351,47 @@ enum Walk {
         // ── 四の三。保存ディレクトリを二つ（依頼 511） ────
         await placeWalk(store, ProcessInfo.processInfo.environment["AMBER_DRIVE_URL"])
 
+        // ── 四の四。カレンダー表示設定と、読める形の書き出し（依頼 515・516） ────
+        step("カレンダー表示設定：隠した予定表は見えなくなり、戻せば見える") {
+            let was = CalPrefs.hide
+            defer { CalPrefs.hide = was }
+            let me = Calendaring.Slot(day: "2026-09-01", at: nil, title: "t", path: "/x.md", kind: "note")
+            let away = Calendaring.Slot(day: "2026-09-01", at: nil, title: "t", path: "", kind: "away", place: "", from: "会社")
+            CalPrefs.hide = []
+            if !CalPrefs.visible(me) || !CalPrefs.visible(away) { return "隠していないのに見えません" }
+            CalPrefs.hide = ["away:会社"]
+            if CalPrefs.visible(away) { return "隠したのに見えます" }
+            if !CalPrefs.visible(me) { return "別のものまで隠れました" }
+            if !CalPrefs.sources().contains(where: { $0.key == "away:会社" }) { return "隠したものが一覧に無く、戻せません" }
+            return nil
+        }
+        step("カレンダー表示設定：土日と個人カレンダーの色を憶える") {
+            let (w, c) = (CalPrefs.weekend, CalPrefs.hereColor)
+            defer { CalPrefs.weekend = w; CalPrefs.hereColor = c }
+            CalPrefs.weekend = false
+            CalPrefs.hereColor = "#e8702a"
+            if CalPrefs.weekend { return "土日が戻っています" }
+            if CalPrefs.colorName(CalPrefs.hereColor) != "オレンジ" { return "色の名前が \(CalPrefs.colorName(CalPrefs.hereColor))" }
+            return nil
+        }
+        step("カレンダー：週は月曜から、日は一日ずつ") {
+            if Calendaring.shift("2026-09-12", 7) != "2026-09-19" { return "七日先が違います" }
+            if Calendaring.weekName("2026-09-12") != "土" { return "曜日が \(Calendaring.weekName("2026-09-12"))" }
+            if Calendaring.shift("2026-09-30", 1) != "2026-10-01" { return "月を跨げません" }
+            return nil
+        }
+        step("エクスポート：HTML は一枚で完結し、PDF は頁になる") {
+            guard let note = store.notes.first(where: { $0.title == "ストラテジーパターン" }) ?? store.notes.first else { return "ノートがありません" }
+            let (text, _) = try store.open(note)
+            let html = try Exporting.html(note, text: text)
+            let page = try String(contentsOf: html, encoding: .utf8)
+            if !page.contains("<!doctype html") || !page.contains(note.shown) { return "HTML の形になっていません" }
+            let pdf = try Exporting.pdf(note, text: text)
+            let bytes = try Data(contentsOf: pdf)
+            if bytes.count < 1000 || String(decoding: bytes.prefix(5), as: UTF8.self) != "%PDF-" { return "PDF になっていません（\(bytes.count) bytes）" }
+            return nil
+        }
+
         // ── 五。「表示」の面の網（位置 × 操作・`Mesh`） ────
         let grid = await Mesh.run()
         ran += grid.ran

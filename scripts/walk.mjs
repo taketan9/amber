@@ -167,6 +167,45 @@ await step('ブラウザから貼る', `
 
 // 九。ノートそのもの
 await step('新しいノート', `const at = await newNote(); return !!at;`, true);
+// 新しいノートの小窓（依頼 513・電話の形）── 題とタグを入れて作成／何も入れずに作成。
+await step('新しいノートの小窓：タイトルとタグを入れて作成', `
+    const p = cmdNewNote();
+    await new Promise((g) => setTimeout(g, 300));
+    if (el('newform').hidden) return '小窓が出ていません';
+    el('nntitle').value = '小窓から作ったノート';
+    el('nntag').value = '小窓';
+    el('nnok').click();
+    const at = await p;
+    if (!at) return '作れませんでした';
+    await new Promise((g) => setTimeout(g, 500));
+    const n = state.notes.find((x) => x.path === at);
+    if (!n || n.title !== '小窓から作ったノート') return '題が ' + (n && n.title);
+    if (!(n.tags || []).includes('小窓')) return 'タグが付いていません: ' + JSON.stringify(n && n.tags);
+    return true;`, true);
+await step('新しいノートの小窓：何も入れずに作成でも作れる', `
+    const p = cmdNewNote();
+    await new Promise((g) => setTimeout(g, 300));
+    el('nnok').click();
+    const at = await p;
+    return at ? true : '作れませんでした';`, true);
+// 自動保存の入切（依頼 512）── 切ると打っても書かれず、「保存」が出る。
+await step('自動保存：切ると打っても書かれず、「保存」を押すと書かれる', `
+    await openNote(${path('買い物.md')});
+    const was = autoSave;
+    autoSave = false;
+    editor.setValue(editor.getValue() + '\\n自動保存を切って書いた行');
+    await new Promise((g) => setTimeout(g, 1600));
+    const onDisk = (await ask('read', { path: state.open.path })).text;
+    const shown = !el('savenow').hidden;
+    const notWritten = !onDisk.includes('自動保存を切って書いた行');
+    await save();
+    const wrote = (await ask('read', { path: state.open.path })).text.includes('自動保存を切って書いた行');
+    autoSave = was; drawSaveNow();
+    if (!shown) return '「保存」が出ていません';
+    if (!notWritten) return '切っているのに書かれました';
+    if (!wrote) return '「保存」で書かれません';
+    if (!el('savenow').hidden) return '入に戻したのに「保存」が残っています';
+    return true;`, true);
 await step('複製', `await cmdDup(); return state.notes.length > 0;`, true);
 await step('題を直す', `
     await openNote(${path('買い物.md')});
@@ -518,7 +557,7 @@ await step('鍵：表に載っている鍵が、ぜんぶ効く', `
     const snap = () => JSON.stringify({
         view, zen, fontStep, railOff, listOff, tocOn,
         veil: !el('veil').hidden, more: !el('more').hidden,
-        emoji: !el('emoji').hidden, open: state.open,
+        emoji: !el('emoji').hidden, newform: !el('newform').hidden, open: state.open,
         tabs: (state.tabs || []).length, notes: state.notes.length,
         find: document.activeElement === el('find'),
         said: el('say').classList.contains('on') ? el('say').textContent : '',
@@ -528,6 +567,7 @@ await step('鍵：表に載っている鍵が、ぜんぶ効く', `
         if (!el('emoji').hidden) closeEmoji();
         if (!el('more').hidden) closeMenu();
         if (!el('veil').hidden) closeSheet(null);
+        if (!el('newform').hidden) el('nncancel').click();
         if (zen) setZen(false);
         setFont(0, true);
         if (railOff) toggleRail();
@@ -1734,7 +1774,7 @@ if (NOTES2) {
         return true;`, true);
     await step('保存ディレクトリ：移す先の一覧は、保存ディレクトリの名前を頭に', `
         const names = bookChoices().map((c) => c.name);
-        if (!names.includes('二つ目（いちばん上）')) return names.join(' / ');
+        if (!names.includes('二つ目（トップページ）')) return names.join(' / ');
         if (!names.includes('二つ目 › 持ち帰り')) return names.join(' / ');
         if (!names.some((n) => n.endsWith(' › 仕事'))) return names.join(' / ');
         return true;`, true);
@@ -1810,7 +1850,7 @@ if (NOTES2) {
 // 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => relOf(x.book) === '歩き試し'
-            || /複製|新しいノート|週報|二台目|名前は一行目から/.test(x.title || '')
+            || /複製|新しいノート|週報|二台目|名前は一行目から|小窓から作ったノート/.test(x.title || '')
             || /買い物\.2\.md$/.test(x.path))) {
         try { await ask('delete', { path: n.path }); } catch { /* もう無い */ }
     }

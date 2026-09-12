@@ -45,9 +45,15 @@ struct Calendaring: View {
     @State private var adding = false
     @State private var newTitle = ""
     @State private var newAt = "09:00"
+    @State private var newEnd = ""
     /// 直している、この iPhone の予定。
     @State private var editing: Slot?
     @State private var editTitle = ""
+    /// 月／週／日（依頼 515・窓と同じ三つ）。
+    @State private var mode = CalPrefs.view
+    @State private var settings = false
+    /// 表示設定を変えたら描き直すための数。
+    @State private var prefsTick = 0
 
     static var today: String {
         let f = DateFormatter()
@@ -69,18 +75,37 @@ struct Calendaring: View {
     /// 「時間内に型検査できません」で組めなくなる（実際になった）。
     private var inside: some View {
         VStack(spacing: 0) {
-            grid
-            Divider()
-            day
+            // 月／週／日の切り替え（依頼 515）── 窓の表の上の三つと同じ。
+            Picker("表示", selection: $mode) {
+                Text("月").tag("month")
+                Text("週").tag("week")
+                Text("日").tag("day")
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12).padding(.top, 6)
+            .onChange(of: mode) { _, now in CalPrefs.view = now; count() }
+            if mode == "month" {
+                grid
+                Divider()
+                day
+            } else if mode == "week" {
+                week
+            } else {
+                day
+            }
         }
         // **`Text` に数をそのまま渡さない。** SwiftUI は土地の決まりで
         // 桁を区切るので、年が「2,026年」になる（実際になった）。
-        .navigationTitle(Text(verbatim: "\(year)年 \(month)月"))
+        .navigationTitle(Text(verbatim: heading))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { bar }
+        .sheet(isPresented: $settings) {
+            CalSettings(changed: { prefsTick += 1; count() })
+        }
+        .id(prefsTick)
         .modifier(Asking(
             trouble: $trouble, adding: $adding, editing: $editing,
-            newTitle: $newTitle, newAt: $newAt, editTitle: $editTitle,
+            newTitle: $newTitle, newAt: $newAt, newEnd: $newEnd, editTitle: $editTitle,
             day: spoken(picked), toPhone: Phone.allowed,
             add: add, rename: rename, drop: drop))
     }
@@ -90,6 +115,8 @@ struct Calendaring: View {
             Button("閉じる") { dismiss() }
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
+            Button { settings = true } label: { Image(systemName: "gearshape") }
+                .accessibilityLabel("カレンダー表示設定")
             Button { step(-1) } label: { Image(systemName: "chevron.left") }
             Button("今日") {
                 year = Calendar.current.component(.year, from: Date())
@@ -106,7 +133,7 @@ struct Calendaring: View {
     private var grid: some View {
         VStack(spacing: 3) {
             HStack(spacing: 3) {
-                ForEach(Array(["月", "火", "水", "木", "金", "土", "日"].enumerated()), id: \.offset) { i, w in
+                ForEach(Array(["月", "火", "水", "木", "金", "土", "日"].prefix(CalPrefs.weekend ? 7 : 5).enumerated()), id: \.offset) { i, w in
                     Text(w).font(.caption2)
                         .foregroundStyle(i == 5 ? Color.blue : (i == 6 ? Color.red : Color.secondary))
                         .frame(maxWidth: .infinity)
@@ -114,7 +141,8 @@ struct Calendaring: View {
             }
             ForEach(weeks, id: \.self) { week in
                 HStack(spacing: 3) {
-                    ForEach(week, id: \.self) { d in cell(d) }
+                    // 土日を出さないときは月〜金だけ（依頼 515）。
+                    ForEach(Array(week.prefix(CalPrefs.weekend ? 7 : 5)), id: \.self) { d in cell(d) }
                 }
             }
         }
@@ -136,7 +164,7 @@ struct Calendaring: View {
                 ForEach(mine.prefix(2)) { s in
                     Text(s.title).font(.system(size: 8)).lineLimit(1)
                         .foregroundStyle(s.isAway ? Color.blue
-                            : (s.isPhone ? Color.green
+                            : (s.isPhone ? CalPrefs.hereTint
                                : (s.isPlan ? Color.accentColor : Color.secondary)))
                 }
                 if mine.count > 2 {
@@ -160,7 +188,7 @@ struct Calendaring: View {
     private var day: some View {
         List {
             Section(spoken(picked)) {
-                let plans = slots.filter { $0.day == picked && $0.isPlan }
+                let plans = slots.filter { $0.day == picked && $0.isPlan && CalPrefs.visible($0) }
                 if plans.isEmpty {
                     Text("予定はありません").foregroundStyle(.secondary).font(.footnote)
                 }
@@ -168,8 +196,8 @@ struct Calendaring: View {
             }
             // **予定に出ているノートを、下でもう一度出さない** ── 同じ一本が
             // 二度並ぶと、二つあるように見える。
-            let said = Set(slots.filter { $0.day == picked && $0.isPlan }.map(\.path))
-            let notes = slots.filter { $0.day == picked && !$0.isPlan && !said.contains($0.path) }
+            let said = Set(slots.filter { $0.day == picked && $0.isPlan && CalPrefs.visible($0) }.map(\.path))
+            let notes = slots.filter { $0.day == picked && !$0.isPlan && !said.contains($0.path) && CalPrefs.visible($0) }
             if !notes.isEmpty {
                 Section("この日に書いたノート") {
                     ForEach(notes) { s in row(s, time: false) }
@@ -179,6 +207,7 @@ struct Calendaring: View {
                 Button {
                     newTitle = ""
                     newAt = "09:00"
+                    newEnd = ""
                     adding = true
                 } label: {
                     Label("予定を登録する", systemImage: "plus")
@@ -213,7 +242,7 @@ struct Calendaring: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(s.title)
                         .foregroundStyle(s.isAway ? Color.blue
-                            : (s.isPhone ? Color.green : Color.primary))
+                            : (s.isPhone ? CalPrefs.hereTint : Color.primary))
                     // **道は出さない** ── 読めない長さになるうえ、知りたいのは
                     // 中身のほう。自分のノートは一行目、よその予定は場所と出どころ。
                     if s.noNote {
@@ -234,7 +263,7 @@ struct Calendaring: View {
     // MARK: 数える・足す
 
     private func shown(on d: String) -> [Slot] {
-        let mine = slots.filter { $0.day == d }
+        let mine = slots.filter { $0.day == d && CalPrefs.visible($0) }
         let plans = mine.filter(\.isPlan)
         let said = Set(plans.map(\.path))
         return plans + mine.filter { !$0.isPlan && !said.contains($0.path) }
@@ -292,6 +321,13 @@ struct Calendaring: View {
     }
 
     private func step(_ n: Int) {
+        if mode == "week" || mode == "day" {
+            picked = Self.shift(picked, n * (mode == "week" ? 7 : 1))
+            year = Int(picked.prefix(4)) ?? year
+            month = Int(picked.dropFirst(5).prefix(2)) ?? month
+            count()
+            return
+        }
         var m = month + n
         var y = year
         if m < 1 { m = 12; y -= 1 }
@@ -301,37 +337,122 @@ struct Calendaring: View {
         count()
     }
 
+    // MARK: 週・日
+
+    /// 選んだ日の週（月曜から）。土日を出さないなら月〜金。
+    private var weekDays: [String] {
+        guard let d = Self.date(picked) else { return [picked] }
+        var cal = Calendar(identifier: .gregorian)
+        cal.firstWeekday = 2
+        let lead = (cal.component(.weekday, from: d) + 5) % 7
+        let monday = Self.shift(picked, -lead)
+        let n = CalPrefs.weekend ? 7 : 5
+        return (0..<n).map { Self.shift(monday, $0) }
+    }
+
+    /// 上の題（月／週／日で違う）。
+    private var heading: String {
+        if mode == "week", let a = weekDays.first, let b = weekDays.last { return spoken(a) + " 〜 " + spoken(b) }
+        if mode == "day" { return spoken(picked) + "（" + Self.weekName(picked) + "）" }
+        return "\(year)年 \(month)月"
+    }
+
+    /// 週の表 ── 七日ぶんを段にして並べる（日ごとの予定と、登録する道）。
+    private var week: some View {
+        List {
+            ForEach(weekDays, id: \.self) { d in
+                Section {
+                    let mine = shown(on: d)
+                    if mine.isEmpty {
+                        Text("予定はありません").foregroundStyle(.secondary).font(.footnote)
+                    }
+                    ForEach(mine) { s in row(s, time: true) }
+                    Button {
+                        picked = d
+                        newTitle = ""
+                        newAt = "09:00"
+                        newEnd = ""
+                        adding = true
+                    } label: {
+                        Label("予定を登録する", systemImage: "plus").font(.footnote)
+                    }
+                } header: {
+                    Text(spoken(d) + "（" + Self.weekName(d) + "）" + (d == Self.today ? "　今日" : ""))
+                        .foregroundStyle(d == Self.today ? Color.accentColor : Color.secondary)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    static func date(_ d: String) -> Date? {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd"
+        return f.date(from: d)
+    }
+
+    static func shift(_ d: String, _ n: Int) -> String {
+        guard let at = date(d), let to = Calendar(identifier: .gregorian).date(byAdding: .day, value: n, to: at) else { return d }
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: to)
+    }
+
+    static func weekName(_ d: String) -> String {
+        guard let at = date(d) else { return "" }
+        let i = (Calendar(identifier: .gregorian).component(.weekday, from: at) + 5) % 7
+        return ["月", "火", "水", "木", "金", "土", "日"][i]
+    }
+
+    /// 表に要る月（月なら一つ・週は跨ぐ二つまで・日は一つ）。
+    private var months: [(Int, Int)] {
+        let days = mode == "week" ? weekDays : (mode == "day" ? [picked] : [])
+        guard !days.isEmpty else { return [(year, month)] }
+        var out: [(Int, Int)] = []
+        for d in [days.first!, days.last!] {
+            let y = Int(d.prefix(4)) ?? year
+            let m = Int(d.dropFirst(5).prefix(2)) ?? month
+            if !out.contains(where: { $0 == (y, m) }) { out.append((y, m)) }
+        }
+        return out
+    }
+
     private func count() {
         guard !store.rootPath.isEmpty else { return }
+        let want = months
+        var all: [Slot] = []
         do {
             // 保存ディレクトリごとに訊いて足す（依頼 511）── どの日のノートも、
             // どこに置いてあっても同じ表に出る。
-            var all: [Slot] = []
-            for p in store.places {
-                guard let url = store.url(of: p) else { continue }
-                let got = try Cian.call("month", [
-                    "path": url.path, "year": year, "month": month,
-                ])
-                all += (got["days"] as? [[String: Any]] ?? []).map {
-                    Slot(day: $0["day"] as? String ?? "",
-                         at: $0["at"] as? String,
-                         title: $0["title"] as? String ?? "",
-                         path: $0["path"] as? String ?? "",
-                         kind: $0["kind"] as? String ?? "note")
+            for (y, m) in want {
+                for p in store.places {
+                    guard let url = store.url(of: p) else { continue }
+                    let got = try Cian.call("month", [
+                        "path": url.path, "year": y, "month": m,
+                    ])
+                    all += (got["days"] as? [[String: Any]] ?? []).map {
+                        Slot(day: $0["day"] as? String ?? "",
+                             at: $0["at"] as? String,
+                             title: $0["title"] as? String ?? "",
+                             path: $0["path"] as? String ?? "",
+                             kind: $0["kind"] as? String ?? "note")
+                    }
                 }
+                // この iPhone の予定表（許可されているときだけ）。
+                all += Phone.month(y, m)
             }
             slots = all
         } catch {
             trouble = error.localizedDescription
         }
         // よその予定表は、あとから足す ── 一つも読めなくても、自分のぶんは出る。
-        // この iPhone の予定表（許可されているときだけ）。
-        slots += Phone.month(year, month)
-        let (y, m) = (year, month)
         Task { @MainActor in
-            let more = await Away.month(y, m)
-            guard y == year, m == month else { return }   // 月を替えたあとの答えは捨てる
-            slots = (slots + more).sorted {
+            var more: [Slot] = []
+            for (y, m) in want { more += await Away.month(y, m) }
+            guard want.map({ "\($0.0)-\($0.1)" }) == months.map({ "\($0.0)-\($0.1)" }) else { return }   // 月を替えたあとの答えは捨てる（週・日の表でも同じ）
+            slots = (slots.filter { !$0.isAway } + more).sorted {
                 ($0.day, $0.at == nil ? 1 : 0, $0.at ?? "", $0.title)
                     < ($1.day, $1.at == nil ? 1 : 0, $1.at ?? "", $1.title)
             }
@@ -345,9 +466,10 @@ struct Calendaring: View {
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         let at = newAt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let end = newEnd.trimmingCharacters(in: .whitespacesAndNewlines)
         if Phone.allowed {
             do {
-                try Phone.add(title: title, day: picked, at: at.isEmpty ? nil : at)
+                try Phone.add(title: title, day: picked, at: at.isEmpty ? nil : at, end: end.isEmpty ? nil : end)
                 count()
             } catch {
                 trouble = error.localizedDescription
@@ -383,6 +505,7 @@ private struct Asking: ViewModifier {
     @Binding var editing: Calendaring.Slot?
     @Binding var newTitle: String
     @Binding var newAt: String
+    @Binding var newEnd: String
     @Binding var editTitle: String
     let day: String
     let toPhone: Bool
@@ -398,6 +521,8 @@ private struct Asking: ViewModifier {
             .alert("予定を登録する", isPresented: $adding) {
                 TextField("タイトル", text: $newTitle)
                 TextField("開始（空なら終日）", text: $newAt)
+                    .keyboardType(.numbersAndPunctuation)
+                TextField("終了（空なら一時間後）", text: $newEnd)
                     .keyboardType(.numbersAndPunctuation)
                 Button("登録する") { add() }
                 Button("やめる", role: .cancel) {}

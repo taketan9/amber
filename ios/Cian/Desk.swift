@@ -511,6 +511,8 @@ struct DeskView: View {
     @State private var tabling = false
     /// ⋯ から開くもの。**一覧まで戻らずに、開いているノートへ。**
     @State private var shelving: Note?
+    /// このノート一枚の zip（共有シートに渡す）。
+    @State private var zipping: URL?
     @State private var pasting: String?
     @State private var dropping: Note?
     @State private var touring = false
@@ -555,6 +557,7 @@ struct DeskView: View {
                 }
             }
             .sheet(item: $shelving) { note in Shelving(store: store, note: note) }
+            .sheet(item: $zipping) { at in ActivityView(item: at) }
             .sheet(item: Binding(get: { pasting.map { Past.Which(at: $0, book: false) } },
                                  set: { if $0 == nil { pasting = nil } })) { w in
                 Past(store: store, at: w.at, isBook: w.book)
@@ -748,8 +751,22 @@ struct DeskView: View {
                     Label("フォルダへ移動", systemImage: "folder")
                 }
                 if let note = here?.note {
-                    ShareLink(item: URL(fileURLWithPath: note.path)) {
+                    // 窓と同じ三つ（依頼 516）── Markdown はそのまま、HTML は一枚で完結、PDF は刷ったもの。
+                    Menu {
+                        ShareLink(item: URL(fileURLWithPath: note.path)) {
+                            Label("Markdown", systemImage: "doc.plaintext")
+                        }
+                        Button { export("html") } label: { Label("HTML", systemImage: "doc.richtext") }
+                        Button { export("pdf") } label: { Label("PDF", systemImage: "doc") }
+                    } label: {
                         Label("エクスポート", systemImage: "square.and.arrow.up")
+                    }
+                    // 窓のバックアップの「このノート一枚」と同じもの（絵も一緒に zip に）。
+                    Button {
+                        do { zipping = try store.backup(scope: "note", what: note.path) }
+                        catch { trouble = error.localizedDescription }
+                    } label: {
+                        Label("このノート一枚をバックアップ", systemImage: "archivebox")
                     }
                 }
                 Divider()
@@ -779,6 +796,14 @@ struct DeskView: View {
     private var reminded: Bool {
         guard let text = here?.whole else { return false }
         return (try? store.reminder(of: text)).map { !$0.once.isEmpty || $0.repeats } ?? false
+    }
+
+    /// 読める形で書き出す（HTML／PDF）── 出来たら共有シートへ。
+    private func export(_ how: String) {
+        guard let note = here?.note, let whole = here?.whole else { return }
+        do {
+            zipping = how == "pdf" ? try Exporting.pdf(note, text: whole) : try Exporting.html(note, text: whole)
+        } catch { trouble = error.localizedDescription }
     }
 
     /// 開いているノートを、別のフォルダへ。

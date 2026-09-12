@@ -20,6 +20,8 @@ final class Syncing: ObservableObject {
     @Published var busy = false
     @Published var trouble = ""
     @Published var troubleSince: Date?
+    /// 「あとで」を押したか（この起動のあいだだけ・窓の `syncLater` と同じ）。
+    @Published var later = false
     /// 運んだ直後の数（数秒だけ出す）。
     @Published var fresh: Report?
 
@@ -294,6 +296,9 @@ final class Syncing: ObservableObject {
         }
         if e.contains("サインインが切れ") || e.contains("invalid_grant") || e.contains("401") {
             return ("Google のサインインが切れています。もう一度サインインしてください。", "Google でサインイン", false)
+        }
+        if e.contains("insufficient") || e.contains("storage") || e.contains("quota") || e.contains("507") {
+            return ("Google Drive の空きが足りないようです。空けてから、もう一度試してください。", "もう一度試す", true)
         }
         return (trouble, "もう一度試す", true)
     }

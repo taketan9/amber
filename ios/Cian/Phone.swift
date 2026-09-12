@@ -32,6 +32,14 @@ enum Phone {
         return (try? await store.requestFullAccessToEvents()) ?? false
     }
 
+    /// この端末にある予定表の名前（表示設定で出し入れするため）。
+    static var calendars: [String] {
+        guard allowed else { return [] }
+        var seen: [String] = []
+        for c in store.calendars(for: .event) where !seen.contains(c.title) { seen.append(c.title) }
+        return seen
+    }
+
     /// ひと月ぶん。
     static func month(_ year: Int, _ month: Int) -> [Calendaring.Slot] {
         guard allowed else { return [] }
@@ -82,7 +90,7 @@ enum Phone {
     }
 
     /// 予定を足す。**書ける先が無ければ、そう言う。**
-    static func add(title: String, day: String, at: String?) throws {
+    static func add(title: String, day: String, at: String?, end: String? = nil) throws {
         guard let cal = store.defaultCalendarForNewEvents else {
             throw Trouble.noCalendar
         }
@@ -94,6 +102,9 @@ enum Phone {
         if at == nil {
             e.isAllDay = true
             e.endDate = start
+        } else if let end, let till = when(day, end), till > start {
+            // 終わりの時刻（窓と同じ・依頼 493）── 開始より前なら一時間後に。
+            e.endDate = till
         } else {
             e.endDate = start.addingTimeInterval(60 * 60)
         }

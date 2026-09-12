@@ -1328,11 +1328,11 @@ final class NotesStore: ObservableObject {
     }
 
     /// Make a notebook inside the one that is open.
-    func makeBook(_ name: String) throws {
+    func makeBook(_ name: String, under: String? = nil) throws {
         guard let root else { return }
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
-        let dir = root.appendingPathComponent(at).appendingPathComponent(clean)
+        let dir = root.appendingPathComponent(under ?? at).appendingPathComponent(clean)
         _ = try Cian.call("mkbook", ["dir": dir.path])
         reload()
     }

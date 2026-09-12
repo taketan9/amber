@@ -54,6 +54,8 @@ struct ContentView: View {
     @State private var dropping: String?
     @State private var fresh = ""
     @State private var treeing = false
+    /// この中にフォルダを作る（親の道）。
+    @State private var making: String?
     /// The folder the list is drawn for, and which way it last moved.
     @State private var walked = ""
     /// 履歴を見せている相手（ノートかフォルダ）。
@@ -181,6 +183,16 @@ struct ContentView: View {
         )) { Button("閉じる") {} } message: { Text(moved ?? "") }
         .sheet(item: $shelving) { note in Shelving(store: store, note: note) }
         .sheet(item: $colouring) { f in Colouring(store: store, folder: f) }
+        .sheet(item: Binding(
+            get: { making.map { Where.Named(name: $0) } },
+            set: { if $0 == nil { making = nil } }
+        )) { at in
+            Booking(inside: at.name.split(separator: "/").last.map(String.init) ?? at.name) { name in
+                do { try store.makeBook(name, under: at.name) }
+                catch { store.trouble = error.localizedDescription }
+                making = nil
+            }
+        }
         .sheet(isPresented: $treeing) {
             Tree(store: store, go: { to in go { store.into(to) } },
                  make: { name in
@@ -553,6 +565,14 @@ struct ContentView: View {
         do { try store.share(note, to: book) } catch { store.trouble = error.localizedDescription }
     }
 
+    /// 共有のフォルダを「ファイル」で開く ── クラウド側で家族に分けるのは、人がやる。
+    private func invite(_ book: String) {
+        let at = URL(fileURLWithPath: store.rootPath).appendingPathComponent(book).path
+        guard let enc = at.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "shareddocuments://" + enc) else { return }
+        UIApplication.shared.open(url)
+    }
+
     private func unshare(_ note: Note) {
         do { try store.unshare(note) } catch { store.trouble = error.localizedDescription }
     }
@@ -904,8 +924,19 @@ struct ContentView: View {
                     } isTargeted: { over in into = over ? b.path : nil }
                     .listRowBackground(into == b.path ? Color.accentColor.opacity(0.15) : nil)
                     .contextMenu {
+                        // **下の階層は、ここから作る**（窓と同じ）── 名前に「/」を
+                        // 打たせるのは、書き方を知っている人にしか通じない。
+                        Button { making = b.path } label: {
+                            Label("この中にフォルダを作る", systemImage: "folder.badge.plus")
+                        }
                         Button { colouring = b.path } label: {
                             Label("フォルダに色をつける", systemImage: "paintpalette")
+                        }
+                        if store.shares.contains(where: { $0.at == b.path }) {
+                            // 分けるのはクラウドの仕事 ── 「ファイル」でそのフォルダを開く。
+                            Button { invite(b.path) } label: {
+                                Label("家族を招待", systemImage: "person.badge.plus")
+                            }
                         }
                         // **分けるのはクラウドの仕事。** amber が憶えるのは
                         // 「どれが分けてあるか」の一言だけ ── そのうえで
@@ -1145,6 +1176,21 @@ struct SyncLine: View {
                 Circle().fill(Color.secondary).frame(width: 7, height: 7)
                 Text("同期していません ・ どの保存ディレクトリも「同期しない」").font(.footnote).foregroundStyle(.secondary)
             }
+        } else if !sync.signedIn, !sync.later {
+            // **始める前は色つきの列**（窓の `before` と同じ・本人が決めた案甲）。
+            VStack(alignment: .leading, spacing: 4) {
+                Text("まだ同期していません").font(.footnote.weight(.semibold)).foregroundStyle(Color("AccentColor"))
+                Text("ノートはこの iPhone だけにあります。ほかの端末や家族と同じノートを使うには、Google でサインインします。")
+                    .font(.footnote).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Button("同期をはじめる") { Task { _ = try? await sync.signIn() } }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                    Button("あとで") { sync.later = true }.controlSize(.small)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color("AccentColor").opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
         } else if !sync.signedIn {
             HStack(spacing: 6) {
                 Circle().fill(Color.secondary).frame(width: 7, height: 7)

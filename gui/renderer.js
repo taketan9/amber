@@ -402,7 +402,8 @@ function drawRail() {
         for (const [t, n] of tags.slice(0, 30)) rows.push(dest('tag', t, t, n, on('tag', t)));
     }
     el('rail').innerHTML = rows.join('');
-    el('new').onclick = newNote;
+    el('new').onclick = () => cmdNewNote();
+    if (el('savenow')) el('savenow').onclick = () => save();
     for (const b of el('rail').querySelectorAll('.plus')) {
         b.onclick = (e) => { e.stopPropagation(); railPlus(b.dataset.plus); };
     }
@@ -1332,6 +1333,7 @@ function makeEditor() {
                 readStale();
                 state.dirty = true;
                 el('state').textContent = '書きかけ';
+                drawSaveNow();
                 drawStrip();
                 clearTimeout(saveTimer);
                 // **変換中に切れたら、待つ。** Monaco も変換の一字ごとに
@@ -1339,7 +1341,8 @@ function makeEditor() {
                 // 保存すると、未確定の字がファイルに入る（読む面と同じ話）。
                 saveTimer = setTimeout(function again() {
                     if (composing) { saveTimer = setTimeout(again, 900); return; }
-                    save();
+                    // 自動保存を切っているときは、「保存」を押すまで書かない（依頼 512）。
+                    if (autoSave) save();
                 }, 900);
                 readSoon();
                 drawCount();
@@ -1492,7 +1495,7 @@ async function closeTab(path) {
     if (path === showing) {
         clearTimeout(readTimer);
         await syncRead();
-        if (state.dirty) await save();
+        if (state.dirty) await leaveSave();
         stashTab();
     } else {
         const t = tabs[at];
@@ -1547,7 +1550,7 @@ async function openNote(path, opts) {
             if (showing !== path) {
                 clearTimeout(readTimer);
                 await syncRead();
-                if (state.dirty) await save();
+                if (state.dirty) await leaveSave();
                 // 離れるノートの名前を、題に揃えてから（依頼 492・決めごと 2）。
                 if (state.open && state.open.path !== path) await settleName(state.open.path);
                 stashTab();
@@ -1568,7 +1571,7 @@ async function openNote(path, opts) {
             // 順と並びが合わなくなる。
             clearTimeout(readTimer);
             await syncRead();
-            if (state.dirty) await save();
+            if (state.dirty) await leaveSave();
             stashTab();
             tabs.splice(tabs.findIndex((t) => t.path === showing) + 1, 0, { path, keep: null });
             showing = path;
@@ -1590,7 +1593,7 @@ async function openNote(path, opts) {
     // 先に戻さないと、最後の数百ミリ秒ぶんが黙って消える。
     clearTimeout(readTimer);
     await syncRead();
-    if (state.dirty) await save();
+    if (state.dirty) await leaveSave();
     // 離れるノートの名前を、題に揃えてから（依頼 492・決めごと 2）。
     if (state.open && state.open.path !== path && !(opts && opts.guest)) await settleName(state.open.path);
     if (!editor) await makeEditor();
@@ -3577,6 +3580,7 @@ function readChanged() {
     if (syncing || view === 'write' || !state.open) return;
     state.dirty = true;
     el('state').textContent = '書きかけ';
+    drawSaveNow();
     drawStrip();
     clearTimeout(readTimer);
     // **変換中に切れたら、待つ。** 数え直すだけで、書き戻しはしない ──
@@ -3755,6 +3759,7 @@ async function syncRead() {
         say('保存できません ── 図かコード枠の元の字が取れません。'
             + '「コード」で直してください');
         el('state').textContent = '保存できません';
+        drawSaveNow();
         return;
     }
     // **末尾の空行の数では、変わったことにしない。**
@@ -6812,6 +6817,37 @@ async function mergeIn(path, ours, was) {
     return got.text;
 }
 
+/// 自動保存（依頼 512・本人「基本は自動保存。自発的に切れるようにしたい」）。
+/// 切っているあいだは、打っても書かない ── 「保存」を押したときと、ノートから
+/// 離れるときに一度だけ確認して書く（電話と同じ決まり）。
+let autoSave = true;
+
+/// 「保存」のボタン。**自動保存を切っていて、書きかけのときだけ出す** ──
+/// 入のときに出ていると、押さないと保存されないように見える。
+function drawSaveNow() {
+    const b = el('savenow');
+    if (!b) return;
+    b.hidden = autoSave || !state.open || !state.dirty || state.guest;
+}
+
+/// ノートから離れるとき。自動保存なら黙って書く。切っているなら一度だけ確認。
+async function leaveSave() {
+    if (!state.dirty) return;
+    if (autoSave) return save();
+    const name = (state.open && state.open.title) || stem();
+    if (await askYes('「' + name + '」の書きかけを保存しますか')) return save();
+    // 捨てる ── 次の保存で古い字が書かれないように、書きかけの印だけ下ろす。
+    state.dirty = false;
+    drawSaveNow();
+}
+
+async function cmdAutoSave() {
+    autoSave = !autoSave;
+    window.amber.remember({ autoSave });
+    drawSaveNow();
+    say(autoSave ? '自動保存を入にしました（打てば保存されます）' : '自動保存を切にしました（「保存」を押したときに書きます）');
+}
+
 async function save() {
     if (!state.open || !editor) return;
     const path = state.open.path;
@@ -6859,6 +6895,7 @@ async function save() {
         state.base = text;
         state.dirty = false;
         el('state').textContent = '保存しました';
+        drawSaveNow();
         syncSoon();
         nameSoon();
         await freshenRow(path);
@@ -6866,10 +6903,12 @@ async function save() {
         setTimeout(() => {
             if (!state.dirty && state.open && state.open.path === path) {
                 el('state').textContent = when(state.open.updated);
+                drawSaveNow();
             }
         }, 1400);
     } catch (e) {
         el('state').textContent = '保存できません';
+        drawSaveNow();
         say('保存できません: ' + why(e));
     }
 }
@@ -6892,6 +6931,98 @@ async function newNote(title) {
         say('作れません: ' + why(e));
         return null;
     }
+}
+
+/// **新しいノートの小窓**（依頼 513・電話の `Making` を採用 ── 本人が決めた・
+/// 2026-09-12）。タイトル・タグ・テンプレートを先に選べる。**何も選ばなくても
+/// 作れる**（空のままなら本文の一行目がタイトルになる）── 初めての人が、何も
+/// 分からなくても「作成」だけ押せば先へ進めるように。
+let nnDone = null;
+function askNewNote() {
+    const box = el('newform');
+    const title = el('nntitle');
+    const tagIn = el('nntag');
+    const chips = el('nntags');
+    const known = el('nnknown');
+    const tmpl = el('nntmpl');
+    const tags = [];
+    title.value = '';
+    tagIn.value = '';
+    const drawChips = () => {
+        chips.innerHTML = tags.map((t, i) => '<button type="button" class="on" data-i="' + i + '">#' + escapeHtml(t) + ' ✕</button>').join('');
+        for (const b of chips.querySelectorAll('button')) b.onclick = () => { tags.splice(Number(b.dataset.i), 1); drawChips(); };
+        const mine = tagsOf(state.notes).map(([t]) => t).filter((t) => !tags.includes(t)).slice(0, 12);
+        known.innerHTML = mine.map((t) => '<button type="button">#' + escapeHtml(t) + '</button>').join('');
+        known.querySelectorAll('button').forEach((b, i) => { b.onclick = () => { tags.push(mine[i]); drawChips(); }; });
+        known.hidden = !mine.length;
+    };
+    const addTag = () => {
+        const t = tagIn.value.trim().replace(/^#+/, '').trim();
+        tagIn.value = '';
+        if (t && !tags.includes(t)) tags.push(t);
+        drawChips();
+    };
+    const drawTmpl = () => {
+        const rows = sortNotes(state.notes.filter((n) => inTemplates(n.book)));
+        if (!rows.length) {
+            tmpl.innerHTML = '<button type="button" data-seed="1">見本のテンプレートを入れる（週報・議事録・買い物リスト）</button>'
+                + '<span class="hint">「' + TEMPLATES + '」フォルダに置いたノートが、ここに並びます</span>';
+            tmpl.querySelector('[data-seed]').onclick = async () => {
+                try { await window.amber.templates(state.root); await reload({ quiet: true }); } catch (e) { say('入れられません: ' + why(e)); }
+                drawTmpl();
+            };
+            return;
+        }
+        tmpl.innerHTML = rows.map((n, i) => '<button type="button" data-i="' + i + '">' + escapeHtml(n.title || '（タイトルなし）') + '</button>').join('');
+        tmpl.querySelectorAll('button').forEach((b, i) => { b.onclick = () => shut({ template: rows[i].path }); });
+    };
+    const shut = (v) => {
+        box.hidden = true;
+        if (nnDone) { const f = nnDone; nnDone = null; f(v); }
+    };
+    const go = () => { addTag(); shut({ title: title.value.trim(), tags: tags.slice() }); };
+    drawChips();
+    drawTmpl();
+    tagIn.onkeydown = (e) => {
+        e.stopPropagation();
+        if (e.isComposing || e.keyCode === 229) return;
+        if (isEnter(e)) { e.preventDefault(); addTag(); }
+        else if (e.code === 'Escape') { e.preventDefault(); shut(null); }
+    };
+    el('nnok').onclick = go;
+    el('nncancel').onclick = () => shut(null);
+    box.onmousedown = (e) => { if (e.target === box) shut(null); };
+    box.onkeydown = (e) => {
+        e.stopPropagation();
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.code === 'Escape') { e.preventDefault(); shut(null); }
+        else if (isEnter(e) && e.target === title) { e.preventDefault(); go(); }
+    };
+    box.hidden = false;
+    title.focus();
+    return new Promise((resolve) => { nnDone = resolve; });
+}
+
+/// 「新しいノート」── 小窓で訊いてから作る。作る場所は `newNote` と同じ（いま見ているフォルダ）。
+async function cmdNewNote() {
+    if (state.guest) closeGuest();
+    const got = await askNewNote();
+    if (!got) return null;
+    if (got.template) {
+        try {
+            const here = inTemplates(hereDir()) ? rootOf(hereDir()) : hereDir();
+            const r = await ask('copy', { path: got.template, dir: here });
+            await reload({ quiet: true });
+            await openNote(r.path);
+            if (editor) editor.focus();
+            return r.path;
+        } catch (e) { say('作れません: ' + why(e)); return null; }
+    }
+    const at = await newNote(got.title);
+    if (at && got.tags.length) {
+        await editNote((t) => ask('settags', { text: t, tags: got.tags }).then((r) => r.text));
+    }
+    return at;
 }
 
 /* ── 読み直し ── */
@@ -7134,7 +7265,7 @@ document.addEventListener('keydown', (e) => {
     // 見たノートの前後（Inkdrop の ⌘← / ⌘→）。
     if ((e.metaKey || e.ctrlKey) && e.code === 'ArrowLeft') { e.preventDefault(); walk(-1); return; }
     if ((e.metaKey || e.ctrlKey) && e.code === 'ArrowRight') { e.preventDefault(); walk(1); return; }
-    if ((e.metaKey || e.ctrlKey) && e.code === 'KeyN') { e.preventDefault(); newNote(); return; }
+    if ((e.metaKey || e.ctrlKey) && e.code === 'KeyN') { e.preventDefault(); cmdNewNote(); return; }
     if ((e.metaKey || e.ctrlKey) && e.code === 'KeyF') { e.preventDefault(); openFind(); return; }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
 
@@ -7151,7 +7282,7 @@ document.addEventListener('keydown', (e) => {
     if (e.code === 'ArrowDown' || e.code === 'KeyJ') { e.preventDefault(); moveCursor(1); }
     else if (e.code === 'ArrowUp' || e.code === 'KeyK') { e.preventDefault(); moveCursor(-1); }
     else if (isEnter(e)) { e.preventDefault(); if (editor) editor.focus(); }
-    else if (e.code === 'KeyN') { e.preventDefault(); newNote(); }
+    else if (e.code === 'KeyN') { e.preventDefault(); cmdNewNote(); }
     // **消すのは、必ず訊いてから。** 打っている場所では上で戻しているので、
     // ここに来るのは一覧を見ているときだけ。
     else if ((e.code === 'Backspace' || e.code === 'Delete') && state.open) {
@@ -8461,7 +8592,7 @@ async function hereFor(y, m) {
 const TEAM_WORD = 'csv';
 
 const CMDS = [
-    { id: 'new', name: '新しいノート', key: '⌘N', run: () => newNote() },
+    { id: 'new', name: '新しいノート', key: '⌘N', run: () => cmdNewNote() },
     { id: 'tmpl', name: 'テンプレートから新しいノート', sub: '「' + TEMPLATES + '」フォルダの中身',
       run: cmdTemplate },
     { id: 'clip', name: 'Web から取り込む', sub: 'URL を渡すと、一本のノートに', run: cmdClip },
@@ -8534,6 +8665,7 @@ const CMDS = [
     { id: 'keys', name: 'ショートカット一覧', key: '⌘⇧/', app: true, run: cmdKeys },
     { id: 'syntax', name: 'マークダウンの書き方', app: true, run: cmdSyntax },
     { id: 'theme', name: 'テーマ', app: true, run: cmdTheme },
+    { id: 'autosave', name: '自動保存', app: true, run: cmdAutoSave },
     { id: 'vim', name: 'vimモード', app: true, run: cmdVim },
     { id: 'lineno', name: '行番号', app: true, run: cmdLineNo },
     // ── ノートを入れる／出す
@@ -8700,6 +8832,7 @@ function openMenu(at, which) {
         if (c.id === 'lineno') return { ...c, sub: lineNo ? 'オン' : 'オフ' };
         if (c.id === 'rail') return { ...c, name: railOff ? '左の列を出す' : '左の列を畳む' };
         if (c.id === 'list') return { ...c, name: listOff ? '一覧を出す' : '一覧を畳む' };
+        if (c.id === 'autosave') return { ...c, sub: autoSave ? '入 ── 打てば保存されます' : '切 ── 「保存」を押したときに書きます' };
         if (c.id === 'places') {
             return { ...c, sub: manyPlaces() ? state.places.map((p) => p.name).join('・') : shortPath(state.root) };
         }
@@ -10822,8 +10955,11 @@ async function cmdSync() {
         return;
     }
     const go = await askPick('同期', [
+        // 電話にあって窓に無かった一行（2026-09-12 の見直し）。
+        { name: 'いま同期する', sub: '三十秒待たずに、いま合わせます', value: 'now' },
         { name: '同期をやめる', sub: 'Google のサインインを外します。ノートは消えません', value: 'out' },
     ], 'いま: ' + syncLabel(), true);
+    if (go === 'now') { syncNow('手'); return; }
     if (go !== 'out') return;
     try { await window.amber.driveSignOut(); } catch (e) { say('やめられません: ' + why(e)); return; }
     await loadSync();
@@ -11418,6 +11554,7 @@ const escapeAttr = escapeHtml;
     if (saved.listOff) { listOff = true; document.body.classList.add('nolist'); }
     // エディタはまだ無い ── 開いたときに入る（`makeEditor` の末尾）。
     if (saved.vim) vimOn = true;
+    if (saved.autoSave === false) autoSave = false;
     if (Array.isArray(saved.faces)) usedFaces = saved.faces.slice(0, 24);
     if (typeof saved.fontStep === 'number') fontStep = saved.fontStep;
     if (saved.order) order = saved.order;

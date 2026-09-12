@@ -30,13 +30,13 @@ struct Making: View {
         NavigationStack {
             Form {
                 Section("タイトル") {
-                    TextField("新しいノート", text: $title)
+                    TextField("例: 買い物メモ", text: $title)
                         .focused($naming)
                         // Return moves on to the tags rather than making the
                         // note: the note is made by the button that says so.
                         .submitLabel(.next)
                         .onSubmit { naming = false }
-                    Text("空のままでかまいません。本文の1行目が、そのまま題になります")
+                    Text("空のままでもかまいません。そのときは、本文の1行目がタイトルになります")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 // **型は、作るところに置く。** 「新しいノート」を押した人が
@@ -66,7 +66,7 @@ struct Making: View {
                         }
                     }
                 }
-                Section("タグ") {
+                Section {
                     if !tags.isEmpty {
                         HStack {
                             ForEach(tags, id: \.self) { t in
@@ -90,6 +90,10 @@ struct Making: View {
                     ForEach(known.filter { !tags.contains($0) }, id: \.self) { t in
                         Button("#\(t)") { add(t) }
                     }
+                } header: {
+                    Text("タグ")
+                } footer: {
+                    Text("あとからでも付けられます。前に使ったタグは押すだけで付きます")
                 }
             }
             .navigationTitle("新しいノート")
