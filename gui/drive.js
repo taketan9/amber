@@ -44,6 +44,11 @@ const path = require('node:path');
 /// 登録済みのクライアント（`PLANS.ja.md` 一章）。**秘密ではない。**
 const CLIENT_ID = '306373349806-bskgnk86ciamokeeblmoqgi3t88sqqmf.apps.googleusercontent.com';
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+// **カレンダーの許可は、要る瞬間に足す**（依頼 525）。ノートの同期しか
+// 使わない人に、カレンダーの許可を訊かない ── 同意の画面に並ぶ数が増える
+// ほど、押す前に引き返す人が増える。`calendar.app.created` は「アプリが
+// 自分で作った二次カレンダーだけ」で、**非機密**（審査が要らない）。
+const CAL_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
@@ -63,12 +68,15 @@ function pkce() {
 }
 
 /// 許可の画面の URL。
-function authUrl({ clientId, redirect, challenge, state, authUrl }) {
+function authUrl({ clientId, redirect, challenge, state, authUrl, scope }) {
     const u = new URL(authUrl || AUTH_URL);
     u.searchParams.set('client_id', clientId || CLIENT_ID);
     u.searchParams.set('redirect_uri', redirect);
     u.searchParams.set('response_type', 'code');
-    u.searchParams.set('scope', SCOPE);
+    u.searchParams.set('scope', scope || SCOPE);
+    // **前に貰った許可を落とさない。** これが無いと、カレンダーの許可を
+    // 足しにいった瞬間に Drive の許可が消えて、同期が黙って止まる。
+    u.searchParams.set('include_granted_scopes', 'true');
     u.searchParams.set('code_challenge', challenge);
     u.searchParams.set('code_challenge_method', 'S256');
     // **戻す鍵（refresh token）をもらう。** 無いと一時間で切れて、毎日
@@ -167,7 +175,8 @@ function createDrive(opts) {
 
     /// **サインイン。** ブラウザを開き、折り返しを待ち、鍵を交換して仕舞う。
     /// 返すのは `{ ok: true, who }` か `{ error }`（人に見せる言い分）。
-    async function signIn() {
+    async function signIn(want = {}) {
+        const scope = want.scope || SCOPE;
         const { verifier, challenge } = pkce();
         const state = b64url(crypto.randomBytes(16));
         let settle;
@@ -202,7 +211,7 @@ function createDrive(opts) {
         const redirect = 'http://127.0.0.1:' + port;
         const timer = setTimeout(() => settle({ error: '時間切れです（三分待ちました）' }), patience);
         try {
-            await open(authUrl({ clientId, redirect, challenge, state, authUrl: authAt }));
+            await open(authUrl({ clientId, redirect, challenge, state, authUrl: authAt, scope }));
             const back = await got;
             if (back.error) return { error: back.error };
             const tok = await exchange({
@@ -214,7 +223,10 @@ function createDrive(opts) {
                 access: tok.access_token,
                 refresh: tok.refresh_token || null,
                 until: now + Math.max(60, Number(tok.expires_in || 3600) - 60) * 1000,
-                scope: tok.scope || SCOPE,
+                // **貰えた許可をそのまま憶える。** こちらが頼んだものではなく
+                // 向こうが返したものを持つ ── 頼んだのに断られた許可を
+                // 「持っている」と思い込むと、使う瞬間まで気づけない。
+                scope: tok.scope || scope,
                 who: null,
             };
             kept.who = await whoAmI(kept.access).catch(() => null);
@@ -259,6 +271,14 @@ function createDrive(opts) {
         } catch {
             return null;
         }
+    }
+
+    /// その許可を持っているか。**使う前に訊く** ── 持っていないまま叩くと、
+    /// 人には「HTTP 403」としか見えない。
+    function grants(one) {
+        const kept = load();
+        if (!kept) return false;
+        return String(kept.scope || '').split(/\s+/).includes(one);
     }
 
     /// サインインの様子。
@@ -428,8 +448,8 @@ function createDrive(opts) {
         return { ok: true };
     }
 
-    return { signIn, signOut, account, token, whoAmI, tokenFile, secretFile,
+    return { signIn, signOut, account, token, whoAmI, grants, tokenFile, secretFile,
              list, upload, download, downloadBytes, rename, trash, home, by };
 }
 
-module.exports = { createDrive, pkce, authUrl, landing, CLIENT_ID, SCOPE };
+module.exports = { createDrive, pkce, authUrl, landing, CLIENT_ID, SCOPE, CAL_SCOPE };

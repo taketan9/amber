@@ -16,7 +16,8 @@ const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createDrive, pkce } = require('../gui/drive');
+const { createDrive, pkce, CAL_SCOPE } = require('../gui/drive');
+const { createCal, shareUrl, SETTINGS_URL } = require('../gui/gcal');
 
 let bad = 0;
 const ok = (yes, what, got) => {
@@ -26,7 +27,7 @@ const ok = (yes, what, got) => {
 
 (async () => {
     // ── 偽の Google ──
-    const seen = { token: [], revoke: [], about: 0 };
+    const seen = { token: [], revoke: [], about: 0, cals: new Map(), made: 0 };
     let expiresIn = 3600;
     const fake = http.createServer(async (req, res) => {
         let body = '';
@@ -43,6 +44,29 @@ const ok = (yes, what, got) => {
             seen.about++;
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(JSON.stringify({ user: { displayName: '試し 太郎', emailAddress: 'taro@example.com' } }));
+        } else if (req.url.startsWith('/cal/calendars')) {
+            const id = decodeURIComponent(req.url.slice('/cal/calendars'.length).replace(/^\//, ''));
+            if (req.method === 'POST') {
+                const made = JSON.parse(body || '{}');
+                const newId = 'c' + (++seen.made) + '@group.calendar.google.com';
+                seen.cals.set(newId, { id: newId, summary: made.summary || '' });
+                res.writeHead(200, { 'content-type': 'application/json' });
+                res.end(JSON.stringify(seen.cals.get(newId)));
+            } else if (req.method === 'DELETE') {
+                seen.cals.delete(id);
+                res.writeHead(204); res.end();
+            } else if (req.method === 'PATCH') {
+                const c = seen.cals.get(id);
+                if (!c) { res.writeHead(404); res.end('{"error":{"message":"Not Found"}}'); return; }
+                c.summary = JSON.parse(body || '{}').summary || c.summary;
+                res.writeHead(200, { 'content-type': 'application/json' });
+                res.end(JSON.stringify(c));
+            } else {
+                const c = seen.cals.get(id);
+                if (!c) { res.writeHead(404, { 'content-type': 'application/json' }); res.end('{"error":{"message":"Not Found"}}'); return; }
+                res.writeHead(200, { 'content-type': 'application/json' });
+                res.end(JSON.stringify(c));
+            }
         } else { res.writeHead(404); res.end(); }
     });
     await new Promise((go) => fake.listen(0, '127.0.0.1', go));
@@ -117,6 +141,63 @@ const ok = (yes, what, got) => {
     const p1 = pkce(); const p2 = pkce();
     ok(p1.verifier !== p2.verifier, '合言葉は毎回違う');
     ok(/^[A-Za-z0-9_-]{43,}$/.test(p1.verifier) && /^[A-Za-z0-9_-]{43}$/.test(p1.challenge), 'base64url の形', p1);
+
+    console.log('グループカレンダー（依頼 525）');
+    {
+        // **鍵は Drive と同じ一本。** サインインを二度させない。
+        const cal = createCal({ token: () => Promise.resolve('acc-1'), apiUrl: at + '/cal' });
+        const made = await cal.make('ambər グループ');
+        ok(!!made.id && made.name === 'ambər グループ', '一枚作れる', made);
+        const again = await cal.get(made.id);
+        ok(again && again.id === made.id, '作ったものを訊ける', again);
+        await cal.rename(made.id, '家の予定');
+        ok((await cal.get(made.id)).name === '家の予定', '名前を変えられる');
+        await cal.drop(made.id);
+        // **投げさせない。** ここで例外が出ると、この試験は落ちるのではなく
+        // **死ぬ** ── 後ろの検査が一つも走らないまま、✗ が一つも出ない。
+        const gone = await cal.get(made.id).catch((e) => 'なげた: ' + e.message);
+        ok(gone === null, '消えたら null ── 黙って空の月を出さない', gone);
+
+        // **名前から探し直さない。** `calendar.app.created` に一覧を読む力は
+        // 無いので、二度押せば二枚できる ── 憶えるのは呼ぶ側の仕事。
+        const a = await cal.make('同じ名前');
+        const b = await cal.make('同じ名前');
+        ok(a.id !== b.id, '同じ名前でも別の一枚（憶えるのは呼ぶ側）', [a.id, b.id]);
+
+        // 鍵が無ければ、**人の言葉で**断る。
+        const none = createCal({ token: () => Promise.resolve(null), apiUrl: at + '/cal' });
+        const why = await none.make('x').then(() => '', (e) => e.message);
+        ok(why.includes('サインイン'), '鍵が無いときは人の言葉で断る', why);
+
+        // 許可が足りないときも、「HTTP 403」で終わらせない。
+        const deny = createCal({
+            token: () => Promise.resolve('acc-1'),
+            apiUrl: at + '/cal',
+            fetch: async () => new Response('{"error":{"message":"Insufficient Permission"}}', { status: 403 }),
+        });
+        const no403 = await deny.make('x').then(() => '', (e) => e.message);
+        ok(no403.includes('許可がありません'), '許可が足りないときは、そう言う', no403);
+
+        ok(shareUrl('') === SETTINGS_URL, 'id が無ければ、設定の入口へ');
+        ok(shareUrl('abc@group.calendar.google.com').startsWith(SETTINGS_URL + '/calendar/'),
+           '共有設定のページの URL を組める（**本物で確かめていない**）', shareUrl('abc@group.calendar.google.com'));
+    }
+
+    console.log('カレンダーの許可は、要る瞬間に足す（依頼 525）');
+    {
+        const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'amber-scope-'));
+        const v2 = { dir: dir2, encrypt: (t) => Buffer.from('v1:' + t), decrypt: (b) => String(b).slice(3) };
+        const d2 = createDrive({ open, vault: v2, tokenUrl: at + '/token', revokeUrl: at + '/revoke',
+                                 aboutUrl: at + '/about', authUrl: at + '/auth' });
+        await d2.signIn();
+        ok(lastAuth.searchParams.get('scope') === 'https://www.googleapis.com/auth/drive.file',
+           'はじめのサインインでは、カレンダーの許可を訊かない', lastAuth.searchParams.get('scope'));
+        ok(lastAuth.searchParams.get('include_granted_scopes') === 'true',
+           '**前に貰った許可を落とさない** ── 無いと、足しにいった瞬間に同期が黙って止まる');
+        ok(d2.grants(CAL_SCOPE) === false, 'まだカレンダーの許可は持っていない');
+        await d2.signIn({ scope: CAL_SCOPE });
+        ok(lastAuth.searchParams.get('scope') === CAL_SCOPE, '要る瞬間に、カレンダーの許可だけを足しにいく');
+    }
 
     fake.close();
 
