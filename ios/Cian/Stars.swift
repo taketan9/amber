@@ -60,7 +60,7 @@ struct Stars: View {
                         Text(note.shown).font(.body.weight(.semibold)).lineLimit(1)
                         // Where it actually lives, which is the question a
                         // favourite makes you ask.
-                        Label(note.book.isEmpty ? store.rootName : note.book, systemImage: "folder")
+                        Label(store.bookLabel(note), systemImage: "folder")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

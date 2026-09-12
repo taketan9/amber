@@ -197,6 +197,18 @@ body.mac #railtop { height: 34px; padding-left: 88px; }
 .dest .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dest[data-depth="1"] { padding-left: 28px; }
 .dest[data-depth="2"] { padding-left: 42px; }
+.dest[data-depth="3"] { padding-left: 56px; }
+/* 保存ディレクトリの行（依頼 511）── フォルダの親。字は少し濃く、右に
+   同期先の札（Drive のときだけ）。読めていないものは薄く。 */
+.dest[data-kind="place"] { color: var(--ink); font-weight: 600; }
+.dest[data-kind="place"] .mk { color: var(--ink-2); }
+.dest .sy {
+  margin-left: auto; font-size: 9.5px; font-weight: 600; letter-spacing: .06em;
+  color: var(--ink-3); border: 1px solid var(--line); border-radius: 4px;
+  padding: 0 4px; line-height: 14px; flex: none;
+}
+.dest .sy + .n { margin-left: 6px; }
+.dest.lost { opacity: .55; }
 
 /* ── 中: ノートの一覧 ── */
 #list {

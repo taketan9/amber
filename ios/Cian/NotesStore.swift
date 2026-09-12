@@ -12,14 +12,32 @@ import SwiftUI
 @MainActor
 final class NotesStore: ObservableObject {
     @Published var notes: [Note] = []
-    @Published var rootName: String = ""
     @Published var trouble: String?
-    /// 共有の棚へ入れたノートが、もといたフォルダ（ルートからの道 →
-    /// フォルダ名）。**共有をやめたときに、そこへ戻す。**
-    @Published var came: [String: String] = [:]
 
-    private var root: URL?
+    /// **保存ディレクトリ**（依頼 511・窓の `state.places` と同じ形）。**いくつでも。**
+    /// `sync` は `drive`／`none`、`at` は Drive の上での置き場所（'' はいちばん目）。
+    /// 選んだフォルダは security-scoped bookmark で憶える ── それがこのアプリに
+    /// Google Drive も Dropbox も iCloud のコードも要らない理由（どれも「ファイル」の
+    /// 提供者で、選んだ一つのフォルダがそのまま Mac が開いているフォルダになる）。
+    struct Place: Identifiable, Codable, Equatable {
+        var id: String
+        var name: String
+        var sync: String
+        var at: String
+        /// アプリ自身のフォルダ（「ファイル」→ この iPhone 内 → ambər）。
+        var own: Bool
+        var bookmark: Data?
+    }
+    @Published var places: [Place] = []
+    /// 読めなかった保存ディレクトリ（id → 理由）。無かったことにしない。
+    @Published var placeTrouble: [String: String] = [:]
+    /// いま開いている保存ディレクトリ（一覧のフォルダはこの中のもの）。
+    @Published var placeId: String = ""
+    /// 開けた保存ディレクトリ（id → URL・鍵を開けたまま）。
+    private var urls: [String: URL] = [:]
     private static let bookmarkKey = "cian.notes.root"
+    private static let placesKey = "amber.places"
+    private static let placeKey = "amber.place"
     private static let seededKey = "amber.notes.seeded"
 
     /// The app's own folder, which is where notes go when nothing else is
@@ -36,19 +54,29 @@ final class NotesStore: ObservableObject {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
     }
 
+    /// いま開いている保存ディレクトリ（無ければいちばん目）。
+    var place: Place? { places.first { $0.id == placeId } ?? places.first }
+    /// その保存ディレクトリのフォルダ。
+    private var root: URL? { place.flatMap { urls[$0.id] } }
+    func url(of p: Place) -> URL? { urls[p.id] }
+    /// 二つ以上あるか ── 名前を頭に付けるのはそのときだけ。
+    var many: Bool { places.count > 1 }
+    /// 一覧の上に出す名前（いま開いている保存ディレクトリのもの）。
+    var rootName: String { place?.name ?? "" }
     /// Whether the notes are in the app's own folder rather than one picked.
-    @Published var own = true
+    var own: Bool { place?.own ?? true }
     /// The path as a trail of names — 「この iPhone › ambər › 仕事」.
     ///
     /// A phone hides paths, which is usually kind and here is not: the same
     /// folder name can exist in three different clouds, and "ambər" on its own
     /// answers *what is it called* when the question is *where is it*.
-    var trail: [String] {
-        guard let root else { return [] }
-        if own { return ["この iPhone", "ambər"] }
+    var trail: [String] { place.map(trail(of:)) ?? [] }
+    func trail(of p: Place) -> [String] {
+        if p.own { return ["この iPhone", "ambər"] }
+        guard let url = urls[p.id] else { return [p.name, "（見つかりません）"] }
         // The tail of the path, which is the part that means anything: the
         // front of it is the provider's own bookkeeping.
-        let parts = root.pathComponents.filter { $0 != "/" }
+        let parts = url.pathComponents.filter { $0 != "/" }
         let keep = parts.suffix(4)
         return (parts.count > keep.count ? ["…"] : []) + keep
     }
@@ -57,10 +85,172 @@ final class NotesStore: ObservableObject {
     var rootPath: String { root?.path ?? "" }
     var rootURL: URL? { root }
 
-    /// Go back to the app's own folder.
+    /// その道が入っている保存ディレクトリのフォルダ（長いほうが勝つ）。分からなければいま開いているもの。
+    func rootOf(_ path: String) -> String {
+        var hit = ""
+        for (_, url) in urls where path == url.path || path.hasPrefix(url.path + "/") {
+            if url.path.count > hit.count { hit = url.path }
+        }
+        return hit.isEmpty ? rootPath : hit
+    }
+    /// このノートは、いま開いている保存ディレクトリのものか。
+    func here(_ n: Note) -> Bool { n.root == rootPath }
+    /// ノートの居場所を言葉に（二つ以上なら保存ディレクトリの名前を頭に）。
+    func bookLabel(_ n: Note) -> String {
+        let name = places.first { urls[$0.id]?.path == n.root }?.name ?? ""
+        if n.book.isEmpty { return many ? name : rootName }
+        return (many && !name.isEmpty ? name + " › " : "") + n.book
+    }
+
+    /// Go back to the app's own folder ── **一つだけにする**（走査と「この iPhone の中に戻す」）。
     func useOwn() {
         UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
-        if let own = ownFolder { adopt(own, remember: false, scoped: false, named: "ambər") }
+        for p in places where !p.own { urls[p.id]?.stopAccessingSecurityScopedResource() }
+        let own = Place(id: places.first { $0.own }?.id ?? UUID().uuidString, name: "ambər", sync: "drive", at: "", own: true, bookmark: nil)
+        urls = [:]
+        placeTrouble = [:]
+        places = [own]
+        placeId = own.id
+        open()
+        persist()
+        reload()
+        tidyNames()
+    }
+
+    /// 保存ディレクトリを一つ足す（依頼 511）。**入った直後は同期しない** ── 会社の共有
+    /// フォルダを足した人の一覧を、黙って Drive に上げない。
+    func add(_ url: URL, named: String? = nil) {
+        let path = url.standardizedFileURL.path
+        if urls.values.contains(where: { $0.path == path }) { trouble = "そのフォルダはもう入っています"; return }
+        if urls.values.contains(where: { path.hasPrefix($0.path + "/") || $0.path.hasPrefix(path + "/") }) {
+            trouble = "そこは、ほかの保存ディレクトリと重なります（入れ子にはできません）"
+            return
+        }
+        let leaf = named ?? url.lastPathComponent
+        var name = leaf
+        var n = 2
+        while places.contains(where: { $0.name == name }) { name = leaf + " \(n)"; n += 1 }
+        // Drive の上の置き場所 ── いちばん目のフォルダと名前がぶつからないように。
+        var taken = Set(places.map(\.at))
+        if let first = places.first, let f = urls[first.id] {
+            for b in booksBy[f.path] ?? [] { taken.insert(String(b.split(separator: "/").first ?? "")) }
+        }
+        var at = name
+        n = 2
+        while taken.contains(at) { at = name + " \(n)"; n += 1 }
+        let p = Place(id: UUID().uuidString, name: name, sync: "none", at: at, own: false, bookmark: try? url.bookmarkData())
+        places.append(p)
+        open()
+        placeId = p.id
+        self.at = ""
+        persist()
+        reload()
+        tidyNames()
+    }
+
+    /// 場所を変える（前の「保存場所を変える」と同じ流れ ── 移すかどうかは画面が訊く）。
+    func relocate(_ id: String, to url: URL) {
+        guard let i = places.firstIndex(where: { $0.id == id }) else { return }
+        let path = url.standardizedFileURL.path
+        if urls.contains(where: { $0.key != id && ($0.value.path == path || path.hasPrefix($0.value.path + "/") || $0.value.path.hasPrefix(path + "/")) }) {
+            trouble = "そこは、ほかの保存ディレクトリと重なります（入れ子にはできません）"
+            return
+        }
+        if let was = urls[id], !places[i].own { was.stopAccessingSecurityScopedResource() }
+        urls[id] = nil
+        places[i].own = false
+        places[i].bookmark = try? url.bookmarkData()
+        open()
+        persist()
+        reload()
+        tidyNames()
+    }
+
+    /// この iPhone の中（アプリ自身のフォルダ）にする。
+    func relocateToOwn(_ id: String) {
+        guard let i = places.firstIndex(where: { $0.id == id }) else { return }
+        if places.contains(where: { $0.own && $0.id != id }) { trouble = "この iPhone の中は、もう別の保存ディレクトリになっています"; return }
+        if let was = urls[id], !places[i].own { was.stopAccessingSecurityScopedResource() }
+        urls[id] = nil
+        places[i].own = true
+        places[i].bookmark = nil
+        open()
+        persist()
+        reload()
+    }
+
+    /// 一覧から外す。**ファイルは消さない。** 最後の一つは外せない。
+    @discardableResult
+    func remove(place id: String) -> Bool {
+        guard places.count > 1, let i = places.firstIndex(where: { $0.id == id }) else { return false }
+        if let was = urls[id], !places[i].own { was.stopAccessingSecurityScopedResource() }
+        urls[id] = nil
+        placeTrouble[id] = nil
+        places.remove(at: i)
+        if placeId == id { placeId = places[0].id; at = "" }
+        persist()
+        reload()
+        return true
+    }
+
+    func rename(place id: String, to name: String) {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        guard !n.isEmpty, let i = places.firstIndex(where: { $0.id == id }) else { return }
+        if places.contains(where: { $0.id != id && $0.name == n }) { trouble = "「\(n)」はもうあります"; return }
+        places[i].name = n
+        persist()
+        reload()
+    }
+
+    func setSync(_ id: String, _ sync: String) {
+        guard let i = places.firstIndex(where: { $0.id == id }) else { return }
+        places[i].sync = sync == "drive" ? "drive" : "none"
+        persist()
+    }
+
+    /// 別の保存ディレクトリへ移る（一覧のフォルダの段の切り替え）。
+    func enter(_ id: String) {
+        guard places.contains(where: { $0.id == id }), id != placeId else { return }
+        placeId = id
+        at = ""
+        forward.removeAll()
+        UserDefaults.standard.set(id, forKey: Self.placeKey)
+    }
+
+    private func persist() {
+        if let data = try? JSONEncoder().encode(places) { UserDefaults.standard.set(data, forKey: Self.placesKey) }
+        UserDefaults.standard.set(placeId, forKey: Self.placeKey)
+    }
+
+    /// 憶えたぶんを開く（鍵も開ける）。開けないものは `placeTrouble` に。
+    private func open() {
+        for i in places.indices {
+            let p = places[i]
+            if urls[p.id] != nil { continue }
+            if p.own {
+                if let own = ownFolder { urls[p.id] = own; placeTrouble[p.id] = nil }
+                continue
+            }
+            guard let data = p.bookmark else { placeTrouble[p.id] = "そのフォルダの憶えがありません"; continue }
+            var stale = false
+            guard let url = try? URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale) else {
+                // A folder in a cloud provider can move, be signed out of, or be
+                // handed back stale after an update. Saying so beats an empty list
+                // that looks like "you have no notes".
+                placeTrouble[p.id] = "そのフォルダが見つかりません"
+                continue
+            }
+            // **The permission has to be opened and closed** — for a folder
+            // somebody picked. 開けなくても読めるなら使う（アプリの中のフォルダ）。
+            if !url.startAccessingSecurityScopedResource(), !FileManager.default.isReadableFile(atPath: url.path) {
+                placeTrouble[p.id] = "そのフォルダを開く許可がありません"
+                continue
+            }
+            urls[p.id] = url
+            placeTrouble[p.id] = nil
+            if places[i].name.isEmpty { places[i].name = url.lastPathComponent }
+            if stale, let fresh = try? url.bookmarkData() { places[i].bookmark = fresh }
+        }
     }
 
     /// Copy Markdown files in from somewhere else.
@@ -96,23 +286,26 @@ final class NotesStore: ObservableObject {
     }
 
     /// The folder from last time, or this app's own.
+    ///
+    /// **前の `cian.notes.root` 一つから引き継ぐ**（依頼 511）── 憶えが `places` に
+    /// なっていない電話では、いままでの場所が一つ目になる（同期はいままで通り Drive）。
     func restore() {
         seedWelcome()
-        guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else {
-            if let ownFolder { adopt(ownFolder, remember: false, scoped: false, named: "ambər") }
-            return
+        let d = UserDefaults.standard
+        if let data = d.data(forKey: Self.placesKey),
+           let saved = try? JSONDecoder().decode([Place].self, from: data), !saved.isEmpty {
+            places = saved
+        } else if let data = d.data(forKey: Self.bookmarkKey) {
+            places = [Place(id: UUID().uuidString, name: "", sync: "drive", at: "", own: false, bookmark: data)]
+        } else {
+            places = [Place(id: UUID().uuidString, name: "ambər", sync: "drive", at: "", own: true, bookmark: nil)]
         }
-        var stale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: data,
-            options: [],
-            relativeTo: nil,
-            bookmarkDataIsStale: &stale
-        ) else { return }
-        // A folder in a cloud provider can move, be signed out of, or be
-        // handed back stale after an update. Saying so beats an empty list
-        // that looks like "you have no notes".
-        adopt(url, remember: stale, scoped: true)
+        open()
+        let want = d.string(forKey: Self.placeKey) ?? ""
+        placeId = places.contains { $0.id == want } ? want : places[0].id
+        persist()
+        reload()
+        tidyNames()
     }
 
     /// **Don't show a first-time reader an empty list.**
@@ -133,7 +326,7 @@ final class NotesStore: ObservableObject {
         // Their notes live in that folder; putting samples in the app's own
         // one would drop three files into a place they are not looking at,
         // and they would find them weeks later without knowing where from.
-        guard defaults.data(forKey: Self.bookmarkKey) == nil else {
+        guard defaults.data(forKey: Self.bookmarkKey) == nil, defaults.data(forKey: Self.placesKey) == nil else {
             defaults.set(true, forKey: Self.seededKey)
             return
         }
@@ -215,10 +408,6 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    func choose(_ url: URL) {
-        adopt(url, remember: true, scoped: true)
-    }
-
     /// Everything that is here now, moved to a folder that was just chosen.
     ///
     /// **Copy, check, then remove** — see the engine's `migrate`. Between two
@@ -267,57 +456,53 @@ final class NotesStore: ObservableObject {
     /// The tail, because the front of a provider's path is its own
     /// bookkeeping — 「Google Drive › 仕事 › ノート」 is the answer;
     /// `/private/var/mobile/Library/CloudStorage/…` is not.
-    private func trail(of url: URL) -> String {
-        let parts = url.pathComponents.filter { $0 != "/" }
-        let keep = parts.suffix(3)
-        return (parts.count > keep.count ? "… › " : "") + keep.joined(separator: " › ")
-    }
+    /// フォルダ・色・憶え・共有の印は**保存ディレクトリごと**（core の帳面が
+    /// そこにある）。見せるのは、いま開いている保存ディレクトリのぶん。
+    private var booksBy: [String: [String]] = [:]
+    private var colorsBy: [String: [String: String]] = [:]
+    private var cameBy: [String: [String: String]] = [:]
+    private var sharesBy: [String: [Shelf]] = [:]
 
-    private func adopt(_ url: URL, remember: Bool, scoped: Bool, named: String? = nil) {
-        // **The permission has to be opened and closed** — for a folder
-        // somebody picked. Not for the app's own: asking to open a scope it
-        // was never given fails, and the failure reads as "cian cannot see my
-        // notes" when the truth is that no permission was needed.
-        if scoped, !url.startAccessingSecurityScopedResource() {
-            trouble = "そのフォルダを開く許可がありません"
-            return
-        }
-        if scoped { root?.stopAccessingSecurityScopedResource() }
-        root = url
-        // The app's own folder is literally named `Documents`, which is what
-        // the filesystem calls it and not what anybody calls it — Files shows
-        // it as **ambər** (the display name), and so should the title above it.
-        rootName = named ?? url.lastPathComponent
-        own = named != nil
-        if remember, let data = try? url.bookmarkData() {
-            UserDefaults.standard.set(data, forKey: Self.bookmarkKey)
-        }
-        reload()
-        tidyNames()
-    }
-
+    /// **保存ディレクトリごとに数えて、一つに重ねる**（依頼 511・窓の `reload` と同じ）。
+    /// core は一つの保存ディレクトリしか知らない ── 二つを一つに見せるのは画面の都合。
     func reload() {
-        guard let root else { return }
-        do {
-            let answer = try Cian.call("notes", ["path": root.path])
-            let rows = answer["notes"] as? [[String: Any]] ?? []
-            notes = rows.compactMap(Note.init)
-            allBooks = answer["books"] as? [String] ?? []
-            stars = answer["stars"] as? [String] ?? []
-            colors = answer["colors"] as? [String: String] ?? [:]
-            came = answer["came"] as? [String: String] ?? [:]
-            shares = (answer["shares"] as? [[String: Any]] ?? []).compactMap {
-                guard let at = $0["at"] as? String else { return nil }
-                return Shelf(at: at, by: $0["by"] as? String ?? "")
+        var all: [Note] = []
+        var stars = Set<String>()
+        var waiting: [String] = []
+        var fetchRows: [[String: Any]] = []
+        var firstTrouble: String?
+        var readAny = false
+        for p in places {
+            guard let url = urls[p.id] else { continue }
+            do {
+                let answer = try Cian.call("notes", ["path": url.path])
+                var rows = answer["notes"] as? [[String: Any]] ?? []
+                for i in rows.indices { rows[i]["root"] = url.path; rows[i]["place"] = p.name }
+                all += rows.compactMap(Note.init)
+                booksBy[url.path] = answer["books"] as? [String] ?? []
+                for st in answer["stars"] as? [String] ?? [] { stars.insert(st) }
+                colorsBy[url.path] = answer["colors"] as? [String: String] ?? [:]
+                cameBy[url.path] = answer["came"] as? [String: String] ?? [:]
+                sharesBy[url.path] = (answer["shares"] as? [[String: Any]] ?? []).compactMap {
+                    guard let at = $0["at"] as? String else { return nil }
+                    return Shelf(at: at, by: $0["by"] as? String ?? "")
+                }
+                waiting += (answer["waiting"] as? [[String: Any]] ?? []).compactMap { $0["of"] as? String }
+                fetchRows += answer["waiting"] as? [[String: Any]] ?? []
+                placeTrouble[p.id] = nil
+                readAny = true
+            } catch {
+                placeTrouble[p.id] = error.localizedDescription
+                firstTrouble = firstTrouble ?? error.localizedDescription
             }
-            waiting = (answer["waiting"] as? [[String: Any]] ?? [])
-                .compactMap { $0["of"] as? String }
-            fetch(answer["waiting"] as? [[String: Any]] ?? [])
-            clashes = notes.filter { $0.clash != nil }
-            trouble = nil
-        } catch {
-            trouble = error.localizedDescription
         }
+        notes = all
+        self.stars = stars.sorted()
+        self.waiting = waiting
+        fetch(fetchRows)
+        clashes = notes.filter { $0.clash != nil }
+        // 一つも読めなかったときだけ言う ── 一つが読めないのは列の中で言う。
+        trouble = readAny || places.isEmpty ? nil : firstTrouble
     }
 
     /// いま書いた一本の行だけ、新しくする。**書いたあとに棚を丸ごと数え
@@ -340,7 +525,7 @@ final class NotesStore: ObservableObject {
         else { return reload() }
         let now = notes[at]
         var o: [String: Any] = [
-            "path": now.path, "book": now.book, "shared": now.shared,
+            "path": now.path, "book": now.book, "shared": now.shared, "root": now.root, "place": now.place,
             "title": now.title, "excerpt": now.excerpt, "tags": now.tags,
             "updated": now.updated, "created": now.created, "search": now.search,
         ]
@@ -362,7 +547,7 @@ final class NotesStore: ObservableObject {
     /// **教えてもらわなくても分かる。** 印は共有フォルダの中の一枚
     /// （`notebook::SHARE_MARK`）で、フォルダと一緒に旅をする ── 受け取った
     /// 人が自分の amber に「これが共有です」と教え直す手が要らない。
-    @Published var shares: [Shelf] = []
+    var shares: [Shelf] { sharesBy[rootPath] ?? [] }
 
     struct Shelf: Identifiable, Equatable {
         let at: String
@@ -434,18 +619,21 @@ final class NotesStore: ObservableObject {
     func find(_ needle: String) {
         finding?.cancel()
         let n = needle.trimmingCharacters(in: .whitespaces)
-        guard let root, n.count >= 2 else {
+        let roots = places.compactMap { urls[$0.id]?.path }
+        guard !roots.isEmpty, n.count >= 2 else {
             hits = [:]
             return
         }
         finding = Task {
             try? await Task.sleep(for: .milliseconds(250))
             if Task.isCancelled { return }
-            guard let answer = try? Cian.call("find", ["path": root.path, "needle": n]) else { return }
-            if Task.isCancelled { return }
             var found: [String: String] = [:]
-            for h in answer["hits"] as? [[String: Any]] ?? [] {
-                if let p = h["path"] as? String { found[p] = h["text"] as? String ?? "" }
+            for root in roots {
+                guard let answer = try? Cian.call("find", ["path": root, "needle": n]) else { continue }
+                if Task.isCancelled { return }
+                for h in answer["hits"] as? [[String: Any]] ?? [] {
+                    if let p = h["path"] as? String { found[p] = h["text"] as? String ?? "" }
+                }
             }
             hits = found
         }
@@ -527,7 +715,7 @@ final class NotesStore: ObservableObject {
     /// ones this pile actually has.
     var tagsHere: [String] {
         var count: [String: Int] = [:]
-        for n in notes where flat || n.book == at || at.isEmpty {
+        for n in notes where flat || (here(n) && (n.book == at || at.isEmpty)) {
             for t in n.tags { count[t, default: 0] += 1 }
         }
         return count.keys.sorted {
@@ -578,12 +766,12 @@ final class NotesStore: ObservableObject {
     /// Every notebook there is, as paths relative to the root — including the
     /// empty ones, which is why this comes from the engine's walk of the
     /// directories rather than from the notes.
-    @Published var allBooks: [String] = []
+    var allBooks: [String] { booksBy[rootPath] ?? [] }
 
     /// Every favourite shelf, including the empty ones.
     @Published var stars: [String] = []
     /// Folder path → the colour it was given.
-    @Published var colors: [String: String] = [:]
+    var colors: [String: String] { colorsBy[rootPath] ?? [:] }
 
     /// The shelves directly inside `shelf`, with how many notes are under each.
     func shelves(in shelf: String) -> [(name: String, path: String, count: Int)] {
@@ -666,15 +854,19 @@ final class NotesStore: ObservableObject {
 
     /// Make a favourite shelf, or forget one and everything under it.
     func shelf(_ name: String, drop: Bool = false) throws {
-        guard let root else { return }
-        _ = try Cian.call("shelf", ["path": root.path, "name": name, "drop": drop])
+        if drop {
+            for p in places { if let u = urls[p.id] { _ = try? Cian.call("shelf", ["path": u.path, "name": name, "drop": true]) } }
+        } else {
+            guard let first = places.first, let u = urls[first.id] else { return }
+            _ = try Cian.call("shelf", ["path": u.path, "name": name, "drop": false])
+        }
         reload()
     }
 
     /// How many notes are anywhere under one folder — what a delete would
     /// take with it, said before it is done.
     func under(_ book: String) -> Int {
-        notes.filter { $0.book == book || $0.book.hasPrefix(book + "/") }.count
+        notes.filter { here($0) && ($0.book == book || $0.book.hasPrefix(book + "/")) }.count
     }
 
     /// Rename a folder. The notes inside keep their names and their words.
@@ -720,7 +912,7 @@ final class NotesStore: ObservableObject {
             if !seen.contains(full) { seen.append(full) }
         }
         return seen.map { full in
-            let n = notes.filter { $0.book == full || $0.book.hasPrefix(full + "/") }.count
+            let n = notes.filter { here($0) && ($0.book == full || $0.book.hasPrefix(full + "/")) }.count
             return (String(full.dropFirst(prefix.count)), full, n)
         }
     }
@@ -792,7 +984,7 @@ final class NotesStore: ObservableObject {
         // A tag narrows like a search does — everywhere, not just here.
         // Pressing 「#仕事」 while standing in one folder and being shown only
         // that folder's 仕事 notes is the answer to a question nobody asked.
-        if !flat && n.isEmpty && !narrowing { out = out.filter { $0.book == at } }
+        if !flat && n.isEmpty && !narrowing { out = out.filter { here($0) && $0.book == at } }
         if !n.isEmpty {
             // Either half: what the listing knows, or what was found inside.
             // Every word of one group has to be there; any group will do.
@@ -807,7 +999,7 @@ final class NotesStore: ObservableObject {
         // 引き出しの中に書いてある（窓と同じ）。
         if !onlyBooks.isEmpty {
             out = out.filter { note in
-                onlyBooks.contains { note.book == $0 || note.book.hasPrefix($0 + "/") }
+                here(note) && onlyBooks.contains { note.book == $0 || note.book.hasPrefix($0 + "/") }
             }
         }
         if span != nil { out = out.filter(inSpan) }
@@ -827,7 +1019,7 @@ final class NotesStore: ObservableObject {
     func pinnedHere(_ needle: String) -> [Note] {
         guard needle.trimmingCharacters(in: .whitespaces).isEmpty, !flat, !narrowing else { return [] }
         let all = notes.filter { $0.star != nil }
-        return sorted(at.isEmpty ? all : all.filter { $0.book == at })
+        return sorted(at.isEmpty ? all : all.filter { here($0) && $0.book == at })
     }
 
     /// A run of notes under one heading.
@@ -1062,7 +1254,8 @@ final class NotesStore: ObservableObject {
 
     /// **題に合わせて改名する**（依頼 502・窓と同じ core の `settle`）。改名したら新しい道。
     func settle(_ path: String) -> String? {
-        guard let root = root?.path, !root.isEmpty else { return nil }
+        let root = rootOf(path)
+        guard !root.isEmpty else { return nil }
         guard let got = try? Cian.call("settle", ["path": root, "note": path]),
               got["renamed"] as? Bool == true, let to = got["path"] as? String else { return nil }
         return to
@@ -1071,9 +1264,12 @@ final class NotesStore: ObservableObject {
     /// 時刻の名前のまま残っているノートを、一度だけ題の名前に揃える（決めごと 7）。
     @discardableResult
     func tidyNames() -> Int {
-        guard let root = root?.path, !root.isEmpty else { return 0 }
-        let got = try? Cian.call("tidynames", ["path": root])
-        let n = (got?["renamed"] as? [[String: Any]])?.count ?? 0
+        var n = 0
+        for p in places {
+            guard let u = urls[p.id] else { continue }
+            let got = try? Cian.call("tidynames", ["path": u.path])
+            n += (got?["renamed"] as? [[String: Any]])?.count ?? 0
+        }
         if n > 0 { reload() }
         return n
     }
@@ -1083,11 +1279,9 @@ final class NotesStore: ObservableObject {
         // のは core（最後の一区切りから間が空いたときだけ）── 電話と窓で
         // 決まりが違うと、片方で消えたものをもう片方が残っていると思う。
         // 履歴が置けないことで、保存が止まる理由はない。
-        if let root = root?.path {
-            _ = try? Cian.call("keep", [
-                "root": root, "path": note.path, "gap": 300,
-            ])
-        }
+        _ = try? Cian.call("keep", [
+            "root": rootOf(note.path), "path": note.path, "gap": 300,
+        ])
         var params: [String: Any] = ["path": note.path, "text": text, "force": force]
         if !stamp.isEmpty { params["stamp"] = stamp }
         let answer = try Cian.call("write", params)
@@ -1105,7 +1299,8 @@ final class NotesStore: ObservableObject {
     /// を人が言える道が要る（窓の ⌘S と同じ `keep`：間を置かず・印を付けて）。
     /// 印の付いた世代は数の勘定から外れるので、あとから流れて消えない。
     func keepNow(path: String, text: String) throws -> String {
-        guard let root = root?.path else { return "保存場所がありません" }
+        let root = rootOf(path)
+        guard !root.isEmpty else { return "保存場所がありません" }
         let out = try Cian.call("keep", [
             "root": root, "path": path, "text": text,
             "gap": 0, "force": true, "kept": true,
@@ -1146,7 +1341,12 @@ final class NotesStore: ObservableObject {
     func move(_ note: Note, to book: String?) throws {
         guard let root else { return }
         let dir = book.map { root.appendingPathComponent($0) } ?? root
-        _ = try Cian.call("move", ["path": note.path, "dir": dir.path])
+        // **同じ保存ディレクトリの中なら `root` を渡す**（core が絵を連れて行き、
+        // 同期に「名前が変わった」と憶えさせる・依頼 496）。別の保存ディレクトリへ
+        // 渡るときは渡さない ── 向こうの帳面に、外の道を書かせない。
+        var p: [String: Any] = ["path": note.path, "dir": dir.path]
+        if note.root == root.path { p["root"] = root.path }
+        _ = try Cian.call("move", p)
         reload()
     }
 
@@ -1194,8 +1394,9 @@ final class NotesStore: ObservableObject {
     /// このノートをテンプレートにする ── 「テンプレート」フォルダへ写す（元はそのまま）。
     @discardableResult
     func toStencil(_ note: Note) throws -> String? {
-        guard let root else { return nil }
-        let got = try Cian.call("copy", ["path": note.path, "dir": root.appendingPathComponent(Self.templates).path])
+        let root = rootOf(note.path)
+        guard !root.isEmpty else { return nil }
+        let got = try Cian.call("copy", ["path": note.path, "dir": root + "/" + Self.templates])
         reload()
         return got["path"] as? String
     }
@@ -1234,7 +1435,8 @@ final class NotesStore: ObservableObject {
     /// 憶えていたフォルダが、もう無いことはある（消した・名前を変えた）──
     /// **無いところへは戻さない**。移せずに止まるより、いちばん上へ。
     func home(of note: Note) -> String? {
-        guard let was = came[rel(of: note)], allBooks.contains(was) else { return nil }
+        guard let was = cameBy[note.root]?[rel(of: note)],
+              (booksBy[note.root] ?? []).contains(was) else { return nil }
         return was
     }
 
@@ -1250,7 +1452,7 @@ final class NotesStore: ObservableObject {
         let now = book.isEmpty ? name : book + "/" + name
         // 憶えられないことで、共有が止まる理由はない。
         if let got = try? Cian.call("came", ["path": root.path, "rel": now, "from": from]) {
-            came = got["came"] as? [String: String] ?? came
+            cameBy[root.path] = got["came"] as? [String: String] ?? cameBy[root.path]
         }
     }
 
@@ -1262,7 +1464,7 @@ final class NotesStore: ObservableObject {
         let was = rel(of: note)
         try move(note, to: home(of: note))
         if let got = try? Cian.call("came", ["path": root.path, "rel": was, "forget": true]) {
-            came = got["came"] as? [String: String] ?? came
+            cameBy[root.path] = got["came"] as? [String: String] ?? cameBy[root.path]
         }
     }
 

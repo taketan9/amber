@@ -304,16 +304,23 @@ struct Calendaring: View {
     private func count() {
         guard !store.rootPath.isEmpty else { return }
         do {
-            let got = try Cian.call("month", [
-                "path": store.rootPath, "year": year, "month": month,
-            ])
-            slots = (got["days"] as? [[String: Any]] ?? []).map {
-                Slot(day: $0["day"] as? String ?? "",
-                     at: $0["at"] as? String,
-                     title: $0["title"] as? String ?? "",
-                     path: $0["path"] as? String ?? "",
-                     kind: $0["kind"] as? String ?? "note")
+            // 保存ディレクトリごとに訊いて足す（依頼 511）── どの日のノートも、
+            // どこに置いてあっても同じ表に出る。
+            var all: [Slot] = []
+            for p in store.places {
+                guard let url = store.url(of: p) else { continue }
+                let got = try Cian.call("month", [
+                    "path": url.path, "year": year, "month": month,
+                ])
+                all += (got["days"] as? [[String: Any]] ?? []).map {
+                    Slot(day: $0["day"] as? String ?? "",
+                         at: $0["at"] as? String,
+                         title: $0["title"] as? String ?? "",
+                         path: $0["path"] as? String ?? "",
+                         kind: $0["kind"] as? String ?? "note")
+                }
             }
+            slots = all
         } catch {
             trouble = error.localizedDescription
         }

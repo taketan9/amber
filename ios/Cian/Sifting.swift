@@ -98,7 +98,7 @@ struct Sifted: View {
         case .book:
             picks(head: "押して付け外し（どれかに入っているもの）",
                   rows: store.allBooks.map { b in
-                      (b, b, store.notes.filter { $0.book == b || $0.book.hasPrefix(b + "/") }.count)
+                      (b, b, store.notes.filter { store.here($0) && ($0.book == b || $0.book.hasPrefix(b + "/")) }.count)
                   },
                   none: "フォルダがまだありません（上のフォルダの印から作れます）",
                   on: { store.onlyBooks.contains($0) },

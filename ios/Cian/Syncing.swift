@@ -37,6 +37,31 @@ final class Syncing: ObservableObject {
         var up = 0, down = 0, gone = 0, clash = 0, moved = 0, eyes = 0
         var trouble: [String] = []
         var touched: Set<String> = []
+        /// 保存ディレクトリごとの数（名前 → そのぶん・依頼 511）。
+        var places: [String: Report] = [:]
+    }
+
+    /// 運ぶ相手 ── Drive にしてある保存ディレクトリ（開けているものだけ・依頼 511）。
+    private func targets(_ store: NotesStore) -> [NotesStore.Place] {
+        store.places.filter { $0.sync == "drive" && store.url(of: $0) != nil }
+    }
+
+    /// 向こうの一覧のうち、この保存ディレクトリのぶん（道は保存ディレクトリからの相対に）。
+    /// **いちばん目は `ambər` の直下、二つ目からは `ambər/<at>/`**（窓の `remoteOf` と同じ）。
+    private static func remoteOf(_ all: [Drive.Remote], _ place: NotesStore.Place, _ places: [NotesStore.Place]) -> [Drive.Remote] {
+        let others = places.map(\.at).filter { !$0.isEmpty && $0 != place.at }
+        let pre = place.at.isEmpty ? "" : place.at + "/"
+        var out: [Drive.Remote] = []
+        for x in all {
+            if !pre.isEmpty {
+                guard x.rel.hasPrefix(pre) else { continue }
+                out.append(Drive.Remote(rel: String(x.rel.dropFirst(pre.count)), id: x.id, tag: x.tag, by: x.by))
+            } else {
+                if others.contains(where: { x.rel.hasPrefix($0 + "/") }) { continue }
+                out.append(x)
+            }
+        }
+        return out
     }
 
     /// 開いた直後に一度 ── サインインしているなら時計を回して、六秒後に一度合わせる。
@@ -68,16 +93,57 @@ final class Syncing: ObservableObject {
     }
 
     /// 一度、合わせる。返すのは何を運んだかの数（走査が見る）。
+    /// 保存ディレクトリごとに順に運び、数は足す（`places` に一つずつも残す）。
     @discardableResult
     func now(_ reason: String) async -> Report? {
-        guard signedIn, !busy, let store, !store.rootPath.isEmpty else { return nil }
+        guard signedIn, !busy, let store else { return nil }
+        let targets = targets(store)
+        guard !targets.isEmpty else { return nil }
         if !auto && reason != "手" { return nil }
         busy = true
         defer { busy = false }
-        let root = store.rootPath
         var report = Report(reason: reason)
         do {
-            let remote = try await Drive.shared.list()
+            let all = try await Drive.shared.list()
+            for place in targets {
+                let one = await carry(place, Self.remoteOf(all, place, store.places), store)
+                report.up += one.up; report.down += one.down; report.gone += one.gone
+                report.clash += one.clash; report.moved += one.moved; report.eyes += one.eyes
+                report.trouble += one.trouble.map { (store.many ? place.name + " › " : "") + $0 }
+                report.touched.formUnion(one.touched)
+                report.places[place.name] = one
+            }
+            if !report.touched.isEmpty || report.gone > 0 {
+                store.reload()
+                desk?.pull(report.touched, store)
+            }
+            last = Date()
+            trouble = report.trouble.first ?? ""
+            if report.up + report.down + report.gone + report.clash + report.moved > 0 {
+                fresh = report
+                freshTask?.cancel()
+                freshTask = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    if !Task.isCancelled { self?.fresh = nil }
+                }
+            }
+        } catch {
+            trouble = error.localizedDescription
+            report.trouble.append(trouble)
+        }
+        troubleSince = trouble.isEmpty ? nil : (troubleSince ?? Date())
+        return report
+    }
+
+    /// 一つの保存ディレクトリを運ぶ。`remote` はそのぶんの一覧（相対）。
+    ///
+    /// core（`syncplan`・`synced`）は保存ディレクトリ一つしか知らない ── 帳面
+    /// （`.amber/sync.json`）もそこにある。Drive の上の道だけ `pre` を頭に付ける。
+    private func carry(_ place: NotesStore.Place, _ remote: [Drive.Remote], _ store: NotesStore) async -> Report {
+        var report = Report(reason: place.name)
+        guard let root = store.url(of: place)?.path else { return report }
+        let pre = place.at.isEmpty ? "" : place.at + "/"
+        do {
             let plan = try Cian.call("syncplan", [
                 "path": root, "who": "drive",
                 "remote": remote.map { ["rel": $0.rel, "id": $0.id, "tag": $0.tag, "by": $0.by] },
@@ -97,11 +163,11 @@ final class Syncing: ObservableObject {
                         let print = try Cian.call("syncprint", ["path": at])["print"] as? String ?? ""
                         let newId: String
                         if bin {
-                            newId = try await Drive.shared.upload(rel: rel, bytes: try Data(contentsOf: URL(fileURLWithPath: at)),
+                            newId = try await Drive.shared.upload(rel: pre + rel, bytes: try Data(contentsOf: URL(fileURLWithPath: at)),
                                                                   print: print, id: id.isEmpty ? nil : id)
                         } else {
                             let text = try Cian.call("read", ["path": at])["text"] as? String ?? ""
-                            newId = try await Drive.shared.upload(rel: rel, text: text, print: print, id: id.isEmpty ? nil : id)
+                            newId = try await Drive.shared.upload(rel: pre + rel, text: text, print: print, id: id.isEmpty ? nil : id)
                         }
                         done.append(["rel": rel, "id": newId, "tag": print])
                         report.up += 1
@@ -128,7 +194,7 @@ final class Syncing: ObservableObject {
                         gone.append(rel)
                         report.gone += 1
                     case "movethere":
-                        try await Drive.shared.rename(id, rel: rel)
+                        try await Drive.shared.rename(id, rel: pre + rel)
                         done.append(["rel": rel, "id": id, "tag": there?.tag ?? ""])
                         moved.append(rel)
                         report.moved += 1
@@ -147,7 +213,7 @@ final class Syncing: ObservableObject {
                         while FileManager.default.fileExists(atPath: beside) && n < 100 { beside = Self.numbered(at, n); n += 1 }
                         try Self.put(try await Drive.shared.downloadBytes(id), at: beside)
                         let print = try Cian.call("syncprint", ["path": at])["print"] as? String ?? ""
-                        let newId = try await Drive.shared.upload(rel: rel, bytes: try Data(contentsOf: URL(fileURLWithPath: at)), print: print, id: id)
+                        let newId = try await Drive.shared.upload(rel: pre + rel, bytes: try Data(contentsOf: URL(fileURLWithPath: at)), print: print, id: id)
                         done.append(["rel": rel, "id": newId, "tag": print])
                         report.up += 1
                         report.down += 1
@@ -165,7 +231,7 @@ final class Syncing: ObservableObject {
                         _ = try? Cian.call("keep", ["root": root, "path": at, "text": ours, "gap": 0, "force": true])
                         _ = try Cian.call("syncdown", ["path": at, "text": text])
                         let print = try Cian.call("syncprint", ["path": at])["print"] as? String ?? ""
-                        let newId = try await Drive.shared.upload(rel: rel, text: text, print: print, id: id)
+                        let newId = try await Drive.shared.upload(rel: pre + rel, text: text, print: print, id: id)
                         done.append(["rel": rel, "id": newId, "tag": print])
                         let merged = NotesStore.Merged.from(got, text: text)
                         desk?.incoming(at, merged, who: (there?.by.isEmpty == false ? there!.by : "向こう"), store)
@@ -182,26 +248,28 @@ final class Syncing: ObservableObject {
             if !done.isEmpty || !gone.isEmpty {
                 _ = try Cian.call("synced", ["path": root, "who": "drive", "done": done, "gone": gone, "moved": moved])
             }
-            if !report.touched.isEmpty || report.gone > 0 {
-                store.reload()
-                desk?.pull(report.touched, store)
-            }
-            last = Date()
-            trouble = report.trouble.first ?? ""
-            if report.up + report.down + report.gone + report.clash + report.moved > 0 {
-                fresh = report
-                freshTask?.cancel()
-                freshTask = Task { [weak self] in
-                    try? await Task.sleep(nanoseconds: 6_000_000_000)
-                    if !Task.isCancelled { self?.fresh = nil }
-                }
-            }
         } catch {
-            trouble = error.localizedDescription
-            report.trouble.append(trouble)
+            report.trouble.append(error.localizedDescription)
         }
-        troubleSince = trouble.isEmpty ? nil : (troubleSince ?? Date())
         return report
+    }
+
+    /// 運んだ直後の列の字。二つ以上あるときは保存ディレクトリの名前を頭に（依頼 511）。
+    func freshWords(_ r: Report) -> String {
+        func parts(_ r: Report) -> [String] {
+            var out: [String] = []
+            if r.up > 0 { out.append("アップロード\(r.up)本") }
+            if r.down > 0 { out.append("ダウンロード\(r.down)本") }
+            if r.gone > 0 { out.append("ゴミ箱へ\(r.gone)本") }
+            if r.clash > 0 { out.append("同じ行を両方で直したノート\(r.clash)本") }
+            if r.moved > 0 { out.append("名前の変更\(r.moved)本") }
+            return out
+        }
+        let each = r.places.filter { !parts($0.value).isEmpty }.sorted { $0.key < $1.key }
+        if store?.many == true, !each.isEmpty {
+            return each.map { $0.key + ": " + parts($0.value).joined(separator: "・") }.joined(separator: "　")
+        }
+        return parts(r).joined(separator: "・")
     }
 
     /// サインインして、時計を回す。
@@ -232,6 +300,7 @@ final class Syncing: ObservableObject {
 
     /// 一行の様子（一覧の頭に出す）。
     var line: String {
+        if let store, !store.places.contains(where: { $0.sync == "drive" }) { return "同期していません ・ どの保存ディレクトリも「同期しない」" }
         if !signedIn { return "同期していません" }
         if busy { return "同期しています…" }
         var out = "同期しています"

@@ -721,7 +721,7 @@ struct Tree: View {
         NavigationStack {
             List {
                 Section {
-                    row(store.rootName, "", 0, store.notes.count)
+                    row(store.rootName, "", 0, store.notes.filter(store.here).count)
                     ForEach(store.allBooks, id: \.self) { b in
                         row(b.split(separator: "/").last.map(String.init) ?? b,
                             b,

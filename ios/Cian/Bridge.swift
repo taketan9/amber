@@ -107,6 +107,11 @@ struct Note: Identifiable, Hashable {
     /// Shown because the list reaches six levels down: without it two notes
     /// called 「打合せ」 in two different months are the same row twice.
     let book: String
+    /// どの保存ディレクトリのものか（そのフォルダの道）と、その呼び名（依頼 511）。
+    /// `book` は保存ディレクトリからの相対のまま ── 二つの保存ディレクトリの同じ
+    /// 「仕事」を分けるのはこちら。
+    let root: String
+    let place: String
     /// A favourite, and which favourite shelf it stands on — `""` is the top
     /// of the favourites. **A second place, not a move**: the note stays in
     /// the folder it was written in, and this says where it also shows up.
@@ -139,6 +144,8 @@ struct Note: Identifiable, Hashable {
         updated = o["updated"] as? UInt64 ?? 0
         created = o["created"] as? UInt64 ?? o["updated"] as? UInt64 ?? 0
         book = o["book"] as? String ?? ""
+        root = o["root"] as? String ?? ""
+        place = o["place"] as? String ?? ""
         star = o["star"] as? String
         search = o["search"] as? String ?? ""
         shared = o["shared"] as? Bool ?? false

@@ -74,7 +74,7 @@ struct Nest: View {
             }
             .padding(.leading, CGFloat(depth) * 10)
         }
-        ForEach(store.notes.filter { $0.book == book }.sorted { $0.title < $1.title }) { note in
+        ForEach(store.notes.filter { store.here($0) && $0.book == book }.sorted { $0.title < $1.title }) { note in
             row(note).padding(.leading, CGFloat(depth) * 10 + 8)
         }
     }

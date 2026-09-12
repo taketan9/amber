@@ -352,8 +352,8 @@ function makeWindow() {
 /// まとめて一度だけ送る。保存の一回は数十の出来事になる（書いて、名前を
 /// 変えて、属性を触って）ので、そのたびに数え直すと打っている最中に一覧が
 /// 何度も跳ねる。
-let eyes = null;
-let eyesAt = '';
+/// 見張り（保存ディレクトリ → 見張り）。**いくつでも**（依頼 511）。
+const eyes = new Map();
 
 /// 見張る。**張れたかどうかを返す。**
 ///
@@ -361,10 +361,26 @@ let eyesAt = '';
 /// 「外で変わったら教えてもらう」をしないまま黙って動く。黙ると、二台で
 /// 同じフォルダを触っているのに片方が古いまま、が起きても誰も気づけない。
 /// 同梱する側が自前の帯で言うしかなかったのは、ここに返り値が無かったから。
-function watch(root) {
-    if (eyesAt === root && eyes) return true;
-    if (eyes) { eyes.close(); eyes = null; }
-    eyesAt = root;
+///
+/// `roots` は一つでも並びでもよい。**並びに無くなったものは閉じる**（外した
+/// 保存ディレクトリを、いつまでも見張らない）。返すのは、張れなかった最初の理由。
+function watch(roots) {
+    const want = (Array.isArray(roots) ? roots : [roots]).filter(Boolean);
+    for (const [dir, w] of eyes) {
+        if (want.includes(dir)) continue;
+        try { w.close(); } catch { /* もう閉じている */ }
+        eyes.delete(dir);
+    }
+    let bad = null;
+    for (const dir of want) {
+        if (eyes.has(dir)) continue;
+        const got = watchOne(dir);
+        if (got !== true && !bad) bad = got;
+    }
+    return bad || true;
+}
+
+function watchOne(root) {
     if (!root || !fs.existsSync(root)) return { ok: false, why: 'そのフォルダがありません' };
     let hold = null;
     // **何が動いたかを憶えておく。** 名前を落として「何かが変わった」とだけ
@@ -374,7 +390,7 @@ function watch(root) {
     try {
         // `recursive` は mac と Windows にはあり、Linux には無い ──
         // 無いところでは根の一段だけになる（それでも無いよりよい）。
-        eyes = fs.watch(root, { recursive: true, persistent: false }, (_kind, name) => {
+        const w = fs.watch(root, { recursive: true, persistent: false }, (_kind, name) => {
             // 自分の一時ファイルで起こさない。
             if (name && /(^|[\\/])\.|\.tmp$|~$/.test(name)) return;
             // 名前を教えてもらえない回もある（OS による）。そのときは
@@ -387,7 +403,8 @@ function watch(root) {
                 if (win && !win.isDestroyed()) win.webContents.send('amber:changed', names);
             }, 400);
         });
-        eyes.on('error', () => { eyes = null; });
+        w.on('error', () => { eyes.delete(root); });
+        eyes.set(root, w);
         return true;
     } catch (e) {
         // 見張れないフォルダ（ネットワーク越しなど）はある。**開かない
@@ -404,8 +421,8 @@ app.whenReady().then(() => {
     ipcMain.handle('amber:call', async (_e, method, params) => engine.call(method, params));
     ipcMain.handle('amber:recall', () => ({ root: firstRoot(), ...recall() }));
     ipcMain.handle('amber:appVersion', () => app.getVersion());
-    // 描く側が置き場所を決めたら、そこを見張る。
-    ipcMain.handle('amber:watch', (_e, root) => watch(root));
+    // 描く側が置き場所を決めたら、そこを見張る（一つでも並びでも）。
+    ipcMain.handle('amber:watch', (_e, roots) => watch(roots));
     /// 見本のノートを、言われた場所へ。**上書きはしない。**
     ipcMain.handle('amber:welcome', (_e, root) => {
         const from = path.join(__dirname, '..', 'packaging', 'welcome');

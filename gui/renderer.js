@@ -111,8 +111,20 @@ function why(e) {
 }
 
 const state = {
+    /// いちばん目の保存ディレクトリ（`places[0].dir`）。**一つしか無かった頃の
+    /// 名残り** ── 「どこか一つ」で足りるところ（見本を置く・テンプレート）が使う。
+    /// ノートを扱うところは `rootOf(path)` で、そのノートの保存ディレクトリを引く。
     root: '',
+    /// 保存ディレクトリ（依頼 511・本人が決めた乙・2026-09-12）。**いくつでも。**
+    /// `[{ name, dir, sync: 'drive'|'none', at }]` ── `at` は Drive の上での
+    /// 置き場所（'' は `ambər` の直下、それ以外は `ambər/<at>/`）。名前を変えても
+    /// `at` は変えない（向こうのフォルダを動かさないため）。
+    places: [],
+    /// 読めなかった保存ディレクトリ（`dir` → 理由）。外付けを抜いた・消した。
+    placeTrouble: {},
     notes: [],
+    /// フォルダ。**絶対の道**（保存ディレクトリが複数になってから ── 相対だと
+    /// 二つの保存ディレクトリにある同じ名前の「仕事」が見分けられない）。
     books: [],
     stars: [],
     /// 期間の絞り込み（`{ which: 'updated'|'created', from, to }`）。
@@ -152,6 +164,107 @@ const state = {
     head: '',
     dirty: false,
 };
+
+/* ── 保存ディレクトリ（依頼 511） ──
+ *
+ * **道は絶対で持つ。** フォルダ（`state.books`・`state.dest.what`・ノートの
+ * `book`）はぜんぶ保存ディレクトリからの絶対の道 ── 相対にしておくと、二つの
+ * 保存ディレクトリにある同じ名前の「仕事」が見分けられない。**相対が要るのは
+ * core に渡す瞬間だけ**（`relOf`）。
+ */
+
+/// その道が入っている保存ディレクトリ（無ければ null）。長いほうが勝つ ──
+/// 保存ディレクトリの中に保存ディレクトリがあっても、近いほうを引く。
+function placeOf(path) {
+    if (!path) return null;
+    let hit = null;
+    for (const p of state.places) {
+        if (path !== p.dir && !path.startsWith(p.dir + '/')) continue;
+        if (!hit || p.dir.length > hit.dir.length) hit = p;
+    }
+    return hit;
+}
+
+/// その道の保存ディレクトリ。分からなければいちばん目。
+const rootOf = (path) => { const p = placeOf(path); return p ? p.dir : state.root; };
+
+/// 保存ディレクトリからの相対の道（保存ディレクトリそのものなら ''）。
+function relOf(path) {
+    const root = rootOf(path);
+    if (path === root) return '';
+    return path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
+}
+
+const manyPlaces = () => state.places.length > 1;
+
+/// フォルダの見せ名。保存ディレクトリそのものなら、その名前。
+function bookName(dir) {
+    const p = placeOf(dir);
+    if (p && p.dir === dir) return p.name;
+    return String(dir || '').split('/').pop();
+}
+
+/// フォルダを言葉にする（帯・小窓）。二つ以上あるときは保存ディレクトリの名前を
+/// 頭に付ける ── 「仕事」だけでは、どちらの仕事か分からない。
+function bookLabel(dir) {
+    const p = placeOf(dir);
+    const rel = relOf(dir);
+    if (!p) return rel || dir;
+    if (!rel) return manyPlaces() ? p.name + '（いちばん上）' : '（いちばん上）';
+    return (manyPlaces() ? p.name + ' › ' : '') + rel;
+}
+
+/// 「〜へ」の形（帯の一言）。いちばん上なら「いちばん上へ」、フォルダなら「「仕事」へ」。
+function dirWords(dir) {
+    const p = placeOf(dir);
+    if (p && p.dir === dir) return (manyPlaces() ? '「' + p.name + '」の' : '') + 'いちばん上へ';
+    return '「' + bookLabel(dir) + '」へ';
+}
+
+/// 新しいノートが出来る場所。**いま見ているフォルダ**（フォルダも保存
+/// ディレクトリも見ていなければ、いちばん目のいちばん上）。
+function hereDir() {
+    const { kind, what } = state.dest;
+    if ((kind === 'book' || kind === 'place') && what) return what;
+    return state.root;
+}
+
+/// 移す先の一覧（`askPick` の items）。保存ディレクトリごとに、いちばん上と
+/// その中のフォルダ。値はぜんぶ絶対の道。
+function bookChoices() {
+    const out = [];
+    for (const p of state.places) {
+        out.push({ name: manyPlaces() ? p.name + '（いちばん上）' : '（いちばん上）', value: p.dir });
+        for (const b of state.books) {
+            if (rootOf(b) !== p.dir) continue;
+            out.push({ name: (manyPlaces() ? p.name + ' › ' : '') + relOf(b), value: b });
+        }
+    }
+    return out;
+}
+
+/// ノートを移す。**同じ保存ディレクトリの中なら `root` を渡す**（core が絵を
+/// 連れて行き、同期に「名前が変わった」と憶えさせる）。別の保存ディレクトリへ
+/// 渡るときは渡さない ── 向こうの帳面に、外の道を書かせない（同期は
+/// 片方で消え・片方で新しく上がる、として運ぶ）。
+function moveOp(path, dir) {
+    const same = rootOf(path) === rootOf(dir);
+    return ask('move', { path, dir, root: same ? rootOf(path) : '' });
+}
+
+/// 開いているノートの保存ディレクトリ（開いていなければいちばん目）。
+const openRoot = () => (state.open ? rootOf(state.open.path) : state.root);
+
+/// 憶える（`root` も一緒に ── main.js の見本置きなど、一つで足りるところが読む）。
+function savePlaces() {
+    state.root = state.places.length ? state.places[0].dir : state.root;
+    window.amber.remember({ places: state.places, root: state.root });
+}
+
+/// 見張り直す（ぜんぶの保存ディレクトリ）。
+async function rewatch() {
+    sayIfBlind(await window.amber.watch(state.places.map((p) => p.dir)));
+}
 
 /* ── 印 ── */
 
@@ -245,14 +358,22 @@ function drawRail() {
 
     {
         rows.push(head('フォルダ', 'book'));
-        for (const b of state.books) {
-            // **共有のフォルダは、こちらには出さない。** 下の「共有」の段に
-            // 同じものが並ぶ ── 二つの場所に同じものが出ると、人はそれを
-            // 二度消そうとする（ブックマークを別枠にしたのと同じ理由）。
-            if (state.shares.some((sh) => sh.at && (b === sh.at || b.startsWith(sh.at + '/')))) continue;
-            const n = state.notes.filter((x) => x.book === b || x.book.startsWith(b + '/')).length;
-            rows.push(dest('book', b, b.split('/').pop(), n, on('book', b),
-                           b.split('/').length - 1, state.colors[b]));
+        // **保存ディレクトリが二つ以上なら、それぞれが親の一行**（依頼 511・案ア）
+        // ── その下にフォルダが一段下がって並ぶ。一つだけの日は、いままで通り
+        // フォルダだけ（親が一つきりの木は、ただの余計な段）。
+        const base = manyPlaces() ? 1 : 0;
+        for (const p of state.places) {
+            if (manyPlaces()) rows.push(placeRow(p, on('place', p.dir)));
+            for (const b of state.books) {
+                if (rootOf(b) !== p.dir) continue;
+                // **共有のフォルダは、こちらには出さない。** 下の「共有」の段に
+                // 同じものが並ぶ ── 二つの場所に同じものが出ると、人はそれを
+                // 二度消そうとする（ブックマークを別枠にしたのと同じ理由）。
+                if (state.shares.some((sh) => sh.at !== rootOf(sh.at) && (b === sh.at || b.startsWith(sh.at + '/')))) continue;
+                const n = state.notes.filter((x) => x.book === b || x.book.startsWith(b + '/')).length;
+                rows.push(dest('book', b, b.split('/').pop(), n, on('book', b),
+                               relOf(b).split('/').length - 1 + base, state.colors[b]));
+            }
         }
     }
 
@@ -267,7 +388,8 @@ function drawRail() {
         rows.push(head('共有'));
         for (const sh of state.shares) {
             const n = state.notes.filter((x) => inShare(sh.at, x)).length;
-            rows.push(dest('share', sh.at, sh.at.split('/').pop() || 'ぜんぶ', n,
+            const top = sh.at === rootOf(sh.at);
+            rows.push(dest('share', sh.at, top ? (manyPlaces() ? bookName(sh.at) : 'ぜんぶ') : sh.at.split('/').pop(), n,
                            on('share', sh.at)));
         }
     }
@@ -334,7 +456,28 @@ const RAIL_MARKS = {
     tag: '<path d="M9.1 1.9h3.9a1.1 1.1 0 0 1 1.1 1.1v3.9a1.1 1.1 0 0 1-.32.78'
         + 'l-6.1 6.1a1.1 1.1 0 0 1-1.56 0L1.9 9.58a1.1 1.1 0 0 1 0-1.56l6.1-6.1'
         + 'a1.1 1.1 0 0 1 .78-.32z"/><path d="M11.2 4.8h.01"/>',
+    // 保存ディレクトリは**引き出し**（横長の箱に取っ手）── フォルダの形と
+    // 分けておく。中にフォルダが並ぶ「入れ物の入れ物」なので、同じ形だと
+    // 段の深さでしか見分けられない。
+    place: '<path d="M1.8 6.2h12.4v6.3a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1z'
+        + 'M3.2 6.2 4.6 2.9h6.8l1.4 3.3M6.4 9.8h3.2"/>',
 };
+
+/// 保存ディレクトリの一行（依頼 511）。右に同期先の札（Drive のときだけ）と数。
+/// 読めていなければ薄く出して「見つかりません」── 消えたように見せない。
+function placeRow(p, isOn) {
+    const n = state.notes.filter((x) => x.root === p.dir).length;
+    const lost = state.placeTrouble[p.dir];
+    const badge = p.sync === 'drive' ? '<span class="sy">Drive</span>' : '';
+    return '<div class="dest' + (isOn ? ' on' : '') + (lost ? ' lost' : '') + '" data-kind="place"'
+        + ' data-what="' + escapeAttr(p.dir) + '" data-depth="0"'
+        + (lost ? ' title="' + escapeAttr(lost) + '"' : '') + '>'
+        + '<svg class="mk" viewBox="0 0 16 16" aria-hidden="true">'
+        + '<g fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"'
+        + ' stroke-linejoin="round">' + RAIL_MARKS.place + '</g></svg>'
+        + '<span class="nm">' + escapeHtml(p.name) + '</span>' + badge
+        + '<span class="n">' + (lost ? '見つかりません' : n) + '</span></div>';
+}
 
 function dest(kind, what, name, n, isOn, depth, color) {
     const d = RAIL_MARKS[kind] || RAIL_MARKS.book;
@@ -353,13 +496,15 @@ function dest(kind, what, name, n, isOn, depth, color) {
 
 /* ── 一覧（中） ── */
 
-/// このノートは、その共有の棚の中か。
+/// このノートは、その共有の棚の中か（`at` は絶対の道。保存ディレクトリそのもの
+/// なら、その中のぜんぶ）。
 const inShare = (at, n) => !at || n.book === at || (n.book || '').startsWith(at + '/');
 
 function inDest(n) {
     const kind = state.dest.kind;
     const what = state.dest.what;
     if (kind === 'share') return inShare(what, n);
+    if (kind === 'place') return n.root === what;
     if (kind === 'book') return n.book === what || n.book.startsWith(what + '/');
     if (kind === 'tag') return (n.tags || []).includes(what);
     if (kind === 'star') {
@@ -495,8 +640,9 @@ function drawList() {
     const what = state.dest.what;
     const name = {
         all: 'すべてのノート',
-        book: what.split('/').pop(),
-        share: '共有 ── ' + what.split('/').pop(),
+        book: bookName(what),
+        place: bookName(what),
+        share: '共有 ── ' + (what === rootOf(what) ? (manyPlaces() ? bookName(what) : 'ぜんぶ') : what.split('/').pop()),
         tag: '#' + what,
         star: what ? '★ ' + what.split('/').pop() : '★ ブックマーク',
     }[state.dest.kind] || 'すべてのノート';
@@ -705,9 +851,11 @@ const TEMPLATES = 'テンプレート';
 ///
 /// できたノートは**いま見ているフォルダ**へ（「新しいノート」と同じ）──
 /// どこに出来たか分からない、がいちばん困る。
+/// そのフォルダは「テンプレート」の中か（どの保存ディレクトリのものでも）。
+const inTemplates = (dir) => relOf(dir) === TEMPLATES || relOf(dir).startsWith(TEMPLATES + '/');
+
 async function cmdTemplate() {
-    const rows = state.notes.filter(
-        (n) => n.book === TEMPLATES || n.book.startsWith(TEMPLATES + '/'));
+    const rows = state.notes.filter((n) => inTemplates(n.book));
     if (!rows.length) {
         // **無いなら、その場で作れる**（依頼 506・本人「選んでも動かない」）── 前は
         // 帯に一言出すだけで、見逃すと「押しても何も起きない」にしか見えなかった。
@@ -730,16 +878,14 @@ async function cmdTemplate() {
     const path = await askPick('どの型から',
         sortNotes(rows).map((n) => ({
             name: n.title || '（タイトルなし）',
-            sub: n.book === TEMPLATES ? '' : n.book.slice(TEMPLATES.length + 1),
+            sub: (manyPlaces() ? n.place + (relOf(n.book) === TEMPLATES ? '' : ' › ') : '')
+                + (relOf(n.book) === TEMPLATES ? '' : relOf(n.book).slice(TEMPLATES.length + 1)),
             value: n.path,
         })), '選ぶと、その中身で新しいノートを作ります');
     if (path === null) return;
     // **型のフォルダを見ているときは、いちばん上に作る。** そこに作ると
     // 型が増えていくだけで、書いたものがどこにも出てこない。
-    const here = state.dest.kind === 'book' && state.dest.what !== TEMPLATES
-        && !state.dest.what.startsWith(TEMPLATES + '/')
-        ? state.root + '/' + state.dest.what
-        : state.root;
+    const here = inTemplates(hereDir()) ? rootOf(hereDir()) : hereDir();
     try {
         const r = await ask('copy', { path, dir: here });
         await reload({ quiet: true });
@@ -756,7 +902,8 @@ async function cmdToTemplate() {
     if (!state.open || state.guest) return;
     if (state.dirty) await save();
     try {
-        const r = await ask('copy', { path: state.open.path, dir: state.root + '/' + TEMPLATES });
+        // 写す先は、**そのノートの保存ディレクトリ**の「テンプレート」。
+        const r = await ask('copy', { path: state.open.path, dir: rootOf(state.open.path) + '/' + TEMPLATES });
         await reload({ quiet: true });
         say('「' + (state.open.title || 'このノート') + '」を「' + TEMPLATES + '」に写しました。次から「テンプレートから新しいノート」に出ます');
         return r.path;
@@ -973,9 +1120,7 @@ async function manyStar(on) {
 
 async function manyMove() {
     const notes = pickedNotes();
-    const here = [{ name: '（いちばん上）', value: '' },
-        ...state.books.map((b) => ({ name: b, value: b })),
-        { name: '＋ 新しいフォルダを作る', value: ' new' }];
+    const here = [...bookChoices(), { name: '＋ 新しいフォルダを作る', value: ' new' }];
     let to = await askPick(notes.length + ' 本をどのフォルダへ', here);
     if (to === null) return;
     if (to === ' new') {
@@ -983,16 +1128,16 @@ async function manyMove() {
         if (!made) return;
         to = made;
     }
-    const dir = to ? state.root + '/' + to : state.root;
+    const dir = to;
     if (state.dirty) await save();
     let moved = 0;
     let failed = 0;
     const now = new Set();
     for (const note of notes) {
         // もう居るところへは動かさない。
-        if ((note.book || '') === to) { now.add(note.path); continue; }
+        if (note.book === dir) { now.add(note.path); continue; }
         try {
-            const r = await ask('move', { path: note.path, dir, root: state.root });
+            const r = await moveOp(note.path, dir);
             moved++;
             if (r && r.path) now.add(r.path);
         } catch { failed++; now.add(note.path); }
@@ -1003,7 +1148,7 @@ async function manyMove() {
     await reload({ quiet: true });
     if (state.open) await openNote(state.open.path, { quiet: true });
     drawList();
-    say(moved + ' 本を' + (to ? '「' + to + '」へ' : 'いちばん上へ') + '移しました'
+    say(moved + ' 本を' + dirWords(dir) + '移しました'
         + (failed ? '／' + failed + ' 本は移せませんでした' : ''));
 }
 
@@ -6625,7 +6770,7 @@ async function mergeIn(path, ours, was) {
     }
     // **混ぜる前のこちらの姿を、必ず履歴に残す**（Git の ORIG_HEAD の写し）──
     // 選び間違えても「混ぜる前に戻す」が一手でできる。
-    try { await ask('keep', { root: state.root, path, text: ours, gap: 0, force: true }); } catch { /* 履歴が置けなくても混ぜる */ }
+    try { await ask('keep', { root: rootOf(path), path, text: ours, gap: 0, force: true }); } catch { /* 履歴が置けなくても混ぜる */ }
     try {
         const w = await ask('write', { path, text: got.text, force: true });
         if (w && w.stamp) state.stamp = w.stamp;
@@ -6679,7 +6824,7 @@ async function save() {
     // 起きてはいけない。ここは「保存する前の姿はこれです」と言うだけ。
     if (!state.guest) {
         try {
-            await ask('keep', { root: state.root, path, text: state.was ?? text, gap: KEEP_GAP });
+            await ask('keep', { root: rootOf(path), path, text: state.was ?? text, gap: KEEP_GAP });
         } catch { /* 履歴が置けないことで、保存が止まる理由はない */ }
     }
     // **分かれる前の姿**（開いた時点、または前に保存できた時点の中身）。
@@ -6732,7 +6877,7 @@ async function save() {
 async function newNote(title) {
     // いまフォルダを見ているなら、そこに作る ── 「どこに出来たか分からない」
     // のがいちばん困る。
-    const dir = state.dest.kind === 'book' ? state.root + '/' + state.dest.what : state.root;
+    const dir = hereDir();
     try {
         const r = await ask('new', { dir, title: title || '' });
         await reload({ quiet: true });
@@ -6796,16 +6941,50 @@ async function freshenRow(path) {
 
 async function reload(opts) {
     try {
-        const r = await ask('notes', { path: state.root });
-        state.notes = r.notes || [];
-        state.books = r.books || [];
-        state.stars = r.stars || [];
-        state.colors = r.colors || {};
-        // 共有へ入れたノートが、もといたフォルダ。**献立に「どこへ戻すか」
-        // を出すのに要る** ── そのつど訊きに行くと、押す前に消費してしまう。
-        state.came = r.came || {};
-        state.waiting = r.waiting || [];
-        state.shares = r.shares || [];
+        // **保存ディレクトリごとに数えて、一つに重ねる**（依頼 511）。core は
+        // 一つの保存ディレクトリしか知らない（それでいい ── 二つを一つに見せる
+        // のは画面の都合）。相対で返ってくる道は、ここで絶対にする。
+        const notes = [];
+        const books = [];
+        const stars = new Set();
+        const colors = {};
+        const came = {};
+        const waiting = [];
+        const shares = [];
+        const trouble = {};
+        let firstErr = null;
+        const places = state.places.length ? state.places : (state.root ? [{ name: bookName(state.root), dir: state.root }] : []);
+        for (const p of places) {
+            let r;
+            try {
+                r = await ask('notes', { path: p.dir });
+            } catch (e) {
+                // **読めない保存ディレクトリは、無かったことにしない。** 外付けを
+                // 抜いた・消した ── 一覧からは消えるが、列には薄く残して言う。
+                trouble[p.dir] = why(e);
+                firstErr = firstErr || e;
+                continue;
+            }
+            const abs = (rel) => (rel ? p.dir + '/' + rel : p.dir);
+            for (const n of r.notes || []) notes.push({ ...n, root: p.dir, place: p.name, book: abs(n.book) });
+            for (const b of r.books || []) books.push(abs(b));
+            for (const s of r.stars || []) stars.add(s);
+            for (const [k, v] of Object.entries(r.colors || {})) colors[abs(k)] = v;
+            // 共有へ入れたノートが、もといたフォルダ。**献立に「どこへ戻すか」
+            // を出すのに要る** ── そのつど訊きに行くと、押す前に消費してしまう。
+            for (const [k, v] of Object.entries(r.came || {})) came[abs(k)] = abs(v);
+            for (const w of r.waiting || []) waiting.push(w);
+            for (const s of r.shares || []) shares.push({ at: abs(s.at), by: s.by });
+        }
+        state.placeTrouble = trouble;
+        if (places.length && Object.keys(trouble).length === places.length) throw firstErr;
+        state.notes = notes;
+        state.books = books;
+        state.stars = [...stars].sort();
+        state.colors = colors;
+        state.came = came;
+        state.waiting = waiting;
+        state.shares = shares;
         // 開いていた行を新しいほうに繋ぎ直す（更新時刻が動くので）。
         if (state.open) {
             state.open = state.notes.find((n) => n.path === state.open.path) || state.open;
@@ -7091,12 +7270,18 @@ let sparePicked = new Set();
 /// いちばん危ない。
 async function cmdSpare() {
     if (!state.root) { say('保存場所がありません'); return; }
-    let got;
-    try {
-        got = await window.amber.call('spare', { path: state.root });
-    } catch (e) {
-        say('数えられません: ' + why(e));
-        return;
+    // ぜんぶの保存ディレクトリを数えて、一つの表に（依頼 511）。
+    const got = { pictures: [], unsure: [] };
+    for (const p of state.places) {
+        if (state.placeTrouble[p.dir]) continue;
+        try {
+            const one = await window.amber.call('spare', { path: p.dir });
+            got.pictures.push(...(one.pictures || []));
+            got.unsure.push(...(one.unsure || []));
+        } catch (e) {
+            say('数えられません: ' + why(e));
+            return;
+        }
     }
     spareRows = got.pictures || [];
     sparePicked = new Set();
@@ -7298,11 +7483,16 @@ async function drawCal() {
     awaySlots = [];
     let bad = '';
     for (const { y, m } of calMonths()) {
-        try {
-            const got = await window.amber.call('month', { path: state.root, year: y, month: m });
-            calSlots = calSlots.concat(got.days || []);
-        } catch (e) {
-            bad = why(e);
+        // 保存ディレクトリごとに訊いて足す（依頼 511）── どの日のノートも、
+        // どこに置いてあっても同じ表に出る。
+        for (const p of state.places) {
+            if (state.placeTrouble[p.dir]) continue;
+            try {
+                const got = await window.amber.call('month', { path: p.dir, year: y, month: m });
+                calSlots = calSlots.concat(got.days || []);
+            } catch (e) {
+                bad = why(e);
+            }
         }
         // この機械の予定表と、よその予定表と、チームの紙を足す ── どれが
         // 読めなくても、自分のぶんは出る。
@@ -8354,7 +8544,9 @@ const CMDS = [
       sub: 'ノートから使われていない画像を削除', run: cmdSpare },
     { id: 'backup', name: 'バックアップ', app: true, run: cmdBackup },
     { id: 'restore', name: 'バックアップから戻す', app: true, run: cmdRestore },
-    { id: 'root', name: 'ambər 保存ディレクトリ変更', app: true, run: cmdRoot },
+    // **足す・変える・外す・同期先、を一つの入口で**（依頼 511・本人「保存
+    // ディレクトリを追加・変更・削除っていう表現で全部できるようにしない？」）。
+    { id: 'places', name: '保存ディレクトリの追加・変更・削除', app: true, run: cmdPlaces },
     { id: 'sync', name: '同期', app: true, sub: '同期していません', run: cmdSync },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'ambər について', app: true, run: cmdAbout },
@@ -8506,7 +8698,9 @@ function openMenu(at, which) {
         if (c.id === 'lineno') return { ...c, sub: lineNo ? 'オン' : 'オフ' };
         if (c.id === 'rail') return { ...c, name: railOff ? '左の列を出す' : '左の列を畳む' };
         if (c.id === 'list') return { ...c, name: listOff ? '一覧を出す' : '一覧を畳む' };
-        if (c.id === 'root') return { ...c, sub: shortPath(state.root) };
+        if (c.id === 'places') {
+            return { ...c, sub: manyPlaces() ? state.places.map((p) => p.name).join('・') : shortPath(state.root) };
+        }
         if (c.id === 'sync') return { ...c, sub: syncLabel() };
         if (c.id === 'toshare') {
             if (state.open && state.open.shared) {
@@ -8761,6 +8955,20 @@ async function railPlus(kind) {
 /// 行き先を右押ししたときの献立。**フォルダ・タグ・ブックマークを、名前ごと直す。**
 function railMenu(kind, what, at) {
     if (!what) return;
+    if (kind === 'place') {
+        // 保存ディレクトリの右押しは、⚙ の小窓と同じ四つ＋フォルダ作り（依頼 511）。
+        const p = state.places.find((x) => x.dir === what);
+        if (!p) return;
+        popMenu([
+            { name: 'この中にフォルダを作る', run: () => cmdMkBook(what) },
+            { name: '過去バージョン', sub: 'この中のノートぜんぶ', run: () => cmdHistory(what, true) },
+            { name: '同期先', sub: SYNC_WORDS[p.sync], sep: true, run: () => placeSyncSheet(p) },
+            { name: '名前を変える', run: () => placeRename(p) },
+            { name: '場所を変える…', sub: shortPath(p.dir), run: () => placeMove(p) },
+            { name: '外す', sub: 'ノートはそのまま残ります', run: () => placeDrop(p) },
+        ], at);
+        return;
+    }
     const items = [];
     // **下の階層は、ここから作る。** 名前に「/」を打たせるのは、
     // 書き方を知っている人にしか通じない。
@@ -8772,7 +8980,7 @@ function railMenu(kind, what, at) {
             items.push({
                 name: '家族を招待',
                 sub: 'クラウドの画面が開きます',
-                run: () => window.amber.reveal(state.root + '/' + what),
+                run: () => window.amber.reveal(what),
             });
         }
         items.push({
@@ -8782,7 +8990,7 @@ function railMenu(kind, what, at) {
         // フォルダの履歴は、**中のノートの姿をまとめて時系列で** ──
         // 「あのあたりで壊した」は、どのノートかを覚えていないほうが多い。
         items.push({ name: '過去バージョン', sub: 'この中のノートぜんぶ',
-                     run: () => cmdHistory(state.root + '/' + what, true) });
+                     run: () => cmdHistory(what, true) });
     }
     if (kind === 'star') {
         items.push({ name: 'この中にグループを作る', run: () => newShelf(what) });
@@ -8806,24 +9014,27 @@ function underRail(kind, what) {
 }
 
 async function railRename(kind, what) {
-    const to = await askText('新しい名前', what,
+    // フォルダは絶対の道で来る ── 欄に出すのは保存ディレクトリからの相対。
+    const shown = kind === 'book' ? relOf(what) : what;
+    const to = await askText('新しい名前', shown,
         kind === 'book' ? '仕事/2026 と書けば階層になります' : '');
-    if (to === null || !to.trim() || to.trim() === what) return;
+    if (to === null || !to.trim() || to.trim() === shown) return;
     const name = to.trim();
     const hit = underRail(kind, what);
+    const root = kind === 'book' ? rootOf(what) : state.root;
     try {
         if (kind === 'book') {
             // **中のノートを一本ずつ移す。** フォルダはただのディレクトリで、
             // 名前を変えるのは中身を動かすこと ── 途中で止まっても、動いた
             // ぶんは新しい名前の下にちゃんと居る。
-            await ask('mkbook', { dir: state.root + '/' + name });
+            await ask('mkbook', { dir: root + '/' + name });
             for (const n of hit) {
                 const sub = (n.book || '').slice(what.length).replace(/^\//, '');
-                const dir = state.root + '/' + name + (sub ? '/' + sub : '');
+                const dir = root + '/' + name + (sub ? '/' + sub : '');
                 await ask('mkbook', { dir });
-                await ask('move', { path: n.path, dir, root: state.root });
+                await ask('move', { path: n.path, dir, root });
             }
-            await window.amber.trash(state.root + '/' + what);
+            await window.amber.trash(what);
         } else {
             for (const n of hit) await retagOne(n, kind, what, name);
             // 棚は空でも core が憶えている ── 中のノートだけ直しても、
@@ -8831,14 +9042,16 @@ async function railRename(kind, what) {
             if (kind === 'star') {
                 // 下の階層ごと付け替える ── `drop` は下も一緒に忘れるので、
                 // 先に新しい名前で作り直しておかないと孫の棚が消える。
+                // 棚の帳面は保存ディレクトリごと ── 作るのはいちばん目、
+                // 忘れるのはぜんぶ（どこの帳面に居ても消えるように）。
                 for (const sh of state.stars) {
                     if (sh !== what && !sh.startsWith(what + '/')) continue;
                     await ask('shelf', { path: state.root, name: name + sh.slice(what.length) });
                 }
-                await ask('shelf', { path: state.root, name: what, drop: true });
+                await dropShelf(what);
             }
         }
-        state.dest = { kind, what: name };
+        state.dest = { kind, what: kind === 'book' ? root + '/' + name : name };
         await reload({ quiet: true });
         say('「' + name + '」に変えました（' + hit.length + ' 件）');
     } catch (e) {
@@ -8846,11 +9059,20 @@ async function railRename(kind, what) {
     }
 }
 
+/// ブックマークのグループを忘れる ── **ぜんぶの保存ディレクトリの帳面から**。
+/// どこか一つに残っていると、消したはずのグループが並びに戻ってくる。
+async function dropShelf(name) {
+    for (const p of state.places) {
+        if (state.placeTrouble[p.dir]) continue;
+        try { await ask('shelf', { path: p.dir, name, drop: true }); } catch { /* 無い帳面もある */ }
+    }
+}
+
 async function railDrop(kind, what) {
     const hit = underRail(kind, what);
     const what2 = kind === 'book' ? 'フォルダ' : (kind === 'tag' ? 'タグ' : 'ブックマーク');
     const ask2 = kind === 'book'
-        ? '「' + what + '」を、中の ' + hit.length + ' 件ごとゴミ箱へ入れますか'
+        ? '「' + bookLabel(what) + '」を、中の ' + hit.length + ' 件ごとゴミ箱へ入れますか'
         : kind === 'star'
             ? '保存場所「' + what + '」を消しますか'
                 + (hit.length ? '（中の ' + hit.length + ' 件はブックマークの直下へ）' : '')
@@ -8858,7 +9080,7 @@ async function railDrop(kind, what) {
     if (!await askYes(ask2)) return;
     try {
         if (kind === 'book') {
-            const gone = await window.amber.trash(state.root + '/' + what);
+            const gone = await window.amber.trash(what);
             if (gone !== true) {
                 say('ゴミ箱へ入れられません' + (gone && gone.why ? ': ' + gone.why : ''));
                 return;
@@ -8871,7 +9093,7 @@ async function railDrop(kind, what) {
             // **棚そのものも忘れる。** 保存場所は空でも残るように core が
             // 憶えている（`notebook::add_star`）── ノートから外すだけでは、
             // 中身の無い棚が並び続けて**消せないもの**になっていた。
-            await ask('shelf', { path: state.root, name: what, drop: true });
+            await dropShelf(what);
         } else {
             for (const n of hit) await retagOne(n, kind, what, null);
         }
@@ -9008,7 +9230,7 @@ document.addEventListener('drop', async (e) => {
     if (!at) { say('この落としものの場所が分かりません'); return; }
     // 保存場所の中のものは、いつもの一本として開く ── 同じファイルが
     // 一覧と客の両方に居ると、どちらに書いたのか分からなくなる。
-    if (at.startsWith(state.root + '/')) {
+    if (placeOf(at)) {
         if (state.guest) closeGuest();
         await reload({ quiet: true });
         const known = state.notes.find((n) => n.path === at);
@@ -9344,7 +9566,7 @@ function drawDrawer() {
 
     const rows = drawer === 'tag'
         ? tagsOf(state.notes).map(([t, n]) => [t, t, n])
-        : state.books.map((b) => [b, b, state.notes.filter(
+        : state.books.map((b) => [b, bookLabel(b), state.notes.filter(
             (n) => n.book === b || (n.book || '').startsWith(b + '/')).length]);
     if (!rows.length) {
         box.innerHTML = '<div class="none">'
@@ -9555,25 +9777,28 @@ function closeFind() {
 /// 書いていた頃は、相手が自分の amber に「これが共有です」と教え直す手が
 /// 要り、機種を替えるたびにもう一度要った。
 async function cmdShare(folder, off) {
+    // `folder` は絶対の道。core には、その保存ディレクトリからの相対で渡す。
+    const root = rootOf(folder);
+    const shown = bookLabel(folder);
     if (!off) {
-        const ok = await askYes('「' + folder + '」を、家族と分けるフォルダにしますか');
+        const ok = await askYes('「' + shown + '」を、家族と分けるフォルダにしますか');
         if (!ok) return;
     }
     const by = off ? '' : await myName();
     if (by === null) return;
     try {
-        const r = await ask('share', {
-            path: state.root, folder, off: !!off, by, today: today(),
+        await ask('share', {
+            path: root, folder: relOf(folder), off: !!off, by, today: today(),
         });
-        state.shares = r.shares ? r.shares.map((at) => ({ at, by })) : [];
+        // 印の一覧は `reload` が保存ディレクトリごとに読み直す。
         await reload({ quiet: true });
         if (off) { say('共有をやめました（ノートはそのままです）'); return; }
         // **二段あることを言う。** amber が印を置いただけでは誰にも届かない
         // ── クラウド側で人に分けるのは、まだ人がやる。
-        await askYes('「' + folder + '」を共有のフォルダにしました。\n\n'
+        await askYes('「' + shown + '」を共有のフォルダにしました。\n\n'
             + 'あとは、このフォルダをクラウド側で家族に分けてください。'
             + '（いま開きますか）')
-            ? window.amber.reveal(state.root + '/' + folder)
+            ? window.amber.reveal(folder)
             : say('あとで、フォルダを右押し →「家族を招待」からでもできます');
     } catch (e) {
         say('できません: ' + why(e));
@@ -9616,41 +9841,48 @@ async function cmdToShare() {
     if (back) {
         // **もといたフォルダへ戻す。** 憶えが無ければ、いままでどおり
         // いちばん上へ ── 共有に入れたのが憶えるより前のノートもある。
+        const root = rootOf(state.open.path);
         const home = homeOf(state.open);
         const rel = state.open.rel;
+        const top = !home || home === root;
         const ok = await askYes('「' + (state.open.title || stem()) + '」を共有から外しますか（'
-            + (home ? '「' + home.split('/').pop() + '」へ戻します' : 'いちばん上へ戻します') + '）');
+            + (top ? 'いちばん上へ戻します' : '「' + home.split('/').pop() + '」へ戻します') + '）');
         if (!ok) return;
-        await moveNote(home || '', { home, forget: rel });
+        await moveNote(home || root, { home: top ? '' : home, forget: rel });
         return;
     }
-    let to = (state.shares[0] || {}).at;
+    // 共有の棚は、**そのノートの保存ディレクトリのもの**を先に ── 別の保存
+    // ディレクトリの棚へ渡すと、絵と履歴が付いてこない。
+    const root = rootOf(state.open.path);
+    const near = state.shares.find((sh) => rootOf(sh.at) === root) || state.shares[0];
+    let to = near ? near.at : undefined;
     if (to === undefined) {
         const ok = await askYes('「家族」というフォルダを作って、そこへ移しますか');
         if (!ok) return;
         const by = await myName();
         if (by === null) return;
         try {
-            await ask('share', { path: state.root, folder: '家族', by, today: today() });
-            to = '家族';
+            await ask('share', { path: root, folder: '家族', by, today: today() });
+            to = root + '/家族';
         } catch (e) { say('できません: ' + why(e)); return; }
     } else {
         const ok = await askYes('「' + (state.open.title || stem()) + '」を「'
-            + (to.split('/').pop() || 'ぜんぶ') + '」へ移して共有しますか');
+            + (to === rootOf(to) ? 'ぜんぶ' : to.split('/').pop()) + '」へ移して共有しますか');
         if (!ok) return;
     }
-    await moveNote(to, { from: state.open.book || '' });
+    await moveNote(to, { from: state.open.book || root });
 }
 
-/// このノートがもといたフォルダ。**憶えていなければ空**（いちばん上へ
-/// 戻す、といういままでの形）。
+/// このノートがもといたフォルダ（絶対の道）。**憶えていなければ空**（いちばん
+/// 上へ戻す、といういままでの形）。
 ///
 /// 憶えていたフォルダが、もう無いことはある（消した・名前を変えた）──
 /// **無いところへは戻さない**。移せずに止まるより、いちばん上へ。
 function homeOf(note) {
-    if (!note || !note.rel) return '';
-    const home = (state.came || {})[note.rel];
-    return home && state.books.includes(home) ? home : '';
+    if (!note || !note.path) return '';
+    const home = (state.came || {})[note.path];
+    if (!home) return '';
+    return home === rootOf(note.path) || state.books.includes(home) ? home : '';
 }
 
 /// 共有の棚へ入れる（`to`）／外して戻す（`to` が空ならいちばん上）。
@@ -9659,17 +9891,21 @@ function homeOf(note) {
 /// そこへ戻せるように。`opts.home` は戻した先で、言葉にするために持つ。
 async function moveNote(to, opts) {
     try {
-        const r = await ask('move', { path: state.open.path, dir: state.root + (to ? '/' + to : ''), root: state.root });
+        // `to` は絶対の道（保存ディレクトリそのものなら、そのいちばん上）。
+        const was = state.open.path;
+        const root = rootOf(was);
+        const r = await moveOp(was, to);
         // **憶えるのは移せてから。** 移せなかった回の憶えが残ると、次に
         // 外した人が身に覚えのないフォルダへ連れて行かれる。
+        // 帳面は保存ディレクトリごと ── 別の保存ディレクトリへ渡ったときは
+        // 憶えない（向こうの帳面に、こちらの道は書けない）。
         try {
-            if (to && opts && opts.from !== undefined && r && r.path) {
-                const rel = r.path.slice(state.root.length + 1);
-                const got = await ask('came', { path: state.root, rel, from: opts.from });
-                state.came = (got && got.came) || state.came;
+            if (opts && opts.from !== undefined && r && r.path && rootOf(r.path) === root
+                && rootOf(opts.from) === root) {
+                const got = await ask('came', { path: root, rel: relOf(r.path), from: relOf(opts.from) });
+                if (got && got.came) await reload({ quiet: true });
             } else if (opts && opts.forget) {
-                const got = await ask('came', { path: state.root, rel: opts.forget, forget: true });
-                state.came = (got && got.came) || state.came;
+                await ask('came', { path: root, rel: opts.forget, forget: true });
             }
         } catch { /* 憶えられないことで、共有が止まる理由はない */ }
         await reload({ quiet: true });
@@ -9686,9 +9922,7 @@ async function moveNote(to, opts) {
 }
 
 async function cmdMove() {
-    const here = [{ name: '（いちばん上）', value: '' },
-        ...state.books.map((b) => ({ name: b, value: b })),
-        { name: '＋ 新しいフォルダを作る', value: ' new' }];
+    const here = [...bookChoices(), { name: '＋ 新しいフォルダを作る', value: ' new' }];
     let to = await askPick('どのフォルダへ', here);
     if (to === null) return;
     if (to === ' new') {
@@ -9696,33 +9930,37 @@ async function cmdMove() {
         if (!made) return;
         to = made;
     }
-    const dir = to ? state.root + '/' + to : state.root;
+    const dir = to;
     try {
         // 書きかけを置いていかない ── 移した先に古い字が残る。
         if (state.dirty) await save();
-        const r = await ask('move', { path: state.open.path, dir, root: state.root });
+        const r = await moveOp(state.open.path, dir);
         await reload({ quiet: true });
         await openNote(r.path);
-        say(to ? '「' + to + '」へ移しました' : 'いちばん上へ移しました');
+        say(dirWords(dir) + '移しました');
     } catch (e) {
         say('移せません: ' + why(e));
     }
 }
 
-/// フォルダを一つ作る。`under` があれば、その下に。
+/// フォルダを一つ作る。`under`（絶対の道）があれば、その下に。無ければ
+/// **いま見ている保存ディレクトリ**のいちばん上。返すのは出来た絶対の道。
 ///
 /// **「/」を打たせない。** 「仕事/2026」と書けば階層になる、は書き方を
 /// 知っている人にしか通じない ── 下の階層は、親を右押しして作る。
 async function cmdMkBook(under) {
-    const name = await askText(under ? '「' + under + '」の下に作る名前' : '新しいフォルダの名前',
-        '', under ? '' : '下の階層は、フォルダを右押しして作れます');
+    const base = under || rootOf(hereDir());
+    const top = !under || under === rootOf(under);
+    const where = top && manyPlaces() ? '「' + bookName(base) + '」に作る名前'
+        : top ? '新しいフォルダの名前' : '「' + bookName(under) + '」の下に作る名前';
+    const name = await askText(where, '', top ? '下の階層は、フォルダを右押しして作れます' : '');
     if (name === null || !name.trim()) return null;
     const leaf = name.trim().replace(/\//g, '／');
-    const full = under ? under + '/' + leaf : leaf;
+    const full = base + '/' + leaf;
     try {
-        await ask('mkbook', { dir: state.root + '/' + full });
+        await ask('mkbook', { dir: full });
         await reload({ quiet: true });
-        say('「' + full + '」を作りました');
+        say('「' + bookLabel(full) + '」を作りました');
         return full;
     } catch (e) {
         say('作れません: ' + why(e));
@@ -9754,11 +9992,12 @@ function sayIfBlind(got) {
 ///
 /// 保存場所ごとに憶える ── 別のフォルダへ移せば、そちらにはゴミ箱がある。
 let noBins = [];
-const noBin = () => noBins.includes(state.root);
+const noBin = () => noBins.includes(openRoot());
 
 function markNoBin(yes) {
-    const was = noBins.filter((r) => r !== state.root);
-    noBins = yes ? [...was, state.root] : was;
+    const root = openRoot();
+    const was = noBins.filter((r) => r !== root);
+    noBins = yes ? [...was, root] : was;
     window.amber.remember({ noBins });
 }
 
@@ -9850,7 +10089,8 @@ async function cmdRemind() {
         return;
     }
     const hint = { daily: '09:00', weekly: '月 09:00', monthly: '1 09:00' }[kind];
-    const v = await askText('繰り返し（' + kind + '）', hint,
+    // 題は日本語で（`daily` がそのまま出ていた・2026-09-12 の見直しで見つけた）。
+    const v = await askText('繰り返し（' + ({ daily: '毎日', weekly: '毎週', monthly: '毎月' }[kind] || kind) + '）', hint,
         '毎日は 09:00、毎週は 月 09:00、毎月は 1 09:00');
     if (v === null || !v.trim()) return;
     if (await editNote((t) => ask('setfield', { text: t, key: 'repeat', value: kind + ' ' + v.trim() })
@@ -9972,15 +10212,15 @@ async function cmdColor(folder) {
         say('色を付けるフォルダを右押ししてください');
         return;
     }
-    const hex = await askPick('「' + what + '」の色', [
+    const hex = await askPick('「' + bookLabel(what) + '」の色', [
         { name: '（色を外す）', value: '' },
         ...PALETTE.map(([h, n]) => ({ name: n, sub: h, value: h })),
     ]);
     if (hex === null) return;
     try {
-        const r = await ask('color', { path: state.root, folder: what, color: hex || null });
-        state.colors = r.colors || {};
-        drawRail();
+        await ask('color', { path: rootOf(what), folder: relOf(what), color: hex || null });
+        // 色の一覧は保存ディレクトリごと ── 読み直して重ねる。
+        await reload({ quiet: true });
     } catch (e) {
         say('色を付けられません: ' + why(e));
     }
@@ -9997,28 +10237,33 @@ async function cmdColor(folder) {
 /// `backup.zip` ばかりのフォルダは、「どれがどれか」という一つの問いになる。
 async function cmdBackup() {
     const here = state.dest.kind === 'book' ? state.dest.what : '';
-    const items = [
-        { name: 'すべて', sub: 'ノートも画像も、まるごと一つに', value: ['all', ''] },
-    ];
+    // zip は保存ディレクトリ一つぶん ── 二つ以上あるときは「すべて」も一つずつ。
+    const items = state.places.map((p) => ({
+        name: 'すべて' + (manyPlaces() ? '（' + p.name + '）' : ''),
+        sub: 'ノートも画像も、まるごと一つに', value: ['all', p.dir, p.dir],
+    }));
     for (const b of state.books || []) {
-        items.push({ name: 'フォルダ: ' + b, sub: b === here ? 'いま見ているところ' : '', value: ['book', b] });
+        items.push({ name: 'フォルダ: ' + bookLabel(b), sub: b === here ? 'いま見ているところ' : '', value: ['book', relOf(b), rootOf(b)] });
     }
     // タグは使われている順（`tagsOf`）。多いものから並ぶので、
     // 取っておきたいまとまりはたいてい上のほうに居る。
-    for (const [t, n] of tagsOf(state.notes).slice(0, 20)) {
-        items.push({ name: 'タグ: #' + t, sub: n + ' 件・フォルダをまたいで集めます', value: ['tag', t] });
+    // タグは**いま見ている保存ディレクトリ**の中から集める。
+    const tagRoot = rootOf(hereDir());
+    for (const [t, n] of tagsOf(state.notes.filter((x) => x.root === tagRoot)).slice(0, 20)) {
+        items.push({ name: 'タグ: #' + t, sub: n + ' 件・フォルダをまたいで集めます'
+            + (manyPlaces() ? '（' + bookName(tagRoot) + '）' : ''), value: ['tag', t, tagRoot] });
     }
     if (state.open) {
-        items.push({ name: 'このノート一枚', sub: shortPath(state.open.path), value: ['note', state.open.path] });
+        items.push({ name: 'このノート一枚', sub: shortPath(state.open.path), value: ['note', state.open.path, rootOf(state.open.path)] });
     }
     const pick = await askPick('どこまで取っておきますか', items,
         '一つの zip にまとめます。いまあるノートは動きません');
     if (pick === null) return;
-    const [scope, what] = pick;
+    const [scope, what, root] = pick;
     const into = await window.amber.pickFolder();
     if (!into) return;
     try {
-        const r = await ask('backup', { path: state.root, scope, what, into });
+        const r = await ask('backup', { path: root, scope, what, into });
         say(r.files + ' 件を保存しました: ' + shortPath(r.path || into));
     } catch (e) {
         say('保存できません: ' + why(e));
@@ -10041,7 +10286,8 @@ async function cmdBring() {
     const files = await window.amber.pickFiles([{ name: 'ノート', extensions: ['md', 'markdown', 'txt'] }]);
     if (!files || !files.length) return;
     try {
-        const r = await ask('bring', { files, to: state.root });
+        // 入れる先は、いま見ている保存ディレクトリのいちばん上。
+        const r = await ask('bring', { files, to: rootOf(hereDir()) });
         await reload({});
         // **入らなかった数も言う。** 十本選んで八本入ったとき、黙って
         // いると人は八本しか選ばなかったと思う ── 気づくのは、あとで
@@ -10066,7 +10312,7 @@ async function cmdRestore() {
     const go = await askYes('「' + shortPath(zip) + '」から戻しますか');
     if (!go) return;
     try {
-        const r = await ask('restore', { zip, to: state.root });
+        const r = await ask('restore', { zip, to: rootOf(hereDir()) });
         await reload({});
         const kept = r.kept ? '（' + r.kept + ' 件は、いまのを残しました）' : '';
         say(r.put + ' 件を戻しました' + kept);
@@ -10136,10 +10382,10 @@ function afterRename(from, to) {
 
 /// 題に合わせて改名する。改名したら新しい道、しなければ null。
 async function settleName(path) {
-    if (!nameAuto || !path || state.guest || !state.root || !path.startsWith(state.root + '/')) return null;
+    if (!nameAuto || !path || state.guest || !placeOf(path)) return null;
     let r;
     try {
-        r = await ask('settle', { path: state.root, note: path });
+        r = await ask('settle', { path: rootOf(path), note: path });
     } catch (e) {
         say('名前を変えられません: ' + why(e));
         return null;
@@ -10206,118 +10452,52 @@ function syncClock() {
 window.addEventListener('focus', () => { if (syncAccount.signedIn) syncNow('戻った'); });
 
 /// 一度、合わせる。返すのは何を運んだかの数（試験が見る）。
+/// 運ぶ相手 ── Drive にしてある保存ディレクトリ（読めているものだけ・依頼 511）。
+const syncTargets = () => state.places.filter((p) => p.sync === 'drive' && !state.placeTrouble[p.dir]);
+
+/// 向こうの一覧のうち、この保存ディレクトリのぶん（道は保存ディレクトリからの相対に）。
+///
+/// **いちばん目は `ambər` の直下、二つ目からは `ambər/<at>/`** ── いままでの
+/// ノートは一枚も動かさずに、二つ目が足せる。`at` が '' のもの（いちばん目）は、
+/// ほかの保存ディレクトリの頭を持たないぜんぶ。
+function remoteOf(all, place) {
+    const others = state.places.map((p) => p.at).filter((a) => a && a !== place.at);
+    const pre = place.at ? place.at + '/' : '';
+    const out = [];
+    for (const x of all) {
+        if (pre) {
+            if (!x.rel.startsWith(pre)) continue;
+            out.push({ ...x, rel: x.rel.slice(pre.length) });
+        } else {
+            if (others.some((o) => x.rel.startsWith(o + '/'))) continue;
+            out.push(x);
+        }
+    }
+    return out;
+}
+
+/// 一度、合わせる。返すのは何を運んだかの数（試験が見る）。
+/// 保存ディレクトリごとに順に運び、数は足す（`places` に一つずつも残す ── 運んだ
+/// 直後の列が「仕事: アップロード1本」と言えるように）。
 async function syncNow(reason) {
-    if (!syncAccount.signedIn || syncBusy || !state.root || state.guest) return null;
+    const targets = syncTargets();
+    if (!syncAccount.signedIn || syncBusy || !targets.length || state.guest) return null;
     if (!syncAuto && reason !== '手') return null;
     syncBusy = true;
     drawSyncState();
-    const report = { reason, up: 0, down: 0, gone: 0, clash: 0, moved: 0, eyes: 0, trouble: [] };
+    const report = { reason, up: 0, down: 0, gone: 0, clash: 0, moved: 0, eyes: 0, trouble: [], places: {} };
     try {
-        const remote = await window.amber.driveList();
-        const plan = await ask('syncplan', { path: state.root, who: 'drive', remote });
-        const done = [];
-        const gone = [];
-        const moved = [];
+        const all = await window.amber.driveList();
         let touched = false;
-        // **開いているノートを書き換えたか。** 見張り（`onChanged`）は、保存した
-        // 直後の数秒はそのノートの変わりを「自分の跳ね返り」として捨てる ──
-        // 同期が下ろした字はそこに紛れて、面が古いまま残る（実際に残った）。
-        // だから同期は自分で開き直す（打ちかけなら触らない ── 保存のときに混ざる）。
         let openTouched = false;
-        for (const s of plan.steps || []) {
-            const at = state.root + '/' + s.rel;
-            const isOpen = !!(state.open && state.open.path === at);
-            try {
-                if (s.do === 'up') {
-                    const print = (await ask('syncprint', { path: at })).print;
-                    // 絵は bytes のまま（描く側を通さない・依頼 497）。
-                    const r = s.bin
-                        ? await window.amber.driveUploadFile({ rel: s.rel, file: at, print, id: s.id || undefined })
-                        : await window.amber.driveUpload({ rel: s.rel, text: (await ask('read', { path: at })).text, print, id: s.id || undefined });
-                    done.push({ rel: s.rel, id: r.id, tag: r.tag });
-                    report.up += 1;
-                } else if (s.do === 'down') {
-                    if (s.bin) {
-                        await window.amber.driveDownloadFile({ id: s.id, to: at });
-                    } else {
-                        const text = await window.amber.driveDownload(s.id);
-                        await ask('syncdown', { path: at, text });
-                    }
-                    const there = remote.find((x) => x.id === s.id);
-                    done.push({ rel: s.rel, id: s.id, tag: there ? there.tag : '' });
-                    report.down += 1;
-                    touched = true;
-                    if (isOpen) openTouched = true;
-                } else if (s.do === 'clash' && s.bin) {
-                    // **絵は混ぜられない。** こちらを残し、向こうのものは `名前.2.png` として
-                    // 隣に置く（失うよりよい）。隣に置いた一枚は、次の同期で新しく上がる。
-                    const dot = at.lastIndexOf('.');
-                    let beside = at.slice(0, dot) + '.2' + at.slice(dot);
-                    for (let n = 3; n < 100; n += 1) {
-                        try { await ask('syncprint', { path: beside }); } catch { break; }
-                        beside = at.slice(0, dot) + '.' + n + at.slice(dot);
-                    }
-                    await window.amber.driveDownloadFile({ id: s.id, to: beside });
-                    const print = (await ask('syncprint', { path: at })).print;
-                    const r = await window.amber.driveUploadFile({ rel: s.rel, file: at, print, id: s.id });
-                    done.push({ rel: s.rel, id: r.id, tag: r.tag });
-                    report.up += 1;
-                    report.down += 1;
-                    touched = true;
-                } else if (s.do === 'drophere') {
-                    // 向こうで消え、こちらは触っていない ── **ゴミ箱へ**（消さない）。
-                    await window.amber.trash(at);
-                    gone.push(s.rel);
-                    report.gone += 1;
-                    touched = true;
-                } else if (s.do === 'dropthere') {
-                    await window.amber.driveTrash(s.id);
-                    gone.push(s.rel);
-                    report.gone += 1;
-                } else if (s.do === 'movethere') {
-                    // こちらで改名した ── 向こうも改名する（ID は同じまま・依頼 492）。
-                    await window.amber.driveRename({ id: s.id, rel: s.rel });
-                    const there = remote.find((x) => x.id === s.id);
-                    done.push({ rel: s.rel, id: s.id, tag: there ? there.tag : '' });
-                    moved.push(s.rel);
-                    report.moved += 1;
-                } else if (s.do === 'movehere') {
-                    // 向こうで改名された ── こちらも改名する。
-                    const from = state.root + '/' + s.from;
-                    const wasOpen = !!(state.open && state.open.path === from);
-                    const r = await ask('syncmove', { path: state.root, from: s.from, to: s.rel });
-                    const there = remote.find((x) => x.id === s.id);
-                    done.push({ rel: r.rel, id: s.id, tag: there ? there.tag : '' });
-                    afterRename(from, r.path);
-                    report.moved += 1;
-                    touched = true;
-                    if (wasOpen) openTouched = true;
-                } else if (s.do === 'clash') {
-                    // **両方が変わった ── 混ぜる。** 分かれる前の姿は `synced` が
-                    // 取っておいたもの（無ければ空 ── ぜんぶがぶつかった場所になり、
-                    // 両方残って人が選ぶ。失うよりよい）。
-                    const theirs = await window.amber.driveDownload(s.id);
-                    const ours = (await ask('read', { path: at })).text;
-                    const base = s.base ? (await ask('baseread', { path: state.root, hash: s.base })).text : null;
-                    const got = await ask('merge', { was: base || '', ours, theirs });
-                    // 混ぜる前のこちらを履歴に（Git の ORIG_HEAD の写し）。
-                    try { await ask('keep', { root: state.root, path: at, text: ours, gap: 0, force: true }); } catch { /* 履歴が置けなくても混ぜる */ }
-                    await ask('syncdown', { path: at, text: got.text });
-                    const print = (await ask('syncprint', { path: at })).print;
-                    const r = await window.amber.driveUpload({ rel: s.rel, text: got.text, print, id: s.id });
-                    done.push({ rel: s.rel, id: r.id, tag: r.tag });
-                    const there = remote.find((x) => x.id === s.id);
-                    noteIncoming(at, got, there && there.by ? there.by : '向こう');
-                    report.clash += 1;
-                    if (got.eyes) report.eyes += 1;
-                    touched = true;
-                    if (isOpen) openTouched = true;
-                }
-            } catch (e) {
-                report.trouble.push(s.rel + ': ' + why(e));
-            }
+        for (const place of targets) {
+            const one = await syncPlace(place, remoteOf(all, place));
+            for (const k of ['up', 'down', 'gone', 'clash', 'moved', 'eyes']) report[k] += one[k];
+            for (const t of one.trouble) report.trouble.push((manyPlaces() ? place.name + ' › ' : '') + t);
+            report.places[place.name] = one;
+            touched = touched || one.touched;
+            openTouched = openTouched || one.openTouched;
         }
-        if (done.length || gone.length) await ask('synced', { path: state.root, who: 'drive', done, gone, moved });
         if (touched) await reload({ quiet: true });
         // 開いているノートが下りてきた ── 打ちかけでなければ、その字に開き直す
         // （帯と選び口もここで付く）。打ちかけなら、保存のときの混ぜに任せる。
@@ -10344,6 +10524,119 @@ async function syncNow(reason) {
         drawSyncState();
     }
     return report;
+}
+
+/// 一つの保存ディレクトリを運ぶ。`remote` はそのぶんの一覧（相対）。
+///
+/// core（`syncplan`・`synced`）は保存ディレクトリ一つしか知らない ── 帳面
+/// （`.amber/sync.json`）もそこにある。Drive の上の道だけ `pre` を頭に付ける。
+async function syncPlace(place, remote) {
+    const root = place.dir;
+    const pre = place.at ? place.at + '/' : '';
+    const one = { up: 0, down: 0, gone: 0, clash: 0, moved: 0, eyes: 0, trouble: [], touched: false, openTouched: false };
+    const plan = await ask('syncplan', { path: root, who: 'drive', remote });
+    const done = [];
+    const gone = [];
+    const moved = [];
+    // **開いているノートを書き換えたか。** 見張り（`onChanged`）は、保存した
+    // 直後の数秒はそのノートの変わりを「自分の跳ね返り」として捨てる ──
+    // 同期が下ろした字はそこに紛れて、面が古いまま残る（実際に残った）。
+    // だから同期は自分で開き直す（打ちかけなら触らない ── 保存のときに混ざる）。
+    for (const s of plan.steps || []) {
+        const at = root + '/' + s.rel;
+        const isOpen = !!(state.open && state.open.path === at);
+        try {
+            if (s.do === 'up') {
+                const print = (await ask('syncprint', { path: at })).print;
+                // 絵は bytes のまま（描く側を通さない・依頼 497）。
+                const r = s.bin
+                    ? await window.amber.driveUploadFile({ rel: pre + s.rel, file: at, print, id: s.id || undefined })
+                    : await window.amber.driveUpload({ rel: pre + s.rel, text: (await ask('read', { path: at })).text, print, id: s.id || undefined });
+                done.push({ rel: s.rel, id: r.id, tag: r.tag });
+                one.up += 1;
+            } else if (s.do === 'down') {
+                if (s.bin) {
+                    await window.amber.driveDownloadFile({ id: s.id, to: at });
+                } else {
+                    const text = await window.amber.driveDownload(s.id);
+                    await ask('syncdown', { path: at, text });
+                }
+                const there = remote.find((x) => x.id === s.id);
+                done.push({ rel: s.rel, id: s.id, tag: there ? there.tag : '' });
+                one.down += 1;
+                one.touched = true;
+                if (isOpen) one.openTouched = true;
+            } else if (s.do === 'clash' && s.bin) {
+                // **絵は混ぜられない。** こちらを残し、向こうのものは `名前.2.png` として
+                // 隣に置く（失うよりよい）。隣に置いた一枚は、次の同期で新しく上がる。
+                const dot = at.lastIndexOf('.');
+                let beside = at.slice(0, dot) + '.2' + at.slice(dot);
+                for (let n = 3; n < 100; n += 1) {
+                    try { await ask('syncprint', { path: beside }); } catch { break; }
+                    beside = at.slice(0, dot) + '.' + n + at.slice(dot);
+                }
+                await window.amber.driveDownloadFile({ id: s.id, to: beside });
+                const print = (await ask('syncprint', { path: at })).print;
+                const r = await window.amber.driveUploadFile({ rel: pre + s.rel, file: at, print, id: s.id });
+                done.push({ rel: s.rel, id: r.id, tag: r.tag });
+                one.up += 1;
+                one.down += 1;
+                one.touched = true;
+            } else if (s.do === 'drophere') {
+                // 向こうで消え、こちらは触っていない ── **ゴミ箱へ**（消さない）。
+                await window.amber.trash(at);
+                gone.push(s.rel);
+                one.gone += 1;
+                one.touched = true;
+            } else if (s.do === 'dropthere') {
+                await window.amber.driveTrash(s.id);
+                gone.push(s.rel);
+                one.gone += 1;
+            } else if (s.do === 'movethere') {
+                // こちらで改名した ── 向こうも改名する（ID は同じまま・依頼 492）。
+                await window.amber.driveRename({ id: s.id, rel: pre + s.rel });
+                const there = remote.find((x) => x.id === s.id);
+                done.push({ rel: s.rel, id: s.id, tag: there ? there.tag : '' });
+                moved.push(s.rel);
+                one.moved += 1;
+            } else if (s.do === 'movehere') {
+                // 向こうで改名された ── こちらも改名する。
+                const from = root + '/' + s.from;
+                const wasOpen = !!(state.open && state.open.path === from);
+                const r = await ask('syncmove', { path: root, from: s.from, to: s.rel });
+                const there = remote.find((x) => x.id === s.id);
+                done.push({ rel: r.rel, id: s.id, tag: there ? there.tag : '' });
+                afterRename(from, r.path);
+                one.moved += 1;
+                one.touched = true;
+                if (wasOpen) one.openTouched = true;
+            } else if (s.do === 'clash') {
+                // **両方が変わった ── 混ぜる。** 分かれる前の姿は `synced` が
+                // 取っておいたもの（無ければ空 ── ぜんぶがぶつかった場所になり、
+                // 両方残って人が選ぶ。失うよりよい）。
+                const theirs = await window.amber.driveDownload(s.id);
+                const ours = (await ask('read', { path: at })).text;
+                const base = s.base ? (await ask('baseread', { path: root, hash: s.base })).text : null;
+                const got = await ask('merge', { was: base || '', ours, theirs });
+                // 混ぜる前のこちらを履歴に（Git の ORIG_HEAD の写し）。
+                try { await ask('keep', { root, path: at, text: ours, gap: 0, force: true }); } catch { /* 履歴が置けなくても混ぜる */ }
+                await ask('syncdown', { path: at, text: got.text });
+                const print = (await ask('syncprint', { path: at })).print;
+                const r = await window.amber.driveUpload({ rel: pre + s.rel, text: got.text, print, id: s.id });
+                done.push({ rel: s.rel, id: r.id, tag: r.tag });
+                const there = remote.find((x) => x.id === s.id);
+                noteIncoming(at, got, there && there.by ? there.by : '向こう');
+                one.clash += 1;
+                if (got.eyes) one.eyes += 1;
+                one.touched = true;
+                if (isOpen) one.openTouched = true;
+            }
+        } catch (e) {
+            one.trouble.push(s.rel + ': ' + why(e));
+        }
+    }
+    if (done.length || gone.length) await ask('synced', { path: root, who: 'drive', done, gone, moved });
+    return one;
 }
 
 /// 向こうと混ぜた印（来た行・ぶつかった場所）を、そのノートに憶えさせる。
@@ -10396,8 +10689,20 @@ function drawSyncState() {
     const mark = el('syncmark');
     const hhmm = (t) => new Date(t).toTimeString().slice(0, 5);
     const hide = (x) => { x.hidden = true; x.innerHTML = ''; };
-    if (state.guest || !state.root) { hide(box); hide(mark); return; }
+    if (state.guest || !state.places.length) { hide(box); hide(mark); return; }
     const who = syncAccount.who || {};
+
+    // **どの保存ディレクトリも「同期しない」なら、灰色の一行**（依頼 511）──
+    // サインインを勧めない。同期したくなったら、保存ディレクトリの同期先から。
+    if (!state.places.some((p) => p.sync === 'drive')) {
+        hide(box);
+        el('syncmark').innerHTML = '';
+        mark.innerHTML = '<span class="dot off"></span><span class="t">同期していません ・ どの保存ディレクトリも「同期しない」</span>'
+            + '<button type="button">同期先を選ぶ</button>';
+        mark.querySelector('button').onclick = () => cmdPlaces();
+        mark.hidden = false;
+        return;
+    }
 
     // 一行のほう。
     const line = (dot, text, act) => {
@@ -10451,13 +10756,22 @@ function drawSyncState() {
     }
     if (syncFresh) {
         hide(mark);
-        const parts = [];
-        if (syncFresh.up) parts.push('アップロード' + syncFresh.up + '本');
-        if (syncFresh.down) parts.push('ダウンロード' + syncFresh.down + '本');
-        if (syncFresh.gone) parts.push('ゴミ箱へ' + syncFresh.gone + '本');
-        if (syncFresh.clash) parts.push('同じ行を両方で直したノート' + syncFresh.clash + '本');
-        if (syncFresh.moved) parts.push('名前の変更' + syncFresh.moved + '本');
-        column('good', '同期しました ── ' + hhmm(syncFresh.at), parts.join('・'), []);
+        const partsOf = (r) => {
+            const parts = [];
+            if (r.up) parts.push('アップロード' + r.up + '本');
+            if (r.down) parts.push('ダウンロード' + r.down + '本');
+            if (r.gone) parts.push('ゴミ箱へ' + r.gone + '本');
+            if (r.clash) parts.push('同じ行を両方で直したノート' + r.clash + '本');
+            if (r.moved) parts.push('名前の変更' + r.moved + '本');
+            return parts;
+        };
+        // 保存ディレクトリが二つ以上なら、**運んだところの名前を頭に**（依頼 511）
+        // ── ふだんの一行には出さない。名前が要るのは、何かが動いたときだけ。
+        const each = Object.entries(syncFresh.places || {}).filter(([, r]) => partsOf(r).length);
+        const text = manyPlaces() && each.length
+            ? each.map(([name, r]) => name + ': ' + partsOf(r).join('・')).join('　')
+            : partsOf(syncFresh).join('・');
+        column('good', '同期しました ── ' + hhmm(syncFresh.at), text, []);
         return;
     }
     hide(box);
@@ -10514,18 +10828,92 @@ async function cmdSync() {
     say('同期をやめました');
 }
 
-async function cmdRoot() {
-    // **いまどこかを先に見せる。** 「amber のディレクトリはどうやって
-    // 決めるのか」が分からなかったのは、決める場所が無かったからではなく、
-    // **いまどこを見ているのかが画面のどこにも出ていなかった**から。
-    //
-    // **クラウドは名前で選ばせる。** どのサービスも机の上ではただの
-    // フォルダなので、amber は同期の仕組みを一つも知らなくていい ──
-    // けれど `~/Library/Mobile Documents/com~apple~CloudDocs` を覚えて
-    // いる人はいない。入っているものだけ並べる。
+const SYNC_WORDS = { none: '同期しない', drive: 'Google Drive' };
+
+/// ⚙「保存ディレクトリの追加・変更・削除」（依頼 511・本人が決めた三段・2026-09-12）。
+/// **一つの入口で全部** ── 一覧 → 一つを選ぶ → 同期先／名前／場所／外す。
+/// 同期の入れる切るも、ここ（保存ディレクトリごとに同期先を持つ、という作り）。
+async function cmdPlaces() {
+    for (;;) {
+        const items = state.places.map((p, i) => ({
+            name: p.name,
+            sub: shortPath(p.dir) + ' ・ ' + SYNC_WORDS[p.sync]
+                + (state.placeTrouble[p.dir] ? ' ・ 見つかりません' : ''),
+            value: i,
+        }));
+        items.push({ name: '＋ 保存ディレクトリを追加', sub: 'フォルダを一つ選びます。中の .md がノートになります', value: ' add' });
+        const go = await askPick('保存ディレクトリ', items,
+            'ノートを置くフォルダ。いくつでも。同期先はフォルダごとに選べます', true);
+        if (go === null) return;
+        if (go === ' add') { await addPlace(); continue; }
+        const p = state.places[go];
+        if (!p) return;
+        await placeSheet(p);
+    }
+}
+
+/// 一つの保存ディレクトリの小窓（二段目）。
+async function placeSheet(p) {
+    const go = await askPick(p.name, [
+        { name: '同期先', sub: SYNC_WORDS[p.sync]
+            + (p.sync === 'drive' && !syncAccount.signedIn ? '（まだサインインしていません）' : ''), value: 'sync' },
+        { name: '名前を変える', sub: '一覧での呼び名だけ。フォルダの名前は変わりません', value: 'name' },
+        { name: '場所を変える…', sub: 'いままでのノートも一緒に移せます', value: 'dir' },
+        { name: '外す', sub: 'ambər の一覧から外します。フォルダとノートはそのまま', value: 'drop' },
+    ], shortPath(p.dir), true);
+    if (go === 'sync') await placeSyncSheet(p);
+    else if (go === 'name') await placeRename(p);
+    else if (go === 'dir') await placeMove(p);
+    else if (go === 'drop') await placeDrop(p);
+}
+
+/// 同期先（三段目）。**同期しない／Google Drive**（iCloud・OneDrive はこれから）。
+async function placeSyncSheet(p) {
+    const who = syncAccount.who || {};
+    const now = (k) => (p.sync === k ? 'いまはこれ' : '');
+    const go = await askPick('「' + p.name + '」の同期先', [
+        { name: '同期しない', sub: now('none') || 'この Mac だけに置きます', value: 'none' },
+        { name: 'Google Drive', sub: now('drive') || (syncAccount.signedIn ? who.email || '' : 'Google でサインインします'), value: 'drive' },
+    ], 'iCloud と OneDrive は、これから', true);
+    if (go === null || go === p.sync) return;
+    if (go === 'drive' && !syncAccount.signedIn) {
+        await cmdSync();
+        if (!syncAccount.signedIn) return;
+    }
+    p.sync = go;
+    savePlaces();
+    drawRail();
+    drawSyncState();
+    if (go === 'drive') {
+        syncSoon(1000);
+        say('「' + p.name + '」を Google Drive と同期します');
+    } else {
+        say('「' + p.name + '」は同期しません（Drive にあるものはそのままです）');
+    }
+}
+
+async function placeRename(p) {
+    const to = await askText('「' + p.name + '」の新しい呼び名', p.name, 'フォルダの名前は変わりません');
+    if (to === null || !to.trim() || to.trim() === p.name) return;
+    const name = to.trim();
+    if (state.places.some((x) => x !== p && x.name === name)) { say('「' + name + '」はもうあります'); return; }
+    p.name = name;
+    savePlaces();
+    await reload({ quiet: true });
+    say('「' + name + '」に変えました');
+}
+
+/// 置き場所を選ぶ（足すときも、変えるときも同じ小窓）。
+///
+/// **クラウドは名前で選ばせる。** どのサービスも机の上ではただのフォルダ
+/// なので、amber は同期の仕組みを一つも知らなくていい ── けれど
+/// `~/Library/Mobile Documents/com~apple~CloudDocs` を覚えている人はいない。
+/// 入っているものだけ並べる。クラウドの直下には置かない ── 同期フォルダの
+/// 根っこにノートをばら撒くと、ほかの物と混ざって二度と分けられない。
+async function pickPlaceDir(current) {
     let found = [];
     try { found = await window.amber.clouds(); } catch { /* 一つも無い機械 */ }
-    const here = found.find((c) => state.root.startsWith(c.dir));
+    const here = current ? found.find((c) => current.startsWith(c.dir)) : null;
     const items = [
         ...found.map((c) => ({
             name: c.name,
@@ -10534,39 +10922,72 @@ async function cmdRoot() {
         })),
         { name: '別の場所を選ぶ', sub: 'フォルダを一つ選びます', value: ' pick' },
     ];
-    const go = await askPick('ノートの保存場所', items,
-        'いま: ' + shortPath(state.root) + (here ? '（' + here.name + '）' : ''));
-    if (go === null) return;
-
-    let dir;
-    if (go === ' pick') {
-        dir = await window.amber.pickFolder();
-        if (!dir) return;
-    } else {
-        // クラウドの直下には置かない ── 同期フォルダの根っこにノートを
-        // ばら撒くと、ほかの物と混ざって二度と分けられない。
-        dir = go + '/amber';
-        try {
-            await ask('place', { dir });
-        } catch (e) {
-            say('作れません: ' + why(e));
-            return;
-        }
+    const go = await askPick(current ? 'どこへ' : '保存ディレクトリを追加', items,
+        current ? 'いま: ' + shortPath(current) + (here ? '（' + here.name + '）' : '')
+            : 'クラウドのフォルダを選ぶと、その仕組みで同期されます');
+    if (go === null) return null;
+    if (go === ' pick') return (await window.amber.pickFolder()) || null;
+    const dir = go + '/amber';
+    try {
+        await ask('place', { dir });
+    } catch (e) {
+        say('作れません: ' + why(e));
+        return null;
     }
-    if (dir === state.root) return;
+    return dir;
+}
 
+/// ほかの保存ディレクトリと重なるか（同じ・中・外）。**入れ子にはしない** ──
+/// 同じノートが二つの保存ディレクトリから見えると、二度数えて二度運ぶ。
+function overlaps(dir, except) {
+    return state.places.some((x) => x !== except
+        && (x.dir === dir || dir.startsWith(x.dir + '/') || x.dir.startsWith(dir + '/')));
+}
+
+async function addPlace() {
+    const dir = await pickPlaceDir('');
+    if (!dir) return;
+    if (state.places.some((x) => x.dir === dir)) { say('「' + bookName(dir) + '」はもう入っています'); return; }
+    if (overlaps(dir)) { say('そこは、ほかの保存ディレクトリと重なります（入れ子にはできません）'); return; }
+    const leaf = dir.split('/').pop() || 'ambər';
+    let name = leaf;
+    for (let n = 2; state.places.some((x) => x.name === name); n += 1) name = leaf + ' ' + n;
+    // Drive の上の置き場所（`ambər/<at>/`）。いちばん目のフォルダと名前が
+    // ぶつかると、向こうの一覧で見分けられない ── 空いている名前にする。
+    const taken = new Set([
+        ...state.places.map((x) => x.at),
+        ...state.books.filter((b) => rootOf(b) === state.root).map((b) => relOf(b).split('/')[0]),
+    ]);
+    let at = name;
+    for (let n = 2; taken.has(at); n += 1) at = name + ' ' + n;
+    // **入った直後は同期しない**（本人が決めた・2026-09-12）── 会社の共有
+    // フォルダを足した人の一覧を、黙って Drive に上げない。
+    state.places.push({ name, dir, sync: 'none', at });
+    savePlaces();
+    await rewatch();
+    await reload({ quiet: true });
+    say('「' + name + '」を足しました。同期するなら「' + name + '」→ 同期先 から');
+}
+
+/// 場所を変える（前の「保存場所」と同じ流れ）。
+async function placeMove(p) {
+    const dir = await pickPlaceDir(p.dir);
+    if (!dir || dir === p.dir) return;
+    if (overlaps(dir, p) || dir.startsWith(p.dir + '/')) {
+        say('そこは、ほかの保存ディレクトリと重なります（入れ子にはできません）');
+        return;
+    }
     // **いままでのノートは、ひとりでには付いてこない。**
     // 新しいフォルダは空のフォルダで、そうと知らずに移した人は、書いた
     // ものが全部見えなくなったところに立たされる（電話は前から訊いて
     // いる ── 窓だけ訊いていなかった）。
-    const had = state.notes.length;
-    const was = state.root;
+    const had = state.notes.filter((n) => n.root === p.dir).length;
     if (had > 0 && await askYes('いままでの ' + had + ' 件を、新しい場所へ移しますか')) {
         try {
             // **数えるのは人が数えるもの。** `migrate` が返すのは動かした
             // ファイルの数（絵も履歴も `.amber` も入る）で、6 件のノートが
             // 「14 件を移しました」になる ── 何が 14 なのか誰も分からない。
-            await ask('migrate', { from: was, to: dir });
+            await ask('migrate', { from: p.dir, to: dir });
             say('ノート ' + had + ' 件を、画像と履歴ごと移しました');
         } catch (e) {
             // **移せなくても、保存場所は変えない。** 半分だけ移った状態で
@@ -10575,14 +10996,38 @@ async function cmdRoot() {
             return;
         }
     }
-
-    state.root = dir;
-    window.amber.remember({ root: dir });
-    sayIfBlind(await window.amber.watch(dir));
+    p.dir = dir;
+    savePlaces();
+    await rewatch();
     state.open = null;
     applyView();
     await reload({});
     say('保存場所を変えました: ' + shortPath(dir));
+}
+
+/// 一覧から外す。**ファイルは消さない**（外すのは ambər の憶えだけ）。
+async function placeDrop(p) {
+    if (state.places.length < 2) {
+        say('最後の一つは外せません（動かすなら「場所を変える…」）');
+        return false;
+    }
+    const n = state.notes.filter((x) => x.root === p.dir).length;
+    const ok = await askYes('「' + p.name + '」を ambər から外しますか（' + shortPath(p.dir)
+        + ' と、中の ' + n + ' 件のノートはそのまま残ります）');
+    if (!ok) return false;
+    const inside = (at) => at === p.dir || String(at || '').startsWith(p.dir + '/');
+    state.places = state.places.filter((x) => x !== p);
+    tabs = tabs.filter((t) => !inside(t.path));
+    rememberTabs();
+    if (state.open && inside(state.open.path)) { state.open = null; applyView(); }
+    if (['book', 'place', 'share'].includes(state.dest.kind) && inside(state.dest.what)) {
+        state.dest = { kind: 'all', what: '' };
+    }
+    savePlaces();
+    await rewatch();
+    await reload({});
+    say('「' + p.name + '」を外しました（フォルダはそのままです）');
+    return true;
 }
 
 /// いま動いている amber の身元。
@@ -10609,7 +11054,7 @@ async function cmdAbout() {
     await askPick('', [
         { name: '画面', sub: 'ambər ' + (await window.amber.appVersion() || '?'), value: null },
         { name: 'エンジン', sub: engine, value: null },
-        { name: 'ノートの保存場所', sub: state.root || '（まだ決めていません）', value: null },
+        { name: '保存ディレクトリ', sub: state.places.length ? state.places.map((p) => p.dir).join('・') : '（まだ決めていません）', value: null },
     // **`bare` は渡さない。** `false` を渡すと `bare ?? few` の `??` が
     // それを素通しし（`??` が拾うのは null と undefined だけ）、三つしか
     // 無い一覧に「絞り込む」の欄が出る ── 三つを絞り込む人はいない。
@@ -10651,7 +11096,7 @@ async function cmdKeepNow() {
     if (state.dirty) await save();
     try {
         const r = await ask('keep', {
-            root: state.root, path: state.open.path, gap: 0, force: true, kept: true,
+            root: rootOf(state.open.path), path: state.open.path, gap: 0, force: true, kept: true,
         });
         say(r.stamp ? 'いまのバージョンを残しました（これは消えません）' : 'このバージョンはもう残してあります');
     } catch (e) {
@@ -10667,9 +11112,10 @@ async function cmdKeepNow() {
 async function cmdHistory(at, isBook) {
     const path = at || (state.open && state.open.path);
     if (!path) { say('ノートかフォルダを選んでください'); return; }
+    const root = rootOf(path);
     let r;
     try {
-        r = await ask('history', { root: state.root, path });
+        r = await ask('history', { root, path });
     } catch (e) {
         say('履歴を読めません: ' + why(e));
         return;
@@ -10691,10 +11137,10 @@ async function cmdHistory(at, isBook) {
     const pick = await askPick('過去バージョン', items,
         '選ぶと中身を見られます（' + r.gens + ' 世代・' + r.days + ' 日ぶん残ります）');
     if (!pick) return;
-    const note = isBook ? state.root + '/' + pick.note : path;
+    const note = isBook ? root + '/' + pick.note : path;
     let old;
     try {
-        old = (await ask('oldtext', { root: state.root, path: note, stamp: pick.stamp })).text;
+        old = (await ask('oldtext', { root, path: note, stamp: pick.stamp })).text;
     } catch (e) {
         say('読めません: ' + why(e));
         return;
@@ -10707,7 +11153,7 @@ async function cmdHistory(at, isBook) {
     ], shortPath(note) + '  ·  ' + old.length + ' 字');
     if (go === null) return;
     if (go === 'mark') {
-        await ask('keepmark', { root: state.root, path: note, stamp: pick.stamp, kept: !pick.kept });
+        await ask('keepmark', { root, path: note, stamp: pick.stamp, kept: !pick.kept });
         say(pick.kept ? '保護をやめました' : '保護しました（古くなっても消えません）');
         return;
     }
@@ -10716,7 +11162,7 @@ async function cmdHistory(at, isBook) {
         return;
     }
     // **戻す前に、いまを一世代残す。** 戻しすぎても戻れるように。
-    await ask('keep', { root: state.root, path: note, gap: 0, force: true });
+    await ask('keep', { root, path: note, gap: 0, force: true });
     await ask('write', { path: note, text: old, force: true });
     await reload({});
     if (state.open && state.open.path === note) await openNote(note);
@@ -10919,7 +11365,22 @@ const escapeAttr = escapeHtml;
     }
     el('blankmark').innerHTML = mark(54);
     const saved = await window.amber.recall();
-    state.root = saved.root;
+    // 保存ディレクトリ（依頼 511）。**前の `root` 一つから引き継ぐ** ── 憶えが
+    // `places` になっていない机では、いままでの場所が一つ目になる（同期は
+    // いままで通り Drive）。ここでは書き戻さない（開いただけで設定を書かない）。
+    const places = (Array.isArray(saved.places) ? saved.places : [])
+        .filter((p) => p && typeof p.dir === 'string' && p.dir)
+        .map((p) => ({
+            name: (typeof p.name === 'string' && p.name.trim()) || p.dir.split('/').pop() || 'ambər',
+            dir: p.dir,
+            sync: p.sync === 'drive' ? 'drive' : 'none',
+            at: typeof p.at === 'string' ? p.at : '',
+        }));
+    if (!places.length && saved.root) {
+        places.push({ name: saved.root.split('/').pop() || 'ambər', dir: saved.root, sync: 'drive', at: '' });
+    }
+    state.places = places;
+    state.root = places.length ? places[0].dir : saved.root;
     away = Array.isArray(saved.away) ? saved.away : [];
     if (['month', 'week', 'day'].includes(saved.calView)) calView = saved.calView;
     calGroup = !!saved.calGroup;
@@ -10933,11 +11394,11 @@ const escapeAttr = escapeHtml;
     incomings = (saved.incomings && typeof saved.incomings === 'object') ? saved.incomings : {};
     // 外から動いたら教えてもらう ── 同じフォルダを二つの端末で触るのが
     // このアプリの前提なのに、開き直すまで出てこなかった。
-    sayIfBlind(await window.amber.watch(saved.root));
+    await rewatch();
     // 時刻の名前のまま残っているノートを、一度だけ題の名前に（依頼 492・決めごと 7）。
-    if (saved.root) {
+    for (const p of state.places) {
         try {
-            const got = await ask('tidynames', { path: saved.root });
+            const got = await ask('tidynames', { path: p.dir });
             for (const r of got.renamed || []) afterRename(r.from, r.to);
         } catch { /* 揃えられなくても開ける */ }
     }

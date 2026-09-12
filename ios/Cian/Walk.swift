@@ -348,6 +348,9 @@ enum Walk {
             await syncWalk(store, drive)
         }
 
+        // ── 四の三。保存ディレクトリを二つ（依頼 511） ────
+        await placeWalk(store, ProcessInfo.processInfo.environment["AMBER_DRIVE_URL"])
+
         // ── 五。「表示」の面の網（位置 × 操作・`Mesh`） ────
         let grid = await Mesh.run()
         ran += grid.ran
@@ -511,6 +514,90 @@ enum Walk {
             return (await rels()).contains("ストラテジーパターン.md") ? "向こうに残っています" : nil
         }
         sync.auto = true
+    }
+
+    /// **保存ディレクトリを二つ**（依頼 511・窓の「二十の四」と同じ）── 足す・切り替える・
+    /// 作る・移す・運ぶ・外す。二つ目はアプリの一時フォルダに置く（憶えは書かない）。
+    private static func placeWalk(_ store: NotesStore, _ drive: String?) async {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("二つ目-\(Int(Date().timeIntervalSince1970))", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir.appendingPathComponent("持ち帰り"), withIntermediateDirectories: true)
+        try? "---\ntitle: 別口\n---\n# 別口\n\n二つ目の保存ディレクトリのノート。\n"
+            .write(to: dir.appendingPathComponent("別口.md"), atomically: true, encoding: .utf8)
+        try? "# 宿題\n\n持ち帰りの中。\n"
+            .write(to: dir.appendingPathComponent("持ち帰り/宿題.md"), atomically: true, encoding: .utf8)
+        let first = store.placeId
+        let before = store.notes.count
+        step("保存ディレクトリ：一つのときは切り替えが無い") { store.many ? "二つ以上あります" : nil }
+        step("保存ディレクトリ：二つ目を足すと、一覧が二つぶんになる") {
+            store.add(dir, named: "二つ目")
+            if store.places.count != 2 { return "場所が \(store.places.count) つ（\(store.trouble ?? "")）" }
+            if store.notes.count != before + 2 { return "\(before) 本が \(store.notes.count) 本" }
+            if store.rootName != "二つ目" { return "開いているのが \(store.rootName)" }
+            if !store.allBooks.contains("持ち帰り") { return "二つ目のフォルダが無い: \(store.allBooks)" }
+            if store.notes.filter(store.here).count != 2 { return "二つ目の中が \(store.notes.filter(store.here).count) 本" }
+            if store.places[1].sync != "none" { return "足した直後に同期する設定になっています" }
+            return nil
+        }
+        step("保存ディレクトリ：二つ目で作ると、二つ目に出来る") {
+            guard let n = try store.make(titled: "二つ目の新しいノート") else { return "作れません" }
+            return n.path.hasPrefix(dir.path) ? nil : "出来た道: \(n.path)"
+        }
+        step("保存ディレクトリ：一つ目に戻ると、一つ目のフォルダだけ") {
+            store.enter(first)
+            if store.rootName == "二つ目" { return "戻れていません" }
+            if store.allBooks.contains("持ち帰り") { return "二つ目のフォルダが混ざっています" }
+            return nil
+        }
+        step("保存ディレクトリ：二つ目のノートを一つ目へ移せる") {
+            guard let n = store.notes.first(where: { $0.title == "二つ目の新しいノート" }) else { return "ノートが無い" }
+            try store.move(n, to: nil)
+            guard let now = store.notes.first(where: { $0.title == "二つ目の新しいノート" }) else { return "移したら消えた" }
+            return now.root == store.rootPath ? nil : "居場所: \(now.root)"
+        }
+        step("保存ディレクトリ：よその保存ディレクトリのノートは、名前を頭に付けて言う") {
+            guard let n = store.notes.first(where: { $0.title == "別口" }) else { return "別口が無い" }
+            return store.bookLabel(n) == "二つ目" ? nil : store.bookLabel(n)
+        }
+        if let drive {
+            func rels() async -> [String] {
+                guard let url = URL(string: drive + "/_list"),
+                      let (data, _) = try? await URLSession.shared.data(from: url),
+                      let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+                return arr.compactMap { ($0["appProperties"] as? [String: Any])?["rel"] as? String }
+            }
+            let sync = Syncing.shared
+            sync.store = store
+            sync.auto = false
+            await step("同期：二つ目を Drive にすると、向こうでは ambər/二つ目/ の下に上がる") {
+                guard let p = store.places.first(where: { $0.name == "二つ目" }) else { return "二つ目が無い" }
+                store.setSync(p.id, "drive")
+                guard let r = await sync.now("手") else { return "運びませんでした" }
+                if let t = r.trouble.first { return "困りごと: " + t }
+                guard let two = r.places["二つ目"], two.up >= 2 else { return "二つ目のぶんが上がっていません: \(r.places.keys.sorted())" }
+                let there = await rels()
+                if !there.contains("二つ目/別口.md") || !there.contains("二つ目/持ち帰り/宿題.md") {
+                    return "向こうの一覧: " + there.filter { $0.contains("二つ目") || $0.contains("別口") }.joined(separator: " / ")
+                }
+                if !sync.freshWords(r).contains("二つ目:") { return "列に名前が付いていません: " + sync.freshWords(r) }
+                return nil
+            }
+            await step("同期：二つ目を「同期しない」に戻すと、一つ目だけを運ぶ") {
+                guard let p = store.places.first(where: { $0.name == "二つ目" }) else { return "二つ目が無い" }
+                store.setSync(p.id, "none")
+                guard let r = await sync.now("手") else { return "運びませんでした" }
+                return r.places.keys.contains("二つ目") ? "二つ目も運んでいます" : nil
+            }
+            sync.auto = true
+        }
+        step("保存ディレクトリ：外すと一覧から消える（ファイルは残る）") {
+            guard let p = store.places.first(where: { $0.name == "二つ目" }) else { return "二つ目が無い" }
+            if !store.remove(place: p.id) { return "外せません" }
+            if store.places.count != 1 { return "場所が \(store.places.count) つ" }
+            if store.notes.contains(where: { $0.title == "別口" }) { return "別口が残っています" }
+            return FileManager.default.fileExists(atPath: dir.appendingPathComponent("別口.md").path) ? nil : "ファイルが消えています"
+        }
+        try? FileManager.default.removeItem(at: dir)
     }
 
     private static func finish() {

@@ -221,20 +221,20 @@ await step('ブックマークに登録', `
     return asked || starred(state.open);`, true);
 await step('このノートをテンプレートにする', `
     await openNote(${path('買い物.md')});
-    const before = state.notes.filter((n) => n.book === TEMPLATES).length;
+    const before = state.notes.filter((n) => relOf(n.book) === TEMPLATES).length;
     const made = await cmdToTemplate();
     if (!made) return '写せません: ' + el('say').textContent;
-    const after = state.notes.filter((n) => n.book === TEMPLATES).length;
+    const after = state.notes.filter((n) => relOf(n.book) === TEMPLATES).length;
     return after === before + 1 ? true : '「テンプレート」が ' + before + ' → ' + after;`, true);
 await step('見本のテンプレートを入れる（三枚・二度目は増えない）', `
     const a = await window.amber.templates(state.root);
     const b = await window.amber.templates(state.root);
     await reload({ quiet: true });
-    const names = state.notes.filter((n) => n.book === TEMPLATES).map((n) => n.title);
+    const names = state.notes.filter((n) => relOf(n.book) === TEMPLATES).map((n) => n.title);
     if (a.put !== 3 || b.put !== 0) return JSON.stringify([a.put, b.put]);
     return ['週報', '議事録', '買い物リスト'].every((t) => names.includes(t)) ? true : names.join(' / ');`, true);
 await step('テンプレートから作る', `
-    const rows = state.notes.filter((n) => n.book === TEMPLATES);
+    const rows = state.notes.filter((n) => relOf(n.book) === TEMPLATES);
     if (!rows.length) return 'ひな型なし';
     const r = await ask('copy', { path: rows[0].path, dir: state.root });
     await reload({ quiet: true });
@@ -245,12 +245,13 @@ await step('テンプレートから作る', `
 await step('新しいフォルダ', `
     await ask('mkbook', { dir: state.root + '/歩き試し' });
     await reload({ quiet: true });
-    return state.books.includes('歩き試し');`, true);
+    // フォルダは絶対の道（依頼 511）。
+    return state.books.includes(state.root + '/歩き試し');`, true);
 await step('フォルダへ移す', `
     await openNote(${path('からっぽ.md')});
     await ask('move', { path: state.open.path, dir: state.root + '/歩き試し' });
     await reload({ quiet: true });
-    return state.notes.some((n) => n.book === '歩き試し');`, true);
+    return state.notes.some((n) => n.book === state.root + '/歩き試し');`, true);
 await step('フォルダに色を付ける', `
     await ask('paint', { path: state.root, name: '歩き試し', color: '#D07A2E' });
     await reload({ quiet: true });
@@ -1684,9 +1685,131 @@ if (NOTES) {
 // 二十の三。同期 ── 偽の Drive と上げ下ろし（`walk-sync.mjs`）。
 await syncWalk();
 
+// 二十の四。**保存ディレクトリを二つ**（依頼 511・乙）── 足す・見る・作る・
+// 移す・運ぶ・外す。二つ目は `NOTES2`（walk.sh が置く）。設定には書かない
+// （`savePlaces` を黙らせて、状態だけ動かす ── 本物の設定を汚さないため）。
+const NOTES2 = process.env.NOTES2 || '';
+const DRIVE2 = process.env.DRIVE || '';
+const drive2 = async (p, body) => {
+    const r = await fetch(DRIVE2 + p, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) });
+    return r.json();
+};
+if (NOTES2) {
+    const P2 = JSON.stringify(NOTES2);
+    await step('保存ディレクトリ：一つのときは、列に親の行が無い', `
+        if (state.places.length !== 1) return '場所が ' + state.places.length + ' つあります';
+        if (document.querySelector('#rail .dest[data-kind="place"]')) return '親の行が出ています';
+        if (!CMDS.some((c) => c.id === 'places' && c.name === '保存ディレクトリの追加・変更・削除')) return '⚙ の名前が違います';
+        return true;`, true);
+    await step('保存ディレクトリ：二つ目を足すと、フォルダの段にそれぞれの親が並ぶ', `
+        window.__savePlaces = savePlaces;
+        savePlaces = () => { state.root = state.places[0].dir; };
+        state.places.push({ name: '二つ目', dir: ${P2}, sync: 'none', at: '二つ目' });
+        await rewatch();
+        await reload({ quiet: true });
+        const rows = [...document.querySelectorAll('#rail .dest[data-kind="place"]')].map((d) => d.querySelector('.nm').textContent);
+        if (rows.join('/') !== state.places.map((p) => p.name).join('/')) return '親の行: ' + rows.join('/');
+        if (!state.notes.some((n) => n.place === '二つ目' && n.title === '別口')) return '二つ目のノートが一覧に来ていません';
+        const b = state.books.find((x) => x === ${P2} + '/持ち帰り');
+        if (!b) return '二つ目のフォルダが無い: ' + state.books.join(' / ');
+        const d = [...document.querySelectorAll('#rail .dest[data-kind="book"]')].find((x) => x.dataset.what === b);
+        if (!d || d.dataset.depth !== '1') return '二つ目のフォルダが一段下がっていない（' + (d && d.dataset.depth) + '）';
+        // 一つ目の親には Drive の札、二つ目には無い。
+        const badges = [...document.querySelectorAll('#rail .dest[data-kind="place"]')].map((x) => !!x.querySelector('.sy'));
+        if (badges.join() !== 'true,false') return 'Drive の札: ' + badges.join();
+        return true;`, true);
+    await step('保存ディレクトリ：親の行を押すと、その中のノートだけが並ぶ', `
+        const d = [...document.querySelectorAll('#rail .dest[data-kind="place"]')].find((x) => x.dataset.what === ${P2});
+        d.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }));
+        await new Promise((g) => setTimeout(g, 250));
+        if (state.dest.kind !== 'place') return '行き先が ' + state.dest.kind;
+        const shown = document.querySelectorAll('#rows .row').length;
+        const want = state.notes.filter((n) => n.root === ${P2}).length;
+        if (shown !== want) return shown + ' 本（' + want + ' 本のはず）';
+        if (el('where').textContent !== '二つ目') return '見出しが ' + el('where').textContent;
+        return true;`, true);
+    await step('保存ディレクトリ：二つ目を見ながら作ると、二つ目に出来る', `
+        const at = await newNote('二つ目の新しいノート');
+        if (!at || !at.startsWith(${P2} + '/')) return '出来た道: ' + at;
+        return true;`, true);
+    await step('保存ディレクトリ：移す先の一覧は、保存ディレクトリの名前を頭に', `
+        const names = bookChoices().map((c) => c.name);
+        if (!names.includes('二つ目（いちばん上）')) return names.join(' / ');
+        if (!names.includes('二つ目 › 持ち帰り')) return names.join(' / ');
+        if (!names.some((n) => n.endsWith(' › 仕事'))) return names.join(' / ');
+        return true;`, true);
+    await step('保存ディレクトリ：二つ目のノートを一つ目のフォルダへ移せる', `
+        const to = state.root + '/仕事';
+        const r = await moveOp(state.open.path, to);
+        await reload({ quiet: true });
+        if (!r.path.startsWith(to + '/')) return '移った先: ' + r.path;
+        await openNote(r.path);
+        if (state.open.place !== state.places[0].name) return '一覧の上では ' + state.open.place;
+        return true;`, true);
+    await step('保存ディレクトリ：親の行の右押しに、同期先・名前・場所・外す', `
+        const d = [...document.querySelectorAll('#rail .dest[data-kind="place"]')].find((x) => x.dataset.what === ${P2});
+        d.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 200 }));
+        await new Promise((g) => setTimeout(g, 250));
+        const t = el('more').textContent;
+        el('more').hidden = true;
+        for (const w of ['同期先', '名前を変える', '場所を変える…', '外す', 'この中にフォルダを作る']) if (!t.includes(w)) return '献立に「' + w + '」が無い: ' + t;
+        return true;`, true);
+    if (DRIVE2) {
+        await step('同期：二つ目を Drive にすると、運んだ列に保存ディレクトリの名前が付く', `
+            state.places[1].sync = 'drive';
+            drawSyncState();
+            const r = await syncNow('手');
+            if (!r) return '運びませんでした';
+            if (r.trouble.length) return '困りごと: ' + r.trouble[0];
+            if (!r.places['二つ目'] || !r.places['二つ目'].up) return '二つ目のぶんが上がっていません: ' + JSON.stringify(r.places);
+            const box = el('syncsay');
+            if (box.hidden || !box.textContent.includes('二つ目:')) return '列: ' + box.textContent;
+            return true;`, true);
+        tally.ran += 1;
+        {
+            const there = await drive2('/_list');
+            const rels = there.map((f) => String((f.appProperties || {}).rel || ''));
+            if (!rels.includes('二つ目/別口.md') || !rels.includes('二つ目/持ち帰り/宿題.md')) {
+                bad.push({ name: '同期：二つ目は向こうの ambər/二つ目/ の下', why: ['向こうの一覧: ' + rels.filter((r) => r.includes('二つ目') || r.includes('別口')).join(' / ')] });
+            }
+            if (rels.some((r) => r.startsWith('二つ目/仕事/'))) {
+                bad.push({ name: '同期：一つ目のフォルダが二つ目に紛れない', why: ['二つ目/仕事/ が向こうにあります'] });
+            }
+        }
+        await step('同期：ふだんの一行には、保存ディレクトリの名前が出ない', `
+            syncFresh = null; drawSyncState();
+            const t = el('syncmark').textContent;
+            if (t.includes('二つ目')) return t;
+            if (!t.includes('同期しています')) return t;
+            return true;`, true);
+        await step('同期：二つ目を「同期しない」に戻すと、一つ目だけを運ぶ', `
+            state.places[1].sync = 'none';
+            const r = await syncNow('手');
+            if (!r) return '運びませんでした';
+            if (Object.keys(r.places).join() !== state.places[0].name) return Object.keys(r.places).join();
+            return true;`, true);
+    }
+    await step('同期の様子：どの保存ディレクトリも「同期しない」なら、灰色の一行と「同期先を選ぶ」', `
+        const was = state.places.map((p) => p.sync);
+        for (const p of state.places) p.sync = 'none';
+        drawSyncState();
+        const m = el('syncmark');
+        const out = !m.hidden && m.textContent.includes('同期していません') && m.textContent.includes('同期先を選ぶ') && el('syncsay').hidden;
+        state.places.forEach((p, i) => { p.sync = was[i]; });
+        drawSyncState();
+        return out ? true : (m.hidden ? '一行が出ていません' : m.textContent);`, true);
+    await step('保存ディレクトリ：外すと、一覧からも列からも消える（ファイルは残る）', answering(
+        `placeDrop(state.places[1]);`,
+        `savePlaces = window.__savePlaces;
+        if (state.places.length !== 1) return '場所が ' + state.places.length + ' つ';
+        if (document.querySelector('#rail .dest[data-kind="place"]')) return '親の行が残っています';
+        if (state.notes.some((n) => n.root === ${P2})) return '二つ目のノートが一覧に残っています';
+        return true;`), true);
+}
+
 // 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
-    for (const n of state.notes.filter((x) => x.book === '歩き試し'
+    for (const n of state.notes.filter((x) => relOf(x.book) === '歩き試し'
             || /複製|新しいノート|週報|二台目|名前は一行目から/.test(x.title || '')
             || /買い物\.2\.md$/.test(x.path))) {
         try { await ask('delete', { path: n.path }); } catch { /* もう無い */ }

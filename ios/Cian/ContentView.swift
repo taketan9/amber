@@ -26,7 +26,9 @@ struct ContentView: View {
     /// callback needed, and the second time I called it verified after
     /// watching only the half that opens.
     @State private var asked: Fetching?
-    enum Fetching { case folder, notes, zip }
+    enum Fetching { case folder, addFolder, notes, zip }
+    /// 場所を変えようとしている保存ディレクトリ（`nil` は足す）。
+    @State private var relocating: String?
     /// The folder we just left, while asking whether to bring its notes.
     @State private var moving: URL?
     @State private var moved: String?
@@ -150,7 +152,11 @@ struct ContentView: View {
             // The sheet closes itself first; these open a beat later, from
             // here, where there is no presentation in the way.
             Where(store: store,
-                  choose: { DispatchQueue.main.async { asked = .folder; fetching = .folder } },
+                  choose: { id in DispatchQueue.main.async {
+                      relocating = id
+                      asked = id == nil ? .addFolder : .folder
+                      fetching = asked
+                  } },
                   bringIn: { DispatchQueue.main.async { asked = .notes; fetching = .notes } },
                   restore: { DispatchQueue.main.async { asked = .zip; fetching = .zip } })
         }
@@ -159,7 +165,9 @@ struct ContentView: View {
         )) {
             Button("そのままにする", role: .cancel) {}
             Button("丸ごと移す") {
-                guard let old = moving, let fresh = store.rootURL else { return }
+                guard let old = moving,
+                      let fresh = relocating.flatMap({ id in store.places.first { $0.id == id } }).flatMap(store.url(of:))
+                else { return }
                 do { moved = "\(try store.migrate(from: old, to: fresh)) 件を移しました。" }
                 catch { store.trouble = error.localizedDescription }
             }
@@ -249,7 +257,7 @@ struct ContentView: View {
                                  set: { if !$0 { fetching = nil } }),
             allowedContentTypes: {
                 switch asked {
-                case .folder: return [.folder]
+                case .folder, .addFolder: return [.folder]
                 case .zip: return [.zip]
                 default: return [UTType(filenameExtension: "md") ?? .plainText, .plainText]
                 }
@@ -262,11 +270,15 @@ struct ContentView: View {
                 // that are here now do not follow by themselves: a new folder
                 // is an empty folder, and somebody who did not expect that
                 // has just lost sight of everything they wrote.
-                if let url = urls.first {
-                    let old = store.rootURL
-                    store.choose(url)
-                    if let old, store.notesAt(old) > 0 { moving = old }
+                if let url = urls.first, let id = relocating,
+                   let p = store.places.first(where: { $0.id == id }) {
+                    let old = store.url(of: p)
+                    store.relocate(id, to: url)
+                    if let old, store.trouble == nil, store.notesAt(old) > 0 { moving = old }
                 }
+            case (.addFolder, .success(let urls)):
+                // **足す**（依頼 511）── 入った直後は同期しない（`NotesStore.add`）。
+                if let url = urls.first { store.add(url) }
             case (.notes, .success(let urls)):
                 store.bring(urls)
             case (.zip, .success(let urls)):
@@ -365,14 +377,17 @@ struct ContentView: View {
                         } else if !note.excerpt.isEmpty {
                             Text(note.excerpt).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
-                        if !note.tags.isEmpty || !note.book.isEmpty {
+                        // 二つ以上の保存ディレクトリがあるときは、よその保存ディレクトリの
+                        // ノートにその名前を（依頼 511）── 探した結果に混ざる。
+                        let away = store.many && !store.here(note)
+                        if !note.tags.isEmpty || !note.book.isEmpty || away {
                             HStack(spacing: 6) {
-                                if !note.book.isEmpty {
+                                if !note.book.isEmpty || away {
                                     // The notebook first: it says *where*, and
                                     // where is what tells two same-named notes
                                     // apart. Quieter than the tags, which are a
                                     // thing you chose rather than a place.
-                                    Label(note.book, systemImage: "folder")
+                                    Label(store.bookLabel(note), systemImage: "folder")
                                         .font(.caption2).foregroundStyle(.tint.opacity(0.8))
                                 }
                                 if !note.tags.isEmpty {
@@ -831,6 +846,36 @@ struct ContentView: View {
                     .listRowBackground(outside ? Color.accentColor.opacity(0.15) : nil)
                 }
                 Section {
+                  // **保存ディレクトリが二つ以上なら、切り替えの一行**（依頼 511）── 窓は
+                  // 左の列に親として並べるが、電話は一段ずつなので、フォルダの頭に一つ。
+                  // 押すと並びが出て、選んだ保存ディレクトリのフォルダに替わる。
+                  if store.many, store.at.isEmpty {
+                      Menu {
+                          ForEach(store.places) { p in
+                              Button { go { store.enter(p.id) } } label: {
+                                  if p.id == store.placeId {
+                                      Label(p.name, systemImage: "checkmark")
+                                  } else {
+                                      Text(p.name + (store.placeTrouble[p.id] != nil ? "（見つかりません）" : ""))
+                                  }
+                              }
+                          }
+                      } label: {
+                          HStack {
+                              Label(store.rootName, systemImage: "tray.full.fill")
+                              Spacer()
+                              if store.place?.sync == "drive" {
+                                  Text("Drive").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                                      .padding(.horizontal, 5).padding(.vertical, 1)
+                                      .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.4)))
+                              }
+                              Text("\(store.notes.filter(store.here).count)").foregroundStyle(.secondary).monospacedDigit()
+                              Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(.tertiary)
+                          }
+                          .contentShape(Rectangle())
+                      }
+                      .buttonStyle(.plain)
+                  }
                   ForEach(ownBooks, id: \.path) { b in
                     Button {
                         go { store.into(b.path) }
@@ -1093,7 +1138,13 @@ struct SyncLine: View {
     @ObservedObject private var sync = Syncing.shared
 
     var body: some View {
-        if !sync.signedIn {
+        if sync.store?.places.contains(where: { $0.sync == "drive" }) == false {
+            // **どの保存ディレクトリも「同期しない」なら、灰色の一行**（依頼 511・窓と同じ）。
+            HStack(spacing: 6) {
+                Circle().fill(Color.secondary).frame(width: 7, height: 7)
+                Text("同期していません ・ どの保存ディレクトリも「同期しない」").font(.footnote).foregroundStyle(.secondary)
+            }
+        } else if !sync.signedIn {
             HStack(spacing: 6) {
                 Circle().fill(Color.secondary).frame(width: 7, height: 7)
                 Text("同期していません ・ 設定の「同期」から始められます").font(.footnote).foregroundStyle(.secondary)
@@ -1109,18 +1160,10 @@ struct SyncLine: View {
                 }
             }
         } else if let fresh = sync.fresh {
-            var parts: [String] = []
-            let _ = { () -> Void in
-                if fresh.up > 0 { parts.append("アップロード\(fresh.up)本") }
-                if fresh.down > 0 { parts.append("ダウンロード\(fresh.down)本") }
-                if fresh.gone > 0 { parts.append("ゴミ箱へ\(fresh.gone)本") }
-                if fresh.clash > 0 { parts.append("同じ行を両方で直したノート\(fresh.clash)本") }
-                if fresh.moved > 0 { parts.append("名前の変更\(fresh.moved)本") }
-            }()
             VStack(alignment: .leading, spacing: 2) {
                 Text("同期しました" + (sync.last.map { " ── " + Syncing.hhmm($0) } ?? ""))
                     .font(.footnote.weight(.semibold)).foregroundStyle(Color(red: 0.25, green: 0.49, blue: 0.32))
-                Text(parts.joined(separator: "・")).font(.footnote).foregroundStyle(.secondary)
+                Text(sync.freshWords(fresh)).font(.footnote).foregroundStyle(.secondary)
             }
         } else {
             HStack(spacing: 6) {

@@ -151,14 +151,22 @@ struct Sparing: View {
         defer { looking = false }
         guard !store.rootPath.isEmpty else { pictures = []; return }
         do {
-            let got = try Cian.call("spare", ["path": store.rootPath])
-            pictures = (got["pictures"] as? [[String: Any]] ?? []).map {
-                Picture(path: $0["path"] as? String ?? "",
-                        bytes: $0["bytes"] as? Int ?? 0,
-                        when: $0["when"] as? Double ?? 0,
-                        note: $0["note"] as? String ?? "")
+            // ぜんぶの保存ディレクトリを数えて、一つの表に（依頼 511）。
+            var all: [Picture] = []
+            var unsureAll: [String] = []
+            for p in store.places {
+                guard let url = store.url(of: p) else { continue }
+                let got = try Cian.call("spare", ["path": url.path])
+                all += (got["pictures"] as? [[String: Any]] ?? []).map {
+                    Picture(path: $0["path"] as? String ?? "",
+                            bytes: $0["bytes"] as? Int ?? 0,
+                            when: $0["when"] as? Double ?? 0,
+                            note: $0["note"] as? String ?? "")
+                }
+                unsureAll += got["unsure"] as? [String] ?? []
             }
-            unsure = got["unsure"] as? [String] ?? []
+            pictures = all
+            unsure = unsureAll
             picked = []
         } catch {
             trouble = error.localizedDescription

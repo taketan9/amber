@@ -16,7 +16,8 @@ struct Where: View {
     /// presentation over a presentation, and it silently does nothing, which
     /// is exactly how 「保存場所を選ぶ」 behaved: pressed, and no answer at
     /// all. So the sheet closes first and the screen underneath opens it.
-    let choose: () -> Void
+    /// 保存ディレクトリの場所を選ぶ（`nil` は「足す」、それ以外はその id の場所を変える）。
+    let choose: (String?) -> Void
     let bringIn: () -> Void
     let restore: () -> Void
     /// 取ってきて、一本のノートにする（依頼 421 の乙）。
@@ -153,31 +154,40 @@ struct Where: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("ノートの保存場所") {
-                    // The path, as the trail of names it is. "amber" alone
-                    // answers "what is it called" when the question was
-                    // "where is it" — and on a phone, where a folder can be
-                    // in three different clouds, that is the whole question.
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(store.trail.joined(separator: "  ›  "))
-                            .font(.callout)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(store.own
-                             ? "この iPhone の中。「ファイル」→ この iPhone 内 → ambər で開けます"
-                             : store.rootPath)
-                            .font(.caption2).foregroundStyle(.secondary)
-                            .lineLimit(4)
-                    }
-                    LabeledContent("ノート", value: "\(store.notes.count) 本")
-                    // **保存場所は一つ。** 窓がそうなので、電話も同じに
-                    // した ── 前はここに「開いてきた場所」が八つ並んでいて、
-                    // 二つの amber で「いまどこに書いているか」の答えが違う
-                    // 形をしていた。戻る道だけ、いまの場所の隣に置く。
-                    if !store.own {
-                        Button { store.useOwn() } label: {
-                            Label("この iPhone の中に戻す", systemImage: "iphone")
+                // **保存ディレクトリ**（依頼 511・窓の ⚙「保存ディレクトリの追加・変更・削除」と
+                // 同じ三段）── 一覧 → 一つ → 同期先／名前／場所／外す。同期の入れる切るもここ。
+                Section {
+                    ForEach(store.places) { p in
+                        NavigationLink {
+                            PlaceSheet(store: store, id: p.id, choose: { dismiss(); choose(p.id) })
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(p.name)
+                                    Text(store.trail(of: p).joined(separator: " › ") + " ・ "
+                                         + (p.sync == "drive" ? "Google Drive" : "同期しない")
+                                         + (store.placeTrouble[p.id] != nil ? " ・ 見つかりません" : ""))
+                                        .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                                Spacer()
+                                Text("\(store.notes.filter { $0.root == (store.url(of: p)?.path ?? "\u{0}") }.count) 本")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    Button {
+                        dismiss()
+                        choose(nil)
+                    } label: {
+                        Label("保存ディレクトリを追加", systemImage: "folder.badge.plus")
+                    }
+                } header: {
+                    Text("保存ディレクトリの追加・変更・削除")
+                } footer: {
+                    // **The thing that is actually hard.** 2026-09-05:
+                    // 「どこのディレクトリなのかが単純にわからないんだ。探せなくて困っている」。
+                    // 提供者はみな選ぶ画面の何段か下に居て、どれも人が当たりを付ける場所に無い。
+                    Text("ノートを置くフォルダ。いくつでも。同期先はフォルダごとに選べます（iCloud と OneDrive は、これから）。\n\n選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。iCloud Drive はそのまま一覧に、Google Drive / Dropbox は「場所」の下。出てこないときは「…」→「サイドバーを編集」でオンに（「ファイル」アプリ側の設定）。Mac 版の ambər に同じフォルダを指定すれば、両方から同じノートを触れます。")
                 }
 
                 Section {
@@ -223,28 +233,6 @@ struct Where: View {
                     Text(sync.signedIn
                          ? "Mac と同じノートを Google Drive の「ambər」フォルダで使っています。保存の三秒後・三十秒ごと・この画面に戻ったときに同期します。"
                          : "Mac と iPhone で同じノートを使えるようにします。ambər が触れるのは、ambər が作ったファイルだけです。")
-                }
-
-                Section {
-                    Button {
-                        dismiss()
-                        choose()
-                    } label: {
-                        Label("ambər 保存ディレクトリ変更", systemImage: "folder")
-                    }
-                } header: {
-                    Text("場所")
-                } footer: {
-                    // **The thing that is actually hard.** 2026-09-05:
-                    // 「どこのディレクトリなのかが単純にわからないんだ。
-                    // 探せなくて困っている」. The providers are all in the
-                    // picker and all several taps down inside it, and none of
-                    // them is where a person would guess. So: where to tap,
-                    // in order, and what to do when one is not listed. This
-                    // is a thing cian cannot do for him — the sidebar is the
-                    // Files app's own setting — so the least it can do is say
-                    // exactly where it is.
-                    Text("選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。\n\n・iCloud Drive → そのまま一覧にあります\n・Google Drive / Dropbox → 「場所」の下に並びます\n\n出てこないときは、その並びの下の「…」→「サイドバーを編集」で、使いたいものをオンにしてください（「ファイル」アプリ側の設定なので、ambər からは変えられません）。\n\n灰色で選べないものがあります。フォルダを丸ごと他のアプリに渡せるかどうかは、そのアプリ側の作りによるもので、ambər からは変えられません（2026-09 現在、「ドライブ」は灰色、iCloud Drive と Dropbox は選べます）。\n\n窓版の ambər に同じフォルダを指定すれば、両方から同じノートを触れます。")
                 }
 
                 Section {
@@ -453,4 +441,99 @@ struct ActivityView: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: [item], applicationActivities: nil)
     }
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
+/// **保存ディレクトリ一つの画面**（二段目・依頼 511）── 同期先／名前／場所／外す。
+struct PlaceSheet: View {
+    @ObservedObject var store: NotesStore
+    let id: String
+    /// 場所を選ぶ画面を開く（設定の紙を閉じてから ── 紙の上に紙は開かない）。
+    let choose: () -> Void
+    @ObservedObject private var sync = Syncing.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var dropping = false
+    @State private var signingIn = false
+
+    private var place: NotesStore.Place? { store.places.first { $0.id == id } }
+
+    var body: some View {
+        List {
+            if let p = place {
+                Section {
+                    Picker("同期先", selection: Binding(get: { p.sync }, set: { pick($0) })) {
+                        Text("同期しない").tag("none")
+                        Text("Google Drive").tag("drive")
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                    if p.sync == "drive", !sync.signedIn {
+                        Button { signIn() } label: {
+                            Label(signingIn ? "ブラウザで「許可」を押してください…" : "Google でサインイン",
+                                  systemImage: "person.crop.circle.badge.checkmark")
+                        }
+                        .disabled(signingIn)
+                    }
+                } header: {
+                    Text("同期先")
+                } footer: {
+                    Text(p.sync == "drive"
+                         ? "Google Drive の「ambər」" + (p.at.isEmpty ? "" : " › " + p.at) + " に置きます。iCloud と OneDrive は、これから"
+                         : "この iPhone だけに置きます。iCloud と OneDrive は、これから")
+                }
+                Section {
+                    TextField("呼び名", text: $name)
+                        .onSubmit { store.rename(place: id, to: name) }
+                } header: {
+                    Text("名前")
+                } footer: {
+                    Text("一覧での呼び名だけ。フォルダの名前は変わりません")
+                }
+                Section {
+                    LabeledContent("いま", value: store.trail(of: p).joined(separator: " › "))
+                    Button { choose() } label: { Label("場所を変える…", systemImage: "folder") }
+                    if !p.own, !store.places.contains(where: { $0.own }) {
+                        Button { store.relocateToOwn(id) } label: { Label("この iPhone の中にする", systemImage: "iphone") }
+                    }
+                } header: {
+                    Text("場所")
+                } footer: {
+                    Text("場所を変えると、いままでのノートを一緒に移すか確認します")
+                }
+                Section {
+                    Button(role: .destructive) { dropping = true } label: { Label("外す", systemImage: "minus.circle") }
+                        .disabled(store.places.count < 2)
+                } footer: {
+                    Text(store.places.count < 2
+                         ? "最後の一つは外せません（動かすなら「場所を変える…」）"
+                         : "ambər の一覧から外します。フォルダとノートはそのまま残ります")
+                }
+            }
+        }
+        .navigationTitle(place?.name ?? "")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { name = place?.name ?? "" }
+        .onDisappear { if let p = place, name != p.name { store.rename(place: id, to: name) } }
+        .alert("「\(place?.name ?? "")」を ambər から外しますか", isPresented: $dropping) {
+            Button("やめる", role: .cancel) {}
+            Button("外す", role: .destructive) { if store.remove(place: id) { dismiss() } }
+        } message: {
+            Text("フォルダと中のノートはそのまま残ります")
+        }
+    }
+
+    private func pick(_ to: String) {
+        store.setSync(id, to)
+        guard to == "drive" else { return }
+        if sync.signedIn { sync.soon(1) } else { signIn() }
+    }
+
+    private func signIn() {
+        signingIn = true
+        Task {
+            defer { signingIn = false }
+            do { _ = try await sync.signIn(); sync.soon(1) }
+            catch { store.trouble = "サインインできませんでした: " + error.localizedDescription }
+        }
+    }
 }

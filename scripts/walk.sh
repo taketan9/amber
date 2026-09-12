@@ -45,6 +45,22 @@ rm -rf "$work"
 mkdir -p "$work/home/Documents/amber" "$work/site"
 notes="$work/home/Documents/amber"
 mkdir -p "$notes/attachments" "$notes/仕事" "$notes/テンプレート" "$notes/家族"
+# **二つ目の保存ディレクトリ**（依頼 511）── 走査の中で足して、外す。
+notes2="$work/home/Documents/二つ目"
+mkdir -p "$notes2/持ち帰り"
+cat > "$notes2/別口.md" <<'MD'
+---
+title: 別口
+---
+# 別口
+
+二つ目の保存ディレクトリのノート。#別口
+MD
+cat > "$notes2/持ち帰り/宿題.md" <<'MD'
+# 宿題
+
+持ち帰りのフォルダの中。
+MD
 
 # 設定の写し（無ければ「無かった」と憶えておく）
 if [ -f "$mine" ]; then cp "$mine" "$work/amber.json.mine"; else touch "$work/なかった"; fi
@@ -227,5 +243,5 @@ done
 
 # どの台本を走らせるか（既定は総ざらい）。
 script="${1:-walk}"
-SITE="http://127.0.0.1:$siteport/" PORT="$port" NOTES="$notes" TEAMCSV="$work/team.csv" \
+SITE="http://127.0.0.1:$siteport/" PORT="$port" NOTES="$notes" NOTES2="$notes2" TEAMCSV="$work/team.csv" \
   DRIVE="http://127.0.0.1:$driveport" node "$here/$script.mjs"

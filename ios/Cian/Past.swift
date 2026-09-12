@@ -102,7 +102,7 @@ struct Past: View {
 
     private func load() {
         do {
-            let out = try Cian.call("history", ["root": store.rootPath, "path": at])
+            let out = try Cian.call("history", ["root": store.rootOf(at), "path": at])
             rows = out["versions"] as? [[String: Any]] ?? []
             gens = (out["gens"] as? NSNumber)?.intValue ?? 50
             days = (out["days"] as? NSNumber)?.intValue ?? 30
@@ -112,14 +112,14 @@ struct Past: View {
     }
 
     private func noteOf(_ v: [String: Any]) -> String {
-        isBook ? store.rootPath + "/" + (v["note"] as? String ?? "") : at
+        isBook ? store.rootOf(at) + "/" + (v["note"] as? String ?? "") : at
     }
 
     private func open(_ v: [String: Any]) {
         let note = noteOf(v)
         let stamp = v["stamp"] as? String ?? ""
         do {
-            let out = try Cian.call("oldtext", ["root": store.rootPath, "path": note, "stamp": stamp])
+            let out = try Cian.call("oldtext", ["root": store.rootOf(note), "path": note, "stamp": stamp])
             peek = Peek(when: v["when"] as? String ?? "", note: note, stamp: stamp,
                         text: out["text"] as? String ?? "")
         } catch {
@@ -131,7 +131,7 @@ struct Past: View {
     /// 取り返しのつかない操作になり、押すのが怖くなる。
     private func revert(_ p: Peek) {
         do {
-            _ = try Cian.call("keep", ["root": store.rootPath, "path": p.note,
+            _ = try Cian.call("keep", ["root": store.rootOf(p.note), "path": p.note,
                                        "gap": 0, "force": true])
             _ = try Cian.call("write", ["path": p.note, "text": p.text, "force": true])
             store.reload()
