@@ -659,14 +659,17 @@ await step('カレンダー：左の列から開ける', `
     // **一覧は動かない** ── カレンダーは行き先ではないので、押しても
     // 一覧が空にならないこと。
     const kept = state.dest.kind !== 'cal';
-    // **開いているあいだは、左の列のカレンダーが光る**（依頼 477）。
+    // **開いているあいだは、左の列のカレンダーが光る**（依頼 477）── そして
+    // 行き先の光り（すべてのノート）は消える（依頼 510）。
     const lit = el('rail').querySelector('.dest[data-kind="cal"]').classList.contains('on');
+    const other = [...el('rail').querySelectorAll('.dest.on')].filter((d) => d.dataset.kind !== 'cal').length;
     // **ノートと同じ場所に出る**（依頼 478）── 小窓ではないので、
     // ノートの面は引っ込んでいる。
     const wide = el('cal').closest('#pane') && el('work').hidden;
     calShut();
     if (!open) return '開きませんでした';
     if (!lit) return '左の列が光りません';
+    if (other) return 'カレンダーを開いているのに、ほかの行き先も ' + other + ' つ光っています';
     if (!wide) return 'ノートと同じ場所に出ていません';
     if (el('rail').querySelector('.dest[data-kind="cal"]').classList.contains('on')) {
         return '閉じても光ったままです';

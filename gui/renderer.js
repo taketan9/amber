@@ -201,7 +201,9 @@ function tagsOf(notes) {
 const starred = (n) => n.star !== null && n.star !== undefined;
 
 function drawRail() {
-    const on = (kind, what) => state.dest.kind === kind && state.dest.what === what;
+    // **カレンダーを出しているあいだは、カレンダーだけが光る**（本人・2026-09-12）──
+    // 行き先（すべてのノート など）の光りは消す。閉じれば戻る。
+    const on = (kind, what) => !calOn && state.dest.kind === kind && state.dest.what === what;
     const rows = [];
     // 名前は決め打ちなので、`BRAND` をそのまま置く（人の書いた字は入らない）。
     rows.push('<div id="railtop"><span class="wm">' + BRAND + '</span></div>');
