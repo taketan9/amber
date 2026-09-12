@@ -134,7 +134,7 @@ struct Feeds: View {
                         url = ""
                         asking = true
                     } label: {
-                        Label("カレンダーを追加", systemImage: "plus")
+                        Label("カレンダーを追加する", systemImage: "plus")
                     }
                 } footer: {
                     Text("Google カレンダーなら「設定 → カレンダーの統合 → "
@@ -160,7 +160,7 @@ struct Feeds: View {
                     }
                 }
             }
-            .alert("カレンダーを追加", isPresented: $asking) {
+            .alert("カレンダーを追加する", isPresented: $asking) {
                 TextField("https://…", text: $url)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()

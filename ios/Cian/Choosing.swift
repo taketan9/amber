@@ -19,8 +19,8 @@ struct Choosing: View {
             List {
                 if let tab, tab.clashing {
                     Section {
-                        Button("ぜんぶこちらを残す") { desk.chooseAll(id, "ours", store) }
-                        Button("ぜんぶ\(who)を残す") { desk.chooseAll(id, "theirs", store) }
+                        Button("すべてこちらの記載を反映する") { desk.chooseAll(id, "ours", store) }
+                        Button("すべて\(who)の記載を反映する") { desk.chooseAll(id, "theirs", store) }
                     } footer: {
                         Text("一つずつ選ぶなら下から。どちらを残しても、混ぜる前のこちらの姿は履歴に残っています。")
                     }
@@ -62,7 +62,7 @@ struct Choosing: View {
                     }
                 } else {
                     Section {
-                        Text("ぜんぶ決まりました。").foregroundStyle(.secondary)
+                        Text("すべて決まりました").foregroundStyle(.secondary)
                     }
                 }
             }

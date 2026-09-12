@@ -389,7 +389,7 @@ function drawRail() {
         for (const sh of state.shares) {
             const n = state.notes.filter((x) => inShare(sh.at, x)).length;
             const top = sh.at === rootOf(sh.at);
-            rows.push(dest('share', sh.at, top ? (manyPlaces() ? bookName(sh.at) : 'ぜんぶ') : sh.at.split('/').pop(), n,
+            rows.push(dest('share', sh.at, top ? (manyPlaces() ? bookName(sh.at) : 'すべて') : sh.at.split('/').pop(), n,
                            on('share', sh.at)));
         }
     }
@@ -644,7 +644,7 @@ function drawList() {
         all: 'すべてのノート',
         book: bookName(what),
         place: bookName(what),
-        share: '共有 ── ' + (what === rootOf(what) ? (manyPlaces() ? bookName(what) : 'ぜんぶ') : what.split('/').pop()),
+        share: '共有 ── ' + (what === rootOf(what) ? (manyPlaces() ? bookName(what) : 'すべて') : what.split('/').pop()),
         tag: '#' + what,
         star: what ? '★ ' + what.split('/').pop() : '★ ブックマーク',
     }[state.dest.kind] || 'すべてのノート';
@@ -869,7 +869,7 @@ async function cmdTemplate() {
         try {
             if (pick === 'seed') {
                 const r = await window.amber.templates(state.root);
-                say(r.put ? r.put + ' 枚入れました' : 'もう入っています');
+                say(r.put ? r.put + ' 件入れました' : 'もう入っています');
             } else {
                 await cmdToTemplate();
             }
@@ -1002,7 +1002,7 @@ function drawPicked() {
     const n = state.picked.size;
     bar.hidden = !n;
     if (!n) return;
-    bar.innerHTML = '<span class="n">' + n + ' 本を選んでいます</span><span class="sp"></span>'
+    bar.innerHTML = '<span class="n">' + n + ' 件を選んでいます</span><span class="sp"></span>'
         + '<button id="pickdo">まとめて ▾</button><button id="pickoff">やめる</button>';
     el('pickdo').onclick = (e) =>
         pickedMenu(e.currentTarget.getBoundingClientRect());
@@ -1018,13 +1018,13 @@ function pickedNotes() {
 function pickedMenu(at) {
     const n = state.picked.size;
     popMenu([
-        { name: n + ' 本にタグを付ける', run: () => manyTagOn() },
-        { name: n + ' 本からタグを外す', run: () => manyTagOff() },
-        { name: n + ' 本をフォルダへ移動', run: () => manyMove() },
-        { name: n + ' 本をブックマークに登録する', run: () => manyStar(true) },
-        { name: n + ' 本のブックマークを外す', run: () => manyStar(false) },
+        { name: n + ' 件にタグを付ける', run: () => manyTagOn() },
+        { name: n + ' 件からタグを外す', run: () => manyTagOff() },
+        { name: n + ' 件をフォルダへ移動', run: () => manyMove() },
+        { name: n + ' 件をブックマークに登録する', run: () => manyStar(true) },
+        { name: n + ' 件のブックマークを外す', run: () => manyStar(false) },
         { name: '選ぶのをやめる', key: 'Esc', sep: true, run: unpickAll },
-        { name: n + ' 本をゴミ箱へ入れる', sep: true, run: () => manyDelete() },
+        { name: n + ' 件をゴミ箱へ入れる', sep: true, run: () => manyDelete() },
     ], at);
 }
 
@@ -1060,16 +1060,16 @@ async function eachPicked(change) {
 /// 数で言う。**「済みました」だけにしない** ── 何本に効いて、何本は
 /// もともとそうだったのかは、押した人が知りたいことそのもの。
 function sayMany(verb, r, why2) {
-    let m = r.done.length + ' 本' + verb;
-    if (r.skipped.length) m += '（' + r.skipped.length + ' 本は' + why2 + '）';
-    if (r.failed.length) m += '／' + r.failed.length + ' 本は書けませんでした';
+    let m = r.done.length + ' 件' + verb;
+    if (r.skipped.length) m += '（' + r.skipped.length + ' 件は' + why2 + '）';
+    if (r.failed.length) m += '／' + r.failed.length + ' 件は書けませんでした';
     say(m);
 }
 
 async function manyTagOn() {
     const notes = pickedNotes();
     const all = tagsOf(state.notes).map(([t, c]) => ({ name: t, sub: c + ' 件', value: t }));
-    const pick = await askPick(notes.length + ' 本に付けるタグ',
+    const pick = await askPick(notes.length + ' 件に付けるタグ',
         [...all, { name: '＋ 新しいタグを作る', value: ' new' }]);
     if (pick === null) return;
     let tag = pick;
@@ -1098,8 +1098,8 @@ async function manyTagOff() {
     // 無いタグは選びようがない。
     const here = tagsOf(notes);
     if (!here.length) { say('選んだノートにタグは付いていません'); return; }
-    const tag = await askPick(notes.length + ' 本から外すタグ',
-        here.map(([t, c]) => ({ name: t, sub: notes.length + ' 本中 ' + c + ' 本', value: t })));
+    const tag = await askPick(notes.length + ' 件から外すタグ',
+        here.map(([t, c]) => ({ name: t, sub: notes.length + ' 件中 ' + c + ' 件', value: t })));
     if (tag === null) return;
     const r = await eachPicked(async (note, text) => {
         const now = note.tags || [];
@@ -1123,7 +1123,7 @@ async function manyStar(on) {
 async function manyMove() {
     const notes = pickedNotes();
     const here = [...bookChoices(), { name: '＋ 新しいフォルダを作る', value: ' new' }];
-    let to = await askPick(notes.length + ' 本をどのフォルダへ', here);
+    let to = await askPick(notes.length + ' 件をどのフォルダへ', here);
     if (to === null) return;
     if (to === ' new') {
         const made = await cmdMkBook();
@@ -1150,8 +1150,8 @@ async function manyMove() {
     await reload({ quiet: true });
     if (state.open) await openNote(state.open.path, { quiet: true });
     drawList();
-    say(moved + ' 本を' + dirWords(dir) + '移しました'
-        + (failed ? '／' + failed + ' 本は移せませんでした' : ''));
+    say(moved + ' 件を' + dirWords(dir) + '移しました'
+        + (failed ? '／' + failed + ' 件は移せませんでした' : ''));
 }
 
 /// まとめてゴミ箱へ。**訊くのは一度だけ。**
@@ -1163,7 +1163,7 @@ async function manyDelete() {
     const notes = pickedNotes();
     if (!notes.length) return;
     const knew = noBin();
-    const head = notes.length + ' 本を';
+    const head = notes.length + ' 件を';
     if (!await askYes(knew
         ? head + '消しますか（ここにはゴミ箱が無いので、戻せません）'
         : head + 'ゴミ箱へ入れますか')) return;
@@ -1189,9 +1189,9 @@ async function manyDelete() {
     if (state.open && state.picked.has(state.open.path)) { state.open = null; state.dirty = false; applyView(); }
     unpickAll();
     await reload({ quiet: true });
-    say((binned ? binned + ' 本をゴミ箱へ入れました' : '')
-        + (binned && erased ? '／' : '') + (erased ? erased + ' 本を消しました' : '')
-        + (failed ? '／' + failed + ' 本は消せませんでした' : '')
+    say((binned ? binned + ' 件をゴミ箱へ入れました' : '')
+        + (binned && erased ? '／' : '') + (erased ? erased + ' 件を消しました' : '')
+        + (failed ? '／' + failed + ' 件は消せませんでした' : '')
         || '何も消しませんでした');
 }
 
@@ -1474,7 +1474,7 @@ function drawStrip() {
                 { name: '閉じる', run: () => closeTab(t.path) },
                 { name: 'ほかを閉じる', dim: tabs.length < 2,
                   run: () => { for (const o of tabs.slice()) if (o.path !== t.path) closeTab(o.path); } },
-                { name: '右のぜんぶを閉じる', dim: at >= tabs.length - 1,
+                { name: '右のすべてを閉じる', dim: at >= tabs.length - 1,
                   run: () => { for (const o of tabs.slice(at + 1)) closeTab(o.path); } },
                 { name: '一覧でこのノートを選ぶ', sep: true, run: () => openNote(t.path, { keep: true }) },
                 { name: 'Finder で表示', run: () => window.amber.reveal(t.path) },
@@ -6492,8 +6492,8 @@ function drawBand() {
             + n + ' か所。選ぶまでは両方残っています</span>'
             + '<span class="nav">'
             + '<button class="k" data-go="-1">← 前</button><button class="k" data-go="1">次 →</button>'
-            + '<button class="k" data-all="ours">ぜんぶこちらを残す</button>'
-            + '<button class="k" data-all="theirs">ぜんぶ' + escapeHtml(who) + 'を残す</button></span>'
+            + '<button class="k" data-all="ours">すべてこちらの記載を反映する</button>'
+            + '<button class="k" data-all="theirs">すべて' + escapeHtml(who) + 'の記載を反映する</button></span>'
             + fields.map((f, i) => '<span class="fld">'
                 + '<b>' + escapeHtml(fieldName(f.key)) + '</b>を両方で変えていました ── こちら「' + escapeHtml(f.ours) + '」／'
                 + escapeHtml(who) + '「' + escapeHtml(f.theirs) + '」'
@@ -7423,7 +7423,7 @@ async function cmdSpare() {
     const unsure = got.unsure || [];
     warn.hidden = !unsure.length;
     warn.textContent = unsure.length
-        ? '読めなかったノートが ' + unsure.length + ' 本あります（' + unsure.slice(0, 3).join('・')
+        ? '読めなかったノートが ' + unsure.length + ' 件あります（' + unsure.slice(0, 3).join('・')
           + (unsure.length > 3 ? ' ほか' : '') + '）。そのノートが使っている画像も、'
           + 'ここに混じります'
         : '';
@@ -7448,7 +7448,7 @@ function drawSpare() {
     box.querySelector('.go').disabled = !sparePicked.size;
     box.querySelector('.all').disabled = false;
     box.querySelector('.all').textContent =
-        sparePicked.size === spareRows.length ? 'ぜんぶやめる' : 'ぜんぶ選ぶ';
+        sparePicked.size === spareRows.length ? 'すべてやめる' : 'すべて選ぶ';
     grid.innerHTML = spareRows.map((r) => {
         const on = sparePicked.has(r.path) ? ' on' : '';
         // もとのノートの名前は「らしい」だけ ── 言い切らない。
@@ -8454,7 +8454,7 @@ async function calSources() {
     const out = [{ key: 'me', name: '自分のノート（日付を書いたノート）' }];
     if (hereOn) {
         const got = await window.amber.cal(['calendars']);
-        for (const c of (got && got.calendars) || []) out.push({ key: 'here:' + c, name: c + '（この Mac）' });
+        for (const c of (got && got.calendars) || []) out.push({ key: 'here:' + c, name: c + '（このパソコン）' });
     }
     for (const a of away) out.push({ key: 'away:' + a.name, name: a.name + '（カレンダー設定で足したもの）' });
     for (const w of teamPeople) out.push({ key: 'team:' + (w.mail || w.name), name: w.name + '（チーム）' });
@@ -8470,13 +8470,13 @@ async function cmdCalSettings() {
             sub: calHide.includes(c.key) ? '出していません' : '',
             value: c.key,
         }));
-        rows.push({ name: (calWeekend ? '✓　' : '　　') + '土日を出す', value: '*weekend', sub: calWeekend ? '' : '月〜金だけ出しています' });
-        rows.push({ name: '個人カレンダーの色 ── ' + (calHereColor ? colorName(calHereColor) : '緑（既定）'), value: '*color', sub: '押すと選べます' });
+        rows.push({ name: (calWeekend ? '✓　' : '　　') + '土日表示', value: '*weekend', sub: calWeekend ? '' : '月〜金だけ出しています' });
+        rows.push({ name: 'カラー設定 ── ' + (calHereColor ? colorName(calHereColor) : '緑（既定）'), value: '*color', sub: '押すと選べます' });
         const pick = await askPick('カレンダー表示設定', rows, '押すと出し入れできます。閉じるまで続けて選べます', true);
         if (pick === null) break;
         if (pick === '*weekend') { calWeekend = !calWeekend; window.amber.remember({ calWeekend }); continue; }
         if (pick === '*color') {
-            const c = await askPick('個人カレンダーの色', CAL_COLORS.map(([h, n]) => ({
+            const c = await askPick('カラー設定（個人カレンダーの色）', CAL_COLORS.map(([h, n]) => ({
                 name: (h === (calHereColor || '#2f8a52') ? '● ' : '　 ') + n, value: h,
             })), '', true);
             if (c !== null) { calHereColor = c; window.amber.remember({ calHereColor }); paintHereColor(); }
@@ -8849,7 +8849,7 @@ function openMenu(at, which) {
             return { ...c, sub: to
                 // **無ければ作る。** 「共有する」を押した人に、その前に
                 // 「フォルダを作る」を押させない。
-                ? '「' + (to.at.split('/').pop() || 'ぜんぶ') + '」へ移します'
+                ? '「' + (to.at.split('/').pop() || 'すべて') + '」へ移します'
                 : '「家族」というフォルダを作って、そこへ移します' };
         }
         return c;
@@ -9096,7 +9096,7 @@ function railMenu(kind, what, at) {
         if (!p) return;
         popMenu([
             { name: 'この中にフォルダを作る', run: () => cmdMkBook(what) },
-            { name: '過去バージョン', sub: 'この中のノートぜんぶ', run: () => cmdHistory(what, true) },
+            { name: '過去バージョン', sub: 'この中のノートすべて', run: () => cmdHistory(what, true) },
             { name: '同期先', sub: SYNC_WORDS[p.sync], sep: true, run: () => placeSyncSheet(p) },
             { name: '名前を変える', run: () => placeRename(p) },
             { name: '場所を変える…', sub: shortPath(p.dir), run: () => placeMove(p) },
@@ -9124,7 +9124,7 @@ function railMenu(kind, what, at) {
         });
         // フォルダの履歴は、**中のノートの姿をまとめて時系列で** ──
         // 「あのあたりで壊した」は、どのノートかを覚えていないほうが多い。
-        items.push({ name: '過去バージョン', sub: 'この中のノートぜんぶ',
+        items.push({ name: '過去バージョン', sub: 'この中のノートすべて',
                      run: () => cmdHistory(what, true) });
     }
     if (kind === 'star') {
@@ -9651,7 +9651,7 @@ function drawDrawers() {
     if (filtering()) {
         const c = document.createElement('button');
         c.className = 'clear';
-        c.textContent = 'ぜんぶ外す';
+        c.textContent = 'すべて外す';
         c.onclick = () => clearFilter();
         box.append(c);
     }
@@ -10002,7 +10002,7 @@ async function cmdToShare() {
         } catch (e) { say('できません: ' + why(e)); return; }
     } else {
         const ok = await askYes('「' + (state.open.title || stem()) + '」を「'
-            + (to === rootOf(to) ? 'ぜんぶ' : to.split('/').pop()) + '」へ移して共有しますか');
+            + (to === rootOf(to) ? 'すべて' : to.split('/').pop()) + '」へ移して共有しますか');
         if (!ok) return;
     }
     await moveNote(to, { from: state.open.book || root });
@@ -10860,7 +10860,7 @@ function drawSyncState() {
         if (!syncLater) {
             hide(mark);
             column('before', 'まだ同期していません',
-                'ノートはこのパソコンだけにあります。iPhone や家族と同じノートを使うには、Google でサインインします。',
+                'ノートはこのパソコンだけにあります。ほかの端末や家族と同じノートを使うには、Google でサインインします。',
                 [{ name: '同期をはじめる', run: () => cmdSync() },
                  { name: 'あとで', quiet: true, run: () => { syncLater = true; drawSyncState(); } }]);
         } else {
@@ -10893,11 +10893,11 @@ function drawSyncState() {
         hide(mark);
         const partsOf = (r) => {
             const parts = [];
-            if (r.up) parts.push('アップロード' + r.up + '本');
-            if (r.down) parts.push('ダウンロード' + r.down + '本');
-            if (r.gone) parts.push('ゴミ箱へ' + r.gone + '本');
-            if (r.clash) parts.push('同じ行を両方で直したノート' + r.clash + '本');
-            if (r.moved) parts.push('名前の変更' + r.moved + '本');
+            if (r.up) parts.push('アップロード' + r.up + '件');
+            if (r.down) parts.push('ダウンロード' + r.down + '件');
+            if (r.gone) parts.push('ゴミ箱へ' + r.gone + '件');
+            if (r.clash) parts.push('同じ行を両方で直したノート' + r.clash + '件');
+            if (r.moved) parts.push('名前の変更' + r.moved + '件');
             return parts;
         };
         // 保存ディレクトリが二つ以上なら、**運んだところの名前を頭に**（依頼 511）
@@ -11010,7 +11010,7 @@ async function placeSyncSheet(p) {
     const who = syncAccount.who || {};
     const now = (k) => (p.sync === k ? 'いまはこれ' : '');
     const go = await askPick('「' + p.name + '」の同期先', [
-        { name: '同期しない', sub: now('none') || 'この Mac だけに置きます', value: 'none' },
+        { name: '同期しない', sub: now('none') || 'このパソコンだけに置きます', value: 'none' },
         { name: 'Google Drive', sub: now('drive') || (syncAccount.signedIn ? who.email || '' : 'Google でサインインします'), value: 'drive' },
     ], 'iCloud と OneDrive は、これから', true);
     if (go === null || go === p.sync) return;
@@ -11214,7 +11214,7 @@ async function cmdWelcome() {
     try {
         const r = await window.amber.welcome(state.root);
         await reload({});
-        say(r.put ? r.put + ' 枚置きました' : 'もう入っています（同じ名前は飛ばしました）');
+        say(r.put ? r.put + ' 件置きました' : 'もう入っています（同じ名前は飛ばしました）');
     } catch (e) {
         say('置けません: ' + why(e));
     }

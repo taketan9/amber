@@ -170,7 +170,7 @@ struct Where: View {
                                         .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                                 }
                                 Spacer()
-                                Text("\(store.notes.filter { $0.root == (store.url(of: p)?.path ?? "\u{0}") }.count) 本")
+                                Text("\(store.notes.filter { $0.root == (store.url(of: p)?.path ?? "\u{0}") }.count) 件")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -187,7 +187,7 @@ struct Where: View {
                     // **The thing that is actually hard.** 2026-09-05:
                     // 「どこのディレクトリなのかが単純にわからないんだ。探せなくて困っている」。
                     // 提供者はみな選ぶ画面の何段か下に居て、どれも人が当たりを付ける場所に無い。
-                    Text("ノートを置くフォルダ。いくつでも。同期先はフォルダごとに選べます（iCloud と OneDrive は、これから）。\n\n選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。iCloud Drive はそのまま一覧に、Google Drive / Dropbox は「場所」の下。出てこないときは「…」→「サイドバーを編集」でオンに（「ファイル」アプリ側の設定）。Mac 版の ambər に同じフォルダを指定すれば、両方から同じノートを触れます。")
+                    Text("ノートを置くフォルダ。いくつでも。同期先はフォルダごとに選べます（iCloud と OneDrive は、これから）。\n\n選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。iCloud Drive はそのまま一覧に、Google Drive / Dropbox は「場所」の下。出てこないときは「…」→「サイドバーを編集」でオンに（「ファイル」アプリ側の設定）。パソコン版の ambər に同じフォルダを指定すれば、両方から同じノートを触れます。")
                 }
 
                 Section {
@@ -376,7 +376,7 @@ struct Where: View {
             } message: {
                 Text(added == 0
                      ? "もう入っています（同じ名前のものは飛ばしました）。"
-                     : "\(added ?? 0) 枚置きました。")
+                     : "\(added ?? 0) 件置きました")
             }
             .alert(
                 "できません",

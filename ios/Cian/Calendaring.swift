@@ -518,18 +518,11 @@ private struct Asking: ViewModifier {
             .alert("読めません", isPresented: Binding(
                 get: { trouble != nil }, set: { if !$0 { trouble = nil } })
             ) { Button("閉じる") {} } message: { Text(trouble ?? "") }
-            .alert("予定を登録する", isPresented: $adding) {
-                TextField("タイトル", text: $newTitle)
-                TextField("開始（空なら終日）", text: $newAt)
-                    .keyboardType(.numbersAndPunctuation)
-                TextField("終了（空なら一時間後）", text: $newEnd)
-                    .keyboardType(.numbersAndPunctuation)
-                Button("登録する") { add() }
-                Button("やめる", role: .cancel) {}
-            } message: {
-                Text(toPhone
-                     ? "\(day) の予定表に登録します。"
-                     : "\(day) に、ノートが一本できます。")
+            // **時刻は打たせない**（依頼 493 の電話の側・本人「手打ちすると絶対ミスする」）
+            // ── 窓と同じ小窓一枚: タイトル・終日・開始・終了（十五分刻み）。
+            .sheet(isPresented: $adding) {
+                EventForm(day: day, toPhone: toPhone, title: $newTitle, at: $newAt, end: $newEnd, add: add)
+                    .presentationDetents([.medium])
             }
             // この iPhone の予定は、**押したら直せる**（よその予定表と
             // 違って、書き戻す口がある）。
@@ -543,5 +536,73 @@ private struct Asking: ViewModifier {
             } message: {
                 Text("この iPhone の予定表のものです。")
             }
+    }
+}
+
+/// **予定を登録する小窓**（窓の `askEvent` と同じ四つ）。開始を選ぶと終了は一時間後、
+/// 終日に印を入れたら時刻は選べない、空のままなら登録できない。
+struct EventForm: View {
+    let day: String
+    let toPhone: Bool
+    @Binding var title: String
+    @Binding var at: String
+    @Binding var end: String
+    let add: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var allDay = false
+    @State private var start = "09:00"
+    @State private var till = "10:00"
+    @State private var said = ""
+
+    static let times: [String] = (0..<24).flatMap { h in ["00", "15", "30", "45"].map { String(format: "%02d:", h) + $0 } }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("タイトル", text: $title)
+                } footer: {
+                    Text(toPhone ? "\(day) の予定表に登録します" : "\(day) に、ノートが一件できます")
+                }
+                Section {
+                    Toggle("終日", isOn: $allDay)
+                    Picker("開始", selection: $start) { ForEach(Self.times, id: \.self) { Text($0).tag($0) } }
+                        .disabled(allDay)
+                        .onChange(of: start) { _, now in till = Self.plus(now, 60) }
+                    Picker("終了", selection: $till) { ForEach(Self.times, id: \.self) { Text($0).tag($0) } }
+                        .disabled(allDay)
+                } footer: {
+                    if !said.isEmpty { Text(said).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("予定を登録する")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("やめる") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("登録する") { go() }.bold() }
+            }
+            .onAppear {
+                allDay = at.isEmpty
+                if !at.isEmpty { start = at }
+                till = end.isEmpty ? Self.plus(start, 60) : end
+            }
+        }
+    }
+
+    private func go() {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { said = "タイトルを入れてください"; return }
+        if !allDay && till <= start { said = "終了は開始より後にしてください"; return }
+        at = allDay ? "" : start
+        end = allDay ? "" : till
+        add()
+        dismiss()
+    }
+
+    static func plus(_ t: String, _ min: Int) -> String {
+        let p = t.split(separator: ":").compactMap { Int($0) }
+        guard p.count == 2 else { return t }
+        let n = Swift.min(p[0] * 60 + p[1] + min, 23 * 60 + 45)
+        return String(format: "%02d:%02d", n / 60, n % 60)
     }
 }

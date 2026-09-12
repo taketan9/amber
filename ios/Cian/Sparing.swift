@@ -49,7 +49,7 @@ struct Sparing: View {
                 } else {
                     ScrollView {
                         if !unsure.isEmpty {
-                            Text("読めなかったノートが \(unsure.count) 本あります。"
+                            Text("読めなかったノートが \(unsure.count) 件あります。"
                                  + "そのノートが使っている画像も、ここに混じります")
                                 .font(.footnote)
                                 .padding(12)
@@ -75,7 +75,7 @@ struct Sparing: View {
                 }
                 ToolbarItem(placement: .bottomBar) {
                     if !pictures.isEmpty {
-                        Button(picked.count == pictures.count ? "ぜんぶやめる" : "ぜんぶ選ぶ") {
+                        Button(picked.count == pictures.count ? "すべてやめる" : "すべて選ぶ") {
                             picked = picked.count == pictures.count
                                 ? [] : Set(pictures.map(\.path))
                         }

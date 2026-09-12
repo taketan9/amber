@@ -260,11 +260,11 @@ final class Syncing: ObservableObject {
     func freshWords(_ r: Report) -> String {
         func parts(_ r: Report) -> [String] {
             var out: [String] = []
-            if r.up > 0 { out.append("アップロード\(r.up)本") }
-            if r.down > 0 { out.append("ダウンロード\(r.down)本") }
-            if r.gone > 0 { out.append("ゴミ箱へ\(r.gone)本") }
-            if r.clash > 0 { out.append("同じ行を両方で直したノート\(r.clash)本") }
-            if r.moved > 0 { out.append("名前の変更\(r.moved)本") }
+            if r.up > 0 { out.append("アップロード\(r.up)件") }
+            if r.down > 0 { out.append("ダウンロード\(r.down)件") }
+            if r.gone > 0 { out.append("ゴミ箱へ\(r.gone)件") }
+            if r.clash > 0 { out.append("同じ行を両方で直したノート\(r.clash)件") }
+            if r.moved > 0 { out.append("名前の変更\(r.moved)件") }
             return out
         }
         let each = r.places.filter { !parts($0.value).isEmpty }.sorted { $0.key < $1.key }

@@ -553,7 +553,7 @@ final class NotesStore: ObservableObject {
         let at: String
         let by: String
         var id: String { at }
-        var name: String { at.split(separator: "/").last.map(String.init) ?? "ぜんぶ" }
+        var name: String { at.split(separator: "/").last.map(String.init) ?? "すべて" }
     }
 
     /// このノートは、その棚の中か。

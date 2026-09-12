@@ -89,11 +89,11 @@ struct CalSettings: View {
                     Text("切ったものは表から消えるだけで、予定そのものは消えません")
                 }
                 Section {
-                    Toggle("土日を出す", isOn: Binding(get: { weekend }, set: { weekend = $0; CalPrefs.weekend = $0; changed() }))
+                    Toggle("土日表示", isOn: Binding(get: { weekend }, set: { weekend = $0; CalPrefs.weekend = $0; changed() }))
                 } footer: {
                     Text(weekend ? "" : "月〜金だけ出しています")
                 }
-                Section("個人カレンダーの色") {
+                Section("カラー設定（個人カレンダーの色）") {
                     ForEach(CalPrefs.colors, id: \.hex) { c in
                         Button {
                             color = c.hex

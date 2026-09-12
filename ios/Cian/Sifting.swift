@@ -24,7 +24,7 @@ struct Sifting: View {
                     pill(.book, name("フォルダ", store.onlyBooks.map { $0.split(separator: "/").last.map(String.init) ?? $0 }))
                     pill(.span, spanName)
                     if store.narrowing {
-                        Button("ぜんぶ外す") {
+                        Button("すべて外す") {
                             store.only = []
                             store.onlyBooks = []
                             store.span = nil

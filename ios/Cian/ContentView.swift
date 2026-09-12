@@ -231,7 +231,7 @@ struct ContentView: View {
                 let n = store.under(b)
                 Text(n == 0
                      ? "「\(b.split(separator: "/").last.map(String.init) ?? b)」は空です。元には戻せません。"
-                     : "「\(b.split(separator: "/").last.map(String.init) ?? b)」の中のノート \(n) 本も一緒に消えます。元には戻せません。")
+                     : "「\(b.split(separator: "/").last.map(String.init) ?? b)」の中のノート \(n) 件も一緒に消えます。元には戻せません。")
             }
         }
         .sheet(isPresented: $booking) {
@@ -808,7 +808,7 @@ struct ContentView: View {
                             Image(systemName: "star.fill").foregroundStyle(.orange)
                         }
                         Spacer()
-                        NavigationLink("ぜんぶ見る") {
+                        NavigationLink("すべて見る") {
                             Stars(store: store) { note in
                                 desk.open(note, store)
                                 showing = true

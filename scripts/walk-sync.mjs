@@ -56,7 +56,7 @@ export async function syncWalk() {
         if (box.hidden) return '列が出ていません';
         if (!box.classList.contains('good')) return '色が ' + box.className + ' です';
         const t = box.textContent;
-        if (!t.includes('同期しました') || !/アップロード\\d+本/.test(t)) return JSON.stringify(t);
+        if (!t.includes('同期しました') || !/アップロード\\d+件/.test(t)) return JSON.stringify(t);
         if (/上げ|下ろ|運/.test(t)) return '中の言葉が出ています: ' + t;
         return true;`, true);
     await step('同期の様子：数秒で一行に縮み、最終の時刻とメールアドレスが出る', `
