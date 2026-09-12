@@ -18,6 +18,8 @@ struct Making: View {
     let stencils: [Note]
     /// 型が選ばれたとき。ここで作って、この小窓は閉じる。
     let fromStencil: (Note) -> Void
+    /// 型が一つも無いとき、見本の三枚（週報・議事録・買い物リスト）を入れる（依頼 506）。
+    var seedStencils: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var tags: [String] = []
@@ -41,8 +43,18 @@ struct Making: View {
                 // 探しているのがまさにこれで、献立の奥に置くと見つからない。
                 // 選んだ瞬間に作る ── 型を選んでから題とタグを訊くと、
                 // 型の中に書いてあるものをもう一度訊くことになる。
-                if !stencils.isEmpty {
-                    Section("型から") {
+                Section("テンプレートから") {
+                    if stencils.isEmpty {
+                        // **無いなら、その場で入れられる**（依頼 506）── 段ごと隠すと、
+                        // テンプレートという道があることに気づけない。
+                        if let seedStencils {
+                            Button { seedStencils() } label: {
+                                Label("見本のテンプレートを入れる（週報・議事録・買い物リスト）", systemImage: "doc.on.doc")
+                            }
+                        }
+                        Text("「テンプレート」フォルダの中のノートが、ここに並びます。ノートを長押し →「テンプレートにする」でも増やせます。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
                         ForEach(stencils, id: \.path) { t in
                             Button {
                                 fromStencil(t)

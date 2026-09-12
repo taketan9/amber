@@ -219,6 +219,20 @@ await step('ブックマークに登録', `
     const asked = !el('veil').hidden;
     closeSheet(null);
     return asked || starred(state.open);`, true);
+await step('このノートをテンプレートにする', `
+    await openNote(${path('買い物.md')});
+    const before = state.notes.filter((n) => n.book === TEMPLATES).length;
+    const made = await cmdToTemplate();
+    if (!made) return '写せません: ' + el('say').textContent;
+    const after = state.notes.filter((n) => n.book === TEMPLATES).length;
+    return after === before + 1 ? true : '「テンプレート」が ' + before + ' → ' + after;`, true);
+await step('見本のテンプレートを入れる（三枚・二度目は増えない）', `
+    const a = await window.amber.templates(state.root);
+    const b = await window.amber.templates(state.root);
+    await reload({ quiet: true });
+    const names = state.notes.filter((n) => n.book === TEMPLATES).map((n) => n.title);
+    if (a.put !== 3 || b.put !== 0) return JSON.stringify([a.put, b.put]);
+    return ['週報', '議事録', '買い物リスト'].every((t) => names.includes(t)) ? true : names.join(' / ');`, true);
 await step('テンプレートから作る', `
     const rows = state.notes.filter((n) => n.book === TEMPLATES);
     if (!rows.length) return 'ひな型なし';

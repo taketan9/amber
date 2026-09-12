@@ -707,10 +707,23 @@ async function cmdTemplate() {
     const rows = state.notes.filter(
         (n) => n.book === TEMPLATES || n.book.startsWith(TEMPLATES + '/'));
     if (!rows.length) {
-        // **どうすれば使えるかを言う。** 「ありません」だけだと、
-        // 作れないのか保存場所が違うのかが分からない。
-        say('「' + TEMPLATES + '」フォルダを作って、中にノートを置くと型になります');
-        return;
+        // **無いなら、その場で作れる**（依頼 506・本人「選んでも動かない」）── 前は
+        // 帯に一言出すだけで、見逃すと「押しても何も起きない」にしか見えなかった。
+        const items = [{ name: '見本のテンプレートを入れる', sub: '週報・議事録・買い物リスト の三枚を「' + TEMPLATES + '」フォルダに', value: 'seed' }];
+        if (state.open && !state.guest) items.push({ name: '今開いているノートをテンプレートにする', sub: '「' + (state.open.title || 'このノート') + '」を「' + TEMPLATES + '」フォルダへ写します', value: 'this' });
+        const pick = await askPick('テンプレートがまだありません', items,
+            '「' + TEMPLATES + '」フォルダの中のノートが、テンプレートになります', true);
+        if (pick === null) return;
+        try {
+            if (pick === 'seed') {
+                const r = await window.amber.templates(state.root);
+                say(r.put ? r.put + ' 枚入れました' : 'もう入っています');
+            } else {
+                await cmdToTemplate();
+            }
+            await reload({ quiet: true });
+        } catch (e) { say('入れられません: ' + why(e)); return; }
+        return cmdTemplate();
     }
     const path = await askPick('どの型から',
         sortNotes(rows).map((n) => ({
@@ -732,6 +745,22 @@ async function cmdTemplate() {
         if (editor) editor.focus();
     } catch (e) {
         say('作れません: ' + why(e));
+    }
+}
+
+/// **このノートをテンプレートにする**（依頼 506）── 「テンプレート」フォルダへ写す。
+/// 元のノートはそのまま（写しが型になる）。
+async function cmdToTemplate() {
+    if (!state.open || state.guest) return;
+    if (state.dirty) await save();
+    try {
+        const r = await ask('copy', { path: state.open.path, dir: state.root + '/' + TEMPLATES });
+        await reload({ quiet: true });
+        say('「' + (state.open.title || 'このノート') + '」を「' + TEMPLATES + '」に写しました。次から「テンプレートから新しいノート」に出ます');
+        return r.path;
+    } catch (e) {
+        say('写せません: ' + why(e));
+        return null;
     }
 }
 
@@ -8292,6 +8321,8 @@ const CMDS = [
     { id: 'remind', name: '通知設定', need: 'note', run: cmdRemind },
     { id: 'dup', name: '複製', sub: '同じ中身のノートをもう一つ', need: 'note', menu: true,
       run: cmdDup },
+    { id: 'totmpl', name: 'このノートをテンプレートにする', sub: '「' + TEMPLATES + '」フォルダへ写します',
+      need: 'note', menu: true, run: cmdToTemplate },
     { id: 'export', name: 'エクスポート', need: 'note', menu: true, run: cmdExport },
     // **名前で出す。** 前は帯に ☰ と ⤢ が並んでいたが、どちらが目次で
     // どちらが拡大かは記号のどこにも書いていない ── 帯の幅を食っていた
@@ -8411,7 +8442,8 @@ async function palette() {
     const head = (name, sub) => rows.push({ name, sub, head: true });
 
     head('── すること');
-    for (const c of CMDS.filter(canRun)) {
+    // カレンダーは左の列のいちばん上にある ── ここには出さない（本人・2026-09-12）。
+    for (const c of CMDS.filter((c) => canRun(c) && c.id !== 'cal')) {
         rows.push({
             name: c.name, key: keyText(c.key), run: () => c.run(),
             // 合言葉のあるものは、打たれるまで出てこない（依頼 473）。
@@ -8419,34 +8451,8 @@ async function palette() {
         });
     }
 
-    // いま開いているノートの見出し ── 長いノートの中を歩く道。
-    if (state.open) {
-        let heads = [];
-        try {
-            heads = ((await ask('blocks', { text: whole() })).blocks || [])
-                .filter((b) => b.kind === 'heading');
-        } catch { /* 読めなければ、出さないだけ */ }
-        if (heads.length) {
-            head('── このノートの見出し', state.open.title || '');
-            for (const h of heads) {
-                rows.push({
-                    // 深さを字下げで見せる ── `##` の下の `###` が同じ列に
-                    // 並ぶと、目次に見えない。
-                    name: '　'.repeat(Math.max(0, (h.level || 1) - 1)) + h.text,
-                    run: () => gotoHead(h),
-                });
-            }
-        }
-    }
-
-    head('── ノートを開く', state.notes.length + ' 件');
-    for (const n of sortNotes(state.notes)) {
-        rows.push({
-            name: n.title || '（タイトルなし）',
-            sub: n.book || '',
-            run: () => openNote(n.path),
-        });
-    }
+    // 「このノートの見出し」と「ノートを開く」の段は出さない（本人・2026-09-12）──
+    // 見出しは目次（⌘⇧O）、ノートは一覧の探す欄が受け持つ。
 
     const go = (kind, what) => () => {
         state.dest = { kind, what };

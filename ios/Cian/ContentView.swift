@@ -315,6 +315,9 @@ struct ContentView: View {
                     desk.open(note, store)
                     showing = true
                 } catch { store.trouble = error.localizedDescription }
+            }, seedStencils: {
+                let n = store.addStencils()
+                if n == 0, store.trouble == nil { store.trouble = "もう入っています" }
             })
         }
 
@@ -443,6 +446,13 @@ struct ContentView: View {
                         catch { store.trouble = error.localizedDescription }
                     } label: {
                         Label("複製", systemImage: "plus.square.on.square")
+                    }
+                    // **このノートをテンプレートにする**（依頼 506・窓と同じ言葉）。
+                    Button {
+                        do { _ = try store.toStencil(note) }
+                        catch { store.trouble = error.localizedDescription }
+                    } label: {
+                        Label("このノートをテンプレートにする", systemImage: "doc.on.doc")
                     }
                     Divider()
                     // The order they are reached for. Favouriting is the one

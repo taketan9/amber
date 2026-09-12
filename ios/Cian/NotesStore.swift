@@ -1172,6 +1172,34 @@ final class NotesStore: ObservableObject {
         notes.filter { $0.book == Self.templates || $0.book.hasPrefix(Self.templates + "/") }
     }
 
+    /// 見本のテンプレート（週報・議事録・買い物リスト）を「テンプレート」フォルダへ
+    /// （依頼 506・窓と同じ一組 `packaging/templates`）。同じ名前は飛ばす。返すのは置いた数。
+    @discardableResult
+    func addStencils() -> Int {
+        guard let from = Bundle.main.resourceURL?.appendingPathComponent("templates"),
+              FileManager.default.fileExists(atPath: from.path), let root
+        else { trouble = "見本のテンプレートが入っていません"; return 0 }
+        let dir = root.appendingPathComponent(Self.templates)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var put = 0
+        for name in ((try? FileManager.default.contentsOfDirectory(atPath: from.path)) ?? []).sorted() where name.hasSuffix(".md") {
+            let to = dir.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: to.path) { continue }
+            if (try? FileManager.default.copyItem(at: from.appendingPathComponent(name), to: to)) != nil { put += 1 }
+        }
+        reload()
+        return put
+    }
+
+    /// このノートをテンプレートにする ── 「テンプレート」フォルダへ写す（元はそのまま）。
+    @discardableResult
+    func toStencil(_ note: Note) throws -> String? {
+        guard let root else { return nil }
+        let got = try Cian.call("copy", ["path": note.path, "dir": root.appendingPathComponent(Self.templates).path])
+        reload()
+        return got["path"] as? String
+    }
+
     /// 型から新しいノートを作る。**写す仕組みは「複製」と同じ**（core の
     /// `duplicate`）で、行き先だけが違う ── いちばん上へ置く。
     func fromStencil(_ note: Note) throws -> String? {

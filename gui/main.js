@@ -420,6 +420,21 @@ app.whenReady().then(() => {
         }
         return { put };
     });
+    /// 見本のテンプレートを、置き場所の「テンプレート」フォルダへ（依頼 506）。上書きはしない。
+    ipcMain.handle('amber:templates', (_e, root) => {
+        const from = path.join(__dirname, '..', 'packaging', 'templates');
+        if (!fs.existsSync(from)) throw new Error('見本のテンプレートが入っていません');
+        const dir = path.join(root, 'テンプレート');
+        fs.mkdirSync(dir, { recursive: true });
+        let put = 0;
+        for (const name of fs.readdirSync(from).filter((n) => n.endsWith('.md')).sort()) {
+            const to = path.join(dir, name);
+            if (fs.existsSync(to)) continue;
+            fs.copyFileSync(path.join(from, name), to);
+            put++;
+        }
+        return { put, dir };
+    });
     ipcMain.handle('amber:remember', (_e, patch) => remember(patch));
 
     // ── Google Drive との繋ぎ（`drive.js`）── サインインだけ。運ぶのは次。
