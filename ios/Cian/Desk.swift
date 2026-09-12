@@ -733,14 +733,14 @@ struct DeskView: View {
         ToolbarItem(id: "more", placement: .topBarTrailing) {
             Menu {
                 Button { shelving = here?.note } label: {
-                    Label(here?.note.star == nil ? "ブックマークに登録" : "保存場所を変える",
+                    Label(here?.note.star == nil ? "ブックマークに登録する" : "ブックマークグループを変える",
                           systemImage: "star")
                 }
                 Button { tags = here?.note.tags ?? []; tagging = true } label: {
                     Label("タグ設定", systemImage: "tag")
                 }
                 Menu {
-                    Button("（いちばん上）") { moveHere(nil) }
+                    Button("（トップページ）") { moveHere(nil) }
                     ForEach(store.allBooks, id: \.self) { b in
                         Button(b) { moveHere(b) }
                     }

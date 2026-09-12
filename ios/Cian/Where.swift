@@ -38,7 +38,7 @@ struct Where: View {
                 let got = try await hand.clip(url)
                 let name = got.title.isEmpty ? url.host ?? "取り込み" : got.title
                 guard let made = try store.make(titled: name) else {
-                    trouble = "ノートを作れませんでした"
+                    trouble = "ノートを作れません"
                     return
                 }
                 let read = try Cian.call("read", ["path": made.path])
@@ -274,7 +274,7 @@ struct Where: View {
                     Button {
                         sparing = true
                     } label: {
-                        Label("不要添付削除", systemImage: "photo.badge.checkmark")
+                        Label("使われていない画像", systemImage: "photo.badge.checkmark")
                     }
                     // The scope is a choice because backing up is
                     // something people do *before* something — before a
@@ -345,7 +345,7 @@ struct Where: View {
                     // ── 琥珀の三つ（iPhone に合わせる・明るい・暗い）と、cian と同じ二十一。
                     // 琥珀を選ぶと `look`、配色を選ぶと `palette`（明暗はその配色に従う）。
                     Picker("テーマ", selection: themeKey) {
-                        Text("琥珀 ── iPhone に合わせる").tag("")
+                        Text("琥珀 ── OS に合わせる").tag("")
                         Text("琥珀 ── 明るい").tag("amber-light")
                         Text("琥珀 ── 暗い").tag("amber-dark")
                         ForEach(Palettes.all, id: \.name) { Text($0.label).tag($0.name) }
@@ -361,7 +361,7 @@ struct Where: View {
                     // Three and not two: a phone that goes dark at sunset is
                     // the common case, and a switch with no way back to it
                     // is a switch that gets set once and regretted.
-                    Text("「琥珀 ── iPhone に合わせる」は、夜になると暗くなる設定にしているときに一緒に暗くなります。白磁から下は Mac と同じ配色（同じ並び）です。")
+                    Text("「琥珀 ── OS に合わせる」は、OS がダークのとき一緒に暗くなります。白磁から下は cian と同じ二十一の配色（同じ順）です。")
                 }
             }
             // The zip exists before the share sheet opens, so what is being
@@ -372,14 +372,14 @@ struct Where: View {
             .alert("見本のノート", isPresented: Binding(
                 get: { added != nil }, set: { if !$0 { added = nil } }
             )) {
-                Button("わかりました") {}
+                Button("閉じる") {}
             } message: {
                 Text(added == 0
                      ? "もう入っています（同じ名前のものは飛ばしました）。"
                      : "\(added ?? 0) 枚置きました。")
             }
             .alert(
-                "作れませんでした",
+                "できません",
                 isPresented: Binding(get: { trouble != nil }, set: { if !$0 { trouble = nil } })
             ) {
                 Button("閉じる") {}
@@ -394,7 +394,7 @@ struct Where: View {
             .alert("取り込みました", isPresented: Binding(
                 get: { clipDone != nil }, set: { if !$0 { clipDone = nil } }
             )) {
-                Button("わかりました") {}
+                Button("閉じる") {}
             } message: {
                 Text("「\(clipDone ?? "")」を作りました。")
             }

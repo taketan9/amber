@@ -301,7 +301,7 @@ struct NoteView: View {
             // **ぶつかった場所がある**（依頼 501・窓の帯と同じ言葉）── 数と、選ぶ道。
             HStack(spacing: 9) {
                 Circle().fill(Color(red: 0.77, green: 0.34, blue: 0.31)).frame(width: 8, height: 8)
-                Text("\(tab.who.isEmpty ? "向こう" : tab.who) と同じところを \(tab.spots.count + tab.fields.count) か所で直しています")
+                Text("\(tab.who.isEmpty ? "向こう" : tab.who)と同じところを直していました ── \(tab.spots.count + tab.fields.count) か所。選ぶまでは両方残っています")
                     .font(.footnote)
                 Spacer(minLength: 8)
                 Button("選ぶ") { choosing = true }
@@ -386,7 +386,7 @@ struct NoteView: View {
                 }
                 .confirmationDialog("図", isPresented: showing("fig"),
                                     titleVisibility: .visible) {
-                    Button("図を直す") { if let md = held?.at { fixingText = Fixing(md: md) } }
+                    Button("図で直す") { if let md = held?.at { fixingText = Fixing(md: md) } }
                     Button("消す", role: .destructive) { hand.did("drop") }
                     Button("やめる", role: .cancel) {}
                 }

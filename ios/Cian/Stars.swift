@@ -45,7 +45,7 @@ struct Stars: View {
                 }
                 .buttonStyle(.plain)
                 .swipeActions {
-                    Button("グループを消す", role: .destructive) {
+                    Button("ブックマークグループを消す", role: .destructive) {
                         // The notes are not touched — only the shelf they
                         // were standing on. They are still in their folders,
                         // which is where they always were.
@@ -75,7 +75,7 @@ struct Stars: View {
                     .tint(.orange)
                 }
                 .contextMenu {
-                    Button { moving = note } label: { Label("グループを変える", systemImage: "star") }
+                    Button { moving = note } label: { Label("ブックマークグループを変える", systemImage: "star") }
                 }
             }
             if store.shelves(in: at).isEmpty && store.starred(on: at).isEmpty {
@@ -89,13 +89,13 @@ struct Stars: View {
                 Button { name = ""; making = true } label: {
                     Image(systemName: "plus.rectangle.on.folder")
                 }
-                .accessibilityLabel("新しいグループ")
+                .accessibilityLabel("新しいブックマークグループ")
             }
         }
-        .alert("新しいグループ", isPresented: $making) {
+        .alert("新しいブックマークグループ", isPresented: $making) {
             TextField("名前", text: $name)
             Button("やめる", role: .cancel) {}
-            Button("作る") {
+            Button("作成") {
                 let n = name.trimmingCharacters(in: .whitespaces)
                 guard !n.isEmpty else { return }
                 do { try store.shelf(at.isEmpty ? n : "\(at)/\(n)") }
@@ -126,7 +126,7 @@ struct Shelving: View {
         NavigationStack {
             List {
                 Section {
-                    row("デフォルト", "")
+                    row("（トップページ）", "")
                     ForEach(store.stars, id: \.self) { s in row(s, s) }
                 }
                 // **Making a shelf from where you need one.** It was only
@@ -139,19 +139,19 @@ struct Shelving: View {
                         name = ""
                         making = true
                     } label: {
-                        Label("新しいグループ…", systemImage: "plus.rectangle.on.folder")
+                        Label("新しいブックマークグループ…", systemImage: "plus.rectangle.on.folder")
                     }
                 }
             }
-            .navigationTitle("グループを選ぶ")
+            .navigationTitle("ブックマークグループを選ぶ")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("やめる") { dismiss() } }
             }
-            .alert("新しいグループ", isPresented: $making) {
+            .alert("新しいブックマークグループ", isPresented: $making) {
                 TextField("名前", text: $name)
                 Button("やめる", role: .cancel) {}
-                Button("作る") {
+                Button("作成") {
                     let n = name.trimmingCharacters(in: .whitespaces)
                     guard !n.isEmpty else { return }
                     do {
@@ -161,7 +161,7 @@ struct Shelving: View {
                     } catch { store.trouble = error.localizedDescription }
                 }
             } message: {
-                Text("作ってから、このノートをそこに入れます。「グループ/中のグループ」と書けば階層になります。")
+                Text("作ってから、このノートをそこに入れます。「グループ/中のグループ」と書けば階層になります")
             }
         }
     }

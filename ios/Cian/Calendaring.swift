@@ -181,7 +181,7 @@ struct Calendaring: View {
                     newAt = "09:00"
                     adding = true
                 } label: {
-                    Label("この日に予定を足す", systemImage: "plus")
+                    Label("予定を登録する", systemImage: "plus")
                 }
             }
         }
@@ -357,7 +357,7 @@ struct Calendaring: View {
         let when = at.isEmpty ? picked : picked + " " + at
         do {
             guard let made = try store.make(titled: title) else {
-                trouble = "作れませんでした"
+                trouble = "作れません"
                 return
             }
             let (text, stamp) = try store.open(made)
@@ -395,25 +395,25 @@ private struct Asking: ViewModifier {
             .alert("読めません", isPresented: Binding(
                 get: { trouble != nil }, set: { if !$0 { trouble = nil } })
             ) { Button("閉じる") {} } message: { Text(trouble ?? "") }
-            .alert("予定を足す", isPresented: $adding) {
-                TextField("何をする", text: $newTitle)
-                TextField("何時から（空なら終日）", text: $newAt)
+            .alert("予定を登録する", isPresented: $adding) {
+                TextField("タイトル", text: $newTitle)
+                TextField("開始（空なら終日）", text: $newAt)
                     .keyboardType(.numbersAndPunctuation)
-                Button("足す") { add() }
+                Button("登録する") { add() }
                 Button("やめる", role: .cancel) {}
             } message: {
                 Text(toPhone
-                     ? "\(day) の予定表に足します。"
+                     ? "\(day) の予定表に登録します。"
                      : "\(day) に、ノートが一本できます。")
             }
             // この iPhone の予定は、**押したら直せる**（よその予定表と
             // 違って、書き戻す口がある）。
-            .alert("予定を直す", isPresented: Binding(
+            .alert("予定を修正する", isPresented: Binding(
                 get: { editing != nil }, set: { if !$0 { editing = nil } })
             ) {
-                TextField("題", text: $editTitle)
-                Button("直す") { rename() }
-                Button("消す", role: .destructive) { drop() }
+                TextField("タイトル", text: $editTitle)
+                Button("修正する") { rename() }
+                Button("削除する", role: .destructive) { drop() }
                 Button("やめる", role: .cancel) {}
             } message: {
                 Text("この iPhone の予定表のものです。")

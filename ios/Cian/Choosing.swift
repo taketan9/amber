@@ -20,7 +20,7 @@ struct Choosing: View {
                 if let tab, tab.clashing {
                     Section {
                         Button("ぜんぶこちらを残す") { desk.chooseAll(id, "ours", store) }
-                        Button("ぜんぶ \(who) を残す") { desk.chooseAll(id, "theirs", store) }
+                        Button("ぜんぶ\(who)を残す") { desk.chooseAll(id, "theirs", store) }
                     } footer: {
                         Text("一つずつ選ぶなら下から。どちらを残しても、混ぜる前のこちらの姿は履歴に残っています。")
                     }

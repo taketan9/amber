@@ -50,7 +50,7 @@ struct Sparing: View {
                     ScrollView {
                         if !unsure.isEmpty {
                             Text("読めなかったノートが \(unsure.count) 本あります。"
-                                 + "そのノートが使っている画像も、ここに出ているかもしれません。")
+                                 + "そのノートが使っている画像も、ここに混じります")
                                 .font(.footnote)
                                 .padding(12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -96,7 +96,7 @@ struct Sparing: View {
             } message: {
                 Text("この iPhone にゴミ箱はありません。消したものは戻せません。")
             }
-            .alert("できませんでした", isPresented: Binding(
+            .alert("できません", isPresented: Binding(
                 get: { trouble != nil }, set: { if !$0 { trouble = nil } })
             ) {
                 Button("閉じる") {}

@@ -204,11 +204,12 @@ struct ContentView: View {
         // **Said before it is done, and said in numbers.** There is no
         // wastepaper basket on a phone: this is the real thing, and 「中の
         // ノートごと」 is not a figure of speech.
-        .alert("このフォルダを削除しますか", isPresented: Binding(
+        // 確認文は窓と同じ形（本人・2026-09-12）── 電話にゴミ箱は無いので「削除」。
+        .alert("「\(dropping.map { $0.split(separator: "/").last.map(String.init) ?? $0 } ?? "")」を、中の \(dropping.map(store.under) ?? 0) 件ごと削除しますか", isPresented: Binding(
             get: { dropping != nil }, set: { if !$0 { dropping = nil } }
         )) {
             Button("やめる", role: .cancel) {}
-            Button("中のノートごと削除", role: .destructive) {
+            Button("削除", role: .destructive) {
                 guard let b = dropping else { return }
                 do { try store.drop(b) }
                 catch { store.trouble = error.localizedDescription }
@@ -432,7 +433,7 @@ struct ContentView: View {
                         do { try store.star(note, on: note.star == nil ? "" : nil) }
                         catch { store.trouble = error.localizedDescription }
                     } label: {
-                        Label(note.star == nil ? "ブックマーク" : "外す",
+                        Label(note.star == nil ? "ブックマークに登録する" : "外す",
                               systemImage: note.star == nil ? "star" : "star.slash")
                     }
                     .tint(.orange)
@@ -474,12 +475,12 @@ struct ContentView: View {
                     // done in passing; moving is filing; exporting is the one
                     // that leaves cian, and leaving is always last.
                     Button { shelving = note } label: {
-                        Label(note.star == nil ? "ブックマークに登録する" : "保存場所を変える", systemImage: "star")
+                        Label(note.star == nil ? "ブックマークに登録する" : "ブックマークグループを変える", systemImage: "star")
                     }
                     // Every notebook, not just the ones beside this note —
                     // filing is often filing *away*.
-                    Menu("フォルダへ移す") {
-                        Button("デフォルト") { moveTo(note, nil) }
+                    Menu("フォルダへ移動") {
+                        Button("（トップページ）") { moveTo(note, nil) }
                         ForEach(store.allBooks, id: \.self) { b in
                             Button(b) { moveTo(note, b) }
                         }
@@ -904,7 +905,7 @@ struct ContentView: View {
                     .listRowBackground(into == b.path ? Color.accentColor.opacity(0.15) : nil)
                     .contextMenu {
                         Button { colouring = b.path } label: {
-                            Label("色をつける", systemImage: "paintpalette")
+                            Label("フォルダに色をつける", systemImage: "paintpalette")
                         }
                         // **分けるのはクラウドの仕事。** amber が憶えるのは
                         // 「どれが分けてあるか」の一言だけ ── そのうえで
@@ -929,7 +930,7 @@ struct ContentView: View {
                             Label("名前を変える", systemImage: "pencil")
                         }
                         Button(role: .destructive) { dropping = b.path } label: {
-                            Label("削除する", systemImage: "trash")
+                            Label("このフォルダを削除", systemImage: "trash")
                         }
                     }
                   }
@@ -1147,7 +1148,9 @@ struct SyncLine: View {
         } else if !sync.signedIn {
             HStack(spacing: 6) {
                 Circle().fill(Color.secondary).frame(width: 7, height: 7)
-                Text("同期していません ・ 設定の「同期」から始められます").font(.footnote).foregroundStyle(.secondary)
+                Text("同期していません ・ ").font(.footnote).foregroundStyle(.secondary)
+                // 窓と同じく、押せるボタンを（本人・2026-09-12）。
+                Button("同期をはじめる") { Task { _ = try? await sync.signIn() } }.font(.footnote.weight(.semibold))
             }
         } else if !sync.trouble.isEmpty {
             VStack(alignment: .leading, spacing: 3) {

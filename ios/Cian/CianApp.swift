@@ -58,7 +58,7 @@ enum Size: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .small: return "小さめ"
-        case .system: return "iPhone に合わせる"
+        case .system: return "OS に合わせる"
         case .big: return "大きめ"
         case .bigger: return "もっと大きく"
         case .biggest: return "いちばん大きく"
@@ -102,7 +102,7 @@ enum Look: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .auto: return "iPhone に合わせる"
+        case .auto: return "OS に合わせる"
         case .light: return "ライト"
         case .dark: return "ダーク"
         }

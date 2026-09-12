@@ -134,14 +134,14 @@ struct Feeds: View {
                         url = ""
                         asking = true
                     } label: {
-                        Label("予定表を足す", systemImage: "plus")
+                        Label("カレンダーを追加", systemImage: "plus")
                     }
                 } footer: {
                     Text("Google カレンダーなら「設定 → カレンダーの統合 → "
                          + "非公開 URL（iCal 形式）」のアドレスです。")
                 }
             }
-            .navigationTitle("カレンダー設定")
+            .navigationTitle("カレンダー設定追加")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } }
@@ -160,17 +160,17 @@ struct Feeds: View {
                     }
                 }
             }
-            .alert("予定表を足す", isPresented: $asking) {
+            .alert("カレンダーを追加", isPresented: $asking) {
                 TextField("https://…", text: $url)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-                Button("足す") { add() }
+                Button("追加する") { add() }
                 Button("やめる", role: .cancel) {}
             } message: {
                 Text("iCal（.ics）のアドレスを貼ってください。")
             }
-            .alert("できませんでした", isPresented: Binding(
+            .alert("できません", isPresented: Binding(
                 get: { trouble != nil }, set: { if !$0 { trouble = nil } })
             ) { Button("閉じる") {} } message: { Text(trouble ?? "") }
         }

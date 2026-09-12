@@ -1172,7 +1172,7 @@ final class NotesStore: ObservableObject {
         let r = try Cian.call("backup", [
             "path": root.path, "scope": scope, "what": what,
         ])
-        guard let at = r["path"] as? String else { throw Cian.Failure.engine("作れませんでした") }
+        guard let at = r["path"] as? String else { throw Cian.Failure.engine("作れません") }
         return URL(fileURLWithPath: at)
     }
 

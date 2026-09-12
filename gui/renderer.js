@@ -210,14 +210,14 @@ function bookLabel(dir) {
     const p = placeOf(dir);
     const rel = relOf(dir);
     if (!p) return rel || dir;
-    if (!rel) return manyPlaces() ? p.name + '（いちばん上）' : '（いちばん上）';
+    if (!rel) return manyPlaces() ? p.name + '（トップページ）' : '（トップページ）';
     return (manyPlaces() ? p.name + ' › ' : '') + rel;
 }
 
 /// 「〜へ」の形（帯の一言）。いちばん上なら「いちばん上へ」、フォルダなら「「仕事」へ」。
 function dirWords(dir) {
     const p = placeOf(dir);
-    if (p && p.dir === dir) return (manyPlaces() ? '「' + p.name + '」の' : '') + 'いちばん上へ';
+    if (p && p.dir === dir) return (manyPlaces() ? '「' + p.name + '」の' : '') + 'トップページへ';
     return '「' + bookLabel(dir) + '」へ';
 }
 
@@ -234,7 +234,7 @@ function hereDir() {
 function bookChoices() {
     const out = [];
     for (const p of state.places) {
-        out.push({ name: manyPlaces() ? p.name + '（いちばん上）' : '（いちばん上）', value: p.dir });
+        out.push({ name: manyPlaces() ? p.name + '（トップページ）' : '（トップページ）', value: p.dir });
         for (const b of state.books) {
             if (rootOf(b) !== p.dir) continue;
             out.push({ name: (manyPlaces() ? p.name + ' › ' : '') + relOf(b), value: b });
@@ -583,9 +583,10 @@ function hitTerm(n, t) {
 /// いる**。core に上げなかったのはそのため ── Rust には土地を知った自然順が
 /// 標準に無く、上げると iPhone の並びのほうが悪くなる。
 const ORDERS = [
-    ['updated', '更新が新しい順'],
-    ['created', '作成が新しい順'],
-    ['title', '名前順'],
+    // 名前は電話と同じ三語（本人・2026-09-12）。
+    ['updated', '更新順'],
+    ['created', '作成順'],
+    ['title', 'タイトル順'],
 ];
 let order = 'updated';
 
@@ -753,7 +754,7 @@ el('rail').addEventListener('contextmenu', (e) => {
     e.preventDefault();
     popMenu([
         { name: '新しいフォルダ', run: () => cmdMkBook() },
-        { name: '新しいブックマークのグループ', run: () => newShelf('') },
+        { name: '新しいブックマークグループ', run: () => newShelf('') },
         { name: '左の列を畳む', key: '⌘/', sep: true, run: toggleRail },
     ], { x: e.clientX, y: e.clientY });
 });
@@ -1019,7 +1020,7 @@ function pickedMenu(at) {
         { name: n + ' 本にタグを付ける', run: () => manyTagOn() },
         { name: n + ' 本からタグを外す', run: () => manyTagOff() },
         { name: n + ' 本をフォルダへ移動', run: () => manyMove() },
-        { name: n + ' 本をブックマークに登録', run: () => manyStar(true) },
+        { name: n + ' 本をブックマークに登録する', run: () => manyStar(true) },
         { name: n + ' 本のブックマークを外す', run: () => manyStar(false) },
         { name: '選ぶのをやめる', key: 'Esc', sep: true, run: unpickAll },
         { name: n + ' 本をゴミ箱へ入れる', sep: true, run: () => manyDelete() },
@@ -5477,7 +5478,8 @@ function studioDraw() {
     const spec = studio.data ? DIAGRAM_FORM[studio.data.kind] : null;
     box.querySelector('.kind').textContent = spec ? spec.name : '図';
     const swap = box.querySelector('#studioswap');
-    swap.textContent = studio.raw ? '表で直す' : '字で直す';
+    // 図が主、コードが従（本人・2026-09-12）。
+    swap.textContent = studio.raw ? '図で直す' : 'コードで直す';
     // 読み戻せなかった図は、表に戻れない ── 押せる顔をしておいて何も
     // 起きないより、押せないと見えているほうがいい。
     swap.disabled = studio.raw && !studio.data;
@@ -6171,7 +6173,7 @@ function readMenu(e) {
     // 升の上 ── 済み／未済と、下に一つ。
     const box = t.closest('.box');
     if (box) { popMenu([
-        { name: '済み／未済を入れ替える', run: () => box.click() },
+        { name: 'チェックを入れ替える', run: () => box.click() },
         { name: 'この下に一つ足す', run: () => { landOnBox(box); readMark('line', '- [ ] ', true); } },
     ], at); return; }
 
@@ -6485,8 +6487,8 @@ function drawBand() {
             + n + ' か所。選ぶまでは両方残っています</span>'
             + '<span class="nav">'
             + '<button class="k" data-go="-1">← 前</button><button class="k" data-go="1">次 →</button>'
-            + '<button class="k" data-all="ours">ぜんぶこちら</button>'
-            + '<button class="k" data-all="theirs">ぜんぶ' + escapeHtml(who) + '</button></span>'
+            + '<button class="k" data-all="ours">ぜんぶこちらを残す</button>'
+            + '<button class="k" data-all="theirs">ぜんぶ' + escapeHtml(who) + 'を残す</button></span>'
             + fields.map((f, i) => '<span class="fld">'
                 + '<b>' + escapeHtml(fieldName(f.key)) + '</b>を両方で変えていました ── こちら「' + escapeHtml(f.ours) + '」／'
                 + escapeHtml(who) + '「' + escapeHtml(f.theirs) + '」'
@@ -6502,7 +6504,7 @@ function drawBand() {
     const n = incoming.came.length;
     b.className = '';
     b.innerHTML = '<span class="dot"></span><span>ほかの人が ' + n + ' 行更新しました</span>'
-        + '<button class="act">ほかの人が更新したところを確認した</button>';
+        + '<button class="act">確認した</button>';
     b.querySelector('.act').onclick = () => {
         incoming = null;
         keepIncoming();
@@ -7292,7 +7294,7 @@ async function cmdSpare() {
     warn.textContent = unsure.length
         ? '読めなかったノートが ' + unsure.length + ' 本あります（' + unsure.slice(0, 3).join('・')
           + (unsure.length > 3 ? ' ほか' : '') + '）。そのノートが使っている画像も、'
-          + 'ここに出ているかもしれません。'
+          + 'ここに混じります'
         : '';
     box.hidden = false;
     drawSpare();
@@ -8069,7 +8071,7 @@ async function calAdd(day, at0) {
         const got = await window.amber.cal(['add', title, day, ev.start, ev.end]);
         if (!got || got.error) { say('足せません: ' + (got?.error || '返事がありません')); return; }
         await drawCal();
-        say('「' + title + '」を ' + dayName(day) + ' に足しました');
+        say('「' + title + '」を ' + dayName(day) + ' に登録しました');
         return;
     }
     // ノートに持てるのは始まりだけ（`remind:`）── 終わりの時刻はノートには書かない。
@@ -8087,7 +8089,7 @@ async function calAdd(day, at0) {
         });
         await reload({ quiet: true });
         await drawCal();
-        say('「' + title.trim() + '」を ' + dayName(day) + ' に足しました');
+        say('「' + title.trim() + '」を ' + dayName(day) + ' に登録しました');
     } catch (e) {
         say('足せません: ' + why(e));
     }
@@ -8097,11 +8099,11 @@ async function calAdd(day, at0) {
 async function hereEdit(id) {
     const one = calSlots.find((s) => s.kind === 'here' && s.path === id);
     const pick = await askPick('この予定をどうしますか',
-        [{ name: 'タイトルを修正する', value: 'rename' }, { name: '予定を削除する', value: 'drop' }],
+        [{ name: '予定を修正する', value: 'rename' }, { name: '予定を削除する', value: 'drop' }],
         one ? one.title : '', true);
     if (pick === null) return;
     if (pick === 'rename') {
-        const to = await askText('タイトルを修正する', one ? one.title : '');
+        const to = await askText('予定を修正する', one ? one.title : '');
         if (to === null || !to.trim()) return;
         const got = await window.amber.cal(['rename', id, to.trim()]);
         if (!got || got.error) { say('直せません: ' + (got?.error || '返事がありません')); return; }
@@ -8295,7 +8297,7 @@ el('cal').addEventListener('contextmenu', async (e) => {
     const rows = [];
     if (item) {
         if (item.kind === 'here' && item.at) {
-            rows.push({ name: 'タイトルを修正する', run: () => hereEdit(item.at) });
+            rows.push({ name: '予定を修正する', run: () => hereEdit(item.at) });
             rows.push({ name: '予定を削除する', run: async () => {
                 if (!await askYes('この予定を削除しますか')) return;
                 const got = await window.amber.cal(['drop', item.at]);
@@ -8503,7 +8505,7 @@ const CMDS = [
     { id: 'when', name: '期間で絞る', run: () => openDrawer('when') },
 
     // ── このノートにすること（⋯ と、ノートの右押し）
-    { id: 'star', name: 'ブックマークに登録', key: '⌘D', need: 'note', menu: true, run: cmdStar },
+    { id: 'star', name: 'ブックマークに登録する', key: '⌘D', need: 'note', menu: true, run: cmdStar },
     { id: 'tags', name: 'タグ設定', need: 'note', menu: true, run: cmdTags },
     { id: 'move', name: 'フォルダへ移動', need: 'note', menu: true, run: cmdMove },
     { id: 'toshare', name: '家族と共有する', need: 'note', menu: true, run: cmdToShare },
@@ -8540,8 +8542,8 @@ const CMDS = [
     // 下まで来ない ── 同じ行い（ノートを入れる）は同じ場所に。
     { id: 'bring', name: 'ノートを取り込む', app: true, sep: true, run: cmdBring },
     { id: 'welcome', name: '見本のノートを入れる', app: true, run: cmdWelcome },
-    { id: 'spare', name: '不要添付削除', app: true,
-      sub: 'ノートから使われていない画像を削除', run: cmdSpare },
+    { id: 'spare', name: '使われていない画像', app: true,
+      sub: 'どのノートも使っていない画像を、選んでゴミ箱へ', run: cmdSpare },
     { id: 'backup', name: 'バックアップ', app: true, run: cmdBackup },
     { id: 'restore', name: 'バックアップから戻す', app: true, run: cmdRestore },
     // **足す・変える・外す・同期先、を一つの入口で**（依頼 511・本人「保存
@@ -8559,7 +8561,7 @@ const CMDS = [
 
     // ── 表には要るが、献立には出さないもの
     { id: 'mkbook', name: '新しいフォルダを作る', run: () => cmdMkBook() },
-    { id: 'color', name: 'フォルダに色を付ける', sub: 'フォルダを右押しでも', run: () => cmdColor() },
+    { id: 'color', name: 'フォルダに色をつける', sub: 'フォルダを右押しでも', run: () => cmdColor() },
     { id: 'bigger', name: '文字を大きく', key: '⌘+', run: () => setFont(fontStep + 1) },
     { id: 'smaller', name: '文字を小さく', key: '⌘−', run: () => setFont(fontStep - 1) },
     { id: 'font0', name: '文字の大きさを戻す', key: '⌘0', run: () => setFont(0) },
@@ -8609,7 +8611,7 @@ async function cmdKeys() {
 
     const pick = await askPick('ショートカット一覧',
         rows.map((r, n) => ({ name: r.name, sub: r.sub || '', key: keyText(r.key), head: r.head, value: n })),
-        '選ぶと、その場で実行します');
+        '選ぶと、その場で動きます');
     if (pick === null) return;
     const hit = rows[pick];
     if (hit && hit.run) await hit.run();
@@ -8674,7 +8676,7 @@ async function palette() {
             name: r.name, sub: r.sub || '', key: r.key || '', head: r.head,
             word: r.word, value: n,
         })),
-        '↑↓ で選び、Enter で実行');
+        '↑↓ で選び、Enter で決定');
     if (pick === null) return;
     const hit = rows[pick];
     if (hit && hit.run) await hit.run();
@@ -8933,7 +8935,7 @@ function head(name, plus) {
 async function railPlus(kind) {
     if (kind === 'book') { await cmdMkBook(); return; }
     if (kind === 'star') {
-        const name = await askText('新しいブックマークのグループの名前', '', '仕事/週次 と書けば階層になります');
+        const name = await askText('新しいブックマークグループの名前', '', '仕事/週次 と書けば階層になります');
         if (name === null || !name.trim()) return;
         try {
             await ask('shelf', { path: state.root, name: name.trim() });
@@ -8974,7 +8976,7 @@ function railMenu(kind, what, at) {
     // 書き方を知っている人にしか通じない。
     if (kind === 'book') {
         items.push({ name: 'この中にフォルダを作る', run: () => cmdMkBook(what) });
-        items.push({ name: 'フォルダに色を付ける', run: () => cmdColor(what) });
+        items.push({ name: 'フォルダに色をつける', run: () => cmdColor(what) });
         const isShare = state.shares.some((sh) => sh.at === what);
         if (isShare) {
             items.push({
@@ -8993,12 +8995,12 @@ function railMenu(kind, what, at) {
                      run: () => cmdHistory(what, true) });
     }
     if (kind === 'star') {
-        items.push({ name: 'この中にグループを作る', run: () => newShelf(what) });
+        items.push({ name: 'この中にブックマークグループを作る', run: () => newShelf(what) });
     }
     items.push({ name: '名前を変える', sep: items.length > 0, run: () => railRename(kind, what) });
     items.push({
-        name: kind === 'book' ? 'このフォルダをゴミ箱へ'
-            : (kind === 'tag' ? 'このタグを全部のノートから外す' : 'このグループを消す'),
+        name: kind === 'book' ? 'このフォルダを削除'
+            : (kind === 'tag' ? 'このタグを全部のノートから外す' : 'このブックマークグループを消す'),
         run: () => railDrop(kind, what),
     });
     popMenu(items, at);
@@ -9074,7 +9076,7 @@ async function railDrop(kind, what) {
     const ask2 = kind === 'book'
         ? '「' + bookLabel(what) + '」を、中の ' + hit.length + ' 件ごとゴミ箱へ入れますか'
         : kind === 'star'
-            ? '保存場所「' + what + '」を消しますか'
+            ? 'ブックマークグループ「' + what + '」を消しますか'
                 + (hit.length ? '（中の ' + hit.length + ' 件はブックマークの直下へ）' : '')
             : '「' + what + '」の' + what2 + 'を ' + hit.length + ' 件から外しますか（ノートは残ります）';
     if (!await askYes(ask2)) return;
@@ -9227,7 +9229,7 @@ document.addEventListener('drop', async (e) => {
     e.preventDefault();
     document.body.classList.remove('dropping');
     const at = window.amber.pathOf(e.dataTransfer.files[0]);
-    if (!at) { say('この落としものの場所が分かりません'); return; }
+    if (!at) { say('このファイルの場所が分かりません'); return; }
     // 保存場所の中のものは、いつもの一本として開く ── 同じファイルが
     // 一覧と客の両方に居ると、どちらに書いたのか分からなくなる。
     if (placeOf(at)) {
@@ -9352,9 +9354,9 @@ function stem() {
 async function cmdStar() {
     if (starred(state.open)) {
         const now = state.open.star;
-        const off = await askPick('このノートはブックマーク済みです',
+        const off = await askPick('このノートはブックマークに入っています',
             [{ name: 'ブックマークから外す', value: 'off' },
-             { name: '保存場所を変える', value: 'move' }],
+             { name: 'ブックマークグループを変える', value: 'move' }],
             now && now !== 'true' ? 'いま: ' + now : 'いま: ブックマークの直下');
         if (off === null) return;
         if (off === 'off') {
@@ -9366,7 +9368,7 @@ async function cmdStar() {
     }
     const where = [{ name: '（ブックマークの直下）', value: '' },
         ...state.stars.map((x) => ({ name: x, value: x })),
-        { name: '＋ 新しい保存場所を作る', value: ' new' }];
+        { name: '＋ 新しいブックマークグループを作る', value: ' new' }];
     let to = await askPick('どこに登録しますか', where);
     if (to === null) return;
     if (to === ' new') {
@@ -9979,7 +9981,7 @@ async function cmdMkBook(under) {
 function sayIfBlind(got) {
     if (got === true || got === undefined) return;
     const why2 = got && got.why;
-    say('このフォルダは見張れません' + (why2 ? '（' + why2 + '）' : '')
+    say('このフォルダの変更を検知できません' + (why2 ? '（' + why2 + '）' : '')
         + '。外で変えたら、開き直すと出ます');
 }
 
@@ -10067,12 +10069,12 @@ async function cmdDelete() {
 /// iPhone は、閉じていても鳴らす。
 async function cmdRemind() {
     const kind = await askPick('いつ知らせるか', [
-        { name: '日付と時刻を決める', value: 'once' },
+        { name: '一度だけ知らせる', value: 'once' },
         { name: '毎日', sub: '例: 09:00', value: 'daily' },
         { name: '毎週', sub: '例: 月 09:00', value: 'weekly' },
         { name: '毎月', sub: '例: 1 09:00', value: 'monthly' },
         { name: '（やめる）', value: 'off' },
-    ], '仕掛けるのは窓、鳴らすのは iPhone（窓は開いている間だけ鳴ります）');
+    ], '通知は iPhone に届きます（このアプリを開いているあいだは、ここでも通知します）');
     if (kind === null) return;
     if (kind === 'off') {
         if (await editNote(async (t) => {
@@ -10085,7 +10087,7 @@ async function cmdRemind() {
         const v = await askText('いつ', ymdNow(), '2026-09-10 09:00 の形で');
         if (v === null || !v.trim()) return;
         if (await editNote((t) => ask('setfield', { text: t, key: 'remind', value: v.trim() })
-            .then((r) => r.text))) say('通知を仕掛けました: ' + v.trim());
+            .then((r) => r.text))) say('通知を設定しました: ' + v.trim());
         return;
     }
     const hint = { daily: '09:00', weekly: '月 09:00', monthly: '1 09:00' }[kind];
@@ -10094,7 +10096,7 @@ async function cmdRemind() {
         '毎日は 09:00、毎週は 月 09:00、毎月は 1 09:00');
     if (v === null || !v.trim()) return;
     if (await editNote((t) => ask('setfield', { text: t, key: 'repeat', value: kind + ' ' + v.trim() })
-        .then((r) => r.text))) say('繰り返しを仕掛けました');
+        .then((r) => r.text))) say('繰り返しを設定しました');
 }
 
 function ymdNow() {
@@ -10674,7 +10676,7 @@ function syncTroubleFace(t) {
         return { text: 'Google のサインインが切れています。もう一度サインインしてください。', button: 'Google でサインイン', go: 'signin' };
     }
     if (/insufficient|storage|quota|507/i.test(e)) {
-        return { text: 'Google Drive の空きが足りないようです。空けてから、もう一度お試しください。', button: 'もう一度試す', go: 'retry' };
+        return { text: 'Google Drive の空きが足りないようです。空けてから、もう一度試してください。', button: 'もう一度試す', go: 'retry' };
     }
     return { text: e, button: 'もう一度試す', go: 'retry' };
 }
@@ -10784,12 +10786,12 @@ function signInTrouble(err) {
     if (/client_secret/i.test(e)) {
         return 'Google が「クライアント シークレット」を求めています。'
             + '手元のシークレットを ~/Library/Application Support/amber/google.json に'
-            + ' {"secret": "…"} の形で置いて、もう一度お試しください';
+            + ' {"secret": "…"} の形で置いて、もう一度試してください';
     }
     if (/access_denied/i.test(e)) {
         return 'Google に断られました（アクセスをブロック）。テスト利用者に、いま使ったアカウントを足してください';
     }
-    if (/時間切れ/.test(e)) return 'ブラウザで「許可」を押す前に、三分が過ぎました。もう一度お試しください';
+    if (/時間切れ/.test(e)) return 'ブラウザで「許可」を押す前に、三分が過ぎました。もう一度試してください';
     if (/安全に置けません/.test(e)) return e;
     return 'サインインできませんでした: ' + e;
 }

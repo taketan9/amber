@@ -55,7 +55,7 @@ struct Ringing: View {
                     Text("繰り返しは、時刻に通知が届きます。その日のノートは、次に ambər を開いたときに作られます（iPhone はアプリを勝手に動かさないため）。")
                 }
             }
-            .navigationTitle("通知")
+            .navigationTitle("通知設定")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("やめる") { dismiss() } }
