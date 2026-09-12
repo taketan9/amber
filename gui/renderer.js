@@ -700,6 +700,8 @@ function drawList() {
             state.anchor = at;
             openNote(at);
         };
+        // 二度押しは「このノートを残す」── 仮のタブを本のタブに（依頼 522）。
+        r.ondblclick = () => openNote(r.dataset.path, { pin: true });
         // 右押しでも、⋯ と同じ献立。**開いてから出す** ── 開いていない
         // ノートに「削除」を出すと、どれが消えるのか画面が言っていない。
         r.oncontextmenu = async (e) => {
@@ -1333,6 +1335,7 @@ function makeEditor() {
                 // 打ったので、読む面はもう今の字ではない（組み直すまで）。
                 readStale();
                 state.dirty = true;
+                pinTab();
                 el('state').textContent = '書きかけ';
                 drawSaveNow();
                 drawStrip();
@@ -1445,18 +1448,18 @@ function drawStrip() {
         const name = (here && state.open && state.open.title)
             || (t.keep && t.keep.open && t.keep.open.title)
             || (row && row.title) || baseOf(t.path);
-        return { path: t.path, here, name: name || '（タイトルなし）',
+        return { path: t.path, here, name: name || '（タイトルなし）', pre: !!t.pre,
                  dirty: here ? state.dirty : !!(t.keep && t.keep.dirty) };
     });
     const key = JSON.stringify(shape);
     if (key === stripWas) return;
     stripWas = key;
     box.innerHTML = shape.map((t, n) =>
-        '<div class="tab' + (t.here ? ' on' : '') + '" data-n="' + n + '"'
-        + ' title="' + escapeAttr(t.path) + '">'
+        '<div class="tab' + (t.here ? ' on' : '') + (t.pre ? ' pre' : '') + '" data-n="' + n + '"'
+        + ' title="' + escapeAttr(t.pre ? PRE_HINT : t.path) + '">'
         + (t.dirty ? '<span class="d"></span>' : '')
         + '<span class="t">' + escapeHtml(t.name) + '</span>'
-        + '<button class="x" title="閉じる">✕</button></div>').join('');
+        + '<button class="x" title="このノートを閉じる">✕</button></div>').join('');
     for (const d of box.querySelectorAll('.tab')) {
         const t = tabs[Number(d.dataset.n)];
         d.onmousedown = (e) => {
@@ -1472,11 +1475,13 @@ function drawStrip() {
             e.preventDefault();
             const at = tabs.indexOf(t);
             popMenu([
-                { name: '閉じる', run: () => closeTab(t.path) },
-                { name: 'ほかを閉じる', dim: tabs.length < 2,
-                  run: () => { for (const o of tabs.slice()) if (o.path !== t.path) closeTab(o.path); } },
-                { name: '右のすべてを閉じる', dim: at >= tabs.length - 1,
+                // 言い方は本人が決めた（2026-09-12）。
+                { name: 'このタブを残す', dim: !t.pre, sub: t.pre ? '読んでいるだけのタブを、本のタブに' : '', run: () => pinPath(t.path) },
+                { name: 'このノートを閉じる', run: () => closeTab(t.path) },
+                { name: 'このノートより右のものを閉じる', dim: at >= tabs.length - 1,
                   run: () => { for (const o of tabs.slice(at + 1)) closeTab(o.path); } },
+                { name: 'このノート以外をすべて閉じる', dim: tabs.length < 2,
+                  run: () => { for (const o of tabs.slice()) if (o.path !== t.path) closeTab(o.path); } },
                 { name: '一覧でこのノートを選ぶ', sep: true, run: () => openNote(t.path, { keep: true }) },
                 { name: 'Finder で表示', run: () => window.amber.reveal(t.path) },
             ], { x: e.clientX, y: e.clientY });
@@ -1533,8 +1538,23 @@ async function saveTab(t) {
 /// 開いていたタブを憶える。**次に開いたとき、同じ机に戻る**（電話と同じ）。
 function rememberTabs() {
     if (state.guest) return;
-    window.amber.remember({ tabs: tabs.map((t) => t.path) });
+    // 仮のタブは憶えない ── 読んだだけのものを、次に開いたときまで机に残さない。
+    window.amber.remember({ tabs: tabs.filter((t) => !t.pre).map((t) => t.path) });
 }
+
+/// 仮のタブの説明（人の言葉で・本人・2026-09-12）。
+const PRE_HINT = 'まだ読んでいるだけのタブです。ほかのノートを開くと、このタブが入れ替わります。書き始めるか、一覧で二度押しすると残ります';
+
+/// そのタブを本のタブにする（書いた・二度押した）。
+function pinPath(path) {
+    const t = tabs.find((x) => x.path === path);
+    if (!t || !t.pre) return;
+    t.pre = false;
+    stripWas = null;
+    drawStrip();
+    rememberTabs();
+}
+const pinTab = () => pinPath(showing);
 
 async function openNote(path, opts) {
     // **ノートを開いたら、カレンダーからは出る**（依頼 478）── 同じ場所を
@@ -1547,7 +1567,8 @@ async function openNote(path, opts) {
     if (!opts || !opts.guest) {
         const at = tabs.findIndex((t) => t.path === path);
         if (at >= 0) {
-            // もう机の上にある ── そのタブへ。
+            // もう机の上にある ── そのタブへ。二度押しなら、仮でなくする。
+            if (opts && opts.pin) pinPath(path);
             if (showing !== path) {
                 clearTimeout(readTimer);
                 await syncRead();
@@ -1577,14 +1598,26 @@ async function openNote(path, opts) {
             tabs.splice(tabs.findIndex((t) => t.path === showing) + 1, 0, { path, keep: null });
             showing = path;
         } else if (showing) {
-            // いまのタブを差し替える（ふつうに一覧を押したとき）。
+            // **仮のタブを差し替える**（依頼 522・VS Code のプレビュータブの決まり・
+            // 本人が決めた・2026-09-12）。一覧から押しただけのノートは仮のタブで開き、
+            // 次を押すとそのタブが入れ替わる ── 十本見て回っても机は散らからない。
+            // 書いたタブ・二度押したタブは本のタブになって残る。仮が無ければ、
+            // いまの右に仮を一枚。
+            clearTimeout(readTimer);
+            await syncRead();
+            if (state.dirty) await leaveSave();
+            if (state.open && state.open.path !== path) await settleName(state.open.path);
+            stashTab();
+            const pre = tabs.findIndex((t) => t.pre);
             const now = tabs.findIndex((t) => t.path === showing);
-            if (now >= 0) tabs[now] = { path, keep: null };
+            if (pre >= 0) tabs[pre] = { path, keep: null, pre: true };
+            else tabs.splice(now + 1, 0, { path, keep: null, pre: true });
             showing = path;
         } else {
-            tabs = [{ path, keep: null }];
+            tabs = [{ path, keep: null, pre: true }];
             showing = path;
         }
+        if (opts && opts.pin) pinPath(path);
         rememberTabs();
     }
     // たどっている最中は積まない ── 積むと前へ戻れなくなる。
@@ -1718,6 +1751,7 @@ async function titleDone(keep) {
     // 「（タイトルなし）」はこちらが出している言葉で、人が書いた題ではない。
     const to = want === '（タイトルなし）' ? '' : want;
     if (to === (state.open.title || '')) return;
+    pinTab();
     try {
         // **前書きの組み立ては core。** ここで `---` を書き足すと、
         // 前書きの形を決めるところが二つになる。
@@ -3580,6 +3614,7 @@ function sameNote(a, b) {
 function readChanged() {
     if (syncing || view === 'write' || !state.open) return;
     state.dirty = true;
+    pinTab();
     el('state').textContent = '書きかけ';
     drawSaveNow();
     drawStrip();

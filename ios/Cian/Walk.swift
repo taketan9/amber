@@ -402,6 +402,32 @@ enum Walk {
             return nil
         }
 
+        // ── 四の五。仮のタブ（依頼 522） ────
+        do {
+            let desk = Desk()
+            desk.store = store
+            step("仮のタブ：一覧から開いただけなら仮で、次を開くと入れ替わる") {
+                guard store.notes.count >= 3 else { return "ノートが足りません" }
+                let (a, b, c) = (store.notes[0], store.notes[1], store.notes[2])
+                desk.open(a, store, pin: true)
+                desk.open(b, store)
+                if desk.tabs.count != 2 || desk.current?.preview != true { return "仮のタブになっていません（\(desk.tabs.count) 枚）" }
+                desk.open(c, store)
+                if desk.tabs.count != 2 || desk.showing != c.path { return "入れ替わらず増えました（\(desk.tabs.count) 枚）" }
+                return nil
+            }
+            step("仮のタブ：書くと本のタブになり、ほかを閉じられる") {
+                guard let id = desk.current?.id else { return "タブが無い" }
+                try desk.load(id, store)
+                guard var t = desk.binding(id)?.wrappedValue else { return "タブを取れません" }
+                t.text += "\n仮のタブに書いた行"
+                desk.binding(id)?.wrappedValue = t
+                if desk.current?.preview == true { return "書いたのに仮のまま" }
+                desk.closeOthers(id)
+                return desk.tabs.count == 1 ? nil : "ほかを閉じられません（\(desk.tabs.count)）"
+            }
+        }
+
         // ── 五。「表示」の面の網（位置 × 操作・`Mesh`） ────
         let grid = await Mesh.run()
         ran += grid.ran

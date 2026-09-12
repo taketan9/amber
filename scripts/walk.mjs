@@ -88,6 +88,41 @@ await step('タブを閉じる', `
     await closeTab(tabs[tabs.length - 1].path);
     return tabs.length === n - 1;`, true);
 
+// 三の二。**仮のタブ**（依頼 522・VS Code のプレビュータブの決まり）。
+await step('仮のタブ：一覧から押しただけなら仮で、次を押すと入れ替わる', `
+    for (const t of tabs.slice()) if (t.path !== showing) await closeTab(t.path);
+    pinPath(showing);
+    // いま開いているのとは別の二本で試す。
+    const two = state.notes.filter((n) => n.path !== showing).slice(0, 2).map((n) => n.path);
+    if (two.length < 2) return 'ノートが足りません';
+    window.__two = two;
+    const n0 = tabs.length;
+    await openNote(two[0]);
+    if (tabs.length !== n0 + 1) return '仮のタブが増えていません（' + tabs.length + '）';
+    if (!tabs.find((t) => t.path === showing).pre) return '仮になっていません';
+    await openNote(two[1]);
+    if (tabs.length !== n0 + 1) return '入れ替わらず増えました（' + tabs.length + '）';
+    if (showing !== two[1]) return '開いていません';
+    return el('strip').querySelector('.tab.pre') ? true : '帯に仮の印がありません';`, true);
+await step('仮のタブ：書くと本のタブになり、二度押しでも残る', `
+    const two = window.__two;
+    editor.setValue(editor.getValue() + '\\n仮のタブに書いた行');
+    await new Promise((g) => setTimeout(g, 200));
+    if (tabs.find((t) => t.path === showing).pre) return '書いたのに仮のまま';
+    await openNote(two[0]);
+    if (!tabs.find((t) => t.path === showing).pre) return '押しただけなのに本のタブ';
+    await openNote(two[0], { pin: true });
+    if (tabs.find((t) => t.path === showing).pre) return '二度押ししても仮のまま';
+    return tabs.length >= 2 ? true : 'タブが ' + tabs.length + ' 枚';`, true);
+await step('仮のタブ：右押しの献立は決めた言い方', `
+    const d = el('strip').querySelector('.tab');
+    d.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
+    await new Promise((g) => setTimeout(g, 250));
+    const t = el('more').textContent;
+    closeMenu();
+    for (const w of ['このタブを残す', 'このノートを閉じる', 'このノートより右のものを閉じる', 'このノート以外をすべて閉じる']) if (!t.includes(w)) return '無い: ' + w;
+    return true;`, true);
+
 // 四。まとめて選ぶ
 await step('すべて選ぶ', `pickAll(); return state.picked.size > 0;`, true);
 await step('選びを解く', `unpickAll(); return state.picked.size;`, 0);

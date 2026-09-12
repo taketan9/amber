@@ -483,9 +483,12 @@ body.mac #listhead { padding-top: 30px; }
 /* まだ書き込まれていない印。**閉じるかどうかを決める、まさにその場所で言う。** */
 .tab .d { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex: none; }
 .tab .x {
-  border: 0; background: none; padding: 0 2px; cursor: pointer;
-  color: var(--ink-3); font-size: 11px; line-height: 1; flex: none;
+  border: 0; background: none; padding: 0 3px; cursor: pointer;
+  color: var(--ink-3); font-size: 12px; line-height: 1; flex: none;
 }
+/* 仮のタブ（依頼 522）── 読んでいるだけ。斜体で薄く。 */
+.tab.pre .t { font-style: italic; color: var(--ink-3); }
+.tab.pre.on .t { color: var(--ink-2); }
 .tab .x:hover { color: var(--ink); }
 /* ノートだけを大きくしているときは、机も畳む。 */
 body.zen #strip { display: none; }
