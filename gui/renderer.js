@@ -224,7 +224,8 @@ function drawRail() {
         + ' stroke-linecap="round"/></svg></span>'
         + '<span>新しいノート</span></button>');
 
-    rows.push('<div class="head">ノート</div>');
+    // 「ノート」という見出しは置かない（本人・2026-09-12「すぐ下が『すべてのノート』で
+    // 意味をなしていない」）── 見出しの無い一行として「すべてのノート」。
     rows.push(dest('all', '', 'すべてのノート', state.notes.length, on('all', '')));
 
     const stars = state.notes.filter(starred);
