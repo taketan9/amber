@@ -609,12 +609,74 @@ struct ContentView: View {
     private var list: some View {
         List {
             if needle.isEmpty {
+                // **並びは本人が決めた**（2026-09-12・依頼 505）: 探す（題の下の帯）→
+                // タグ／フォルダ／期間 → 同期の様子 → カレンダー → 新しいノート →
+                // すべてのノート → ブックマーク → フォルダ。**窓の左の列と同じ順**
+                // （依頼 247）── 窓もカレンダーをいちばん上にした。
                 Section {
                     if store.at.isEmpty {
+                        // 絞り込みの帯（窓と同じ三つの引き出し）と、並び順。
+                        HStack(alignment: .center, spacing: 10) {
+                            Sifting(store: store, open: $sifting)
+                            Spacer(minLength: 0)
+                        Menu {
+                            Picker("並び", selection: $store.order) {
+                                ForEach(NotesStore.Order.allCases) { Text($0.label).tag($0) }
+                            }
+                            Divider()
+                            Toggle(isOn: $store.tree) {
+                                Label("フォルダごと（ツリー）", systemImage: "list.bullet.indent")
+                            }
+                            Toggle(isOn: $store.flat) {
+                                Label("全部まとめて見る", systemImage: "list.bullet")
+                            }
+                        } label: {
+                            Text("並び順").font(.subheadline)
+                        }
+                        }
+                        // **右の余白は、何でもない場所**（依頼 270）── 段のどこを触っても
+                        // 最初のボタンが鳴らないように、段そのものに当たり判定を敷く。
+                        .contentShape(Rectangle())
+                        .onTapGesture {}
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        if let which = sifting {
+                            Sifted(store: store, which: which)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                                .listRowSeparator(.hidden)
+                        }
+                        // **同期の様子は一覧の頭に**（依頼 500・窓と同じ場所）。
+                        SyncLine()
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 4, trailing: 16))
+                        // **クラウドの置き土産。** 黙って足りない一覧を見せない
+                        // ── 落ちてきていないノートも、同時に書いた控えも、
+                        // amber の側では直せないが、言わないと「ノートが消えた」
+                        // にしか見えない（窓と同じ言い方）。
+                    if !store.waiting.isEmpty {
+                        band(.blue, "\(store.waiting.count) 件、まだ落ちてきていません",
+                             store.waiting.prefix(3).joined(separator: "・")
+                             + (store.waiting.count > 3 ? " ほか" : "")
+                             + " ── クラウドが中身をまだ持ってきていないだけで、消えてはいません")
+                    }
+                    if !store.clashes.isEmpty {
+                        band(.orange, "\(store.clashes.count) 件、同時に更新されたコピーがあります",
+                             store.clashes.prefix(3).map {
+                                 ($0.clash?.of ?? "") + (($0.clash?.by.isEmpty == false)
+                                     ? "（\($0.clash!.by)）" : "")
+                             }.joined(separator: "・")
+                             + (store.clashes.count > 3 ? " ほか" : "")
+                             + " ── クラウドが作ったもの。中身を見比べて、どちらにするか決めてください")
+                    }
+                        // **カレンダー**（依頼 454）── 窓の左の列でもいちばん上。
+                        Button { showCal = true } label: {
+                            Label("カレンダー", systemImage: "calendar")
+                        }
+                        .buttonStyle(.plain)
                         // **一つだけの、押させたいボタン。** 窓と同じ形 ── 塊に
-                        // せず、琥珀は丸だけに残す。名前とアイコンの大きな
-                        // 見出しはやめた（アプリの名前は窓の外が言っている
-                        // ので、中で二度言うぶんだけノートが下がる）。
+                        // せず、琥珀は丸だけに残す。
                         Button { naming = true } label: {
                             HStack(spacing: 10) {
                                 ZStack {
@@ -631,6 +693,17 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 0, trailing: 16))
+                        Button { store.flat.toggle() } label: {
+                            HStack {
+                                Label("すべてのノート", systemImage: store.flat
+                                    ? "tray.full.fill" : "tray.full")
+                                Spacer()
+                                Text("\(store.notes.count)")
+                                    .foregroundStyle(.secondary).monospacedDigit()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(store.flat ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                     } else {
                         // A folder's own name does not say where it is, and
                         // two folders called 「2026」 look identical at the
@@ -643,107 +716,6 @@ struct ContentView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-
-                // **同期の様子は一覧の頭に**（依頼 500・窓と同じ場所）。
-                if store.at.isEmpty {
-                    SyncLine()
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 4, trailing: 16))
-                }
-
-                // 並べ替えとフィルタ。**窓と同じ場所** ── 一覧のすぐ上に
-                // 二つ並ぶ。最上段に置くと、作るボタンと同じ高さに座って
-                // 「よく使うもの」に見えてしまう（前はそうなっていた）。
-                if store.at.isEmpty {
-                    HStack(spacing: 14) {
-                        // **探す欄は、いつも出ている**（本人・2026-09-12「最初から入力欄が
-                        // 出ているのは変かな？」→ 出しておく）── 題の下の検索の帯
-                        // （`Seeking`・iOS の標準の形）。ここには置かない。
-                        // **フォルダを作る印は「フォルダ」の見出しの右に**（本人「パッと
-                        // 探せなかった」）── 下の `header` にある。
-                        Spacer(minLength: 0)
-                        // **「フィルタ」の献立は無くなった。** 絞るのは下の
-                        // 帯（タグ・フォルダ・期間）がやる ── ここに残って
-                        // いたのは並べ方の話なので、「並び順」にまとめる。
-                        Menu {
-                            Picker("並び", selection: $store.order) {
-                                ForEach(NotesStore.Order.allCases) { Text($0.label).tag($0) }
-                            }
-                            Divider()
-                            Toggle(isOn: $store.tree) {
-                                Label("フォルダごと（ツリー）", systemImage: "list.bullet.indent")
-                            }
-                            Toggle(isOn: $store.flat) {
-                                Label("全部まとめて見る", systemImage: "list.bullet")
-                            }
-                        } label: {
-                            Text("並び順").font(.subheadline)
-                        }
-                    }
-                    // **右の余白は、何でもない場所。** 段のどこを触っても
-                    // 最初のボタンが鳴っていて、右端を触るとフォルダを作る小窓が
-                    // 出た ── 一覧の段は、中にボタンがあっても段ごと押せる。
-                    .contentShape(Rectangle())
-                    .onTapGesture {}
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 2, trailing: 16))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-
-                    // **クラウドの置き土産。** 黙って足りない一覧を見せない
-                    // ── 落ちてきていないノートも、同時に書いた控えも、
-                    // amber の側では直せないが、言わないと「ノートが消えた」
-                    // にしか見えない（窓と同じ言い方）。
-                    if !store.waiting.isEmpty {
-                        band(.blue, "\(store.waiting.count) 件、まだ落ちてきていません",
-                             store.waiting.prefix(3).joined(separator: "・")
-                             + (store.waiting.count > 3 ? " ほか" : "")
-                             + " ── クラウドが中身をまだ持ってきていないだけで、消えてはいません")
-                    }
-                    if !store.clashes.isEmpty {
-                        band(.orange, "\(store.clashes.count) 件、同時に更新されたコピーがあります",
-                             store.clashes.prefix(3).map {
-                                 ($0.clash?.of ?? "") + (($0.clash?.by.isEmpty == false)
-                                     ? "（\($0.clash!.by)）" : "")
-                             }.joined(separator: "・")
-                             + (store.clashes.count > 3 ? " ほか" : "")
-                             + " ── クラウドが作ったもの。中身を見比べて、どちらにするか決めてください")
-                    }
-
-                    // 絞り込みの帯（窓と同じ三つの引き出し）。
-                    Sifting(store: store, open: $sifting)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 4, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                    if let which = sifting {
-                        Sifted(store: store, which: which)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-                            .listRowSeparator(.hidden)
-                    }
-                }
-
-                // **窓の左の列と同じ順**（ノート → ブックマーク → フォルダ
-                // → タグ）。二つの amber で同じものを同じ場所に探せる。
-                Section("ノート") {
-                    Button { store.flat.toggle() } label: {
-                        HStack {
-                            Label("すべてのノート", systemImage: store.flat
-                                ? "tray.full.fill" : "tray.full")
-                            Spacer()
-                            Text("\(store.notes.count)")
-                                .foregroundStyle(.secondary).monospacedDigit()
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(store.flat ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-
-                    // **カレンダー**（依頼 454）── 窓では左の列にあるので、
-                    // 電話でも同じ場所（ノートの段の中）に置く。
-                    Button { showCal = true } label: {
-                        Label("カレンダー", systemImage: "calendar")
-                    }
-                    .buttonStyle(.plain)
-                }
             }
             // ブックマーク。**窓と同じ名前**（依頼 212 で「お気に入り」から
             // 改名した ── 「棚」も含めて、何のことか画面が説明して

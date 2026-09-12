@@ -207,6 +207,17 @@ function drawRail() {
     rows.push('<div id="railtop"><span class="wm">' + BRAND + '</span></div>');
     // 「＋」は全角の空白で離していた ── 字と記号のあいだが不揃いになる。
     // 印は琥珀の丸の中に描く（同じ太さ・同じ大きさで、字と揃う）。
+    // **カレンダーは、いちばん上に一つ**（本人・2026-09-12「ノートと切り離して最上段に」）。
+    // ここに置かないと、パレットを知っている人しか辿り着けない（依頼 454・467）。
+    // **開いているあいだは、ここが光る。** 行き先は変えない（一覧はそのまま）が、
+    // いま何を見ているかは画面が答えるべき（依頼 477）。
+    rows.push('<div class="dest' + (calOn ? ' on' : '')
+        + '" data-kind="cal" data-what="" data-depth="0">'
+        + '<svg class="mk" viewBox="0 0 16 16" aria-hidden="true">'
+        + '<g fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"'
+        + ' stroke-linejoin="round">' + RAIL_MARKS.cal + '</g></svg>'
+        + '<span class="nm">カレンダー</span></div>');
+    rows.push('<div class="sp"></div>');
     rows.push('<button id="new"><span class="ring">'
         + '<svg viewBox="0 0 16 16" aria-hidden="true">'
         + '<path d="M8 3.4v9.2M3.4 8h9.2" stroke="currentColor" stroke-width="2.2"'
@@ -215,18 +226,6 @@ function drawRail() {
 
     rows.push('<div class="head">ノート</div>');
     rows.push(dest('all', '', 'すべてのノート', state.notes.length, on('all', '')));
-    // **カレンダー**（依頼 454）。ここに置かないと、パレットを知っている
-    // 人しか辿り着けない ── 電話は一覧の同じ段に出しているので、窓にも
-    // 同じ場所に置く（本人が「カレンダーってどこだろう？」・依頼 467）。
-    // **開いているあいだは、ここが光る。** 行き先は変えない（一覧は
-    // そのまま）が、いま何を見ているかは画面が答えるべき（依頼 477）。
-    const calOpen = calOn;
-    rows.push('<div class="dest' + (calOpen ? ' on' : '')
-        + '" data-kind="cal" data-what="" data-depth="0">'
-        + '<svg class="mk" viewBox="0 0 16 16" aria-hidden="true">'
-        + '<g fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"'
-        + ' stroke-linejoin="round">' + RAIL_MARKS.cal + '</g></svg>'
-        + '<span class="nm">カレンダー</span></div>');
 
     const stars = state.notes.filter(starred);
     {
