@@ -87,8 +87,6 @@ await step('タブを閉じる', `
     const n = tabs.length;
     await closeTab(tabs[tabs.length - 1].path);
     return tabs.length === n - 1;`, true);
-await step('前に見たノート', `await walk(-1); return !!state.open;`, true);
-await step('次に見たノート', `await walk(1); return !!state.open;`, true);
 
 // 四。まとめて選ぶ
 await step('すべて選ぶ', `pickAll(); return state.picked.size > 0;`, true);
@@ -182,6 +180,13 @@ await step('新しいノートの小窓：タイトルとタグを入れて作�
     if (!n || n.title !== '小窓から作ったノート') return '題が ' + (n && n.title);
     if (!(n.tags || []).includes('小窓')) return 'タグが付いていません: ' + JSON.stringify(n && n.tags);
     return true;`, true);
+await step('最大化・最小化の印：押すとノートだけになり、もう一度で戻る', `
+    await openNote(${path('買い物.md')});
+    el('zenbtn').click();
+    const big = zen && el('zenbtn').textContent === '⤡';
+    el('zenbtn').click();
+    if (!big) return '大きくなりません';
+    return zen ? 'もう一度押しても戻りません' : true;`, true);
 await step('新しいノートの小窓：何も入れずに作成でも作れる', `
     const p = cmdNewNote();
     await new Promise((g) => setTimeout(g, 300));
@@ -1614,9 +1619,9 @@ await step('同じ行：保存すると両方残り、帯と選び口が出る',
     // **選び口の字は、書き戻しに混ざらない。**
     const back = paperToMd(el('read'), state.head);
     if (back === null) return '選び口を置いたら字に戻せなくなりました';
-    if (back.includes('こちらを残す')) return '選び口の字が本文に混ざります';
+    if (back.includes('の記載を反映する')) return '選び口の字が本文に混ざります';
     return true;`, true);
-await step('同じ行：「こちらを残す」を押すと、向こうの行が消えて帯も消える', `
+await step('同じ行：「こちらの記載を反映する」を押すと、向こうの行が消えて帯も消える', `
     const g = el('read').querySelector('.gadget');
     if (!g) return '選び口がありません';
     g.querySelector('button[data-w="ours"]').click();

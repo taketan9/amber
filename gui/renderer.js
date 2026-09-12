@@ -404,6 +404,7 @@ function drawRail() {
     el('rail').innerHTML = rows.join('');
     el('new').onclick = () => cmdNewNote();
     if (el('savenow')) el('savenow').onclick = () => save();
+    if (el('zenbtn')) el('zenbtn').onclick = () => setZen(!zen);
     for (const b of el('rail').querySelectorAll('.plus')) {
         b.onclick = (e) => { e.stopPropagation(); railPlus(b.dataset.plus); };
     }
@@ -790,11 +791,11 @@ async function cmdClip() {
         const t = (await navigator.clipboard.readText()).trim();
         if (/^https?:\/\//i.test(t)) seed = t;
     } catch { /* 読めなくても、打てばよい */ }
-    const url = await askText('Web から取り込む', seed, 'ページの URL を貼ってください');
+    const url = await askText('Web からインポート', seed, 'ページの URL を貼ってください');
     if (url === null || !url.trim()) return;
     say('取りに行っています…');
     const got = await window.amber.fetchPage(url.trim());
-    if (!got || got.error) { say('取り込めません: ' + (got?.error || '返事がありません')); return; }
+    if (!got || got.error) { say('インポートできません: ' + (got?.error || '返事がありません')); return; }
     let md = '';
     let title = '';
     try {
@@ -4691,6 +4692,7 @@ function toggleSplit() { setView(view === 'split' ? 'write' : 'split'); }
 
 function setZen(on) {
     zen = on;
+    if (el('zenbtn')) { el('zenbtn').textContent = on ? '⤡' : '⤢'; el('zenbtn').title = on ? '元の大きさに戻す（F12 か Esc）' : 'ノートだけを大きく（F12）'; }
     applyView();
     // 戻るときは黙る ── `say('')` は空の札を出してしまう。
     if (on) say('ノートだけを大きく（F12 か Esc で戻る）');
@@ -6497,9 +6499,9 @@ function drawBand() {
             + fields.map((f, i) => '<span class="fld">'
                 + '<b>' + escapeHtml(fieldName(f.key)) + '</b>を両方で変えていました ── こちら「' + escapeHtml(f.ours) + '」／'
                 + escapeHtml(who) + '「' + escapeHtml(f.theirs) + '」'
-                + '<button class="k go" data-f="' + i + '" data-w="ours">こちらを残す</button>'
-                + '<button class="k" data-f="' + i + '" data-w="theirs">' + escapeHtml(who) + 'を残す</button>'
-                + (f.key === 'tags' ? '<button class="k" data-f="' + i + '" data-w="both">両方</button>' : '')
+                + '<button class="k go" data-f="' + i + '" data-w="ours">こちらの記載を反映する</button>'
+                + '<button class="k" data-f="' + i + '" data-w="theirs">' + escapeHtml(who) + 'の記載を反映する</button>'
+                + (f.key === 'tags' ? '<button class="k" data-f="' + i + '" data-w="both">両方を反映する</button>' : '')
                 + '</span>').join('');
         for (const x of b.querySelectorAll('[data-go]')) x.onclick = () => stepGadget(Number(x.dataset.go));
         for (const x of b.querySelectorAll('[data-all]')) x.onclick = () => chooseAll(x.dataset.all);
@@ -6589,12 +6591,12 @@ function placeGadgets() {
         const what = !spot.ours.length ? 'こちらは消し、' + who + 'は直していました'
             : !spot.theirs.length ? 'こちらは直し、' + who + 'は消していました'
             : '同じ行を両方で直していました';
-        const hint = !spot.ours.length ? '（こちらを残す ＝ ' + who + 'の行が消えます）'
-            : !spot.theirs.length ? '（' + who + 'を残す ＝ この行が消えます）' : '';
+        const hint = !spot.ours.length ? '（こちらの記載を反映する ＝ ' + who + 'の行が消えます）'
+            : !spot.theirs.length ? '（' + who + 'の記載を反映する ＝ この行が消えます）' : '';
         g.innerHTML = '<b>' + escapeHtml(what) + '</b>'
-            + '<button class="go" data-w="ours">こちらを残す</button>'
-            + '<button data-w="theirs">' + escapeHtml(who) + 'を残す</button>'
-            + '<button data-w="both">両方</button>'
+            + '<button class="go" data-w="ours">こちらの記載を反映する</button>'
+            + '<button data-w="theirs">' + escapeHtml(who) + 'の記載を反映する</button>'
+            + '<button data-w="both">両方を反映する</button>'
             + (hint ? '<span class="hint">' + escapeHtml(hint) + '</span>' : '');
         for (const x of g.querySelectorAll('button')) {
             x.onmousedown = (e) => e.preventDefault();
@@ -7263,8 +7265,6 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     // 見たノートの前後（Inkdrop の ⌘← / ⌘→）。
-    if ((e.metaKey || e.ctrlKey) && e.code === 'ArrowLeft') { e.preventDefault(); walk(-1); return; }
-    if ((e.metaKey || e.ctrlKey) && e.code === 'ArrowRight') { e.preventDefault(); walk(1); return; }
     if ((e.metaKey || e.ctrlKey) && e.code === 'KeyN') { e.preventDefault(); cmdNewNote(); return; }
     if ((e.metaKey || e.ctrlKey) && e.code === 'KeyF') { e.preventDefault(); openFind(); return; }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -7381,13 +7381,8 @@ function trailPush(path) {
     trail.push(path);
     trailAt = trail.length - 1;
 }
-function walk(step) {
-    const to = trailAt + step;
-    if (to < 0 || to >= trail.length) { say(step < 0 ? 'これより前はありません' : 'これより後はありません'); return; }
-    trailAt = to;
-    // たどっている間は積み直さない ── 積むと前へ戻れなくなる。
-    openNote(trail[to], { walking: true });
-}
+// 前へ／次へ（`walk`）は 2026-09-12 に外した（本人「要らない」）── 跡（`trail`）は
+// 開き直しの `walking` の印のために残っている。
 
 
 /* ── ノートから使われていない画像（依頼 449） ── */
@@ -8505,7 +8500,7 @@ async function cmdSubscribe() {
     if (url === null || !url.trim()) return;
     say('取りに行っています…');
     const got = await window.amber.fetchPage(url.trim(), 'calendar');
-    if (!got || got.error) { say('取り込めません: ' + (got?.error || '返事がありません')); return; }
+    if (!got || got.error) { say('インポートできません: ' + (got?.error || '返事がありません')); return; }
     let name = '';
     try {
         const out = await window.amber.call('ics', {
@@ -8595,8 +8590,8 @@ const CMDS = [
     { id: 'new', name: '新しいノート', key: '⌘N', run: () => cmdNewNote() },
     { id: 'tmpl', name: 'テンプレートから新しいノート', sub: '「' + TEMPLATES + '」フォルダの中身',
       run: cmdTemplate },
-    { id: 'clip', name: 'Web から取り込む', sub: 'URL を渡すと、一本のノートに', run: cmdClip },
-    { id: 'outside', name: 'ambər フォルダ以外のノートを開く', key: '⌘O', app: true,
+    { id: 'clip', name: 'Web からインポート', sub: 'URL を渡すと、一件のノートに', run: cmdClip },
+    { id: 'outside', name: 'ほかの場所のノートを開く', key: '⌘O', app: true,
       run: cmdOpenOutside },
     // **`⌘S` は「現状バージョン保存」が持っている**（受け口は捕捉の段）。
     // ここにも同じ鍵を書くと、一覧に二つ並んで、どちらが走るのか
@@ -8608,8 +8603,6 @@ const CMDS = [
     // 無かった ── Inkdrop は献立に並べている。
     { id: 'rail', name: '左の列を畳む', key: '⌘/', app: true, run: () => toggleRail() },
     { id: 'list', name: '一覧を畳む', key: '⌘⌥/', app: true, run: () => toggleList() },
-    { id: 'back', name: '前に見たノート', key: '⌘←', run: () => walk(-1) },
-    { id: 'fwd', name: '次に見たノート', key: '⌘→', run: () => walk(1) },
     { id: 'find', name: 'ノートを探す', key: '⌘F', run: () => openFind() },
     // **絞り込みは、命令ではなくなった。** タグ・フォルダ・期間の三つは
     // 一覧の頭に引き出しとして常に出ている ── 命令の表から呼ぶものが
@@ -8672,7 +8665,8 @@ const CMDS = [
     // **入れる三つを、並べて置く。** 「見本のノートを入れる」は列の
     // いちばん下に一つだけ離れて座っていて、探す人は「amber について」の
     // 下まで来ない ── 同じ行い（ノートを入れる）は同じ場所に。
-    { id: 'bring', name: 'ノートを取り込む', app: true, sep: true, run: cmdBring },
+    // エクスポートと対の言葉（本人・2026-09-12）。
+    { id: 'bring', name: 'インポート', sub: 'ほかの .md をノートに', app: true, sep: true, run: cmdBring },
     { id: 'welcome', name: '見本のノートを入れる', app: true, run: cmdWelcome },
     { id: 'spare', name: '使われていない画像', app: true,
       sub: 'どのノートも使っていない画像を、選んでゴミ箱へ', run: cmdSpare },
@@ -9041,7 +9035,7 @@ function knownTheme(name) {
 async function cmdTheme() {
     const at = await askPick('テーマ', THEMES.map(([k, n]) => ({
         name: n, sub: k === theme ? '● いま' : '', value: k,
-    })), '琥珀は amber が育ててきたもの。白磁から下は cian と同じ二十一の配色（同じ順）');
+    })), '琥珀は amber が育ててきたもの');
     if (at === null) return;
     setTheme(at);
 }
@@ -10429,9 +10423,9 @@ async function cmdBring() {
         // 探しても出てこない日。
         const re = r.renamed ? '（' + r.renamed + ' 件は名前を変えました）' : '';
         const no = r.failed ? '。' + r.failed + ' 件は入れられませんでした' : '';
-        say(r.put + ' 件を取り込みました' + re + no);
+        say(r.put + ' 件をインポートしました' + re + no);
     } catch (e) {
-        say('取り込めません: ' + why(e));
+        say('インポートできません: ' + why(e));
     }
 }
 

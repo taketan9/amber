@@ -333,7 +333,7 @@ enum Walk {
         // ── 四。よそから来るもの ────────────────────────
         if let site = ProcessInfo.processInfo.environment["SITE"],
            let url = Clipping.reach(site) {
-            await step("Web から取り込む") {
+            await step("Web からインポート") {
                 let hand = Clipping()
                 await hand.warm()
                 let got = try await hand.clip(url)
@@ -378,6 +378,16 @@ enum Walk {
             if Calendaring.shift("2026-09-12", 7) != "2026-09-19" { return "七日先が違います" }
             if Calendaring.weekName("2026-09-12") != "土" { return "曜日が \(Calendaring.weekName("2026-09-12"))" }
             if Calendaring.shift("2026-09-30", 1) != "2026-10-01" { return "月を跨げません" }
+            return nil
+        }
+        step("ほかの場所のノートを開く：一覧に入れずに読める") {
+            let at = FileManager.default.temporaryDirectory.appendingPathComponent("よそ-\(Int(Date().timeIntervalSince1970)).md")
+            try "# よその一枚\n\n一覧には入らない。\n".write(to: at, atomically: true, encoding: .utf8)
+            defer { try? FileManager.default.removeItem(at: at) }
+            guard let n = store.openOutside(at) else { return "開けません: \(store.trouble ?? "")" }
+            if n.title != "よその一枚" { return "題が \(n.title)" }
+            if !store.isOutside(n.path) { return "一時的に開いている印が付いていません" }
+            if store.notes.contains(where: { $0.path == at.path }) { return "一覧に入っています" }
             return nil
         }
         step("エクスポート：HTML は一枚で完結し、PDF は頁になる") {
@@ -486,7 +496,7 @@ enum Walk {
             if tab.who != "太郎の Mac" { return "相手の名前が \(tab.who) です" }
             return nil
         }
-        await step("同期：「こちらを残す」を選ぶと、向こうの行が消えて向こうにも上がる") {
+        await step("同期：「こちらの記載を反映する」を選ぶと、向こうの行が消えて向こうにも上がる") {
             guard let note = store.notes.first(where: { $0.path.hasSuffix("/太郎のメモ.md") }) else { return "太郎のメモ.md がありません" }
             desk.chooseSpot(note.path, 0, "ours", store)
             guard let now = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "札が消えました" }

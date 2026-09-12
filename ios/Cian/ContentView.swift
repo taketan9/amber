@@ -26,7 +26,7 @@ struct ContentView: View {
     /// callback needed, and the second time I called it verified after
     /// watching only the half that opens.
     @State private var asked: Fetching?
-    enum Fetching { case folder, addFolder, notes, zip }
+    enum Fetching { case folder, addFolder, notes, zip, outside }
     /// 場所を変えようとしている保存ディレクトリ（`nil` は足す）。
     @State private var relocating: String?
     /// The folder we just left, while asking whether to bring its notes.
@@ -160,6 +160,7 @@ struct ContentView: View {
                       fetching = asked
                   } },
                   bringIn: { DispatchQueue.main.async { asked = .notes; fetching = .notes } },
+                  openOutside: { DispatchQueue.main.async { asked = .outside; fetching = .outside } },
                   restore: { DispatchQueue.main.async { asked = .zip; fetching = .zip } })
         }
         .alert("いままでのノートを持っていきますか", isPresented: Binding(
@@ -294,6 +295,12 @@ struct ContentView: View {
                 if let url = urls.first { store.add(url) }
             case (.notes, .success(let urls)):
                 store.bring(urls)
+            case (.outside, .success(let urls)):
+                // ほかの場所の .md を一時的に開く（一覧には入れない・依頼 517）。
+                if let u = urls.first, let n = store.openOutside(u) {
+                    desk.open(n, store)
+                    showing = true
+                }
             case (.zip, .success(let urls)):
                 guard let zip = urls.first else { break }
                 do {
@@ -672,9 +679,6 @@ struct ContentView: View {
                             Divider()
                             Toggle(isOn: $store.tree) {
                                 Label("フォルダごと（ツリー）", systemImage: "list.bullet.indent")
-                            }
-                            Toggle(isOn: $store.flat) {
-                                Label("全部まとめて見る", systemImage: "list.bullet")
                             }
                         } label: {
                             Text("並び順").font(.subheadline)

@@ -297,6 +297,19 @@ struct NoteView: View {
     /// 名前が二つ付く。
     @ViewBuilder
     private var band: some View {
+        // ほかの場所のノートを一時的に開いている（依頼 517・窓の帯と同じ字）。
+        if store.isOutside(tab.note.path) {
+            HStack(spacing: 9) {
+                Circle().fill(Color("AccentColor")).frame(width: 8, height: 8)
+                Text("ほかの場所のノートを、一時的に開いています").font(.footnote)
+                Spacer(minLength: 8)
+                Button("閉じる") { desk.close(tab.id) }.font(.footnote.weight(.semibold))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(Color("AccentColor").opacity(0.12))
+            Divider()
+        }
         if tab.clashing {
             // **ぶつかった場所がある**（依頼 501・窓の帯と同じ言葉）── 数と、選ぶ道。
             HStack(spacing: 9) {

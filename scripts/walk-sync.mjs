@@ -165,7 +165,7 @@ export async function syncWalk() {
             bad.push({ name: '同期：混ぜた字が向こうにも上がる', why: [String(JSON.stringify(one.text)).slice(0, 160)] });
         }
     }
-    await step('同期：「こちらを残す」を選ぶと、向こうにもそれが上がる', `
+    await step('同期：「こちらの記載を反映する」を選ぶと、向こうにもそれが上がる', `
         setView('read');
         await new Promise((g) => setTimeout(g, 600));
         const g = el('read').querySelector('.gadget');

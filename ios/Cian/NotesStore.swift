@@ -253,6 +253,25 @@ final class NotesStore: ObservableObject {
         }
     }
 
+    /// 開いている「ほかの場所のノート」の鍵（一つだけ・次を開いたら前のは閉じる）。
+    private var outside: URL?
+
+    /// ほかの場所の .md を、一覧に入れずに開く（パソコン版の ⌘O と同じ・依頼 517）。
+    /// 返るノートは `root` が空 ── それが「一時的に開いている」印になる。
+    func openOutside(_ url: URL) -> Note? {
+        outside?.stopAccessingSecurityScopedResource()
+        _ = url.startAccessingSecurityScopedResource()
+        outside = url
+        guard let got = try? Cian.call("note", ["path": url.path]), let note = Note(got) else {
+            trouble = "そのファイルを読めません"
+            return nil
+        }
+        return note
+    }
+
+    /// いま一時的に開いている、ほかの場所のノートか。
+    func isOutside(_ path: String) -> Bool { outside?.path == path }
+
     /// Copy Markdown files in from somewhere else.
     ///
     /// **Copied, not moved.** Whatever exported them still has them, which is

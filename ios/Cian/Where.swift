@@ -19,6 +19,8 @@ struct Where: View {
     /// 保存ディレクトリの場所を選ぶ（`nil` は「足す」、それ以外はその id の場所を変える）。
     let choose: (String?) -> Void
     let bringIn: () -> Void
+    /// ほかの場所の .md を一時的に開く（依頼 517・パソコン版の ⌘O）。
+    let openOutside: () -> Void
     let restore: () -> Void
     /// 取ってきて、一本のノートにする（依頼 421 の乙）。
     ///
@@ -36,7 +38,7 @@ struct Where: View {
             await hand.warm()
             do {
                 let got = try await hand.clip(url)
-                let name = got.title.isEmpty ? url.host ?? "取り込み" : got.title
+                let name = got.title.isEmpty ? url.host ?? "インポート" : got.title
                 guard let made = try store.make(titled: name) else {
                     trouble = "ノートを作れません"
                     return
@@ -89,14 +91,14 @@ struct Where: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Web から取り込む")
+            .navigationTitle("Web からインポート")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("やめる") { clipping = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("取り込む") { clipping = false; clip() }
+                    Button("インポート") { clipping = false; clip() }
                         // **形になっていない間は押させない。** 押してから
                         // 「URL の形になっていません」と言うより早い。
                         .disabled(Clipping.reach(clipUrl) == nil)
@@ -246,13 +248,19 @@ struct Where: View {
                         clipUrl = ""
                         clipping = true
                     } label: {
-                        Label("Web から取り込む", systemImage: "safari")
+                        Label("Web からインポート", systemImage: "safari")
                     }
                     Button {
                         dismiss()
                         bringIn()
                     } label: {
-                        Label("ノートを取り込む", systemImage: "square.and.arrow.down")
+                        Label("インポート", systemImage: "square.and.arrow.down")
+                    }
+                    Button {
+                        dismiss()
+                        openOutside()
+                    } label: {
+                        Label("ほかの場所のノートを開く", systemImage: "doc.badge.ellipsis")
                     }
                     // The other half of 「バックアップ」. Without it a zip is
                     // a thing you can make and never use, which is not a
@@ -300,9 +308,9 @@ struct Where: View {
                         Label("バックアップ", systemImage: "square.and.arrow.up")
                     }
                 } header: {
-                    Text("バックアップと取り込み")
+                    Text("バックアップとインポート")
                 } footer: {
-                    Text("取り込んだ .md はこのフォルダにコピーされます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。「不要添付削除」は、ノートから使われていない画像を小さく見て、選んでゴミ箱へ。")
+                    Text("インポートした .md はこのフォルダにコピーされます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。「不要添付削除」は、ノートから使われていない画像を小さく見て、選んでゴミ箱へ。")
                 }
 
                 Section {
@@ -361,7 +369,7 @@ struct Where: View {
                     // Three and not two: a phone that goes dark at sunset is
                     // the common case, and a switch with no way back to it
                     // is a switch that gets set once and regretted.
-                    Text("「琥珀 ── OS に合わせる」は、OS がダークのとき一緒に暗くなります。白磁から下は cian と同じ二十一の配色（同じ順）です。")
+                    Text("「琥珀 ── OS に合わせる」は、OS がダークのとき一緒に暗くなります。")
                 }
             }
             // The zip exists before the share sheet opens, so what is being
@@ -391,7 +399,7 @@ struct Where: View {
             .sheet(isPresented: $clipping) { clipSheet }
             .sheet(isPresented: $sparing) { Sparing(store: store) }
             .sheet(isPresented: $feeding) { Feeds() }
-            .alert("取り込みました", isPresented: Binding(
+            .alert("インポートしました", isPresented: Binding(
                 get: { clipDone != nil }, set: { if !$0 { clipDone = nil } }
             )) {
                 Button("閉じる") {}

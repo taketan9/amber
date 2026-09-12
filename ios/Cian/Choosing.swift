@@ -29,11 +29,11 @@ struct Choosing: View {
                             side("こちら", spot.ours)
                             side(who, spot.theirs)
                             HStack {
-                                Button("こちらを残す") { desk.chooseSpot(id, n, "ours", store) }
+                                Button("こちらの記載を反映する") { desk.chooseSpot(id, n, "ours", store) }
                                     .buttonStyle(.borderedProminent)
-                                Button("\(who) を残す") { desk.chooseSpot(id, n, "theirs", store) }
+                                Button("\(who)の記載を反映する") { desk.chooseSpot(id, n, "theirs", store) }
                                     .buttonStyle(.bordered)
-                                Button("両方") { desk.chooseSpot(id, n, "both", store) }
+                                Button("両方を反映する") { desk.chooseSpot(id, n, "both", store) }
                                     .buttonStyle(.bordered)
                             }
                             .font(.footnote.weight(.semibold))
@@ -48,11 +48,11 @@ struct Choosing: View {
                             LabeledContent("こちら", value: f.ours.isEmpty ? "（なし）" : f.ours)
                             LabeledContent(who, value: f.theirs.isEmpty ? "（なし）" : f.theirs)
                             HStack {
-                                Button("こちらを残す") { desk.chooseField(id, n, "ours", store) }
+                                Button("こちらの記載を反映する") { desk.chooseField(id, n, "ours", store) }
                                     .buttonStyle(.borderedProminent)
-                                Button("\(who) を残す") { desk.chooseField(id, n, "theirs", store) }
+                                Button("\(who)の記載を反映する") { desk.chooseField(id, n, "theirs", store) }
                                     .buttonStyle(.bordered)
-                                Button("両方") { desk.chooseField(id, n, "both", store) }
+                                Button("両方を反映する") { desk.chooseField(id, n, "both", store) }
                                     .buttonStyle(.bordered)
                             }
                             .font(.footnote.weight(.semibold))
