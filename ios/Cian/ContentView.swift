@@ -681,10 +681,20 @@ struct ContentView: View {
                              + " ── クラウドが作ったもの。中身を見比べて、どちらにするか決めてください")
                     }
                         // **カレンダー**（依頼 454）── 窓の左の列でもいちばん上。
+                        // **三つの段は同じ大きさ・同じ色**（本人・2026-09-12）── 印は 26pt の
+                        // 枠にアクセント色、字は 16pt の太め。「新しいノート」と揃える。
                         Button { showCal = true } label: {
-                            Label("カレンダー", systemImage: "calendar")
+                            HStack(spacing: 10) {
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundStyle(Color.accentColor)
+                                    .frame(width: 26, height: 26)
+                                Text("カレンダー").font(.system(size: 16, weight: .semibold))
+                                Spacer(minLength: 0)
+                            }
                         }
                         .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 0, trailing: 16))
                         // **一つだけの、押させたいボタン。** 窓と同じ形 ── 塊に
                         // せず、琥珀は丸だけに残す。
                         Button { naming = true } label: {
@@ -704,16 +714,20 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 0, trailing: 16))
                         Button { store.flat.toggle() } label: {
-                            HStack {
-                                Label("すべてのノート", systemImage: store.flat
-                                    ? "tray.full.fill" : "tray.full")
-                                Spacer()
+                            HStack(spacing: 10) {
+                                Image(systemName: store.flat ? "tray.full.fill" : "tray.full")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundStyle(Color.accentColor)
+                                    .frame(width: 26, height: 26)
+                                Text("すべてのノート").font(.system(size: 16, weight: .semibold))
+                                Spacer(minLength: 0)
                                 Text("\(store.notes.count)")
                                     .foregroundStyle(.secondary).monospacedDigit()
                             }
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(store.flat ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 0, trailing: 16))
                     } else {
                         // A folder's own name does not say where it is, and
                         // two folders called 「2026」 look identical at the
