@@ -468,6 +468,9 @@ Taketan が頼んだことが、いまも満たされているか。`python3 scr
 | 516 | 2026-09-12 | 電話のエクスポートも窓と同じ三つ（Markdown・HTML・PDF）に | `Exporting`（core の `html` → 窓の `onePage` と同じ CSS・絵は `data:` で一枚の中へ・PDF は `UIPrintPageRenderer` で A4 の頁に）。ノートの ⋯ →「エクスポート」が三択に | `ios/Cian/Exporting.swift ~ static func pdf` |
 | 517 | 2026-09-12 | 「ambər フォルダ以外のノートを開く」を「ほかの場所のノートを開く」に。スマホ版にも置く（本人・絵で決めた） | 窓: 命令の名前と帯の字。電話: 設定に一行 →「ファイル」で .md を一本選ぶ → `NotesStore.openOutside`（鍵を開けたまま・一覧には入れない）→ 開いた札の上に「ほかの場所のノートを、一時的に開いています」の帯。エクスポート／インポートも対の言葉に統一（ノートを取り込む → インポート、Web から取り込む → Web からインポート） | `ios/Cian/NotesStore.swift ~ func openOutside` |
 | 518 | 2026-09-12 | パソコン版のノートの上の帯に、最大化・最小化の印を（本人「めっちゃ使う気がする」）。前に見た／次に見たノートは窓からも外す。「全部まとめて見る」は「すべてのノート」と同じなので消す | `#zenbtn`（⤢／⤡・F12 と同じ `setZen`）。`back`／`fwd` の命令と ⌘← ⌘→ を外した。電話の並び順の献立から「全部まとめて見る」を外した。ぶつかりの一つずつも「こちらの記載を反映する／〇〇の記載を反映する／両方を反映する」。テーマの脚註の cian の一文は消した | `gui/index.html ~ id="zenbtn"` |
+| 519 | 2026-09-12 | Win 版は exe、Mac 版は app で配れるように。cian・crmaine の Electron の組み方を採る | `scripts/pack.js`（網に出ない・Electron の一式を写して名前と絵と中身を差し替え・出口で数える）。`--mac` → `dist/ambər.app`（署名はその場のもの）＋zip、`--win --electron … --server …` → `dist/amber-win-x64/amber.exe` ＋zip（絵は Windows で rcedit）。`resources/app/` は `gui/`＋`packaging/`＋エンジン（`gui/` の隣に置くと engine.js が最初に見る） | `scripts/pack.js ~ function fillApp` |
+| 520 | 2026-09-12 | OneNote から出した Markdown を、セクションなどのフォルダ構成ごと ambər に | `scripts/onenote2md.py`（本人が別の席で作ったものを、ambər の保存ディレクトリとして読める形に改修）: 同じページは同じファイル・変わっていなければ書かない・LF・SharePoint で通る名前・絵は隣の `attachments/`・`--prune`・`--flatten-groups`。読ませ方は ⚙「保存ディレクトリの追加・変更・削除」で出力先を足す（同期しない） | `scripts/onenote2md.py ~ def place_for` |
+| 521 | 2026-09-12 | 家族とノートとカレンダーを共有したい（自分の端末をまたぐのは大満足） | まず土台の一つ: Drive の一覧は **自分のものだけ**（`ownedByMe`）── 家族が共有したノートが自分の ambər に紛れ込まないように。共有の形は案を見せて決める（共有フォルダを保存ディレクトリに、が本命） | `gui/drive.js ~ ownedByMe === false` |
 
 ## 増やすとき
 

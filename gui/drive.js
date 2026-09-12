@@ -348,11 +348,16 @@ function createDrive(opts) {
         let pageToken = '';
         do {
             const got = await api('/drive/v3/files?q=' + q(`appProperties has { key='amber' and value='note' } and trashed=false`)
-                + '&fields=nextPageToken,files(id,name,md5Checksum,appProperties)&pageSize=1000'
+                + '&fields=nextPageToken,files(id,name,md5Checksum,appProperties,ownedByMe)&pageSize=1000'
                 + (pageToken ? '&pageToken=' + q(pageToken) : ''));
             for (const f of got.files || []) {
                 const ap = f.appProperties || {};
                 if (!ap.rel) continue;
+                // **自分のものだけ。** appProperties は同じアプリなら人をまたいで見えるので、
+                // 家族が共有してくれたノートまで「向こうにある」と数えてしまう ── 同じ道に
+                // 下りてきて、こちらの上げは自分の ambər へ行く（二つに割れる）。家族と
+                // 分けるのは別の道（共有フォルダを保存ディレクトリにする・依頼 521 で）。
+                if (f.ownedByMe === false) continue;
                 out.push({ rel: ap.rel, id: f.id, tag: ap.print || f.md5Checksum || '', by: ap.by || '' });
             }
             pageToken = got.nextPageToken || '';
