@@ -5,6 +5,7 @@
 //     amber-cal add 題 2026-09-11 11:00 足す（時刻は省ける＝終日）
 //     amber-cal rename <id> 新しい題    直す
 //     amber-cal drop <id>               消す
+//     amber-cal notes <id> <メモ>       メモ欄を書き換える（タグの置き場所）
 //
 // **なぜ別の実行ファイルなのか。** Electron から EventKit は呼べない。
 // AppleScript で「カレンダー」アプリに話しかける道もあるが、あちらは
@@ -130,6 +131,9 @@ case "add":
             e.endDate = start.addingTimeInterval(3600)
         }
     }
+    // メモ（依頼 523）── 足すときからタグを持てる。いちばん後ろに置くのは、
+    // いままでの呼び方（題・日・開始・終了）を一つも変えないため。
+    if args.count >= 6 && !args[5].isEmpty { e.notes = args[5] }
     do { try store.save(e, span: .thisEvent) } catch { no(error.localizedDescription) }
     out(["ok": true, "id": e.eventIdentifier ?? ""])
 
@@ -139,6 +143,19 @@ case "rename":
         no("その予定は、もうありません")
     }
     e.title = args[2]
+    do { try store.save(e, span: .thisEvent) } catch { no(error.localizedDescription) }
+    out(["ok": true])
+
+// **メモ欄を丸ごと入れ替える。** タグの行だけを差し替えた字は、呼ぶ側が
+// core（`caltag::set`）に作らせて持ってくる ── ここは OS への口だけで、
+// 「どこを書き換えるか」の判断は持たない。
+case "notes":
+    need()
+    guard args.count >= 3, let e = store.event(withIdentifier: args[1]) else {
+        no("その予定は、もうありません")
+    }
+    // **空にもできる。** タグを全部外すと、メモが空文字になることがある。
+    e.notes = args[2].isEmpty ? nil : args[2]
     do { try store.save(e, span: .thisEvent) } catch { no(error.localizedDescription) }
     out(["ok": true])
 
@@ -163,5 +180,9 @@ func one(_ e: EKEvent, _ day: String, _ at: String?, _ to: String?) -> [String: 
         "id": e.eventIdentifier ?? "",
         "place": e.location ?? "",
         "from": e.calendar?.title ?? "",
+        // **メモ欄をそのまま渡す。** 誰の用事かのタグはこの中の最後の行に
+        // 置いてあるが、**それを読む判断は core（`caltag`）の仕事** ──
+        // ここで切り出すと、窓と電話で二つの読み方ができる。
+        "notes": e.notes ?? "",
     ]
 }

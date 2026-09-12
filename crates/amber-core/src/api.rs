@@ -769,6 +769,32 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
 
         // フォルダに付けられる色。**並びは core が持つ** ── 窓と電話に
         // 同じ表を書いていた頃、十一色のうち六色がずれていた。
+        // **予定のメモ欄のタグ**（依頼 523）── 誰の用事かは、メモの
+        // いちばん最後のタグだけの行に置く。**読むのも書くのもここ一枚**で、
+        // 窓（`amber-cal` 越し）と電話（EventKit）が同じ答えになる。
+        "caltag" => {
+            let notes = p["notes"].as_str().unwrap_or_default();
+            Ok(serde_json::json!({
+                "tags": crate::caltag::tags(notes),
+                "body": crate::caltag::body(notes),
+            }))
+        }
+
+        // タグを書き換えた**メモ欄ぜんぶ**を返す。人の文章には触らない。
+        // 書き戻すのは呼ぶ側（`amber-cal notes <id> <字>` / EventKit）。
+        "caltagset" => {
+            let notes = p["notes"].as_str().unwrap_or_default();
+            let tags: Vec<String> = p["tags"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|t| t.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(serde_json::json!({ "notes": crate::caltag::set(notes, &tags) }))
+        }
+
         "palette" => Ok(serde_json::json!({
             "colors": crate::notebook::PALETTE
                 .iter()
@@ -1746,6 +1772,37 @@ mod tests {
         // 書く側も同じ1か所から。
         let out = call("paint", &serde_json::json!({ "text": "ここ", "color": "#d9822b" })).unwrap();
         assert_eq!(out["text"], "<span style=\"color:#d9822b\">ここ</span>");
+    }
+
+    #[test]
+    fn the_tag_line_of_an_event_goes_in_and_comes_back() {
+        // **口が繋がっていることを見る。** 判断（`caltag`）の試験は
+        // あちらにある ── ここで見たいのは、窓と電話が呼ぶ名前で
+        // 同じ答えが返ってくることだけ。
+        let memo = "保険証を忘れずに。\n\n#太郎 #次郎";
+        let got = call("caltag", &serde_json::json!({ "notes": memo })).unwrap();
+        assert_eq!(got["tags"][0], "太郎");
+        assert_eq!(got["tags"][1], "次郎");
+        assert_eq!(got["body"], "保険証を忘れずに。");
+
+        let out = call(
+            "caltagset",
+            &serde_json::json!({ "notes": memo, "tags": ["花子"] }),
+        )
+        .unwrap();
+        assert_eq!(out["notes"], "保険証を忘れずに。\n\n#花子");
+
+        // 空で呼べば、タグ行ごと消える（人の文章はそのまま）。
+        let none = call(
+            "caltagset",
+            &serde_json::json!({ "notes": memo, "tags": [] }),
+        )
+        .unwrap();
+        assert_eq!(none["notes"], "保険証を忘れずに。");
+
+        // メモが無い予定でも落ちない。
+        let empty = call("caltag", &serde_json::json!({})).unwrap();
+        assert!(empty["tags"].as_array().unwrap().is_empty());
     }
 
     #[test]
