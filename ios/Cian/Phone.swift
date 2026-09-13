@@ -89,7 +89,11 @@ enum Phone {
             path: e.eventIdentifier ?? "",
             kind: "here",
             place: e.location ?? "",
-            from: e.calendar?.title ?? "")
+            from: e.calendar?.title ?? "",
+            // **メモ欄をそのまま持ってくる**（依頼 547）── どこがタグ行かの
+            // 判断はここでしない。切り出しは core に一枚だけ置く（写すと、
+            // 窓と電話で二つの読み方ができる）。
+            notes: e.notes ?? "")
     }
 
     /// 予定を登録する。**書ける先が無ければ、そう言う。**

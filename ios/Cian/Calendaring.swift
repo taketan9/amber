@@ -25,6 +25,10 @@ struct Calendaring: View {
         /// よその予定の場所と、どの予定表から来たか。
         var place: String = ""
         var from: String = ""
+        /// 予定のメモ欄（依頼 547）。**だれの用事かは、その最後の行にある。**
+        var notes: String = ""
+        /// メモ欄から読んだ、だれの用事か。切り出すのは core（`caltag`）。
+        var tags: [String] = []
         var id: String { day + (at ?? "") + path + kind + title }
         var isPlan: Bool { kind != "note" }
         var isAway: Bool { kind == "away" }
@@ -240,6 +244,26 @@ struct Calendaring: View {
     /// 回る形の弱いところは「ほかに何が選べるか」が押すまで分からないこと
     /// なので、**長押しで三つ出す** ── 押し先が一つで済む軽さは残したまま、
     /// 全部を見る道も残す。
+    /// **一人なら、その色。二人以上なら、帯を分ける**（依頼 547・窓の
+    /// `tagPaint` と同じ決まり）── 二人の用事は二人のものなので、どちらか
+    /// 片方の色にしてしまうと嘘になる。タグが無ければ何も差さず、
+    /// いままでの出どころ別の色のままにする。
+    private func tagTints(_ s: Slot) -> [Color] {
+        s.tags.compactMap { Color(hex: CalPrefs.laneColor($0, among: CalPrefs.tagsKnown)) }
+    }
+
+    /// タグの色の帯（予定の左に立てる）。色が無ければ何も出さない。
+    @ViewBuilder private func tagBand(_ s: Slot, width: CGFloat, height: CGFloat) -> some View {
+        let tints = tagTints(s)
+        if !tints.isEmpty {
+            VStack(spacing: 0) {
+                ForEach(Array(tints.enumerated()), id: \.offset) { _, c in c }
+            }
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: width / 2))
+        }
+    }
+
     private static let sides = ["both", "me", "group"]
     private func sideWord(_ k: String) -> String {
         ["both": "両方", "me": "自分だけ", "group": "グループ"][k] ?? "両方"
@@ -366,15 +390,21 @@ struct Calendaring: View {
                 ForEach(mine.prefix(2)) { s in
                     // **塗ってあるものが、グループに見えている予定**（依頼 530）。
                     // 窓とまったく同じ決まり ── 自分だけの予定は塗らない。
-                    Text(s.title).font(.system(size: 8)).lineLimit(1)
-                        .foregroundStyle(s.isAway ? Color.blue
-                            : (s.isPhone ? CalPrefs.hereTint
-                               : (s.isPlan ? Color.accentColor : Color.secondary)))
-                        .padding(.horizontal, CalPrefs.inGroup(s) ? 3 : 0)
-                        .padding(.vertical, CalPrefs.inGroup(s) ? 1 : 0)
-                        .background(CalPrefs.inGroup(s)
-                            ? CalPrefs.hereTint.opacity(0.22) : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    // だれの用事かが分かっているものは、**その色の帯を左に**
+                    // 立てる（依頼 547）── 升目は字が 8pt なので、色を字に
+                    // 乗せると読めなくなる。
+                    HStack(spacing: 2) {
+                        tagBand(s, width: 2, height: 9)
+                        Text(s.title).font(.system(size: 8)).lineLimit(1)
+                            .foregroundStyle(s.isAway ? Color.blue
+                                : (s.isPhone ? CalPrefs.hereTint
+                                   : (s.isPlan ? Color.accentColor : Color.secondary)))
+                    }
+                    .padding(.horizontal, CalPrefs.inGroup(s) ? 3 : 0)
+                    .padding(.vertical, CalPrefs.inGroup(s) ? 1 : 0)
+                    .background(CalPrefs.inGroup(s)
+                        ? CalPrefs.hereTint.opacity(0.22) : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
                 }
                 if mine.count > 2 {
                     Text("ほか \(mine.count - 2)").font(.system(size: 8)).foregroundStyle(.tertiary)
@@ -473,14 +503,18 @@ struct Calendaring: View {
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     // 塗ってあるものが、グループに見えている予定（依頼 530）。
-                    Text(s.title)
-                        .foregroundStyle(s.isAway ? Color.blue
-                            : (s.isPhone ? CalPrefs.hereTint : Color.primary))
-                        .padding(.horizontal, CalPrefs.inGroup(s) ? 5 : 0)
-                        .padding(.vertical, CalPrefs.inGroup(s) ? 2 : 0)
-                        .background(CalPrefs.inGroup(s)
-                            ? CalPrefs.hereTint.opacity(0.18) : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                    // だれの用事かは、左の帯の色で（依頼 547）。
+                    HStack(spacing: 6) {
+                        tagBand(s, width: 3, height: 16)
+                        Text(s.title)
+                            .foregroundStyle(s.isAway ? Color.blue
+                                : (s.isPhone ? CalPrefs.hereTint : Color.primary))
+                    }
+                    .padding(.horizontal, CalPrefs.inGroup(s) ? 5 : 0)
+                    .padding(.vertical, CalPrefs.inGroup(s) ? 2 : 0)
+                    .background(CalPrefs.inGroup(s)
+                        ? CalPrefs.hereTint.opacity(0.18) : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
                     // **道は出さない** ── 読めない長さになるうえ、知りたいのは
                     // 中身のほう。自分のノートは一行目、よその予定は場所と出どころ。
                     if s.noNote {
@@ -681,7 +715,7 @@ struct Calendaring: View {
                 // この iPhone の予定表（許可されているときだけ）。
                 all += Phone.month(y, m)
             }
-            slots = all
+            slots = readTags(all)
         } catch {
             trouble = error.localizedDescription
         }
@@ -695,6 +729,25 @@ struct Calendaring: View {
                     < ($1.day, $1.at == nil ? 1 : 0, $1.at ?? "", $1.title)
             }
         }
+    }
+
+    /// **だれの用事かを、メモ欄から読む**（依頼 547・窓の `readCalTags` と同じ）。
+    ///
+    /// 訊くのはグループカレンダーの予定だけ ── 自分だけの予定に人の名前は
+    /// 入らないし、よその予定表のメモまで覗く筋合いが無い。**一度にまとめて
+    /// 訊く**（`caltag` は字の一覧を受ける）── 予定の数だけ扉を叩かない。
+    private func readTags(_ all: [Slot]) -> [Slot] {
+        let want = all.indices.filter { CalPrefs.inGroup(all[$0]) && !all[$0].notes.isEmpty }
+        guard !want.isEmpty else { return all }
+        guard let got = try? Cian.call("caltag", ["notes": want.map { all[$0].notes }]),
+              let each = got["each"] as? [[String: Any]] else { return all }
+        var out = all
+        for (i, k) in want.enumerated() where i < each.count {
+            out[k].tags = each[i]["tags"] as? [String] ?? []
+        }
+        // 見た名前は憶える ── 次に予定を登録するとき、打たずに選べる。
+        for s in out { for t in s.tags { CalPrefs.rememberTag(t) } }
+        return out
     }
 
     /// 足す。**この iPhone の予定表が使えるならそちらへ**（依頼 460）──
@@ -808,6 +861,11 @@ struct EventForm: View {
     @Binding var toGroup: Bool?
     @Binding var tags: [String]
     let add: () -> Void
+    /// **選びは、この小窓が持つ**（依頼 547）── `@Binding` を直に触ると、
+    /// 一つ選ぶたびに外の画面まで描き直されて、選んだ印が消える（画面で出た）。
+    /// 外に渡すのは「登録する」を押したときだけ。
+    @State private var toG: Bool?
+    @State private var who: [String] = []
     @Environment(\.dismiss) private var dismiss
     @State private var allDay = false
     @State private var start = "09:00"
@@ -832,9 +890,7 @@ struct EventForm: View {
                 // グループカレンダーが無ければ、選ぶものが無いので出さない。
                 if canGroup {
                     Section("どこに入れる") {
-                        Picker("どこに入れる", selection: Binding(
-                            get: { toGroup }, set: { toGroup = $0 })
-                        ) {
+                        Picker("どこに入れる", selection: $toG) {
                             Text("自分だけ").tag(Bool?.some(false))
                             Text("グループと共有").tag(Bool?.some(true))
                         }
@@ -843,19 +899,24 @@ struct EventForm: View {
                     }
                     // **だれの用事かは、グループに出すときだけ訊く** ── 誰にも
                     // 見えない予定に、誰の用事かを書く意味がない。
-                    if toGroup == true {
+                    if toG == true {
                         Section("だれの") {
                             ForEach(known, id: \.self) { t in
                                 Button {
-                                    if let i = tags.firstIndex(of: t) { tags.remove(at: i) } else { tags.append(t) }
+                                    if let i = who.firstIndex(of: t) { who.remove(at: i) } else { who.append(t) }
                                 } label: {
                                     HStack {
                                         Circle().fill(Color(hex: CalPrefs.laneColor(t, among: known)) ?? .gray)
                                             .frame(width: 10, height: 10)
                                         Text(t).foregroundStyle(.primary)
                                         Spacer()
-                                        if tags.contains(t) { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                                        if who.contains(t) { Image(systemName: "checkmark").foregroundStyle(.tint) }
                                     }
+                                    // **行のどこを押しても効く。** `.plain` に
+                                    // すると押せるのは字のところだけになり、
+                                    // 名前の右の空きを押しても何も起きない
+                                    // （画面で出た ── 押したのに付かなかった）。
+                                    .contentShape(Rectangle())
                                 }
                                 // **選んでいない名前を、選んだ色で出さない** ──
                                 // `Button` の字は既定で琥珀になるので、全部が
@@ -892,7 +953,7 @@ struct EventForm: View {
                     // 何も起きない」になる。
                     Button("登録する") { go() }
                         .bold()
-                        .disabled(canGroup && toGroup == nil)
+                        .disabled(canGroup && toG == nil)
                 }
             }
             .alert("だれの用事ですか", isPresented: $naming) {
@@ -903,7 +964,7 @@ struct EventForm: View {
                     guard !name.isEmpty, !name.contains(" "), !name.contains("　") else { return }
                     CalPrefs.rememberTag(name)
                     known = CalPrefs.tagsKnown
-                    if !tags.contains(name) { tags.append(name) }
+                    if !who.contains(name) { who.append(name) }
                 }
             }
             .onAppear {
@@ -912,8 +973,8 @@ struct EventForm: View {
                 till = end.isEmpty ? Self.plus(start, 60) : end
                 known = CalPrefs.tagsKnown
                 canGroup = toPhone && !groupName.isEmpty && Phone.calendars.contains(groupName)
-                toGroup = nil
-                tags = []
+                toG = nil
+                who = []
             }
         }
     }
@@ -924,6 +985,8 @@ struct EventForm: View {
         if !allDay && till <= start { said = "終了は開始より後にしてください"; return }
         at = allDay ? "" : start
         end = allDay ? "" : till
+        toGroup = toG
+        tags = who
         add()
         dismiss()
     }
