@@ -2,7 +2,8 @@
 //
 //     amber-cal ask                     許可を訊く
 //     amber-cal month 2026 9            ひと月ぶん（JSON）
-//     amber-cal add 題 2026-09-11 11:00 足す（時刻は省ける＝終日）
+//     amber-cal add 題 2026-09-11 11:00 [終了] [メモ] [予定表名]
+//                                       足す（時刻は省ける＝終日）
 //     amber-cal rename <id> 新しい題    直す
 //     amber-cal drop <id>               消す
 //     amber-cal notes <id> <メモ>       メモ欄を書き換える（タグの置き場所）
@@ -106,7 +107,18 @@ case "month":
 case "add":
     need()
     guard args.count >= 3 else { no("題と日が要ります") }
-    guard let into = store.defaultCalendarForNewEvents else {
+    // **どの予定表に書くか**（依頼 544）── 名前で指す。グループカレンダーは
+    // 端末に降りてきた一枚なので、名前でしか指せない（Google 側の id は、
+    // 端末に降りた時点で別の世界のものになっている）。
+    // 言われなければ、いままでどおり既定の予定表へ。
+    let wantCal: String? = args.count >= 7 && !args[6].isEmpty ? args[6] : nil
+    var into: EKCalendar? = store.defaultCalendarForNewEvents
+    if let w = wantCal {
+        into = store.calendars(for: .event).first { $0.title == w }
+        if into == nil { no("「\(w)」という予定表が、この Mac にありません") }
+        if into?.allowsContentModifications == false { no("「\(w)」には書けません") }
+    }
+    guard let into else {
         no("書ける予定表がこの Mac にありません")
     }
     let at: String? = args.count >= 4 && !args[3].isEmpty ? args[3] : nil

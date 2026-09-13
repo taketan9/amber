@@ -932,6 +932,29 @@ body.vim #vim { display: block; }
   -webkit-app-region: no-drag;
 }
 #evform[hidden], #newform[hidden] { display: none !important; }
+/* **押せないボタンは、押せないように見せる**（依頼 544）── 行き先を選ぶまで
+   登録できないのに、見た目が変わらないと「押しても何も起きない」になる。 */
+#evform .acts button:disabled { background: var(--line-2); border-color: var(--line);
+  color: var(--ink-3); cursor: default; }
+/* どこに入れるか（依頼 544）── 二つ並べて、選ばれたほうだけ色が付く。 */
+#evform .pick2 { display: flex; gap: 8px; }
+#evform .pick2 button { flex: 1; border: 1px solid var(--line); border-radius: 10px;
+  padding: 9px 10px; font-size: 13px; color: var(--ink-2); background: var(--paper); }
+#evform .pick2 button:hover { background: var(--hover); }
+/* だれの用事か（依頼 544）── 色の丸を添えて、選んだものだけ色を付ける。
+   札の形は「新しいノート」の小窓と同じ ── 同じものは同じ形にする。 */
+#evform .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#evform #evtags .chip {
+  display: inline-flex; align-items: center; gap: 6px; --c: var(--ink-3);
+  font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line);
+  color: var(--ink-2); background: var(--bg);
+}
+#evform #evtags .chip:hover { background: var(--hover); }
+#evform #evtags .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); font-style: normal; }
+#evform #evtags .chip.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 20%, var(--paper)); color: var(--ink); font-weight: 600; }
+#evform #evtags .chip.add { color: var(--brand-s); font-weight: 600; }
+#evform .pick2 button.on { border-color: var(--amber-deep);
+  background: color-mix(in srgb, var(--amber) 26%, var(--paper)); color: var(--ink); font-weight: 700; }
 #evform .box, #newform .box {
   width: min(440px, 88vw); background: var(--paper); border: 1px solid var(--line);
   border-radius: 13px; box-shadow: 0 18px 48px rgba(0,0,0,.3); padding: 14px 16px 12px;
@@ -1746,6 +1769,20 @@ body.dropping::after {
        打たせず選ばせる。 -->
   <div id="evform" hidden><div class="box">
     <div class="hd"></div>
+    <!-- **どこに入れるかを、いちばん先に選ばせる**（依頼 544・本人が決めた丙）。
+         どちらも選ばれていない状態で開き、選ぶまで登録できない ── 既定を
+         持たせると、その既定のまま押した予定が出る。出す・出さないは、
+         押し間違えたときに戻す道が無いほうの話なので、毎回選ばせる。
+         グループカレンダーが無ければ、選ぶものが無いので出さない。 -->
+    <div class="f" id="evwhere" hidden><span>どこに入れる</span>
+      <div class="pick2">
+        <button data-to="me">自分だけ</button>
+        <button data-to="group">グループと共有</button>
+      </div>
+    </div>
+    <div class="f" id="evwho" hidden><span>だれの</span>
+      <div id="evtags" class="chips"></div>
+    </div>
     <label class="f"><span>タイトル</span><input id="evtitle" type="text" spellcheck="false"></label>
     <label class="chk"><input id="evall" type="checkbox"><span>終日</span></label>
     <div class="row">

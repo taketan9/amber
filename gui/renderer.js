@@ -7635,6 +7635,19 @@ function tagColor(t) {
     return LANE_COLORS[tagOrder.indexOf(t) % LANE_COLORS.length];
 }
 
+/// この端末が見たことのあるタグ（依頼 544）。**選ばせるために憶えておく** ──
+/// 毎回名前を打たせない。予定から読めたものと、人が足したものの両方。
+let tagsKnown = [];
+const tagsSeen = () => {
+    const out = tagsKnown.slice();
+    for (const s of calSlots) for (const t of s.tags || []) if (!out.includes(t)) out.push(t);
+    return out;
+};
+function rememberTag(t) {
+    if (!tagsKnown.includes(t)) tagsKnown.push(t);
+    window.amber.remember({ tagsKnown });
+}
+
 /// タグの色を、予定の一行に差す（依頼 539）。
 ///
 /// **一人なら、その色。二人以上なら、左の帯を分ける** ── 二人の用事は
@@ -8395,6 +8408,54 @@ function askEvent(head, at0) {
         return String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
     };
     box.querySelector('.hd').textContent = head;
+    // **どこに入れるか**（依頼 544）── グループカレンダーが無ければ出さない
+    // （選ぶものが無い）。あるときは、どちらも選ばれていない状態で開く。
+    const where = el('evwhere');
+    const who = el('evwho');
+    let toGroup = null;
+    let picked = [];
+    where.hidden = !groupCal;
+    who.hidden = true;
+    const paint = () => {
+        for (const b of where.querySelectorAll('button')) {
+            b.classList.toggle('on', toGroup !== null && b.dataset.to === (toGroup ? 'group' : 'me'));
+        }
+        // **誰の用事かは、グループに出すときだけ訊く** ── 誰にも見えない
+        // 予定に、誰の用事かを書く意味がない。
+        who.hidden = !toGroup;
+        if (toGroup) drawEvTags();
+        // 選ぶまで登録できない（丙）。
+        el('evok').disabled = !!groupCal && toGroup === null;
+    };
+    function drawEvTags() {
+        const known = tagsSeen();
+        el('evtags').innerHTML = known
+            .map((t) => '<button class="chip' + (picked.includes(t) ? ' on' : '') + '"'
+                + ' data-tag="' + escapeAttr(t) + '" style="--c:' + escapeAttr(tagColor(t)) + '">'
+                + '<i class="dot"></i>' + escapeHtml(t) + '</button>').join('')
+            + '<button class="chip add" data-tag=" new">＋ 足す</button>';
+    }
+    el('evtags').onclick = async (e) => {
+        const b = e.target.closest('.chip');
+        if (!b) return;
+        const t = b.dataset.tag;
+        if (t === ' new') {
+            const got = await askText('だれの用事ですか', '', '名前を入力してください（例: 太郎）');
+            const name = (got || '').trim();
+            if (!name || name.includes(' ')) return;
+            if (!picked.includes(name)) picked.push(name);
+            rememberTag(name);
+        } else {
+            picked = picked.includes(t) ? picked.filter((x) => x !== t) : picked.concat(t);
+        }
+        drawEvTags();
+    };
+    where.onclick = (e) => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        toGroup = b.dataset.to === 'group';
+        paint();
+    };
     title.value = '';
     all.checked = false;
     start.value = at0 || '';
@@ -8402,6 +8463,7 @@ function askEvent(head, at0) {
     err.hidden = true;
     const gate = () => { start.disabled = all.checked; end.disabled = all.checked; };
     gate();
+    paint();
     all.onchange = () => { gate(); err.hidden = true; };
     start.onchange = () => { if (start.value) end.value = plus(start.value, 60); err.hidden = true; };
     const shut = (v) => {
@@ -8417,7 +8479,8 @@ function askEvent(head, at0) {
             if (!end.value) { err.textContent = '終了の時刻を選んでください'; err.hidden = false; end.focus(); return; }
             if (end.value <= start.value) { err.textContent = '終了は開始より後にしてください'; err.hidden = false; end.focus(); return; }
         }
-        shut({ title: t, allDay: all.checked, start: all.checked ? '' : start.value, end: all.checked ? '' : end.value });
+        shut({ title: t, allDay: all.checked, start: all.checked ? '' : start.value,
+               end: all.checked ? '' : end.value, toGroup: !!toGroup, tags: picked.slice() });
     };
     el('evok').onclick = go;
     el('evcancel').onclick = () => shut(null);
@@ -8443,10 +8506,24 @@ async function calAdd(day, at0) {
     if (!ev) return;
     const title = ev.title;
     if (hereOn) {
-        const got = await window.amber.cal(['add', title, day, ev.start, ev.end]);
-        if (!got || got.error) { say('足せません: ' + (got?.error || '返事がありません')); return; }
+        // **選ばれた行き先に入れる**（依頼 544）。グループなら、そのカレンダーへ
+        // 書き、誰の用事かをメモ欄の最後の行に置く（`caltagset` が字を作る）。
+        let notes = '';
+        if (ev.toGroup && ev.tags.length) {
+            try {
+                const made = await window.amber.call('caltagset', { notes: '', tags: ev.tags });
+                notes = (made && made.notes) || '';
+            } catch { /* タグが書けなくても、予定そのものは足す */ }
+        }
+        const into = ev.toGroup && groupCal ? groupCal.name : '';
+        const got = await window.amber.cal(['add', title, day, ev.start, ev.end, notes, into]);
+        if (!got || got.error) {
+            say('登録できませんでした: ' + ((got && got.error) || 'カレンダーから応答がありません'));
+            return;
+        }
         await drawCal();
-        say('「' + title + '」を ' + dayName(day) + ' に登録しました');
+        say('「' + title + '」を ' + dayName(day) + ' に登録しました'
+            + (ev.toGroup ? '（グループと共有します）' : ''));
         return;
     }
     // ノートに持てるのは始まりだけ（`remind:`）── 終わりの時刻はノートには書かない。
@@ -11819,6 +11896,7 @@ const escapeAttr = escapeHtml;
     groupCal = saved.group && saved.group.id ? saved.group : null;
     if (['me', 'group', 'both'].includes(saved.calSide)) calSide = saved.calSide;
     groupAsked = !!saved.groupAsked;
+    if (Array.isArray(saved.tagsKnown)) tagsKnown = saved.tagsKnown.filter((t) => typeof t === 'string');
     if (Array.isArray(saved.calHide)) calHide = saved.calHide.filter((k) => typeof k === 'string');
     if (saved.calWeekend === false) calWeekend = false;
     if (typeof saved.calHereColor === 'string' && /^#[0-9a-f]{6}$/i.test(saved.calHereColor)) calHereColor = saved.calHereColor;
