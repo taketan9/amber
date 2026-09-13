@@ -288,9 +288,107 @@ jobs:
           path: out/amber-gui.zip
           if-no-files-found: error
 
+  # **展開するだけで動く Windows の一枚**（依頼 553）。
+  #
+  # 配布先は**ネットに出られない会社の端末**で、そこには git も gh も無く、
+  # 落とせるのは GitHub の Release の zip だけ ── なので「持ち込んで組む」
+  # ではなく、**組んだものを置く**。組む道具（`scripts/pack.js`）は手元でも
+  # ここでも同じものを通る。
+  #
+  # ここでしか組めない理由が二つある:
+  #
+  # - **`gui/vendor/` は git に入っていない**（`npm install` が置いたものを
+  #   写す形）ので、網の外では作れない
+  # - **exe の絵と名前は PE のリソース**なので、`rcedit` を Windows の上で
+  #   掛けるしかない
+  windows:
+    needs: [version, build]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # エンジンは matrix の側が組んで置いたもの ── ここで組み直さない
+      # （二度組むと、配る一枚と資材の一枚が別物になりうる）。
+      - uses: actions/download-artifact@v4
+        with:
+          name: amber-server-win-x64.exe
+          path: engine
+
+      # **`npm ci` で積む**（`screen` と同じ理由 ── lock を書き換えない）。
+      - name: エディタと図を積む
+        working-directory: gui
+        run: |
+          npm ci --no-audit --no-fund
+          node vendor.js
+
+      # **Electron の版は lock から取る。** ここに数字を書くと、`package.json`
+      # を上げた日にここだけ古いまま残り、**画面と本体の版が違う一枚**ができる
+      # ── その食い違いは、配ったあとにしか出ない。
+      - name: Electron を落として展開する
+        shell: pwsh
+        run: |
+          $v = (Get-Content gui/node_modules/electron/package.json | ConvertFrom-Json).version
+          Write-Host "Electron $v"
+          $url = "https://github.com/electron/electron/releases/download/v$v/electron-v$v-win32-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile electron.zip
+          Expand-Archive electron.zip -DestinationPath electron-dist
+          if (-not (Test-Path electron-dist/electron.exe)) { throw "electron.exe がありません" }
+
+      - name: rcedit を落とす
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe `
+            -OutFile rcedit-x64.exe
+
+      - name: 組む
+        run: >
+          node scripts/pack.js --out dist --platform win32
+          --electron electron-dist
+          --engine engine/amber-server-win-x64.exe
+          --rcedit rcedit-x64.exe
+          --zip
+
+      # **出口で数える。** `pack.js` も中身を数えるが、こちらは
+      # **Windows でしか分からないところ**を見る ── 絵と名前が焼けたか。
+      - name: 焼けたか、数えたか
+        shell: pwsh
+        run: |
+          $exe = Get-Item dist/amber-win-x64/amber.exe
+          $name = $exe.VersionInfo.ProductName
+          Write-Host "ProductName: $name"
+          if ($name -ne 'ambər') { throw "exe の名前が焼けていません: $name" }
+          $zip = Get-ChildItem dist/amber-win-x64-*.zip
+          if (-not $zip) { throw "zip がありません" }
+          Write-Host ("{0}  {1:N1} MB" -f $zip.Name, ($zip.Length / 1MB))
+          # 展開するだけで動く一枚なので、**要るものが中に居るか**を見る。
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          $names = $z.Entries | ForEach-Object { $_.FullName }
+          $z.Dispose()
+          foreach ($need in @(
+              'amber-win-x64/amber.exe',
+              'amber-win-x64/resources/app/gui/main.js',
+              'amber-win-x64/resources/app/gui/amber-server.exe',
+              'amber-win-x64/resources/app/gui/vendor/monaco/vs/loader.js',
+              'amber-win-x64/resources/app/gui/vendor/mermaid/mermaid.min.js',
+              'amber-win-x64/resources/app/packaging/welcome',
+              'amber-win-x64/はじめにお読みください.txt')) {
+            if (-not ($names | Where-Object { $_ -like "$need*" })) { throw "zip に入っていません: $need" }
+          }
+          Write-Host ("中身 {0} 件" -f $names.Count)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amber-win-x64.zip
+          path: dist/amber-win-x64-*.zip
+          if-no-files-found: error
+
   # **札を押したときだけ出す。** 手で走らせた回は資材だけ残る。
   publish:
-    needs: [build, screen]
+    needs: [build, screen, windows]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
