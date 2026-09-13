@@ -37,10 +37,19 @@ struct Calendaring: View {
 
     /// 何を出しているか（依頼 530）── `me` / `group` / `both`。
     @State private var side = CalPrefs.side
+    /// グループカレンダーの名前（依頼 534）。**`@State` で持つ。**
+    ///
+    /// `CalPrefs`（`UserDefaults`）を画面から直に読んでいたせいで、作った
+    /// 直後に「グループへ招待」が出てこなかった ── **SwiftUI に「変わった」
+    /// が伝わらない**ので、別の画面へ行って戻るまで描き直されない。
+    /// 憶える先は `CalPrefs` のままで、**画面が見るのはこちら**。
+    @State private var groupName = CalPrefs.groupName
     /// グループを作る前の確認と、作っているあいだ（依頼 532）。
     @State private var making = false
     @State private var busy = false
     @State private var made = ""
+    /// 招待の行き方を出しているところ（依頼 534）。
+    @State private var inviting = false
 
     /// **開くたびに今月へ戻さない。** 先の予定を見にきた人を、
     /// 閉じて開くたびに今日へ連れ戻さない。
@@ -94,7 +103,7 @@ struct Calendaring: View {
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: mode) { _, now in CalPrefs.view = now; count() }
-                if !CalPrefs.groupName.isEmpty { sidePill }
+                if !groupName.isEmpty { sidePill }
             }
             .padding(.horizontal, 12).padding(.top, 6)
             if mode == "month" {
@@ -124,6 +133,18 @@ struct Calendaring: View {
             Text("「ambər グループ」というカレンダーが一枚できます。"
                  + "そこに入れた予定だけが、招待した人に見えます。\n\n"
                  + "いまの予定は一つも動きません。")
+        }
+        // **行き方を言う**（依頼 534）── iPhone では amber の中から招待できない。
+        .alert("グループへ招待", isPresented: $inviting) {
+            Button("Google カレンダーを開く") { openGoogleCalendar() }
+            Button("閉じる", role: .cancel) { }
+        } message: {
+            Text("いまは Google カレンダーのアプリで招待します。\n\n"
+                 + "1. 左上のメニュー → 設定\n"
+                 + "2. 「\(groupName)」を選ぶ\n"
+                 + "3. 「ユーザーまたはグループを追加」\n\n"
+                 + "amber の中で招待できるようにするには Google の審査が要ります。"
+                 + "一般公開のときに通します。")
         }
         .alert("できました", isPresented: Binding(get: { !made.isEmpty }, set: { if !$0 { made = "" } })) {
             Button("わかりました") { made = "" }
@@ -227,6 +248,9 @@ struct Calendaring: View {
                 let got = try await Drive.shared.makeGroupCalendar(named: "ambər グループ")
                 CalPrefs.groupName = got.name
                 CalPrefs.groupId = got.id
+                // **画面にも伝える。** ここを忘れると、作ったのに何も
+                // 変わらないように見える（実機で出た・依頼 534）。
+                groupName = got.name
                 side = "group"
                 CalPrefs.side = "group"
                 // **二段あることを、その場で言う。** amber が作っただけでは
@@ -243,15 +267,21 @@ struct Calendaring: View {
         }
     }
 
-    /// グループへ招待する。**いまは Google の画面で**（本人が決めた・2026-09-13）。
-    /// 人を招待する口には審査の要る許可が要るので、一般公開のときに通す。
-    private func invite() {
-        let id = CalPrefs.groupId
-        let tag = Data(id.utf8).base64EncodedString().replacingOccurrences(of: "=", with: "")
-        let at = id.isEmpty
-            ? "https://calendar.google.com/calendar/u/0/r/settings"
-            : "https://calendar.google.com/calendar/u/0/r/settings/calendar/" + tag
-        if let u = URL(string: at) { UIApplication.shared.open(u) }
+    /// グループへ招待する。**いまは Google カレンダーのアプリで**
+    /// （依頼 534・実機で分かった）。
+    ///
+    /// はじめはパソコン版の設定ページの URL を組んで開いていたが、**iPhone では
+    /// その URL が Google カレンダーのアプリに横取りされ**、「このカレンダーに
+    /// アクセスするには…ログインしてください」とだけ出て、招待する画面には
+    /// 行けなかった（本人が実機で踏んだ）。
+    ///
+    /// iPhone でも共有そのものはできる ── **アプリの設定から**。だから
+    /// **URL を当てにいかず、行き方を言う**。amber の中で招待できるようにする
+    /// には `calendar.acls`（審査の要る許可）が要るので、一般公開のときに通す。
+    private func invite() { inviting = true }
+
+    private func openGoogleCalendar() {
+        if let u = URL(string: "https://calendar.google.com/") { UIApplication.shared.open(u) }
     }
 
     @ViewBuilder private func cell(_ d: String) -> some View {
@@ -327,7 +357,7 @@ struct Calendaring: View {
                 // 中ではない。狙いは IT に明るくない人で、**PC を持っていない
                 // 可能性が大いにある**（本人）ので、電話で始められないのは
                 // 致命的。作ったら消え、そのあとは「グループへ招待」になる。
-                if CalPrefs.groupName.isEmpty {
+                if groupName.isEmpty {
                     Button { making = true } label: {
                         Label("グループを作る", systemImage: "person.2.badge.plus")
                     }
