@@ -79,27 +79,20 @@ struct Calendaring: View {
     private var inside: some View {
         VStack(spacing: 0) {
             // 月／週／日の切り替え（依頼 515）── 窓の表の上の三つと同じ。
-            Picker("表示", selection: $mode) {
-                Text("月").tag("month")
-                Text("週").tag("week")
-                Text("日").tag("day")
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 12).padding(.top, 6)
-            .onChange(of: mode) { _, now in CalPrefs.view = now; count() }
-            // **何を出すか**（依頼 530・窓の `自分だけ｜グループ｜両方` と同じ）。
-            // **グループカレンダーが無ければ出さない** ── 選べないものを
-            // 見せない。電話は縦が短いので、一段でも空けられるなら空ける。
-            if !CalPrefs.groupName.isEmpty {
-                Picker("出すもの", selection: $side) {
-                    Text("自分だけ").tag("me")
-                    Text("グループ").tag("group")
-                    Text("両方").tag("both")
+            // **何を出すかは、その右に一つ**（依頼 531・本人が絵を見て案ウ）──
+            // 段をもう一つ足すと月の表が 85pt 下がる（画面の一割）。電話は
+            // 縦が命なので、横に置いて段を増やさない。
+            HStack(spacing: 8) {
+                Picker("表示", selection: $mode) {
+                    Text("月").tag("month")
+                    Text("週").tag("week")
+                    Text("日").tag("day")
                 }
                 .pickerStyle(.segmented)
-                .padding(.horizontal, 12).padding(.top, 6)
-                .onChange(of: side) { _, now in CalPrefs.side = now; count() }
+                .onChange(of: mode) { _, now in CalPrefs.view = now; count() }
+                if !CalPrefs.groupName.isEmpty { sidePill }
             }
+            .padding(.horizontal, 12).padding(.top, 6)
             if mode == "month" {
                 grid
                 Divider()
@@ -164,6 +157,46 @@ struct Calendaring: View {
         }
         .padding(.horizontal, 8)
         .padding(.top, 6)
+    }
+
+    /// 何を出しているか（依頼 531）。**押すと回る。**
+    ///
+    /// 回る順は **両方 → 自分だけ → グループ → 両方**（本人）。
+    /// 回る形の弱いところは「ほかに何が選べるか」が押すまで分からないこと
+    /// なので、**長押しで三つ出す** ── 押し先が一つで済む軽さは残したまま、
+    /// 全部を見る道も残す。
+    private static let sides = ["both", "me", "group"]
+    private func sideWord(_ k: String) -> String {
+        ["both": "両方", "me": "自分だけ", "group": "グループ"][k] ?? "両方"
+    }
+    private func setSide(_ k: String) {
+        side = k
+        CalPrefs.side = k
+        count()
+    }
+    private var sidePill: some View {
+        Button {
+            let i = Self.sides.firstIndex(of: side) ?? 0
+            setSide(Self.sides[(i + 1) % Self.sides.count])
+        } label: {
+            Label(sideWord(side), systemImage: "person.2")
+                .font(.footnote)
+                .labelStyle(.titleAndIcon)
+                .lineLimit(1)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            // **長押しで三つ出す。** 回る形だけだと、選べるものが分からない。
+            ForEach(Self.sides, id: \.self) { k in
+                Button { setSide(k) } label: {
+                    if k == side { Label(sideWord(k), systemImage: "checkmark") }
+                    else { Text(sideWord(k)) }
+                }
+            }
+        }
     }
 
     @ViewBuilder private func cell(_ d: String) -> some View {
