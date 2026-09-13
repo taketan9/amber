@@ -773,6 +773,21 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // いちばん最後のタグだけの行に置く。**読むのも書くのもここ一枚**で、
         // 窓（`amber-cal` 越し）と電話（EventKit）が同じ答えになる。
         "caltag" => {
+            // **まとめて訊けるようにする**（依頼 539）── 月の表には予定が
+            // 何十本も並ぶ。一本ずつ訊くと、その数だけ行き来することになる。
+            if let Some(many) = p["notes"].as_array() {
+                let out: Vec<_> = many
+                    .iter()
+                    .map(|n| {
+                        let notes = n.as_str().unwrap_or_default();
+                        serde_json::json!({
+                            "tags": crate::caltag::tags(notes),
+                            "body": crate::caltag::body(notes),
+                        })
+                    })
+                    .collect();
+                return Ok(serde_json::json!({ "each": out }));
+            }
             let notes = p["notes"].as_str().unwrap_or_default();
             Ok(serde_json::json!({
                 "tags": crate::caltag::tags(notes),
@@ -1803,6 +1818,20 @@ mod tests {
         // メモが無い予定でも落ちない。
         let empty = call("caltag", &serde_json::json!({})).unwrap();
         assert!(empty["tags"].as_array().unwrap().is_empty());
+
+        // **まとめて訊ける**（依頼 539）── 月の表の予定ぜんぶを一度で。
+        let many = call(
+            "caltag",
+            &serde_json::json!({ "notes": [memo, "本文だけ", "", "#花子"] }),
+        )
+        .unwrap();
+        let each = many["each"].as_array().unwrap();
+        assert_eq!(each.len(), 4);
+        assert_eq!(each[0]["tags"][0], "太郎");
+        assert!(each[1]["tags"].as_array().unwrap().is_empty());
+        assert_eq!(each[1]["body"], "本文だけ");
+        assert!(each[2]["tags"].as_array().unwrap().is_empty());
+        assert_eq!(each[3]["tags"][0], "花子");
     }
 
     #[test]

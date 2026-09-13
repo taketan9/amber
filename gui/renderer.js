@@ -7592,6 +7592,55 @@ function paintHereColor() {
 
 /// 出す予定だけ（隠した予定表のものを落とす）。**どの見方でも同じ一本**を通す
 /// ── 月だけ隠せていない、が起きないように。ノートは落とさない。
+/// **誰の用事かのタグ**（依頼 539）── 予定の `notes` から、まとめて読む。
+///
+/// タグの置き場所はメモ欄のいちばん最後の行で、**どこを読むかを決めるのは
+/// core**（`caltag`）。ここで切り出すと、窓と電話で読み方が二つできる。
+///
+/// **一度で訊く。** 月の表には予定が何十本も並ぶので、一本ずつ訊くと
+/// その数だけ行き来することになる。
+async function readCalTags(slots) {
+    const want = slots.filter((s) => inGroup(s) && s.notes);
+    if (!want.length) return;
+    try {
+        const got = await window.amber.call('caltag', { notes: want.map((s) => s.notes) });
+        const each = (got && got.each) || [];
+        want.forEach((s, i) => { s.tags = (each[i] && each[i].tags) || []; });
+    } catch { /* 読めなくても、予定そのものは出す */ }
+}
+
+/// そのタグの色（依頼 539）。
+///
+/// **決めていなければ、十色を順に配る。** 設定を開かなくても色分けされた表が
+/// 見られるほうがよい ── 使う前に決めさせない。決めた色は `calColors` に入り、
+/// この端末だけが憶える（`みんなの表` の人ごとの色と同じ仕組み）。
+const tagKey = (t) => 'tag:' + t;
+let tagOrder = [];
+function tagColor(t) {
+    const key = tagKey(t);
+    if (calColors[key]) return calColors[key];
+    if (!tagOrder.includes(t)) tagOrder.push(t);
+    return LANE_COLORS[tagOrder.indexOf(t) % LANE_COLORS.length];
+}
+
+/// タグの色を、予定の一行に差す（依頼 539）。
+///
+/// **一人なら、その色。二人以上なら、左の帯を分ける** ── 二人の用事は
+/// 二人のものなので、どちらか片方の色にしてしまうと嘘になる。
+/// タグが無ければ何も差さず、いままでの出どころ別の色のままにする。
+function tagPaint(s) {
+    const tags = (s.tags || []).filter(Boolean);
+    if (!tags.length) return '';
+    const colors = tags.map(tagColor);
+    if (colors.length === 1) return ' style="--c:' + escapeAttr(colors[0]) + '"';
+    const step = 100 / colors.length;
+    const bands = colors
+        .map((c, i) => escapeAttr(c) + ' ' + (i * step) + '% ' + ((i + 1) * step) + '%')
+        .join(',');
+    return ' style="--c:' + escapeAttr(colors[0])
+        + ';--bands:linear-gradient(' + bands + ')"';
+}
+
 /// その予定は、グループカレンダーのものか（依頼 529）。
 ///
 /// **予定表の名前で当てる。** EventKit が返すのは端末側のカレンダーの題で、
@@ -7702,6 +7751,8 @@ async function drawCal() {
         calSlots = calSlots.concat(far, teamFor(y, m));
     }
     if (bad) say('カレンダーを読めません: ' + bad);
+    // 誰の用事かのタグを、まとめて読む（依頼 539）。
+    await readCalTags(calSlots);
     calSlots = calSlots.sort((a, b) =>
         a.day.localeCompare(b.day)
         || (a.at ? 0 : 1) - (b.at ? 0 : 1)
@@ -7820,7 +7871,7 @@ async function drawCal() {
             // 色はタグ（誰の用事か）にだけ使うので、見えているかどうかは
             // 塗りで言う ── 10px の印は、月の表の一行では小さすぎる。
             '<span class="ev ' + s.kind + (inGroup(s) ? ' sh' : ' lo')
-            + (s.shut ? ' shut' : '') + '"'
+            + (s.shut ? ' shut' : '') + '"' + tagPaint(s)
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '') + '>'
             + (s.at ? escapeHtml(s.at) + ' ' : '') + escapeHtml(s.title) + '</span>').join('');
         const rest = sorted.length > 3 ? '<span class="more">ほか ' + (sorted.length - 3) + '</span>' : '';

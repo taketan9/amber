@@ -1388,6 +1388,10 @@ body.dropping::after {
 #calbox .d .n { font-size: 1em; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums }
 #calbox .d.today .n { color: var(--amber); font-weight: 700 }
 #calbox .d .ev { font-size: .92em; line-height: 1.5; margin-top: 3px; padding: 2px 6px; color: var(--ink);
+  /* タグの色（依頼 539）は JS が差す。**差されなかったときの色を、ここに
+     置いておく** ── 定義の無い `var()` は黙って透明になるので（依頼 474）、
+     差し損ねた日に予定が消える。 */
+  --c: var(--amber-deep); --bands: none;
   border-left: 3px solid var(--amber-deep); border-radius: 3px; background: color-mix(in srgb, var(--amber) 28%, var(--paper));
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #calbox .d .ev.note { background: none; border-left-color: transparent; color: var(--ink-2) }
@@ -1408,6 +1412,21 @@ body.dropping::after {
    ので、見えているかどうかは塗りで言う。**出どころ別の色より後に書く** ──
    同じ強さなので、前に置くと負ける（実際に負けて、塗り分けが出なかった）。 */
 #calbox .d .ev.lo { background: none }
+/* **タグの色**（依頼 539）── 誰の用事かで色を変える。差されたときだけ効く
+   ので、タグの無い予定は出どころ別の色のまま。二人以上の用事は、左の帯を
+   人数ぶんに分ける（どちらか片方の色にすると、嘘になる）。 */
+#calbox .d .ev[style*="--c"] {
+  border-left-color: var(--c);
+  background: color-mix(in srgb, var(--c) 24%, var(--paper));
+}
+#calbox .d .ev[style*="--bands"] {
+  border-left: 0; padding-left: 8px; position: relative;
+  background: color-mix(in srgb, var(--c) 14%, var(--paper));
+}
+#calbox .d .ev[style*="--bands"]::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--bands);
+}
 #calbox .d .ev.shut { color: var(--ink-2);
   background-image: repeating-linear-gradient(135deg, transparent 0 5px,
     color-mix(in srgb, var(--ink-3) 22%, transparent) 5px 10px); }
