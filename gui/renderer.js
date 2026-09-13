@@ -8026,7 +8026,19 @@ function crowdLanes(days, whole) {
     // 自分が先、つぎに端末とよそ、そのあとにチーム ── 見にきた人の段を
     // いちばん上に置く。
     put('me', '自分のノート', 'note');
-    for (const s of calSlots) {
+    // **自分だけ／グループ／両方 を、ここでも効かせる**（依頼 549）。
+    // ここだけ `calSlots` を直に読んでいたので、**絞り込みのボタンが
+    // 並べて表示では死んでいた** ── 「グループ」が光っているのに会社の
+    // 予定がそのまま並ぶ（依頼 477 と同じ、押しても何も起きない形）。
+    //
+    // **引っ込めた段（`calHide`）は、ここでは落とさない。** 落とすと
+    // その段が「人を選ぶ」の一覧からも消えて、**戻す道が無くなる**
+    // （落とすのは最後の一行）。
+    const mine = calSlots.filter((s) => {
+        if (!groupCal || calSide === 'both') return true;
+        return calSide === 'group' ? inGroup(s) : !inGroup(s);
+    });
+    for (const s of mine) {
         if (!days.includes(s.day)) continue;
         if (s.kind === 'note') continue;
         // **名前が付いた予定は、予定表の段から抜けて、その人の段へ**（依頼 548・
@@ -8049,6 +8061,12 @@ function crowdLanes(days, whole) {
     // 「だれの用事か」のほうで、どの予定表から来たかではない。
     const rank = (l) => (l.key === 'me' ? 0 : l.kind === 'tag' ? 1
         : l.kind === 'here' ? 2 : l.kind === 'away' ? 3 : 4);
+    // **自分のノートの段は、空なら出さない**（依頼 549・本人が決めた）。
+    // ノートに日付を書かない人には、ずっと空の段が一つ並ぶだけになる。
+    // **チームの段は空でも残す**（依頼 471）── あちらは段ごと消えると
+    // 「書き出せていない」と「本当に空」が読めなくなる。逆の決まりなので、
+    // 消すのは `me` だけと名指しする。
+    if (!lanes.get('me').slots.length) lanes.delete('me');
     const out = [...lanes.values()].sort((a, b) => rank(a) - rank(b)
         || a.name.localeCompare(b.name, 'ja'));
     // **選んだ人だけ並べる。** `whole` が真なら、選ぶための一覧なので全員。
