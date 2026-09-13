@@ -8,6 +8,13 @@
  *     node scripts/pack.js --win --out dist --electron ~/workspace/electron-v33.4.11-win32-x64 \
  *                          --server dist/amber-server-win-x64.exe [--zip]
  *
+ * **cian の綴りでも通る**（依頼 550・本人が会社の Windows で打つ形）──
+ * `--platform win32|darwin` は `--win`／`--mac` と同じ、`--engine` は
+ * `--server` と同じ。手が憶えているほうが正しい。
+ *
+ *     node scripts\pack.js --out dist --platform win32 --electron C:\electron-v33.4.11-win32-x64 ^
+ *                          --engine C:\Downloads\amber-server-win-x64.exe --rcedit C:\tools\rcedit-x64.exe --zip
+ *
  * **組むあいだ、網に出ない。** electron-builder のような「取りに行く」道具は
  * 使わない（crmaine が whl と vsce で二度やった事故 ── 途中で落ちて半端な生成物が
  * 残り、それが正常に見える）。写すだけで作り、**出口で必ず数えて**、欠けていれば
@@ -33,6 +40,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
+const { zipDir } = require('./zip');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -43,6 +51,8 @@ function arg(name, fallback = null) {
     return !v || v.startsWith('--') ? true : v;
 }
 const has = (name) => process.argv.includes('--' + name);
+/** エンジンの在り処。**`--server` でも `--engine` でも同じ**（依頼 550）。 */
+const engineArg = () => arg('server') || arg('engine');
 
 const version = (() => {
     const m = fs.readFileSync(path.join(ROOT, 'Cargo.toml'), 'utf8').match(/^version = "(.+?)"/m);
@@ -63,6 +73,27 @@ function copy(from, to, skip = () => false) {
         fs.copyFileSync(from, to);
         fs.chmodSync(to, st.mode);
     }
+}
+
+/**
+ * **先に足りないものを言う**（依頼 550）。
+ *
+ * `gui/vendor/`（Monaco と mermaid・16MB）は **git に入っていない** ──
+ * `npm install` が node_modules に置いたものを `gui/vendor.js` が写す形なので、
+ * **ネットに出られない機械では作れない**。出口の `verify` でも捕まるが、
+ * それでは Electron を二百メガ写したあとで落ちる。**写す前に言う。**
+ */
+function preflight() {
+    const vendor = path.join(ROOT, 'gui', 'vendor');
+    if (fs.existsSync(path.join(vendor, 'monaco', 'vs', 'loader.js'))
+        && fs.existsSync(path.join(vendor, 'mermaid'))) return;
+    console.error('NG: gui/vendor/ がありません（エディタと図の実体）。');
+    console.error('');
+    console.error('  ネットに出られる機械で:  cd gui && npm install && node vendor.js');
+    console.error('  出られない機械では:      その gui/vendor/ を丸ごと持ち込んで、同じ場所に置く');
+    console.error('');
+    console.error('  （持ち込む一式は  node scripts/offline-kit.js  がまとめます）');
+    process.exit(1);
 }
 
 /** `resources/app/` の中身 ── Mac も Windows も同じ形。 */
@@ -117,9 +148,10 @@ function sizeOf(dir) {
 
 // ── Mac ──────────────────────────────────────────────────────────────
 function mac(out) {
+    preflight();
     const electron = arg('electron') || path.join(ROOT, 'gui', 'node_modules', 'electron', 'dist', 'Electron.app');
     if (!fs.existsSync(electron)) { console.error('Electron.app がありません: ' + electron + '（cd gui && npm install）'); process.exit(1); }
-    const server = arg('server') || path.join(ROOT, 'target', 'release', 'amber-server');
+    const server = engineArg() || path.join(ROOT, 'target', 'release', 'amber-server');
     if (!fs.existsSync(server)) { console.error('amber-server がありません: ' + server + '（cargo build --release -p amber-server）'); process.exit(1); }
     const cal = path.join(ROOT, 'target', 'mac', 'amber-cal');
     if (!fs.existsSync(cal)) console.error('注意: amber-cal がありません（scripts/mac-build.sh）── この Mac の予定表は読めない一枚になります');
@@ -164,6 +196,7 @@ function mac(out) {
 
 // ── Windows ──────────────────────────────────────────────────────────
 function win(out) {
+    preflight();
     // Electron の win32 の一式（GitHub の Release の zip を展開したもの）。
     // 引数 → リポジトリの隣の `electron-v*-win32-x64` の順に探す。
     let electron = arg('electron');
@@ -175,9 +208,9 @@ function win(out) {
         console.error('Windows の Electron がありません。https://github.com/electron/electron/releases/download/v33.4.11/electron-v33.4.11-win32-x64.zip を落として展開し、--electron で指してください');
         process.exit(1);
     }
-    const server = arg('server');
+    const server = engineArg();
     if (!server || !fs.existsSync(server)) {
-        console.error('Windows のエンジンがありません。Release の amber-server-win-x64.exe を --server で指してください（gh release download --pattern amber-server-win-x64.exe）');
+        console.error('Windows のエンジンがありません。Release の amber-server-win-x64.exe を --engine（--server でも可）で指してください（gh release download --pattern amber-server-win-x64.exe）');
         process.exit(1);
     }
     const dir = path.join(out, 'amber-win-x64');
@@ -209,24 +242,30 @@ function win(out) {
     if (has('zip')) {
         const zip = path.join(out, `amber-win-x64-${version}.zip`);
         fs.rmSync(zip, { force: true });
-        // Python の zipfile で組む ── 日本語の名前に UTF-8 の印を必ず立てる（`packaging/gui_zip.py` の註）。
-        execFileSync('python3', ['-c', `
-import sys, zipfile, os
-root, out = sys.argv[1], sys.argv[2]
-with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
-    for d, _, files in os.walk(root):
-        for f in files:
-            p = os.path.join(d, f)
-            z.write(p, os.path.relpath(p, os.path.dirname(root)))
-`, dir, zip]);
+        // **組むのは自前**（`scripts/zip.js`・依頼 550）── 前は `python3` を
+        // 呼んでいたが、**組む場所は会社の Windows でもある**。あそこに
+        // python3 は無いし、PowerShell の `Compress-Archive` は日本語の
+        // 名前に UTF-8 の印を立てない（`はじめにお読みください.txt` が化ける）。
+        zipDir(dir, zip);
         console.log('zip: ' + zip + '  (' + sizeOf(zip) + ')');
     }
 }
 
 const out = path.resolve(arg('out') || path.join(ROOT, 'dist'));
-if (has('mac')) mac(out);
-else if (has('win')) win(out);
+// **cian と同じ綴りでも通す**（依頼 550）── 本人が会社の Windows で打つのは
+// `--platform win32` のほう。同じことを二通りで書けるのは普通は避けるが、
+// ここは**手が憶えている綴り**のほうが正しい（打ち直させない）。
+const plat = arg('platform');
+const wantMac = has('mac') || plat === 'darwin' || plat === 'mac' || plat === 'macos';
+const wantWin = has('win') || plat === 'win32' || plat === 'win' || plat === 'windows';
+if (wantMac && wantWin) {
+    console.error('どちらか一つにしてください（--mac と --win の両方が指されています）');
+    process.exit(2);
+}
+if (wantMac) mac(out);
+else if (wantWin) win(out);
 else {
-    console.error('どちらを組むか: --mac か --win（例: node scripts/pack.js --mac --out dist --zip）');
+    console.error('どちらを組むか: --mac か --win（--platform darwin｜win32 でも同じ）');
+    console.error('例: node scripts/pack.js --mac --out dist --zip');
     process.exit(2);
 }
