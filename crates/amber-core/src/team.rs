@@ -595,6 +595,22 @@ mod tests {
     /// **ここが通らなくなったら、書き出す側と話が合っていない。**
     const DEAL: &str = "\u{feff}fetched_at,owner,owner_mail,start,end,all_day,subject,location,show_as,sensitivity,cancelled,organizer,uid\r\n2026-09-10T08:15:00+09:00,山田 武,yamada.takeshi@example.co.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,false,週次定例,会議室A,busy,normal,false,鈴木 一郎,040000008200E00074C5B7101A82E008\r\n2026-09-10T08:15:00+09:00,山田 武,yamada.takeshi@example.co.jp,2026-09-11T00:00:00+09:00,2026-09-12T00:00:00+09:00,true,終日出張,,oof,normal,false,,040000008200E00074C5B7101A82E009\r\n2026-09-10T08:15:00+09:00,鈴木 一郎,suzuki.ichiro@example.co.jp,2026-09-10T14:00:00+09:00,2026-09-10T15:00:00+09:00,false,,,busy,private,false,,040000008200E00074C5B7101A82E00A\r\n";
 
+    /// `+09:00` の一瞬を、**この機械の時刻で**言い直す（依頼 551）。
+    ///
+    /// 「10:00」と書いてしまうと、**東京の机でしか通らない試験**になる ──
+    /// 時刻つきの予定は現地時刻に直す決まり（依頼 471）なので、UTC の機械が
+    /// 読めば 01:00 が正しい。CI は Windows でしか試験を回さず、あそこは
+    /// UTC なので、`team.rs` が入った日から落ちていた（v3.0.0 の札を打つ前の
+    /// 試し組みで、初めて鳴った）。
+    fn 東京の(h: u32, m: u32) -> chrono::DateTime<chrono::Local> {
+        use chrono::TimeZone;
+        chrono::FixedOffset::east_opt(9 * 3600)
+            .unwrap()
+            .with_ymd_and_hms(2026, 9, 10, h, m, 0)
+            .unwrap()
+            .with_timezone(&chrono::Local)
+    }
+
     #[test]
     fn the_agreed_shape_reads_as_agreed() {
         let got = of(DEAL, 2026, 9);
@@ -602,10 +618,12 @@ mod tests {
         assert_eq!(got.people.len(), 2, "二人");
         assert_eq!(got.plans.len(), 3);
 
+        let 始 = 東京の(10, 0);
+        let 終 = 東京の(11, 0);
         let teiれい = got.plans.iter().find(|p| p.title == "週次定例").unwrap();
-        assert_eq!(teiれい.day, "2026-09-10");
-        assert_eq!(teiれい.at.as_deref(), Some("10:00"));
-        assert_eq!(teiれい.to.as_deref(), Some("11:00"));
+        assert_eq!(teiれい.day, 始.format("%Y-%m-%d").to_string(), "時刻つきは現地時刻の日");
+        assert_eq!(teiれい.at.as_deref(), Some(始.format("%H:%M").to_string().as_str()));
+        assert_eq!(teiれい.to.as_deref(), Some(終.format("%H:%M").to_string().as_str()));
         assert_eq!(teiれい.place, "会議室A");
         assert_eq!(teiれい.mail, "yamada.takeshi@example.co.jp", "鍵はメール");
         assert_eq!(teiれい.show, "busy");
