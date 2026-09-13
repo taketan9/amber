@@ -55,8 +55,13 @@ while IFS=$'\t' read -r name ident udid model trouble; do
     echo "── $name に入れる ──"
     # **端末が言っている理由を、そのまま出す。** こちらで当て推量を並べない。
     if [ -n "$trouble" ]; then echo "  $trouble"; continue; fi
+    # **端末を署名の書類に入れてもらう**（`-allowProvisioningUpdates`・依頼 543）。
+    # 新しい端末は、はじめは書類に入っていないので「この端末は入っていません」で
+    # 止まる。この旗があると Xcode が Apple に登録しにいく ── **本人の Apple ID に
+    # 「この端末で開発する」と記録される**（Xcode からいつでも消せる）。
     xcodebuild -project ios/Cian.xcodeproj -scheme Cian \
-        -destination "platform=iOS,id=$udid" -configuration Debug build \
+        -destination "platform=iOS,id=$udid" -configuration Debug \
+        -allowProvisioningUpdates build \
         2>&1 | grep -E 'error:|\*\* BUILD' || true
     app=$(find ~/Library/Developer/Xcode/DerivedData/Cian-*/Build/Products/Debug-iphoneos \
           -maxdepth 1 -name 'Cian.app' 2>/dev/null | head -1)
