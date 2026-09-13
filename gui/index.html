@@ -1419,9 +1419,12 @@ body.dropping::after {
   border-left-color: var(--c);
   background: color-mix(in srgb, var(--c) 24%, var(--paper));
 }
+/* **二人以上の用事は、塗らない**（依頼 540・本人が並べて選んだ案ア）──
+   薄く塗っていた頃は、隣の「その色ひとりの用事」と地の色が近くて紛らわしい
+   （実際に紛らわしかった）。左の帯だけを人数ぶんに分ける。 */
 #calbox .d .ev[style*="--bands"] {
   border-left: 0; padding-left: 8px; position: relative;
-  background: color-mix(in srgb, var(--c) 14%, var(--paper));
+  background: none;
 }
 #calbox .d .ev[style*="--bands"]::before {
   content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;

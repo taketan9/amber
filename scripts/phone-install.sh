@@ -9,6 +9,11 @@
 # で別に建てる ── 実機に入れたつもりでシミュレータを見ていた、が起きないように
 # 道を分ける（2026-09-13 に実際にそれをやった）。
 #
+# **識別子は二つある。** 入れるときのものと、組むときのものは別物で、取り違える
+# と「その端末は見つかりません」で止まる。一覧は `scripts/devices.py` が JSON で
+# 訊いて、両方そのまま返す ── 名前で突き合わせると、名前に含まれる「の」が
+# 字化けして一致せず、**その端末が黙って飛ばされる**（実際に飛ばされた）。
+#
 # # 新しい端末を足すには
 #
 # **一度だけ、ケーブルでこの Mac につないで「信頼」を押してもらう**（その端末の
@@ -26,47 +31,39 @@ cd "$(dirname "$0")/.."
 
 want="${1:-}"
 
+rows=$(python3 scripts/devices.py || true)
 echo "── つながっている実機 ──"
-list=$(xcrun devicectl list devices 2>/dev/null | grep -E 'available|connected' || true)
-if [ -z "$list" ]; then
-    echo "ありません。"
+if [ -z "$rows" ]; then
+    echo "  ありません。"
     echo
     echo "ケーブルでつないで、その端末で「信頼」を押してもらってください"
     echo "（持ち主自身に。暗証番号が要ります）。"
     exit 1
 fi
-echo "$list" | sed 's/^/  /'
+while IFS=$'\t' read -r name ident udid model; do
+    printf '  %-24s %s\n' "$name" "$model"
+done <<< "$rows"
 [ "$want" = "--list" ] && exit 0
 
-# **識別子は二つある。** `devicectl` が返すもの（入れるときに使う）と、
-# `xcodebuild` が受けるもの（組むときに使う）は**別物**で、取り違えると
-# 「その端末は見つかりません」で止まる（実際に止まった・2026-09-13）。
-# 名前で突き合わせて、両方持つ。
-ids=$(echo "$list" | sed -E 's/ {2,}/\t/g' | cut -f1,3 | tr '\t' '|')
-dest=$(xcodebuild -project ios/Cian.xcodeproj -scheme Cian -showdestinations 2>/dev/null \
-       | grep -E 'platform:iOS, arch' || true)
-
 hit=0
-while IFS='|' read -r name id; do
-    [ -z "$id" ] && continue
-    if [ -n "$want" ] && [ "$want" != "--list" ] && [[ "$name" != *"$want"* ]]; then continue; fi
-    build_id=$(echo "$dest" | grep -F "name:$name" | sed -E 's/.*id:([^,]+).*/\1/' | head -1)
-    if [ -z "$build_id" ]; then
-        echo "「$name」は Xcode からは見えていません（ケーブルでつなぎ直してください）"
-        continue
-    fi
+while IFS=$'\t' read -r name ident udid model; do
+    [ -z "$ident" ] && continue
+    if [ -n "$want" ] && [[ "$name" != *"$want"* ]]; then continue; fi
     hit=1
     echo
     echo "── $name に入れる ──"
     xcodebuild -project ios/Cian.xcodeproj -scheme Cian \
-        -destination "platform=iOS,id=$build_id" -configuration Debug build \
+        -destination "platform=iOS,id=$udid" -configuration Debug build \
         2>&1 | grep -E 'error:|\*\* BUILD' || true
     app=$(find ~/Library/Developer/Xcode/DerivedData/Cian-*/Build/Products/Debug-iphoneos \
           -maxdepth 1 -name 'Cian.app' 2>/dev/null | head -1)
-    [ -n "$app" ] || { echo "組めていません"; exit 1; }
-    xcrun devicectl device install app --device "$id" "$app" >/dev/null
-    echo "入れました。"
-done <<< "$ids"
+    [ -n "$app" ] || { echo "  組めていません"; continue; }
+    if xcrun devicectl device install app --device "$ident" "$app" >/dev/null 2>&1; then
+        echo "  入れました。"
+    else
+        echo "  入れられませんでした（端末がロックされているか、つながっていません）"
+    fi
+done <<< "$rows"
 
 [ "$hit" = "1" ] || { echo; echo "「$want」に当たる端末がありません。"; exit 1; }
 

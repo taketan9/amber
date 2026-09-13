@@ -369,9 +369,9 @@ enum Walk {
             let (w, c) = (CalPrefs.weekend, CalPrefs.hereColor)
             defer { CalPrefs.weekend = w; CalPrefs.hereColor = c }
             CalPrefs.weekend = false
-            CalPrefs.hereColor = "#e8702a"
+            CalPrefs.hereColor = "#c0392b"
             if CalPrefs.weekend { return "土日が戻っています" }
-            if CalPrefs.colorName(CalPrefs.hereColor) != "オレンジ" { return "色の名前が \(CalPrefs.colorName(CalPrefs.hereColor))" }
+            if CalPrefs.colorName(CalPrefs.hereColor) != "カーマイン" { return "色の名前が \(CalPrefs.colorName(CalPrefs.hereColor))" }
             return nil
         }
         step("カレンダー：週は月曜から、日は一日ずつ") {

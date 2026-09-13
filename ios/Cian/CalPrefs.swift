@@ -37,11 +37,11 @@ enum CalPrefs {
         set { UserDefaults.standard.set(newValue, forKey: viewKey) }
     }
 
-    /// 窓の `CAL_COLORS` と同じ十色・同じ順。
+    /// 窓の `CAL_COLORS` と同じ八色・同じ順（依頼 540）。
     static let colors: [(hex: String, name: String)] = [
-        ("#e8702a", "オレンジ"), ("#3b78c9", "青"), ("#e0669c", "ピンク"), ("#d9a400", "黄"),
-        ("#2f8a52", "緑"), ("#8e5cb3", "紫"), ("#1fa3a3", "水色"), ("#c0392b", "赤"),
-        ("#7a5c3a", "茶"), ("#5a6b7f", "灰"),
+        ("#e0669c", "ローズ"), ("#d9a400", "アンバー"), ("#2f8a52", "リーフ"),
+        ("#8e5cb3", "バイオレット"), ("#1fa3a3", "シアン"), ("#c0392b", "カーマイン"),
+        ("#7a5c3a", "セピア"), ("#5a6b7f", "スレート"),
     ]
     static func colorName(_ hex: String) -> String { colors.first { $0.hex == hex }?.name ?? hex }
     /// グループカレンダーの名前（無ければ空）。**窓が作ったものを、電話は
