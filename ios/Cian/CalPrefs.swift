@@ -11,6 +11,10 @@ enum CalPrefs {
     private static let weekendKey = "amber.calWeekend"
     private static let colorKey = "amber.calHereColor"
     private static let viewKey = "amber.calView"
+    /// グループカレンダーの名前（依頼 530）。**窓が作り、電話は見るだけ。**
+    private static let groupKey = "amber.calGroupName"
+    /// 何を出しているか ── `me` / `group` / `both`。
+    private static let sideKey = "amber.calSide"
 
     static var hide: [String] {
         get { UserDefaults.standard.stringArray(forKey: hideKey) ?? [] }
@@ -38,6 +42,28 @@ enum CalPrefs {
         ("#7a5c3a", "茶"), ("#5a6b7f", "灰"),
     ]
     static func colorName(_ hex: String) -> String { colors.first { $0.hex == hex }?.name ?? hex }
+    /// グループカレンダーの名前（無ければ空）。**窓が作ったものを、電話は
+    /// 端末のカレンダー越しに見る** ── Google のアカウントが iPhone に足して
+    /// あれば、作った翌日には降りてきている。
+    static var groupName: String {
+        get { UserDefaults.standard.string(forKey: groupKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: groupKey) }
+    }
+
+    /// 何を出しているか（`me` / `group` / `both`）。**既定は両方**。
+    static var side: String {
+        get { UserDefaults.standard.string(forKey: sideKey) ?? "both" }
+        set { UserDefaults.standard.set(newValue, forKey: sideKey) }
+    }
+
+    /// その予定は、グループカレンダーのものか（依頼 530）。
+    ///
+    /// **予定表の名前で当てる** ── 窓の `inGroup` とまったく同じ決まり。
+    /// ここが窓とずれると、同じ予定が端末によって違う顔をする。
+    static func inGroup(_ s: Calendaring.Slot) -> Bool {
+        !groupName.isEmpty && s.isPhone && s.from == groupName
+    }
+
     static var hereTint: Color { Color(hex: hereColor.isEmpty ? "#2f8a52" : hereColor) ?? .green }
 
     /// その予定はどの予定表のものか（窓の `whoOf` と同じ鍵）。
@@ -46,7 +72,12 @@ enum CalPrefs {
         if s.kind == "here" { return "here:" + s.from }
         return "me"
     }
-    static func visible(_ s: Calendaring.Slot) -> Bool { !hide.contains(key(of: s)) }
+    /// 出すか。引っ込めた予定表を落とし、**自分だけ／グループの絞り込み**も効かせる。
+    static func visible(_ s: Calendaring.Slot) -> Bool {
+        if hide.contains(key(of: s)) { return false }
+        if groupName.isEmpty || side == "both" { return true }
+        return side == "group" ? inGroup(s) : !inGroup(s)
+    }
 
     /// 出し入れできる予定表の一覧（窓の `calSources` と同じ並び）。
     static func sources() -> [(key: String, name: String)] {

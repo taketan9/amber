@@ -35,6 +35,9 @@ struct Calendaring: View {
         var noNote: Bool { kind == "away" || kind == "here" }
     }
 
+    /// 何を出しているか（依頼 530）── `me` / `group` / `both`。
+    @State private var side = CalPrefs.side
+
     /// **開くたびに今月へ戻さない。** 先の予定を見にきた人を、
     /// 閉じて開くたびに今日へ連れ戻さない。
     @State private var year = Calendar.current.component(.year, from: Date())
@@ -84,6 +87,19 @@ struct Calendaring: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 12).padding(.top, 6)
             .onChange(of: mode) { _, now in CalPrefs.view = now; count() }
+            // **何を出すか**（依頼 530・窓の `自分だけ｜グループ｜両方` と同じ）。
+            // **グループカレンダーが無ければ出さない** ── 選べないものを
+            // 見せない。電話は縦が短いので、一段でも空けられるなら空ける。
+            if !CalPrefs.groupName.isEmpty {
+                Picker("出すもの", selection: $side) {
+                    Text("自分だけ").tag("me")
+                    Text("グループ").tag("group")
+                    Text("両方").tag("both")
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 12).padding(.top, 6)
+                .onChange(of: side) { _, now in CalPrefs.side = now; count() }
+            }
             if mode == "month" {
                 grid
                 Divider()
@@ -162,10 +178,17 @@ struct Calendaring: View {
                     .foregroundStyle(d == Self.today ? Color.accentColor : .secondary)
                     .fontWeight(d == Self.today ? .bold : .regular)
                 ForEach(mine.prefix(2)) { s in
+                    // **塗ってあるものが、グループに見えている予定**（依頼 530）。
+                    // 窓とまったく同じ決まり ── 自分だけの予定は塗らない。
                     Text(s.title).font(.system(size: 8)).lineLimit(1)
                         .foregroundStyle(s.isAway ? Color.blue
                             : (s.isPhone ? CalPrefs.hereTint
                                : (s.isPlan ? Color.accentColor : Color.secondary)))
+                        .padding(.horizontal, CalPrefs.inGroup(s) ? 3 : 0)
+                        .padding(.vertical, CalPrefs.inGroup(s) ? 1 : 0)
+                        .background(CalPrefs.inGroup(s)
+                            ? CalPrefs.hereTint.opacity(0.22) : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
                 }
                 if mine.count > 2 {
                     Text("ほか \(mine.count - 2)").font(.system(size: 8)).foregroundStyle(.tertiary)
@@ -240,9 +263,15 @@ struct Calendaring: View {
                         .foregroundStyle(.secondary).frame(width: 44, alignment: .leading)
                 }
                 VStack(alignment: .leading, spacing: 1) {
+                    // 塗ってあるものが、グループに見えている予定（依頼 530）。
                     Text(s.title)
                         .foregroundStyle(s.isAway ? Color.blue
                             : (s.isPhone ? CalPrefs.hereTint : Color.primary))
+                        .padding(.horizontal, CalPrefs.inGroup(s) ? 5 : 0)
+                        .padding(.vertical, CalPrefs.inGroup(s) ? 2 : 0)
+                        .background(CalPrefs.inGroup(s)
+                            ? CalPrefs.hereTint.opacity(0.18) : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
                     // **道は出さない** ── 読めない長さになるうえ、知りたいのは
                     // 中身のほう。自分のノートは一行目、よその予定は場所と出どころ。
                     if s.noNote {
