@@ -189,7 +189,7 @@ const ok = (yes, what, got) => {
             fetch: async () => new Response('{"error":{"message":"Insufficient Permission"}}', { status: 403 }),
         });
         const no403 = await deny.make('x').then(() => '', (e) => e.message);
-        ok(no403.includes('許可がありません'), '許可が足りないときは、そう言う', no403);
+        ok(no403.includes('許可されていません'), '許可が足りないときは、そう言う', no403);
 
         ok(shareUrl('') === SETTINGS_URL, 'id が無ければ、設定の入口へ');
         ok(shareUrl('abc@group.calendar.google.com').startsWith(SETTINGS_URL + '/calendar/'),

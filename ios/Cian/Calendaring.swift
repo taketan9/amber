@@ -52,6 +52,8 @@ struct Calendaring: View {
     @State private var inviting = false
     /// 消す前の確認（依頼 535）。
     @State private var dropping = false
+    /// 見つけたグループカレンダーを使うか訊いているところ（依頼 538）。
+    @State private var found = false
 
     /// **開くたびに今月へ戻さない。** 先の予定を見にきた人を、
     /// 閉じて開くたびに今日へ連れ戻さない。
@@ -86,6 +88,8 @@ struct Calendaring: View {
                 // 何のために訊かれたのか分からないまま断られる。
                 if !Phone.asked { await Phone.ask() }
                 count()
+                // 招待された側のために、一度だけ探す（依頼 538）。
+                if CalPrefs.foundGroup() { found = true }
             }
     }
 
@@ -136,7 +140,26 @@ struct Calendaring: View {
                  + "このカレンダーに入れた予定だけが、招待した人に見えます。"
                  + "今ある予定はそのままで、共有されません。")
         }
-        .alert("グループカレンダーを消しますか", isPresented: $dropping) {
+        // 招待された側に、一度だけ訊く（依頼 538）。
+        .alert("グループカレンダーが見つかりました", isPresented: $found) {
+            Button("使う") {
+                CalPrefs.groupAsked = true
+                CalPrefs.groupName = CalPrefs.groupWord
+                // **id は持たない。** 招待された側は持ち主ではないので、
+                // Google 側の id を知らない（招待も削除もできない）。
+                CalPrefs.groupId = ""
+                groupName = CalPrefs.groupWord
+                side = "group"
+                CalPrefs.side = "group"
+                count()
+            }
+            Button("使わない", role: .cancel) { CalPrefs.groupAsked = true }
+        } message: {
+            Text("「\(CalPrefs.groupWord)」というカレンダーがこの iPhone にあります。\n\n"
+                 + "グループカレンダーとして使いますか。"
+                 + "このカレンダーの予定が、グループの予定として色分けされます。")
+        }
+        .alert("グループカレンダーを削除しますか", isPresented: $dropping) {
             Button("削除", role: .destructive) { dropGroup() }
             Button("キャンセル", role: .cancel) { }
         } message: {
@@ -401,7 +424,10 @@ struct Calendaring: View {
                         Label("グループを作る", systemImage: "person.2.badge.plus")
                     }
                     .disabled(busy)
-                } else if side == "group" {
+                } else if side == "group" && !CalPrefs.groupId.isEmpty {
+                    // **招待と削除は、作った人だけ。** 招待された側は Google 側の
+                    // id を持たないので、共有設定にも行けないし消せもしない
+                    // （どちらも作った人の端末からやってもらう）。
                     Button { invite() } label: {
                         Label("グループへ招待", systemImage: "person.2")
                     }

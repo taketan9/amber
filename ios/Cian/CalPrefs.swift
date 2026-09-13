@@ -16,6 +16,7 @@ enum CalPrefs {
     /// 何を出しているか ── `me` / `group` / `both`。
     private static let sideKey = "amber.calSide"
     private static let groupIdKey = "amber.calGroupId"
+    private static let groupAskedKey = "amber.calGroupAsked"
 
     static var hide: [String] {
         get { UserDefaults.standard.stringArray(forKey: hideKey) ?? [] }
@@ -55,6 +56,24 @@ enum CalPrefs {
     static var groupId: String {
         get { UserDefaults.standard.string(forKey: groupIdKey) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: groupIdKey) }
+    }
+
+    /// 見つけたグループカレンダーについて、一度訊いたか（依頼 538）。
+    /// **断った人に毎回訊かない。**
+    static var groupAsked: Bool {
+        get { UserDefaults.standard.bool(forKey: groupAskedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: groupAskedKey) }
+    }
+
+    /// **招待された側が、グループカレンダーを見つける**（依頼 538）。
+    ///
+    /// 作った端末は名前を憶えているが、**招待された人の amber は何も知らない**
+    /// ── カレンダーは端末に降りてくるのに、amber から見ると「よその予定表」と
+    /// 見分けが付かず、絞り込みも色分けも出ない。名前が決まっているので、
+    /// 端末の予定表にその名前があれば見つけられる。
+    static let groupWord = "ambər グループ"
+    static func foundGroup() -> Bool {
+        groupName.isEmpty && !groupAsked && Phone.calendars.contains(groupWord)
     }
 
     /// 何を出しているか（`me` / `group` / `both`）。**既定は両方**。

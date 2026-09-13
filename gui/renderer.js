@@ -7554,6 +7554,9 @@ let groupCal = null;
 /// **既定は両方**（本人）。グループカレンダーが無ければ、絞るものが無いので
 /// 帯にも出さない ── 選べないものを見せない。
 let calSide = 'both';
+/// 見つけたグループカレンダーについて、一度訊いたか（依頼 538）。
+/// **断った人に毎回訊かない。**
+let groupAsked = false;
 /// 作るときの名前（本人が決めた・2026-09-13）。**Google カレンダーにも、
 /// 端末のカレンダーにも、グループ全員の画面にもこの名前で出る。**
 const GROUP_NAME = 'ambər グループ';
@@ -7631,6 +7634,8 @@ let calOn = false;
 /// カレンダーはノートではない ── 上に重ねて出し、ノートを開くときに閉じる。
 async function cmdCalendar() {
     if (!state.root) { say('保存場所がありません'); return; }
+    // 招待された側のために、一度だけ探す（依頼 538）。
+    findGroupCal().catch(() => { /* 見つからなくても、開くのは止めない */ });
     calOn = true;
     if (!calMonth) {
         const now = new Date();
@@ -7730,7 +7735,9 @@ async function drawCal() {
         // ずっと居座らせると帯が一つぶん狭くなる（実際に折れた）。
         // 招待は**グループを見ているときだけ**出す ── 招待したくなるのは、
         // まさにそのときだから。
-        gb.hidden = !!groupCal && calSide !== 'group';
+        // **招待は持ち主だけ。** 招待された側は Google 側の id を持たないので、
+        // 共有設定の画面にも行けない（持ち主の端末からやってもらう）。
+        gb.hidden = !!groupCal && (calSide !== 'group' || !groupCal.id);
         // **印を添える**（本人・2026-09-13）── 「＋ 予定を登録する」と同じで、
         // 絵が入口、字が答え合わせ（依頼 288）。印は左の列の共有と同じ二人 ──
         // 同じものには同じ形を使う。
@@ -8636,6 +8643,38 @@ el('cal').addEventListener('contextmenu', async (e) => {
 
 /* ── 表示の設定（依頼 494）── どの予定表を出すか・土日を出すか ── */
 
+/// **招待された側が、グループカレンダーを見つける**（依頼 538）。
+///
+/// 作った端末は名前を憶えているが、**招待された人の amber は何も知らない** ──
+/// カレンダーは端末に降りてくるのに、amber から見ると「よその予定表」と
+/// 見分けが付かず、絞り込みも色分けも出ない。
+///
+/// 名前が `ambər グループ` で決まっているので、**端末の予定表にその名前が
+/// あれば見つけられる**。ノートの共有で決めた「受け取る側は自動で見つける」
+/// と同じ形 ── 人に選ばせない。
+///
+/// **訊くのは一度だけ。** 断った人に毎回訊かない。
+async function findGroupCal() {
+    if (groupCal || groupAsked || !hereOn) return;
+    let names = [];
+    try {
+        const got = await window.amber.cal(['calendars']);
+        names = (got && got.calendars) || [];
+    } catch { return; }
+    if (!names.includes(GROUP_NAME)) return;
+    groupAsked = true;
+    window.amber.remember({ groupAsked: true });
+    if (!await askYes('「' + GROUP_NAME + '」というカレンダーが見つかりました。\n\n'
+        + 'グループカレンダーとして使いますか。\n'
+        + 'このカレンダーの予定が、グループの予定として色分けされます。')) return;
+    // **id は持たない。** 招待された側は持ち主ではないので、Google 側の id を
+    // 知らない ── 招待も削除もできない（持ち主の端末からやってもらう）。
+    groupCal = { id: '', name: GROUP_NAME };
+    window.amber.remember({ group: groupCal });
+    await drawCal();
+    say('「' + GROUP_NAME + '」をグループカレンダーとして使います');
+}
+
 /// 予定表の一覧。この Mac の予定表（無ければ空）・よその予定表・チーム・自分のノート。
 async function calSources() {
     const out = [{ key: 'me', name: '自分のノート（日付を書いたノート）' }];
@@ -8940,7 +8979,8 @@ async function cmdKeys() {
 
 const canRun = (c) => (c.need !== 'note' || !!state.open)
     // グループを持っていない人に「消す」を出さない（依頼 535）。
-    && (c.need !== 'group' || !!groupCal);
+    // 「削除」は持ち主だけ ── 招待された側は消せない（消すのは持ち主の仕事）。
+    && (c.need !== 'group' || !!(groupCal && groupCal.id));
 
 /// 命令のパレット（⌘⇧P）。**名前で探せれば、覚えなくていい。**
 ///
@@ -11715,6 +11755,7 @@ const escapeAttr = escapeHtml;
     calGroup = !!saved.calGroup;
     groupCal = saved.group && saved.group.id ? saved.group : null;
     if (['me', 'group', 'both'].includes(saved.calSide)) calSide = saved.calSide;
+    groupAsked = !!saved.groupAsked;
     if (Array.isArray(saved.calHide)) calHide = saved.calHide.filter((k) => typeof k === 'string');
     if (saved.calWeekend === false) calWeekend = false;
     if (typeof saved.calHereColor === 'string' && /^#[0-9a-f]{6}$/i.test(saved.calHereColor)) calHereColor = saved.calHereColor;
