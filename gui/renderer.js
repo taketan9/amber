@@ -8029,11 +8029,26 @@ function crowdLanes(days, whole) {
     for (const s of calSlots) {
         if (!days.includes(s.day)) continue;
         if (s.kind === 'note') continue;
+        // **名前が付いた予定は、予定表の段から抜けて、その人の段へ**（依頼 548・
+        // 本人が決めた）。カレンダーを繋いだ直後はどの予定にも名前が付いて
+        // いないので、**そのうちは今までどおり予定表ごとの段**しか出ない ──
+        // 使う前に段を増やして見せても、何のことか分からない。
+        // **二人以上なら、両方の段に出す**（本人が決めた）── 家族旅行は
+        // 太郎の用事でもあり次郎の用事でもあるので、その日その人が何を
+        // しているかを段で読める。
+        const tags = (s.tags || []).filter(Boolean);
+        if (tags.length) {
+            for (const t of tags) put('tag:' + t, t, 'tag').slots.push(s);
+            continue;
+        }
         const who = whoOf(s);
         put(who.key, who.name, s.kind).slots.push(s);
     }
     for (const w of teamPeople) put('team:' + (w.mail || w.name), w.name, 'team');
-    const rank = (l) => (l.key === 'me' ? 0 : l.kind === 'here' ? 1 : l.kind === 'away' ? 2 : 3);
+    // 人の段は、予定表の段より上に ── グループを見ているときに知りたいのは
+    // 「だれの用事か」のほうで、どの予定表から来たかではない。
+    const rank = (l) => (l.key === 'me' ? 0 : l.kind === 'tag' ? 1
+        : l.kind === 'here' ? 2 : l.kind === 'away' ? 3 : 4);
     const out = [...lanes.values()].sort((a, b) => rank(a) - rank(b)
         || a.name.localeCompare(b.name, 'ja'));
     // **選んだ人だけ並べる。** `whole` が真なら、選ぶための一覧なので全員。
@@ -8069,7 +8084,10 @@ function drawCrowd() {
 
     const rows = lanes.map((lane, n) => {
         const track = calView === 'day' ? crowdDay(lane, days[0]) : crowdWeek(lane, days);
-        return '<div class="ln" style="--lane:' + laneColor(lane.key, n) + '"><div class="who ' + lane.kind + '"'
+        // 人の段は、その人の色で（依頼 548）── 予定の一行に差す色と
+        // 同じ鍵（`tag:<名前>`）なので、段の色を変えると予定の色も変わる。
+        const tint = lane.kind === 'tag' ? tagColor(lane.name) : laneColor(lane.key, n);
+        return '<div class="ln" style="--lane:' + tint + '"><div class="who ' + lane.kind + '"'
             + ' data-key="' + escapeAttr(lane.key) + '" title="押すと引っ込めます。右押しで色を変えます">'
             + '<span>' + escapeHtml(lane.name) + '</span></div>'
             + '<div class="track"' + wide + '>' + track + '</div></div>';
