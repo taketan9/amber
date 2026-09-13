@@ -40,18 +40,21 @@ if [ -z "$rows" ]; then
     echo "（持ち主自身に。暗証番号が要ります）。"
     exit 1
 fi
-while IFS=$'\t' read -r name ident udid model; do
+while IFS=$'\t' read -r name ident udid model trouble; do
     printf '  %-24s %s\n' "$name" "$model"
+    [ -n "$trouble" ] && printf '  %-24s → %s\n' '' "$trouble"
 done <<< "$rows"
 [ "$want" = "--list" ] && exit 0
 
 hit=0
-while IFS=$'\t' read -r name ident udid model; do
+while IFS=$'\t' read -r name ident udid model trouble; do
     [ -z "$ident" ] && continue
     if [ -n "$want" ] && [[ "$name" != *"$want"* ]]; then continue; fi
     hit=1
     echo
     echo "── $name に入れる ──"
+    # **端末が言っている理由を、そのまま出す。** こちらで当て推量を並べない。
+    if [ -n "$trouble" ]; then echo "  $trouble"; continue; fi
     xcodebuild -project ios/Cian.xcodeproj -scheme Cian \
         -destination "platform=iOS,id=$udid" -configuration Debug build \
         2>&1 | grep -E 'error:|\*\* BUILD' || true
@@ -61,7 +64,7 @@ while IFS=$'\t' read -r name ident udid model; do
     if xcrun devicectl device install app --device "$ident" "$app" >/dev/null 2>&1; then
         echo "  入れました。"
     else
-        echo "  入れられませんでした（端末がロックされているか、つながっていません）"
+        echo "  入れられませんでした（端末のロックを解いて、つないだままにしてください）"
     fi
 done <<< "$rows"
 
