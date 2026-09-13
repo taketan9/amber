@@ -1347,7 +1347,11 @@ body.dropping::after {
 #cal { flex: 1; min-height: 0; min-width: 0; display: flex; }
 #calbox { flex: 1; min-width: 0; display: flex; flex-direction: column;
   background: var(--paper); color: var(--ink); overflow: hidden; }
-#calbox .hd { display: flex; align-items: center; gap: .5rem;
+/* **字は割らせず、帯のほうを折る**（依頼 529）。幅が足りないとき、既定だと
+   ボタンが縮んで中の字が二行に割れる（「自分だ／け」）── 読めない。
+   窓の幅はいくらでも狭くなりうるので、溢れたら段を足すほうを選ぶ。 */
+#calbox .hd button, #calbox .hd .seg { white-space: nowrap; flex: none }
+#calbox .hd { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
   padding: .6rem .9rem; border-bottom: 1px solid var(--line); }
 #calbox .hd .mo { font-size: 1.25rem; font-weight: 700; min-width: 8.5rem; }
 #calbox .hd .grow { flex: 1; }
@@ -1399,6 +1403,11 @@ body.dropping::after {
    同じ予定が見方によって別のものに見える。** */
 #calbox .d .ev.team { border-left-color: #8e5cb3;
   background: color-mix(in srgb, #8e5cb3 24%, var(--paper)) }
+/* **塗ってあるものが、グループに見えている予定**（依頼 529）。自分だけの
+   予定は塗らず、左の帯の色だけで出す ── 色はタグ（誰の用事か）にだけ使う
+   ので、見えているかどうかは塗りで言う。**出どころ別の色より後に書く** ──
+   同じ強さなので、前に置くと負ける（実際に負けて、塗り分けが出なかった）。 */
+#calbox .d .ev.lo { background: none }
 #calbox .d .ev.shut { color: var(--ink-2);
   background-image: repeating-linear-gradient(135deg, transparent 0 5px,
     color-mix(in srgb, var(--ink-3) 22%, transparent) 5px 10px); }
@@ -1410,6 +1419,11 @@ body.dropping::after {
 #calbox .seg button { border: 0; border-radius: 0; padding: 4px 12px;
   font-size: 13px; color: var(--ink-2); background: none; }
 #calbox .seg button.on { background: var(--sel); color: var(--ink); }
+/* 何を出しているか（依頼 529）。**光り方は見方と同じ** ── 別の色にして
+   みたら、配色によっては紙に混ざって見えなくなった（白磁で消えた）。
+   二つの切り替えは字（自分だけ／グループ／両方 と 日／週／月／並べて）で
+   見分けが付くので、光りまで変える必要が無い。太字だけ足す。 */
+#calbox .seg.side button.on { font-weight: 600; }
 #calbox .hours { flex: 1; display: flex; flex-direction: column; min-height: 0;
   padding: .4rem .5rem .5rem; }
 #calbox .allday { display: grid; gap: 3px; align-items: start;
@@ -1653,6 +1667,14 @@ body.dropping::after {
       <b class="mo"></b>
       <button class="next" title="次へ">›</button>
       <button class="today">今日</button>
+      <!-- **どのカレンダーを見るか**（依頼 529）── どう並べるか（日・週・月）
+           より先に置く。グループカレンダーが無ければ出さない ── 選べない
+           ものを見せない。 -->
+      <span class="seg side" hidden>
+        <button data-side="me">自分だけ</button>
+        <button data-side="group">グループ</button>
+        <button data-side="both">両方</button>
+      </span>
       <span class="seg">
         <button data-view="day">日</button>
         <button data-view="week">週</button>

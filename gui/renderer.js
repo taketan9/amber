@@ -7550,6 +7550,10 @@ let calGroup = false;
 /// （`amber.json` の `group`）。名前から探し直せないので ── `calendar.app.created`
 /// に一覧を読む力は無い ── 憶えていなければ「まだ無い」と同じことになる。
 let groupCal = null;
+/// 何を出しているか（依頼 529）── `'me'`（自分だけ）／`'group'`／`'both'`。
+/// **既定は両方**（本人）。グループカレンダーが無ければ、絞るものが無いので
+/// 帯にも出さない ── 選べないものを見せない。
+let calSide = 'both';
 /// 作るときの名前（本人が決めた・2026-09-13）。**Google カレンダーにも、
 /// 端末のカレンダーにも、グループ全員の画面にもこの名前で出る。**
 const GROUP_NAME = 'ambər グループ';
@@ -7585,8 +7589,27 @@ function paintHereColor() {
 
 /// 出す予定だけ（隠した予定表のものを落とす）。**どの見方でも同じ一本**を通す
 /// ── 月だけ隠せていない、が起きないように。ノートは落とさない。
+/// その予定は、グループカレンダーのものか（依頼 529）。
+///
+/// **予定表の名前で当てる。** EventKit が返すのは端末側のカレンダーの題で、
+/// Google のカレンダー id ではない ── 端末に降りてきた時点で別の世界の
+/// ものになっている。人が Google の画面で名前を変えたら、こちらの憶えも
+/// 変わるまでは当たらない（`calGet` で名前を取り直せる）。
+/// **当てるところは、この一か所だけ**にする。
+function inGroup(s) {
+    return !!groupCal && s.kind === 'here' && s.from === groupCal.name;
+}
+
+/// 出すもの。引っ込めた人を落とし、**自分だけ／グループの絞り込み**を効かせる。
+///
+/// ノートに書いた予定は「自分だけ」のもの ── 共有フォルダのノートでも、
+/// カレンダーとしてはこの端末のものなので、グループ側には出さない。
 function calShown() {
-    return calSlots.filter((s) => s.kind === 'note' || !calHide.includes(whoOf(s).key));
+    return calSlots.filter((s) => {
+        if (s.kind !== 'note' && calHide.includes(whoOf(s).key)) return false;
+        if (!groupCal || calSide === 'both') return true;
+        return calSide === 'group' ? inGroup(s) : !inGroup(s);
+    });
 }
 /// 出す日だけ（土日を隠すなら平日だけ）。
 function calDaysOf(days) {
@@ -7681,8 +7704,20 @@ async function drawCal() {
         || a.title.localeCompare(b.title));
     // **いま見ているものが一つだけ光る**（依頼 528・案ア）。並べているなら
     // 「並べて」── 日・週・月と同じ並びに入れたので、光りも一つで済む。
+    // 何を出しているか（依頼 529）── グループカレンダーが無ければ出さない。
+    const side = box.querySelector('.seg.side');
+    if (side) {
+        side.hidden = !groupCal;
+        for (const b of side.querySelectorAll('button')) {
+            b.classList.toggle('on', b.dataset.side === calSide);
+        }
+    }
     const showing = calGroup && calView !== 'month' ? 'crowd' : calView;
-    for (const b of box.querySelectorAll('.seg button')) {
+    // **`.seg:not(.side)` に絞る。** ここを `.seg button` にしていたせいで、
+    // 直前に付けた絞り込みの光りを、このループが全部消していた
+    // （絞り込みのボタンには `data-view` が無いので、必ず「消す」側に倒れる）。
+    // 撮っても気づけず、計算後の色を画面に書かせて初めて分かった。
+    for (const b of box.querySelectorAll('.seg:not(.side) button')) {
         b.classList.toggle('on', b.dataset.view === showing);
     }
     // グループカレンダーのボタン ── まだ無ければ「作る」、あれば「招待」。
@@ -7691,13 +7726,18 @@ async function drawCal() {
     // 気づいた）。描く場所と、出す場所を取り違えると、こうなる。
     const gb = box.querySelector('.groupbtn');
     if (gb) {
+        // **作ったら、帯から消える。** 作るのは一生に一度で、そのあと
+        // ずっと居座らせると帯が一つぶん狭くなる（実際に折れた）。
+        // 招待は**グループを見ているときだけ**出す ── 招待したくなるのは、
+        // まさにそのときだから。
+        gb.hidden = !!groupCal && calSide !== 'group';
         // **印を添える**（本人・2026-09-13）── 「＋ 予定を登録する」と同じで、
         // 絵が入口、字が答え合わせ（依頼 288）。印は左の列の共有と同じ二人 ──
         // 同じものには同じ形を使う。
         gb.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true">'
             + '<g fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"'
             + ' stroke-linejoin="round">' + RAIL_MARKS.share + '</g></svg>'
-            + '<span>' + (groupCal ? 'グループへ招待' : 'グループを作る') + '</span>';
+            + '<span>' + (groupCal ? '招待' : 'グループを作る') + '</span>';
         gb.title = groupCal
             ? '「' + groupCal.name + '」に人を招待します'
             : '入れた予定が、招待した人に見えるカレンダーを一枚作ります';
@@ -7769,7 +7809,11 @@ async function drawCal() {
         const sorted = plans.concat(
             mine.filter((s) => s.kind === 'note' && !shown.has(s.path)));
         const chips = sorted.slice(0, 3).map((s) =>
-            '<span class="ev ' + s.kind + (s.shut ? ' shut' : '') + '"'
+            // **塗ってあるものが、グループに見えている予定**（依頼 529）。
+            // 色はタグ（誰の用事か）にだけ使うので、見えているかどうかは
+            // 塗りで言う ── 10px の印は、月の表の一行では小さすぎる。
+            '<span class="ev ' + s.kind + (inGroup(s) ? ' sh' : ' lo')
+            + (s.shut ? ' shut' : '') + '"'
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '') + '>'
             + (s.at ? escapeHtml(s.at) + ' ' : '') + escapeHtml(s.title) + '</span>').join('');
         const rest = sorted.length > 3 ? '<span class="more">ほか ' + (sorted.length - 3) + '</span>' : '';
@@ -8366,6 +8410,13 @@ el('cal').addEventListener('click', async (e) => {
     };
     if (e.target.closest('.prev')) { step(-1); await drawCal(); return; }
     if (e.target.closest('.next')) { step(1); await drawCal(); return; }
+    const sideBtn = e.target.closest('.seg.side button');
+    if (sideBtn) {
+        calSide = sideBtn.dataset.side;
+        window.amber.remember({ calSide });
+        await drawCal();
+        return;
+    }
     const seg = e.target.closest('.seg button');
     if (seg) {
         if (seg.dataset.view === 'crowd') {
@@ -11626,6 +11677,7 @@ const escapeAttr = escapeHtml;
     if (['month', 'week', 'day'].includes(saved.calView)) calView = saved.calView;
     calGroup = !!saved.calGroup;
     groupCal = saved.group && saved.group.id ? saved.group : null;
+    if (['me', 'group', 'both'].includes(saved.calSide)) calSide = saved.calSide;
     if (Array.isArray(saved.calHide)) calHide = saved.calHide.filter((k) => typeof k === 'string');
     if (saved.calWeekend === false) calWeekend = false;
     if (typeof saved.calHereColor === 'string' && /^#[0-9a-f]{6}$/i.test(saved.calHereColor)) calHereColor = saved.calHereColor;
