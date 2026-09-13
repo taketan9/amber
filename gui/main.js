@@ -498,7 +498,7 @@ app.whenReady().then(() => {
                 const got = await drive.signIn({ scope: want });
                 if (got.error) return got;
                 if (!drive.grants(CAL_SCOPE)) {
-                    return { error: 'カレンダーを使う許可が下りませんでした' };
+                    return { error: 'カレンダーへのアクセスが許可されませんでした' };
                 }
             }
             return await gcal.make(name);

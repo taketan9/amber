@@ -7740,7 +7740,7 @@ async function drawCal() {
             + '<span>' + (groupCal ? '招待' : 'グループを作る') + '</span>';
         gb.title = groupCal
             ? '「' + groupCal.name + '」に人を招待します'
-            : '入れた予定が、招待した人に見えるカレンダーを一枚作ります';
+            : '一緒に使う人と予定を共有するためのカレンダーを作ります';
     }
 
     const grouped = calGroup && calView !== 'month';
@@ -8077,24 +8077,28 @@ function crowdWeek(lane, days) {
 /// いちばん怖い。
 async function cmdMakeGroup() {
     if (!await askYes('グループカレンダーを作りますか。\n\n'
-        + '「' + GROUP_NAME + '」というカレンダーが一枚できます。'
-        + 'そこに入れた予定だけが、招待した人に見えます。'
-        + '**いまの予定は一つも動きません。**')) return;
-    say('グループカレンダーを作っています…');
+        + '「' + GROUP_NAME + '」という新しいカレンダーを作ります。'
+        + 'このカレンダーに入れた予定だけが、招待した人に見えます。'
+        + '今ある予定はそのままで、共有されません。')) return;
+    say('カレンダーを作成しています…');
     const got = await window.amber.calMake(GROUP_NAME);
-    if (!got || got.error) { say('作れません: ' + ((got && got.error) || '返事がありません')); return; }
+    if (!got || got.error) {
+        say('作成できませんでした: ' + ((got && got.error) || 'Google から応答がありません'));
+        return;
+    }
     groupCal = { id: got.id, name: got.name };
     window.amber.remember({ group: groupCal });
     await drawCal();
     // **二段あることを、その場で言う。** amber がカレンダーを作っただけでは
     // 誰にも届かない ── 人を招待する口には審査の要る許可が要るので、
     // いまは Google の画面で招待してもらう（本人が決めた・2026-09-13）。
-    if (await askYes('「' + got.name + '」を作りました。\n\n'
-        + 'つづけて、グループの人を招待しますか。'
-        + '（Google カレンダーの共有設定が開きます。メールアドレスを入れて送ってください）')) {
+    if (await askYes('「' + got.name + '」を作成しました。\n\n'
+        + '続けて、一緒に使う人を招待しますか。\n'
+        + 'Google カレンダーの共有設定が開きます。'
+        + '相手のメールアドレスを入力すると、招待が届きます。')) {
         await window.amber.calShare(got.id);
     } else {
-        say('あとで、カレンダーの「グループへ招待」からでもできます');
+        say('招待は、カレンダーの「招待」からいつでもできます');
     }
 }
 
@@ -8106,15 +8110,15 @@ async function cmdMakeGroup() {
 async function cmdDropGroup() {
     if (!groupCal) return;
     const name = groupCal.name;
-    if (!await askYes('「' + name + '」を消しますか。\n\n'
-        + '**グループの人の画面からも消えます。**中の予定も一緒に消えて、戻せません。\n\n'
-        + '（amber から外すだけにはできません。消すか、そのままにするかです）')) return;
-    const again = await askText('消すなら、カレンダーの名前を打ってください',
-        '', '「' + name + '」と打つと消えます');
+    if (!await askYes('「' + name + '」を削除しますか。\n\n'
+        + '招待した人のカレンダーからも消えます。'
+        + '中に入っている予定もすべて削除され、元に戻すことはできません。')) return;
+    const again = await askText('確認のため、カレンダーの名前を入力してください',
+        '', '「' + name + '」と入力すると削除されます');
     if (again === null) return;
-    if (again.trim() !== name) { say('名前が違うので、消しませんでした'); return; }
+    if (again.trim() !== name) { say('名前が一致しないため、削除しませんでした'); return; }
     const got = await window.amber.calDrop(groupCal.id);
-    if (got && got.error) { say('消せません: ' + got.error); return; }
+    if (got && got.error) { say('削除できませんでした: ' + got.error); return; }
     groupCal = null;
     calSide = 'both';
     window.amber.remember({ group: null, calSide });
@@ -8122,15 +8126,15 @@ async function cmdDropGroup() {
     // **もう無かったときも、そう言う**（依頼 536）── 黙って「消しました」と
     // 言うと、まだあるのに消したように読める。
     say(got && got.gone
-        ? '「' + name + '」は、もう Google にありませんでした（amber の憶えからも外しました）'
-        : '「' + name + '」を消しました');
+        ? '「' + name + '」は Google カレンダー側ですでに削除されていました（amber の設定からも解除しました）'
+        : '「' + name + '」を削除しました');
 }
 
 /// グループに人を招待する。**いまは Google の画面で。**
 async function cmdInvite() {
     if (!groupCal) return;
     await window.amber.calShare(groupCal.id);
-    say('Google カレンダーの共有設定を開きました（メールアドレスを入れて送ってください）');
+    say('Google カレンダーの共有設定を開きました。相手のメールアドレスを入力してください');
 }
 
 async function cmdWhoPick() {
@@ -8865,7 +8869,7 @@ const CMDS = [
     { id: 'places', name: '保存ディレクトリの追加・変更・削除', app: true, run: cmdPlaces },
     // **作る道があるなら、やめる道もある**（依頼 535）。押す場所は ⚙ ──
     // 一生に一度で、戻せない操作なので、毎日押すものの隣には置かない。
-    { id: 'groupdrop', name: 'グループカレンダーを消す', app: true, need: 'group', run: cmdDropGroup },
+    { id: 'groupdrop', name: 'グループカレンダーを削除する', app: true, need: 'group', run: cmdDropGroup },
     { id: 'sync', name: '同期', app: true, sub: '同期していません', run: cmdSync },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'ambər について', app: true, run: cmdAbout },

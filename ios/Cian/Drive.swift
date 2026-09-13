@@ -250,12 +250,12 @@ final class Drive {
         if !grants(Self.calScope) {
             let want = (load() == nil) ? Self.scope + " " + Self.calScope : Self.calScope
             _ = try await signIn(want: want)
-            if !grants(Self.calScope) { throw Trouble.bad("カレンダーを使う許可が下りませんでした") }
+            if !grants(Self.calScope) { throw Trouble.bad("カレンダーへのアクセスが許可されませんでした") }
         }
         let body = try JSONSerialization.data(withJSONObject: ["summary": name])
         let got = try await json("/calendar/v3/calendars", method: "POST", body: body,
                                  contentType: "application/json")
-        guard let id = got["id"] as? String else { throw Trouble.bad("カレンダーの返事が読めません") }
+        guard let id = got["id"] as? String else { throw Trouble.bad("カレンダーを作成できませんでした") }
         return (id, (got["summary"] as? String) ?? name)
     }
 
@@ -268,7 +268,7 @@ final class Drive {
     /// `false` は「もう無かった」。
     @discardableResult
     func dropGroupCalendar(_ id: String) async throws -> Bool {
-        guard !id.isEmpty else { throw Trouble.bad("どのカレンダーか分かりません") }
+        guard !id.isEmpty else { throw Trouble.bad("削除するカレンダーが特定できません") }
         do {
             _ = try await api("/calendar/v3/calendars/" + Self.q(id), method: "DELETE")
             return true

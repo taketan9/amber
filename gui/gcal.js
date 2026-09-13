@@ -57,7 +57,7 @@ function createCal(opts) {
     async function api(pathAndQuery, init = {}) {
         const access = await token();
         if (!access) {
-            throw new Error('Google のサインインが切れています。⚙ の「同期」からもう一度サインインしてください');
+            throw new Error('Google へのサインインが切れています。⚙ の「同期」からサインインし直してください');
         }
         const r = await doFetch(apiUrl + pathAndQuery, {
             ...init,
@@ -71,7 +71,7 @@ function createCal(opts) {
             // **許可が足りないときは、そう言う。** 「HTTP 403」では、もう一度
             // サインインすれば直ることが人には分からない。
             if (r.status === 401 || r.status === 403) {
-                throw new Error('カレンダーを使う許可がありません（' + why + '）');
+                throw new Error('カレンダーへのアクセスが許可されていません（' + why + '）');
             }
             throw new Error(why);
         }

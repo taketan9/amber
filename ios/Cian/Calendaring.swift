@@ -132,31 +132,31 @@ struct Calendaring: View {
             Button("作る") { makeGroup() }
             Button("やめる", role: .cancel) { }
         } message: {
-            Text("「ambər グループ」というカレンダーが一枚できます。"
-                 + "そこに入れた予定だけが、招待した人に見えます。\n\n"
-                 + "いまの予定は一つも動きません。")
+            Text("「ambər グループ」という新しいカレンダーを作ります。\n\n"
+                 + "このカレンダーに入れた予定だけが、招待した人に見えます。"
+                 + "今ある予定はそのままで、共有されません。")
         }
         .alert("グループカレンダーを消しますか", isPresented: $dropping) {
-            Button("消す", role: .destructive) { dropGroup() }
-            Button("やめる", role: .cancel) { }
+            Button("削除", role: .destructive) { dropGroup() }
+            Button("キャンセル", role: .cancel) { }
         } message: {
-            Text("「\(groupName)」を消します。\n\n"
-                 + "グループの人の画面からも消えます。中の予定も一緒に消えて、戻せません。")
+            Text("「\(groupName)」を削除します。\n\n"
+                 + "招待した人のカレンダーからも消えます。"
+                 + "中に入っている予定もすべて削除され、元に戻すことはできません。")
         }
         // **行き方を言う**（依頼 534）── iPhone では amber の中から招待できない。
         .alert("グループへ招待", isPresented: $inviting) {
             Button("Google カレンダーを開く") { openGoogleCalendar() }
             Button("閉じる", role: .cancel) { }
         } message: {
-            Text("いまは Google カレンダーのアプリで招待します。\n\n"
-                 + "1. 左上のメニュー → 設定\n"
+            Text("招待は Google カレンダーのアプリで行います。\n\n"
+                 + "1. 左上のメニューから「設定」\n"
                  + "2. 「\(groupName)」を選ぶ\n"
                  + "3. 「ユーザーまたはグループを追加」\n\n"
-                 + "amber の中で招待できるようにするには Google の審査が要ります。"
-                 + "一般公開のときに通します。")
+                 + "相手のメールアドレスを入力すると、招待が届きます。")
         }
-        .alert("できました", isPresented: Binding(get: { !made.isEmpty }, set: { if !$0 { made = "" } })) {
-            Button("わかりました") { made = "" }
+        .alert("完了しました", isPresented: Binding(get: { !made.isEmpty }, set: { if !$0 { made = "" } })) {
+            Button("OK") { made = "" }
         } message: { Text(made) }
         .modifier(Asking(
             trouble: $trouble, adding: $adding, editing: $editing,
@@ -265,9 +265,8 @@ struct Calendaring: View {
                 // **二段あることを、その場で言う。** amber が作っただけでは
                 // 誰にも届かない ── 招待は Google の画面で（一般公開のときに
                 // amber の中へ入れる）。
-                made = "「\(got.name)」を作りました。\n\nこのあと「グループへ招待」で、"
-                    + "いっしょに使う人を呼べます。\n\n"
-                    + "この iPhone のカレンダーに出てくるまで、少し時間がかかることがあります。"
+                made = "「\(got.name)」を作成しました。\n\n"
+                    + "「グループへ招待」から、一緒に使う人を招待できます。"
                 count()
             } catch {
                 trouble = error.localizedDescription
@@ -309,8 +308,9 @@ struct Calendaring: View {
                 // **もう無かったときも、そう言う**（依頼 536）── 黙って
                 // 「消しました」と言うと、まだあるのに消したように読める。
                 made = killed
-                    ? "「\(was)」を消しました。"
-                    : "「\(was)」は、もう Google にありませんでした。\n\namber の憶えからも外しました。"
+                    ? "「\(was)」を削除しました。"
+                    : "「\(was)」は Google カレンダー側ですでに削除されていました。\n\n"
+                      + "amber の設定からも解除しました。"
                 count()
             } catch {
                 trouble = error.localizedDescription
@@ -408,7 +408,7 @@ struct Calendaring: View {
                     // **作る道があるなら、やめる道もある**（依頼 535）。
                     // 一生に一度で戻せないので、赤くして、押す前に二度言う。
                     Button(role: .destructive) { dropping = true } label: {
-                        Label("グループカレンダーを消す", systemImage: "trash")
+                        Label("グループカレンダーを削除", systemImage: "trash")
                     }
                     .disabled(busy)
                 }
