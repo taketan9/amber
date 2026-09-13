@@ -66,6 +66,11 @@ struct Calendaring: View {
     @State private var newTitle = ""
     @State private var newAt = "09:00"
     @State private var newEnd = ""
+    /// 予定をどこへ入れるか（依頼 545・窓の `toGroup` と同じ）。**選ばれていない
+    /// 状態で開く** ── 既定を持たせると、その既定のまま押した予定が出る。
+    @State private var newToGroup: Bool?
+    /// だれの用事か（グループに出すときだけ）。
+    @State private var newTags: [String] = []
     /// 直している、この iPhone の予定。
     @State private var editing: Slot?
     @State private var editTitle = ""
@@ -184,7 +189,8 @@ struct Calendaring: View {
         .modifier(Asking(
             trouble: $trouble, adding: $adding, editing: $editing,
             newTitle: $newTitle, newAt: $newAt, newEnd: $newEnd, editTitle: $editTitle,
-            day: spoken(picked), toPhone: Phone.allowed,
+            newToGroup: $newToGroup, newTags: $newTags,
+            day: spoken(picked), toPhone: Phone.allowed, groupName: groupName,
             add: add, rename: rename, drop: drop))
     }
 
@@ -700,8 +706,21 @@ struct Calendaring: View {
         let at = newAt.trimmingCharacters(in: .whitespacesAndNewlines)
         let end = newEnd.trimmingCharacters(in: .whitespacesAndNewlines)
         if Phone.allowed {
+            // **選ばれた行き先に入れる**（依頼 545）。グループならそのカレンダーへ
+            // 書き、だれの用事かをメモ欄の最後の行に置く（字を作るのは core の
+            // `caltagset` ── 窓と同じ一枚に訊く）。
+            let toGroup = newToGroup == true && !groupName.isEmpty
+            var notes = ""
+            if toGroup && !newTags.isEmpty {
+                // タグが書けなくても、予定そのものは登録する。
+                if let out = try? Cian.call("caltagset", ["notes": "", "tags": newTags]) {
+                    notes = out["notes"] as? String ?? ""
+                }
+            }
             do {
-                try Phone.add(title: title, day: picked, at: at.isEmpty ? nil : at, end: end.isEmpty ? nil : end)
+                try Phone.add(title: title, day: picked, at: at.isEmpty ? nil : at,
+                              end: end.isEmpty ? nil : end,
+                              notes: notes, into: toGroup ? groupName : "")
                 count()
             } catch {
                 trouble = error.localizedDescription
@@ -739,8 +758,11 @@ private struct Asking: ViewModifier {
     @Binding var newAt: String
     @Binding var newEnd: String
     @Binding var editTitle: String
+    @Binding var newToGroup: Bool?
+    @Binding var newTags: [String]
     let day: String
     let toPhone: Bool
+    let groupName: String
     let add: () -> Void
     let rename: () -> Void
     let drop: () -> Void
@@ -753,8 +775,10 @@ private struct Asking: ViewModifier {
             // **時刻は打たせない**（依頼 493 の電話の側・本人「手打ちすると絶対ミスする」）
             // ── 窓と同じ小窓一枚: タイトル・終日・開始・終了（十五分刻み）。
             .sheet(isPresented: $adding) {
-                EventForm(day: day, toPhone: toPhone, title: $newTitle, at: $newAt, end: $newEnd, add: add)
-                    .presentationDetents([.medium])
+                EventForm(day: day, toPhone: toPhone, groupName: groupName,
+                          title: $newTitle, at: $newAt, end: $newEnd,
+                          toGroup: $newToGroup, tags: $newTags, add: add)
+                    .presentationDetents([.large])
             }
             // この iPhone の予定は、**押したら直せる**（よその予定表と
             // 違って、書き戻す口がある）。
@@ -776,21 +800,72 @@ private struct Asking: ViewModifier {
 struct EventForm: View {
     let day: String
     let toPhone: Bool
+    /// グループカレンダーの名前（空なら、まだ作っていない）。
+    let groupName: String
     @Binding var title: String
     @Binding var at: String
     @Binding var end: String
+    @Binding var toGroup: Bool?
+    @Binding var tags: [String]
     let add: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var allDay = false
     @State private var start = "09:00"
     @State private var till = "10:00"
     @State private var said = ""
+    @State private var known: [String] = []
+    /// グループカレンダーが、この端末に降りてきているか（依頼 545）。
+    /// **名前を憶えているだけでは足りない** ── 作った直後や、Google の
+    /// アカウントをまだ iPhone に足していないうちは、予定表そのものが無い。
+    /// 出してしまうと、選んで「登録する」を押した先で「予定表がありません」
+    /// になる ── 選ばせておいて断るのがいちばん悪い。
+    @State private var canGroup = false
+    @State private var naming = false
+    @State private var typed = ""
 
     static let times: [String] = (0..<24).flatMap { h in ["00", "15", "30", "45"].map { String(format: "%02d:", h) + $0 } }
 
     var body: some View {
         NavigationStack {
             Form {
+                // **どこに入れるかを、いちばん先に選ばせる**（依頼 545・窓と同じ丙）。
+                // グループカレンダーが無ければ、選ぶものが無いので出さない。
+                if canGroup {
+                    Section("どこに入れる") {
+                        Picker("どこに入れる", selection: Binding(
+                            get: { toGroup }, set: { toGroup = $0 })
+                        ) {
+                            Text("自分だけ").tag(Bool?.some(false))
+                            Text("グループと共有").tag(Bool?.some(true))
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                    }
+                    // **だれの用事かは、グループに出すときだけ訊く** ── 誰にも
+                    // 見えない予定に、誰の用事かを書く意味がない。
+                    if toGroup == true {
+                        Section("だれの") {
+                            ForEach(known, id: \.self) { t in
+                                Button {
+                                    if let i = tags.firstIndex(of: t) { tags.remove(at: i) } else { tags.append(t) }
+                                } label: {
+                                    HStack {
+                                        Circle().fill(Color(hex: CalPrefs.laneColor(t, among: known)) ?? .gray)
+                                            .frame(width: 10, height: 10)
+                                        Text(t).foregroundStyle(.primary)
+                                        Spacer()
+                                        if tags.contains(t) { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                                    }
+                                }
+                                // **選んでいない名前を、選んだ色で出さない** ──
+                                // `Button` の字は既定で琥珀になるので、全部が
+                                // 選ばれているように見える（実機の前に画面で出た）。
+                                .buttonStyle(.plain)
+                            }
+                            Button("＋ 名前を追加") { typed = ""; naming = true }
+                        }
+                    }
+                }
                 Section {
                     TextField("タイトル", text: $title)
                 } footer: {
@@ -811,12 +886,34 @@ struct EventForm: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("やめる") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("登録する") { go() }.bold() }
+                ToolbarItem(placement: .confirmationAction) {
+                    // 選ぶまで登録できない（依頼 545）。**押せないボタンは
+                    // 押せないように見せる** ── 見た目が同じだと「押しても
+                    // 何も起きない」になる。
+                    Button("登録する") { go() }
+                        .bold()
+                        .disabled(canGroup && toGroup == nil)
+                }
+            }
+            .alert("だれの用事ですか", isPresented: $naming) {
+                TextField("名前を入力してください（例: 太郎）", text: $typed)
+                Button("やめる", role: .cancel) {}
+                Button("追加") {
+                    let name = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !name.isEmpty, !name.contains(" "), !name.contains("　") else { return }
+                    CalPrefs.rememberTag(name)
+                    known = CalPrefs.tagsKnown
+                    if !tags.contains(name) { tags.append(name) }
+                }
             }
             .onAppear {
                 allDay = at.isEmpty
                 if !at.isEmpty { start = at }
                 till = end.isEmpty ? Self.plus(start, 60) : end
+                known = CalPrefs.tagsKnown
+                canGroup = toPhone && !groupName.isEmpty && Phone.calendars.contains(groupName)
+                toGroup = nil
+                tags = []
             }
         }
     }

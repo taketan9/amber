@@ -916,7 +916,7 @@ body.vim #vim { display: block; }
   /* **小窓は、何よりも上。** カレンダー（60）や「使われていない画像」
      （60）から呼ばれた小窓が下に開くと、暗幕の裏で開いたまま押せない
      ── 画面の上では「押しても何も起きない」にしか見えない
-     （実際に「予定を足す」がそうなっていた・依頼 477）。 */
+     （実際に「予定を登録する」がそうなっていた・依頼 477）。 */
   position: fixed; inset: 0; z-index: 80; display: flex;
   justify-content: center; align-items: flex-start; padding-top: 12vh;
   background: rgba(0,0,0,.28);
@@ -925,7 +925,7 @@ body.vim #vim { display: block; }
   -webkit-app-region: no-drag;
 }
 #veil[hidden] { display: none !important; }
-/* 予定を足す小窓（依頼 493）── 小窓と同じ高さ・同じ紙。 */
+/* 予定を登録する小窓（依頼 493）── 小窓と同じ高さ・同じ紙。 */
 #evform, #newform {
   position: fixed; inset: 0; z-index: 80; display: flex; justify-content: center;
   align-items: flex-start; padding-top: 12vh; background: rgba(0,0,0,.28);
@@ -1734,7 +1734,7 @@ body.dropping::after {
            ── IT に明るくない人に「設定を開いてください」と言わないため
            （`PLANS.ja.md` の前提）。まだ無ければ「作る」、あれば「招待」。 -->
       <button class="groupbtn"></button>
-      <!-- **予定を足す道は、いつも見えているところに。** 前は右の欄の
+      <!-- **予定を登録する道は、いつも見えているところに。** 前は右の欄の
            いちばん下にあって、日を選ばないと出てこなかった。 -->
       <button class="add">＋ 予定を登録する</button>
       <span class="grow"></span>
@@ -1765,7 +1765,7 @@ body.dropping::after {
     </div>
   </div></div>
   </div>
-  <!-- **予定を足す小窓**（依頼 493）。題と、終日か、開始と終了の時刻。時刻は
+  <!-- **予定を登録する小窓**（依頼 493）。題と、終日か、開始と終了の時刻。時刻は
        打たせず選ばせる。 -->
   <div id="evform" hidden><div class="box">
     <div class="hd"></div>

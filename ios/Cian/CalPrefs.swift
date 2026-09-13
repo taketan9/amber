@@ -17,6 +17,7 @@ enum CalPrefs {
     private static let sideKey = "amber.calSide"
     private static let groupIdKey = "amber.calGroupId"
     private static let groupAskedKey = "amber.calGroupAsked"
+    private static let tagsKey = "amber.calTagsKnown"
 
     static var hide: [String] {
         get { UserDefaults.standard.stringArray(forKey: hideKey) ?? [] }
@@ -74,6 +75,28 @@ enum CalPrefs {
     static let groupWord = "ambər グループ"
     static func foundGroup() -> Bool {
         groupName.isEmpty && !groupAsked && Phone.calendars.contains(groupWord)
+    }
+
+    /// この端末が見たことのあるタグ（依頼 545・窓の `tagsKnown` と同じ）。
+    /// **選ばせるために憶えておく** ── 毎回名前を打たせない。
+    static var tagsKnown: [String] {
+        get { UserDefaults.standard.stringArray(forKey: tagsKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: tagsKey) }
+    }
+    /// そのタグの色（依頼 545・窓の `tagColor` と同じ五色・同じ配り方）。
+    /// **決めていなければ、順に配る** ── 設定を開かなくても色分けされた表が
+    /// 見られるほうがよい。`among` は憶えている順で、窓の `tagOrder` にあたる。
+    static let laneColors = ["#e0669c", "#d9a400", "#2f8a52", "#8e5cb3", "#1fa3a3"]
+    static func laneColor(_ t: String, among all: [String]) -> String {
+        let i = all.firstIndex(of: t) ?? 0
+        return laneColors[i % laneColors.count]
+    }
+
+    static func rememberTag(_ t: String) {
+        var all = tagsKnown
+        guard !t.isEmpty, !all.contains(t) else { return }
+        all.append(t)
+        tagsKnown = all
     }
 
     /// 何を出しているか（`me` / `group` / `both`）。**既定は両方**。

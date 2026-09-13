@@ -31,12 +31,12 @@ struct Tagging: View {
                         }
                     }
                 }
-                Section("足す") {
+                Section("新しいタグを作る") {
                     HStack {
                         TextField("新しいタグ", text: $typed)
                             .autocorrectionDisabled()
                             .onSubmit { add(typed) }
-                        Button("足す") { add(typed) }
+                        Button("作る") { add(typed) }
                             .disabled(clean(typed).isEmpty)
                     }
                     // The ones already in the folder, minus the ones already

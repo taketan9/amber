@@ -8379,7 +8379,7 @@ function teamClock() {
 
 
 
-/// 予定を足す小窓（依頼 493）── **タイトル・終日・開始・終了**を一枚で。
+/// 予定を登録する小窓（依頼 493）── **タイトル・終日・開始・終了**を一枚で。
 /// 時刻は打たせず、十五分刻みから選ばせる。開始を選ぶと終了は一時間後に
 /// 置いておく。終日なら時刻は選べない。返すのは `{ title, allDay, start, end }`、
 /// やめたら null。
@@ -8433,7 +8433,7 @@ function askEvent(head, at0) {
             .map((t) => '<button class="chip' + (picked.includes(t) ? ' on' : '') + '"'
                 + ' data-tag="' + escapeAttr(t) + '" style="--c:' + escapeAttr(tagColor(t)) + '">'
                 + '<i class="dot"></i>' + escapeHtml(t) + '</button>').join('')
-            + '<button class="chip add" data-tag=" new">＋ 足す</button>';
+            + '<button class="chip add" data-tag=" new">＋ 名前を追加</button>';
     }
     el('evtags').onclick = async (e) => {
         const b = e.target.closest('.chip');
@@ -8502,7 +8502,9 @@ function askEvent(head, at0) {
 async function calAdd(day, at0) {
     // **この機械の予定表が使えるなら、そちらへ**（依頼 462）── 普通の
     // カレンダーとして期待されるのはそれ。使えないときだけノートを作る。
-    const ev = await askEvent('予定を足す（' + dayName(day) + '）', at0);
+    // **ボタンと同じ言葉で言う**（依頼 546）── ボタンが「予定を登録する」と
+    // 言っているのに、開いた小窓が「予定を足す」だと、別のことをする窓に見える。
+    const ev = await askEvent('予定を登録する（' + dayName(day) + '）', at0);
     if (!ev) return;
     const title = ev.title;
     if (hereOn) {

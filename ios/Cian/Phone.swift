@@ -33,6 +33,9 @@ enum Phone {
     }
 
     /// この端末にある予定表の名前（表示設定で出し入れするため）。
+    /// 書ける予定表そのもの（名前で指すため・依頼 545）。
+    static var calendarObjects: [EKCalendar] { store.calendars(for: .event) }
+
     static var calendars: [String] {
         guard allowed else { return [] }
         var seen: [String] = []
@@ -89,9 +92,18 @@ enum Phone {
             from: e.calendar?.title ?? "")
     }
 
-    /// 予定を足す。**書ける先が無ければ、そう言う。**
-    static func add(title: String, day: String, at: String?, end: String? = nil) throws {
-        guard let cal = store.defaultCalendarForNewEvents else {
+    /// 予定を登録する。**書ける先が無ければ、そう言う。**
+    /// `into` に予定表の名前を渡すと、そこへ書く（依頼 545）──
+    /// グループカレンダーは端末に降りてきた一枚なので、**名前でしか指せない**。
+    /// `notes` はメモ欄（誰の用事かのタグが、その最後の行に入る）。
+    static func add(title: String, day: String, at: String?, end: String? = nil,
+                    notes: String = "", into: String = "") throws {
+        var target = store.defaultCalendarForNewEvents
+        if !into.isEmpty {
+            target = calendarObjects.first { $0.title == into && $0.allowsContentModifications }
+            guard target != nil else { throw Trouble.noNamed(into) }
+        }
+        guard let cal = target else {
             throw Trouble.noCalendar
         }
         guard let start = when(day, at) else { throw Trouble.badDay }
@@ -108,6 +120,7 @@ enum Phone {
         } else {
             e.endDate = start.addingTimeInterval(60 * 60)
         }
+        if !notes.isEmpty { e.notes = notes }
         try store.save(e, span: .thisEvent)
     }
 
@@ -132,11 +145,18 @@ enum Phone {
 
     enum Trouble: LocalizedError {
         case noCalendar, badDay, gone
+        /// 名前で指した予定表が、この端末に見つからない（依頼 545）。
+        case noNamed(String)
         var errorDescription: String? {
             switch self {
             case .noCalendar: return "書ける予定表がこの iPhone にありません。"
             case .badDay: return "日付を読めませんでした。"
             case .gone: return "その予定は、もうありません。"
+            // **黙って自分の予定表に入れない。** グループと共有するつもりで
+            // 登録した予定が、誰にも見えないところに入るほうがずっと悪い。
+            case .noNamed(let name):
+                return "「\(name)」がこの iPhone のカレンダーにまだありません。"
+                    + "少し待ってから、もう一度お試しください。"
             }
         }
     }
