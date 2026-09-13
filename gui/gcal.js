@@ -30,8 +30,9 @@ const CAL_API = 'https://www.googleapis.com/calendar/v3';
 
 /// カレンダーの設定ページ。**人がここでグループの人を招待する。**
 ///
-/// Google はこの URL にカレンダーの id を base64 で埋める。**確かめていない**
-/// ので、開けなかったときのために設定の入口（`SETTINGS_URL`）も持っておく。
+/// Google はこの URL にカレンダーの id を base64 で埋める（余りの `=` は落とす）。
+/// **本人の本物のカレンダーで確かめた**（2026-09-13）── 組んだ字と、Google が
+/// 出す URL が一字一句同じだった。id が無いときのために設定の入口も持っておく。
 const SETTINGS_URL = 'https://calendar.google.com/calendar/u/0/r/settings';
 
 function shareUrl(id) {

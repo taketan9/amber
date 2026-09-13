@@ -50,6 +50,8 @@ struct Calendaring: View {
     @State private var made = ""
     /// 招待の行き方を出しているところ（依頼 534）。
     @State private var inviting = false
+    /// 消す前の確認（依頼 535）。
+    @State private var dropping = false
 
     /// **開くたびに今月へ戻さない。** 先の予定を見にきた人を、
     /// 閉じて開くたびに今日へ連れ戻さない。
@@ -133,6 +135,13 @@ struct Calendaring: View {
             Text("「ambər グループ」というカレンダーが一枚できます。"
                  + "そこに入れた予定だけが、招待した人に見えます。\n\n"
                  + "いまの予定は一つも動きません。")
+        }
+        .alert("グループカレンダーを消しますか", isPresented: $dropping) {
+            Button("消す", role: .destructive) { dropGroup() }
+            Button("やめる", role: .cancel) { }
+        } message: {
+            Text("「\(groupName)」を消します。\n\n"
+                 + "グループの人の画面からも消えます。中の予定も一緒に消えて、戻せません。")
         }
         // **行き方を言う**（依頼 534）── iPhone では amber の中から招待できない。
         .alert("グループへ招待", isPresented: $inviting) {
@@ -270,15 +279,41 @@ struct Calendaring: View {
     /// グループへ招待する。**いまは Google カレンダーのアプリで**
     /// （依頼 534・実機で分かった）。
     ///
-    /// はじめはパソコン版の設定ページの URL を組んで開いていたが、**iPhone では
-    /// その URL が Google カレンダーのアプリに横取りされ**、「このカレンダーに
-    /// アクセスするには…ログインしてください」とだけ出て、招待する画面には
-    /// 行けなかった（本人が実機で踏んだ）。
+    /// はじめはパソコン版の設定ページの URL を開いていた。**URL は合っていた**
+    /// （本人の本物のカレンダーで確かめた ── 組んだ字と Google が出す URL が
+    /// 一字一句同じ）。**駄目だったのは、iPhone が `calendar.google.com` を
+    /// Google カレンダーのアプリに渡してしまうこと** ── アプリは設定ページを
+    /// 出せないので、「このカレンダーにアクセスするには…ログインしてください」
+    /// とだけ出る。**URL の間違いではなく、行き先の取られ方の問題だった。**
     ///
     /// iPhone でも共有そのものはできる ── **アプリの設定から**。だから
     /// **URL を当てにいかず、行き方を言う**。amber の中で招待できるようにする
     /// には `calendar.acls`（審査の要る許可）が要るので、一般公開のときに通す。
     private func invite() { inviting = true }
+
+    /// **グループカレンダーを消す**（依頼 535）。
+    ///
+    /// **本当に消える。** 持ち主が消すと、グループの人の画面からも消える ──
+    /// 「amber から外す」ではない。戻す道がどこにも無いので、押す前にそう言う。
+    private func dropGroup() {
+        busy = true
+        Task {
+            do {
+                try await Drive.shared.dropGroupCalendar(CalPrefs.groupId)
+                let was = groupName
+                CalPrefs.groupName = ""
+                CalPrefs.groupId = ""
+                groupName = ""
+                side = "both"
+                CalPrefs.side = "both"
+                made = "「\(was)」を消しました。"
+                count()
+            } catch {
+                trouble = error.localizedDescription
+            }
+            busy = false
+        }
+    }
 
     private func openGoogleCalendar() {
         if let u = URL(string: "https://calendar.google.com/") { UIApplication.shared.open(u) }
@@ -366,6 +401,12 @@ struct Calendaring: View {
                     Button { invite() } label: {
                         Label("グループへ招待", systemImage: "person.2")
                     }
+                    // **作る道があるなら、やめる道もある**（依頼 535）。
+                    // 一生に一度で戻せないので、赤くして、押す前に二度言う。
+                    Button(role: .destructive) { dropping = true } label: {
+                        Label("グループカレンダーを消す", systemImage: "trash")
+                    }
+                    .disabled(busy)
                 }
             }
         }

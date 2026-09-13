@@ -8098,6 +8098,30 @@ async function cmdMakeGroup() {
     }
 }
 
+/// **グループカレンダーを消す**（依頼 535）。
+///
+/// **本当に消える。** 持ち主が消すと、グループの人の画面からも消える ──
+/// 「amber から外す」ではない。だから押す前に、そう言う。二度訊くのは、
+/// 戻す道がどこにも無いから（Google のゴミ箱にも残らない）。
+async function cmdDropGroup() {
+    if (!groupCal) return;
+    const name = groupCal.name;
+    if (!await askYes('「' + name + '」を消しますか。\n\n'
+        + '**グループの人の画面からも消えます。**中の予定も一緒に消えて、戻せません。\n\n'
+        + '（amber から外すだけにはできません。消すか、そのままにするかです）')) return;
+    const again = await askText('消すなら、カレンダーの名前を打ってください',
+        '', '「' + name + '」と打つと消えます');
+    if (again === null) return;
+    if (again.trim() !== name) { say('名前が違うので、消しませんでした'); return; }
+    const got = await window.amber.calDrop(groupCal.id);
+    if (got && got.error) { say('消せません: ' + got.error); return; }
+    groupCal = null;
+    calSide = 'both';
+    window.amber.remember({ group: null, calSide });
+    await drawCal();
+    say('「' + name + '」を消しました');
+}
+
 /// グループに人を招待する。**いまは Google の画面で。**
 async function cmdInvite() {
     if (!groupCal) return;
@@ -8835,6 +8859,9 @@ const CMDS = [
     // **足す・変える・外す・同期先、を一つの入口で**（依頼 511・本人「保存
     // ディレクトリを追加・変更・削除っていう表現で全部できるようにしない？」）。
     { id: 'places', name: '保存ディレクトリの追加・変更・削除', app: true, run: cmdPlaces },
+    // **作る道があるなら、やめる道もある**（依頼 535）。押す場所は ⚙ ──
+    // 一生に一度で、戻せない操作なので、毎日押すものの隣には置かない。
+    { id: 'groupdrop', name: 'グループカレンダーを消す', app: true, need: 'group', run: cmdDropGroup },
     { id: 'sync', name: '同期', app: true, sub: '同期していません', run: cmdSync },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'ambər について', app: true, run: cmdAbout },
@@ -8903,7 +8930,9 @@ async function cmdKeys() {
     if (hit && hit.run) await hit.run();
 }
 
-const canRun = (c) => c.need !== 'note' || !!state.open;
+const canRun = (c) => (c.need !== 'note' || !!state.open)
+    // グループを持っていない人に「消す」を出さない（依頼 535）。
+    && (c.need !== 'group' || !!groupCal);
 
 /// 命令のパレット（⌘⇧P）。**名前で探せれば、覚えなくていい。**
 ///

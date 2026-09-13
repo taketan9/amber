@@ -259,6 +259,13 @@ final class Drive {
         return (id, (got["summary"] as? String) ?? name)
     }
 
+    /// **グループカレンダーを消す**（依頼 535）。持ち主が消すと、グループの
+    /// 人の画面からも消える ── 呼ぶ側は、押す前にそう言うこと。
+    func dropGroupCalendar(_ id: String) async throws {
+        guard !id.isEmpty else { throw Trouble.bad("どのカレンダーか分かりません") }
+        _ = try await api("/calendar/v3/calendars/" + Self.q(id), method: "DELETE")
+    }
+
     /// そのカレンダーが、まだ向こうにあるか。**消されていたら nil。**
     func groupCalendar(_ id: String) async throws -> (id: String, name: String)? {
         do {
