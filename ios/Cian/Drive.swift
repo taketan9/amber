@@ -19,6 +19,11 @@ final class Drive {
     static let scheme = "com.googleusercontent.apps.306373349806-paqosepmbnclbibibnq9ktodk42h6qbr"
     static let redirect = scheme + ":/oauth2redirect"
     static let scope = "https://www.googleapis.com/auth/drive.file"
+    /// **カレンダーの許可は、要る瞬間に足す**（依頼 532・窓の `CAL_SCOPE` と同じ）。
+    /// ノートの同期しか使わない人に、カレンダーの許可を訊かない ── 同意の画面に
+    /// 並ぶ数が増えるほど、押す前に引き返す人が増える。`calendar.app.created` は
+    /// 「アプリが自分で作った二次カレンダーだけ」で、**非機密**（審査が要らない）。
+    static let calScope = "https://www.googleapis.com/auth/calendar.app.created"
     static let homeName = "ambər"
 
     /// 試験のための差し替え（`walk-phone.sh` が偽の Drive を指す）。人の道には出ない。
@@ -38,6 +43,9 @@ final class Drive {
         var refresh: String?
         var until: TimeInterval
         var who: Who?
+        /// **貰えた許可**（頼んだ許可ではない）── 断られたものを持っていると
+        /// 思い込むと、使う瞬間まで気づけない。
+        var scope: String?
     }
     struct Remote { let rel: String; let id: String; let tag: String; let by: String }
 
@@ -60,7 +68,8 @@ final class Drive {
     private func load() -> Kept? {
         if let fake = fakeToken {
             return Kept(access: fake, refresh: nil, until: Date().timeIntervalSince1970 + 3600,
-                        who: Who(name: "試し", email: "test@example.com"))
+                        who: Who(name: "試し", email: "test@example.com"),
+                        scope: Self.scope + " " + Self.calScope)
         }
         guard let data = Keychain.get(Self.keychainKey) else { return nil }
         return try? JSONDecoder().decode(Kept.self, from: data)
@@ -80,9 +89,21 @@ final class Drive {
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
 
+    /// その許可を持っているか。**使う前に訊く** ── 持っていないまま叩くと、
+    /// 人には「HTTP 403」としか見えない。
+    func grants(_ one: String) -> Bool {
+        guard let kept = load() else { return false }
+        return (kept.scope ?? Self.scope).split(separator: " ").map(String.init).contains(one)
+    }
+
     /// ブラウザで「許可」を押してもらい、鍵に換えてキーチェーンへ。返すのは誰か。
+    /// `want` を渡すと、その許可だけを足しにいく。
+    ///
+    /// **`@MainActor` はここに付いていないといけない** ── ブラウザの画面を
+    /// 出すので。一度、この上に別の関数を挟んで付け替えてしまい、**それでも
+    /// ビルドは通った**（2026-09-13）。
     @MainActor
-    func signIn() async throws -> Who {
+    func signIn(want: String? = nil) async throws -> Who {
         var raw = [UInt8](repeating: 0, count: 32)
         _ = SecRandomCopyBytes(kSecRandomDefault, raw.count, &raw)
         let verifier = Self.b64url(Data(raw))
@@ -95,7 +116,10 @@ final class Drive {
             .init(name: "client_id", value: Self.clientId),
             .init(name: "redirect_uri", value: Self.redirect),
             .init(name: "response_type", value: "code"),
-            .init(name: "scope", value: Self.scope),
+            .init(name: "scope", value: want ?? Self.scope),
+            // **前に貰った許可を落とさない。** これが無いと、カレンダーの許可を
+            // 足しにいった瞬間に Drive の許可が消えて、同期が黙って止まる。
+            .init(name: "include_granted_scopes", value: "true"),
             .init(name: "code_challenge", value: challenge),
             .init(name: "code_challenge_method", value: "S256"),
             .init(name: "state", value: stateWord),
@@ -123,7 +147,8 @@ final class Drive {
         ])
         guard let access = tok["access_token"] as? String else { throw Trouble.bad("鍵が返ってきませんでした") }
         var kept = Kept(access: access, refresh: tok["refresh_token"] as? String,
-                        until: Date().timeIntervalSince1970 + ((tok["expires_in"] as? Double) ?? 3600) - 60, who: nil)
+                        until: Date().timeIntervalSince1970 + ((tok["expires_in"] as? Double) ?? 3600) - 60,
+                        who: nil, scope: (tok["scope"] as? String) ?? want ?? Self.scope)
         kept.who = try? await whoAmI(access)
         store(kept)
         return kept.who ?? Who(name: "", email: "")
@@ -210,6 +235,39 @@ final class Drive {
     }
     private static func q(_ s: String) -> String {
         s.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? s
+    }
+
+    /// **グループカレンダーを一枚作る**（依頼 532）。返すのは `(id, name)`。
+    ///
+    /// **押すのは一回。** サインインも、カレンダーの許可も、ここで面倒を見る ──
+    /// 使う人に段取りを踏ませない。まだ Google に繋いでいなければ二つまとめて
+    /// 訊く（「サインイン」と「カレンダーの許可」でブラウザを二度開かせない）。
+    ///
+    /// **予定の読み書きはこの道を通らない。** 作ったカレンダーは、Google の
+    /// アカウントが iPhone に足してあれば端末のカレンダーに降りてくる ──
+    /// そこから先は EventKit の仕事で、通信は要らない。
+    func makeGroupCalendar(named name: String) async throws -> (id: String, name: String) {
+        if !grants(Self.calScope) {
+            let want = (load() == nil) ? Self.scope + " " + Self.calScope : Self.calScope
+            _ = try await signIn(want: want)
+            if !grants(Self.calScope) { throw Trouble.bad("カレンダーを使う許可が下りませんでした") }
+        }
+        let body = try JSONSerialization.data(withJSONObject: ["summary": name])
+        let got = try await json("/calendar/v3/calendars", method: "POST", body: body,
+                                 contentType: "application/json")
+        guard let id = got["id"] as? String else { throw Trouble.bad("カレンダーの返事が読めません") }
+        return (id, (got["summary"] as? String) ?? name)
+    }
+
+    /// そのカレンダーが、まだ向こうにあるか。**消されていたら nil。**
+    func groupCalendar(_ id: String) async throws -> (id: String, name: String)? {
+        do {
+            let got = try await json("/calendar/v3/calendars/" + Self.q(id))
+            guard let gid = got["id"] as? String else { return nil }
+            return (gid, (got["summary"] as? String) ?? "")
+        } catch Trouble.http(let code, _) where code == 404 {
+            return nil
+        }
     }
 
     private var homeId: String?

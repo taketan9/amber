@@ -15,6 +15,7 @@ enum CalPrefs {
     private static let groupKey = "amber.calGroupName"
     /// 何を出しているか ── `me` / `group` / `both`。
     private static let sideKey = "amber.calSide"
+    private static let groupIdKey = "amber.calGroupId"
 
     static var hide: [String] {
         get { UserDefaults.standard.stringArray(forKey: hideKey) ?? [] }
@@ -48,6 +49,12 @@ enum CalPrefs {
     static var groupName: String {
         get { UserDefaults.standard.string(forKey: groupKey) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: groupKey) }
+    }
+
+    /// グループカレンダーの id（招待の画面を開くのに使う）。
+    static var groupId: String {
+        get { UserDefaults.standard.string(forKey: groupIdKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: groupIdKey) }
     }
 
     /// 何を出しているか（`me` / `group` / `both`）。**既定は両方**。

@@ -37,6 +37,10 @@ struct Calendaring: View {
 
     /// 何を出しているか（依頼 530）── `me` / `group` / `both`。
     @State private var side = CalPrefs.side
+    /// グループを作る前の確認と、作っているあいだ（依頼 532）。
+    @State private var making = false
+    @State private var busy = false
+    @State private var made = ""
 
     /// **開くたびに今月へ戻さない。** 先の予定を見にきた人を、
     /// 閉じて開くたびに今日へ連れ戻さない。
@@ -112,6 +116,18 @@ struct Calendaring: View {
             CalSettings(changed: { prefsTick += 1; count() })
         }
         .id(prefsTick)
+        // 作る前の確認と、作ったあとの知らせ（依頼 532）。
+        .alert("グループを作りますか", isPresented: $making) {
+            Button("作る") { makeGroup() }
+            Button("やめる", role: .cancel) { }
+        } message: {
+            Text("「ambər グループ」というカレンダーが一枚できます。"
+                 + "そこに入れた予定だけが、招待した人に見えます。\n\n"
+                 + "いまの予定は一つも動きません。")
+        }
+        .alert("できました", isPresented: Binding(get: { !made.isEmpty }, set: { if !$0 { made = "" } })) {
+            Button("わかりました") { made = "" }
+        } message: { Text(made) }
         .modifier(Asking(
             trouble: $trouble, adding: $adding, editing: $editing,
             newTitle: $newTitle, newAt: $newAt, newEnd: $newEnd, editTitle: $editTitle,
@@ -199,6 +215,45 @@ struct Calendaring: View {
         }
     }
 
+    /// グループカレンダーを一枚作る（依頼 532）。**押すのは一回。**
+    ///
+    /// サインインもカレンダーの許可も `Drive` が面倒を見る。作る前に
+    /// 「いまの予定は一つも動きません」と言う ──「共有」を押した瞬間に
+    /// 何が起きるか分からないのが、いちばん怖い。
+    private func makeGroup() {
+        busy = true
+        Task {
+            do {
+                let got = try await Drive.shared.makeGroupCalendar(named: "ambər グループ")
+                CalPrefs.groupName = got.name
+                CalPrefs.groupId = got.id
+                side = "group"
+                CalPrefs.side = "group"
+                // **二段あることを、その場で言う。** amber が作っただけでは
+                // 誰にも届かない ── 招待は Google の画面で（一般公開のときに
+                // amber の中へ入れる）。
+                made = "「\(got.name)」を作りました。\n\nこのあと「グループへ招待」で、"
+                    + "いっしょに使う人を呼べます。\n\n"
+                    + "この iPhone のカレンダーに出てくるまで、少し時間がかかることがあります。"
+                count()
+            } catch {
+                trouble = error.localizedDescription
+            }
+            busy = false
+        }
+    }
+
+    /// グループへ招待する。**いまは Google の画面で**（本人が決めた・2026-09-13）。
+    /// 人を招待する口には審査の要る許可が要るので、一般公開のときに通す。
+    private func invite() {
+        let id = CalPrefs.groupId
+        let tag = Data(id.utf8).base64EncodedString().replacingOccurrences(of: "=", with: "")
+        let at = id.isEmpty
+            ? "https://calendar.google.com/calendar/u/0/r/settings"
+            : "https://calendar.google.com/calendar/u/0/r/settings/calendar/" + tag
+        if let u = URL(string: at) { UIApplication.shared.open(u) }
+    }
+
     @ViewBuilder private func cell(_ d: String) -> some View {
         if d.isEmpty {
             Color.clear.frame(maxWidth: .infinity, minHeight: 46)
@@ -267,6 +322,20 @@ struct Calendaring: View {
                     adding = true
                 } label: {
                     Label("予定を登録する", systemImage: "plus")
+                }
+                // **グループを始める道は、ここに置く**（依頼 532）── 設定の
+                // 中ではない。狙いは IT に明るくない人で、**PC を持っていない
+                // 可能性が大いにある**（本人）ので、電話で始められないのは
+                // 致命的。作ったら消え、そのあとは「グループへ招待」になる。
+                if CalPrefs.groupName.isEmpty {
+                    Button { making = true } label: {
+                        Label("グループを作る", systemImage: "person.2.badge.plus")
+                    }
+                    .disabled(busy)
+                } else if side == "group" {
+                    Button { invite() } label: {
+                        Label("グループへ招待", systemImage: "person.2")
+                    }
                 }
             }
         }
