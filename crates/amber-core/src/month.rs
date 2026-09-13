@@ -58,6 +58,28 @@ fn mark(at: &std::path::Path) -> Option<(u64, u64)> {
     Some((when, m.len()))
 }
 
+/// **書かれたばかりのものは、信用しない**（依頼 552）。
+///
+/// しるしは「更新時刻と長さ」だが、**更新時刻はどこでも細かいわけではない**:
+///
+/// - NTFS の時刻はシステム時計の刻み（約 15ms）でしか進まない
+/// - HFS+ は一秒、FAT は二秒まで
+///
+/// なので、同じ刻みのあいだに**同じ長さで**書き替えると、しるしが一字も
+/// 変わらず、直した題が古いまま出続ける（CI の Windows で実際に出た）。
+///
+/// 見分ける道が無いので、**新しすぎるしるしは初めから信じない** ── git が
+/// 「racily clean」と呼んで同じことをしている。読み直すのは「たったいま
+/// 書かれた数本」だけなので、憶えておく甲斐（二万本で 415ms → 58ms）は残る。
+const GRACE: u64 = 2_000_000_000;
+
+fn now_nanos() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
 /// その日にあるもの、一つ。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Slot {
@@ -140,6 +162,9 @@ pub fn of(rows: &[crate::survey::Row], year: i32, month: u32) -> Vec<Slot> {
         return Vec::new();
     };
     let mut out: Vec<Slot> = Vec::new();
+    // **一度だけ時計を見る**（依頼 552）── 一本ごとに見ると、数えている
+    // あいだに時が進んで、同じ一回の中で信じる／信じないが分かれる。
+    let here = now_nanos();
 
     for r in rows {
         if r.is_dir {
@@ -154,7 +179,9 @@ pub fn of(rows: &[crate::survey::Row], year: i32, month: u32) -> Vec<Slot> {
         let now = mark(&r.path);
         let mut store = seen().lock().ok();
         let cached = store.as_ref().and_then(|m| m.get(&r.path)).cloned().filter(|k| {
-            now.is_some_and(|(w, z)| k.when == w && k.size == z)
+            // **新しすぎるしるしは信じない**（依頼 552）── 粗い時計の上では、
+            // 同じ刻みのあいだの書き替えを見分けられない。
+            now.is_some_and(|(w, z)| k.when == w && k.size == z && here.saturating_sub(w) >= GRACE)
         });
         let known = match cached {
             Some(k) => k,
@@ -314,5 +341,44 @@ mod tests {
             .find(|s| s.title == "面談い" && s.kind == super::Kind::Once)
             .unwrap();
         assert_eq!(moved.day.to_string(), "2026-09-11", "動かした日で出る");
+    }
+
+    /// **粗い時計の上でも、直したものが出る**（依頼 552）。
+    ///
+    /// NTFS の時刻はシステム時計の刻み（約 15ms）でしか進まず、HFS+ は一秒、
+    /// FAT は二秒まで ── 同じ刻みのあいだに**同じ長さで**書き替えると、
+    /// 憶えたしるしが一字も変わらない。上の試験は mac の細かい時計に
+    /// 寄りかかっていて、CI の Windows でだけ落ちた。
+    ///
+    /// ここでは**時刻を手で戻して**、その状況をどの機械の上でも作る。
+    #[test]
+    fn a_note_rewritten_under_a_coarse_clock_is_read_again() {
+        let d = tempfile::tempdir().unwrap();
+        let at = d.path().join("面談.md");
+        std::fs::write(
+            &at,
+            "---\ntitle: 面談あ\ncreated: 2026-09-01\nremind: 2026-09-10 10:00\n---\n\n# 面談あ\n",
+        ).unwrap();
+        let stamp = std::fs::metadata(&at).unwrap().modified().unwrap();
+        let first = super::of(&walk(d.path()), 2026, 9);
+        assert!(first.iter().any(|s| s.title == "面談あ"));
+
+        // 長さも変えずに書き替えて、**時刻を書き替える前に戻す**。
+        std::fs::write(
+            &at,
+            "---\ntitle: 面談い\ncreated: 2026-09-01\nremind: 2026-09-10 10:00\n---\n\n# 面談い\n",
+        ).unwrap();
+        let f = std::fs::File::options().write(true).open(&at).unwrap();
+        f.set_times(std::fs::FileTimes::new().set_modified(stamp)).unwrap();
+        drop(f);
+        assert_eq!(
+            std::fs::metadata(&at).unwrap().modified().unwrap(),
+            stamp,
+            "しるしは書き替える前と同じ（粗い時計と同じ状況）"
+        );
+
+        let then = super::of(&walk(d.path()), 2026, 9);
+        assert!(then.iter().any(|s| s.title == "面談い"), "直した題で出る");
+        assert!(!then.iter().any(|s| s.title == "面談あ"), "古い題は残らない");
     }
 }
