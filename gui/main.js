@@ -13,7 +13,8 @@ const os = require('node:os');
 
 const { execFile } = require('node:child_process');
 const { Engine } = require('./engine');
-const { createDrive } = require('./drive');
+const { createDrive, SCOPE, CAL_SCOPE } = require('./drive');
+const { createCal, shareUrl } = require('./gcal');
 
 // **名前を先に決める。** これが `userData` の置き場所を決めるので、
 // 決めないと憶えごとが `.../Electron/` に入り、Electron を使う他のものと
@@ -478,7 +479,44 @@ app.whenReady().then(() => {
             decrypt: (buf) => safeStorage.decryptString(Buffer.from(buf)),
         },
     });
-    ipcMain.handle('amber:driveSignIn', () => drive.signIn());
+    // ── グループカレンダー（依頼 525）── 鍵は Drive と同じ一本。
+    const gcal = createCal({
+        token: () => drive.token(),
+        ...(fakeAt ? { apiUrl: fakeAt + '/cal' } : {}),
+    });
+
+    /// **作るのは、押す一回。** サインインも許可の足し方も、ここで面倒を見る
+    /// ── 使う人に段取りを踏ませない（`PLANS.ja.md`「設定を開いてください、
+    /// と言わない」）。人に見せる言い分は `{ error }` で返す。
+    ipcMain.handle('amber:calMake', async (_e, name) => {
+        try {
+            if (!drive.grants(CAL_SCOPE)) {
+                // まだ Google に繋いでいないなら、二つまとめて訊く ──
+                // 「サインイン」と「カレンダーの許可」で二度ブラウザを
+                // 開かせない。
+                const want = drive.account().signedIn ? CAL_SCOPE : SCOPE + ' ' + CAL_SCOPE;
+                const got = await drive.signIn({ scope: want });
+                if (got.error) return got;
+                if (!drive.grants(CAL_SCOPE)) {
+                    return { error: 'カレンダーを使う許可が下りませんでした' };
+                }
+            }
+            return await gcal.make(name);
+        } catch (e) {
+            return { error: e.message };
+        }
+    });
+    ipcMain.handle('amber:calGet', async (_e, id) => {
+        try { return await gcal.get(id); } catch (e) { return { error: e.message }; }
+    });
+    ipcMain.handle('amber:calDrop', async (_e, id) => {
+        try { return await gcal.drop(id); } catch (e) { return { error: e.message }; }
+    });
+    /// **招待は、いまは Google の画面で**（本人が決めた・2026-09-13）。
+    /// 人を招待する口には審査の要る許可が要るので、一般公開のときに通す。
+    ipcMain.handle('amber:calShare', (_e, id) => shell.openExternal(shareUrl(id)));
+
+    ipcMain.handle('amber:driveSignIn', (_e, want) => drive.signIn(want || {}));
     ipcMain.handle('amber:driveSignOut', () => drive.signOut());
     ipcMain.handle('amber:driveAccount', () => drive.account());
     ipcMain.handle('amber:driveList', () => drive.list());

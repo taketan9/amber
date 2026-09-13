@@ -54,7 +54,14 @@ contextBridge.exposeInMainWorld('amber', {
     clipboardImage: () => ipcRenderer.invoke('amber:clipboardImage'),
     /// Google Drive との繋ぎ ── サインインする・やめる・様子を訊く。
     /// 鍵そのものは描く側に渡さない（OS に触る側が持つ）。
-    driveSignIn: () => ipcRenderer.invoke('amber:driveSignIn'),
+    // グループカレンダー（依頼 525）── 作るのは押す一回。サインインも
+    // 許可の足し方も主（Node）が面倒を見る。
+    calMake: (name) => ipcRenderer.invoke('amber:calMake', name),
+    calGet: (id) => ipcRenderer.invoke('amber:calGet', id),
+    calDrop: (id) => ipcRenderer.invoke('amber:calDrop', id),
+    calShare: (id) => ipcRenderer.invoke('amber:calShare', id),
+
+    driveSignIn: (want) => ipcRenderer.invoke('amber:driveSignIn', want),
     driveSignOut: () => ipcRenderer.invoke('amber:driveSignOut'),
     driveAccount: () => ipcRenderer.invoke('amber:driveAccount'),
     /// 運ぶ ── 一覧・上げる・下ろす・向こうで消す。何を運ぶかは core（`syncplan`）。

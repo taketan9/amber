@@ -519,9 +519,9 @@ struct ContentView: View {
                         // 分けている人ほど「どこへ行った」になっていた。
                         if note.shared { unshare(note) }
                         else if let sh = store.shares.first { share(note, sh.at) }
-                        else { sharing = "家族" }   // 棚が無ければ、作るところから
+                        else { sharing = "グループ" }   // 棚が無ければ、作るところから
                     } label: {
-                        Label(note.shared ? unshareWords(note) : "家族と共有する",
+                        Label(note.shared ? unshareWords(note) : "グループと共有する",
                               systemImage: "person.2")
                     }
                     // **長押しから履歴へ。** 窓は右押しで開く ── 電話に
@@ -572,7 +572,7 @@ struct ContentView: View {
         do { try store.share(note, to: book) } catch { store.trouble = error.localizedDescription }
     }
 
-    /// 共有のフォルダを「ファイル」で開く ── クラウド側で家族に分けるのは、人がやる。
+    /// 共有のフォルダを「ファイル」で開く ── クラウド側でグループに分けるのは、人がやる。
     private func invite(_ book: String) {
         let at = URL(fileURLWithPath: store.rootPath).appendingPathComponent(book).path
         guard let enc = at.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
@@ -587,7 +587,7 @@ struct ContentView: View {
     /// **押す前に、どこへ戻るかを言う。** 「やめる」とだけ出しておいて別の
     /// フォルダへ入るのは、黙って動かすのと同じ。
     private func unshareWords(_ note: Note) -> String {
-        guard let home = store.home(of: note) else { return "家族との共有をやめる" }
+        guard let home = store.home(of: note) else { return "グループとの共有をやめる" }
         return "共有をやめて「\(home.split(separator: "/").last.map(String.init) ?? home)」へ戻す"
     }
 
@@ -939,16 +939,16 @@ struct ContentView: View {
                         if store.shares.contains(where: { $0.at == b.path }) {
                             // 分けるのはクラウドの仕事 ── 「ファイル」でそのフォルダを開く。
                             Button { invite(b.path) } label: {
-                                Label("家族を招待", systemImage: "person.badge.plus")
+                                Label("グループへ招待", systemImage: "person.badge.plus")
                             }
                         }
                         // **分けるのはクラウドの仕事。** amber が憶えるのは
                         // 「どれが分けてあるか」の一言だけ ── そのうえで
-                        // このフォルダを、クラウド側で家族に共有してもらう。
+                        // このフォルダを、クラウド側でグループの人に共有してもらう。
                         Button {
                             sharing = b.path
                         } label: {
-                            Label("家族と共有するフォルダにする", systemImage: "person.2")
+                            Label("グループと共有するフォルダにする", systemImage: "person.2")
                         }
                         // フォルダの履歴は、**中のノートの姿をまとめて** ──
                         // 「あのあたりで壊した」は、どのノートかを覚えて
@@ -1184,7 +1184,7 @@ struct SyncLine: View {
             // **始める前は色つきの列**（窓の `before` と同じ・本人が決めた案甲）。
             VStack(alignment: .leading, spacing: 4) {
                 Text("まだ同期していません").font(.footnote.weight(.semibold)).foregroundStyle(Color("AccentColor"))
-                Text("ノートはこの iPhone だけにあります。ほかの端末や家族と同じノートを使うには、Google でサインインします。")
+                Text("ノートはこの iPhone だけにあります。ほかの端末やグループの人と同じノートを使うには、Google でサインインします。")
                     .font(.footnote).foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     Button("同期をはじめる") { Task { _ = try? await sync.signIn() } }

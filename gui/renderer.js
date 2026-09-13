@@ -135,8 +135,8 @@ const state = {
     waiting: [],
     /// あなたの名乗り。共有したノートの「誰が」に使う（ノートには書かない）。
     me: '',
-    /// 家族と分けてある棚。**一つとは限らない** ── 印はフォルダごとに置く
-    /// ので、家族用と仕事用が両方あっていい。`[{ at, by }]`。
+    /// グループと分けてある棚。**一つとは限らない** ── 印はフォルダごとに置く
+    /// ので、グループ用と仕事用が両方あっていい。`[{ at, by }]`。
     shares: [],
     /// 押して選んだ絞り込み。**タグは全部・フォルダはどれか。**
     /// ノートは一つのフォルダにしか居ないので、フォルダを「全部」にすると
@@ -1205,10 +1205,10 @@ function row(n) {
     const clash = n.clash
         ? '<span class="clashmark" title="クラウドが作ったコピーです">競合</span>'
         : '';
-    // **共有中は、書く前に分かるように。** 家族が読むノートに、そうと
+    // **共有中は、書く前に分かるように。** グループが読むノートに、そうと
     // 知らずに書くことがないように ── 印は題の隣（開いてからでは遅い）。
     const shared = n.shared && state.dest.kind !== 'share'
-        ? '<span class="sharemark" title="家族と分けているフォルダの中です">共有</span>'
+        ? '<span class="sharemark" title="グループと分けているフォルダの中です">共有</span>'
         : '';
     const tags = (n.tags || []).slice(0, 3)
         .map((t) => '<span class="tag">' + escapeHtml(t) + '</span>').join('');
@@ -4923,7 +4923,7 @@ function mermaidOpts() {
         },
         // 円グラフの色。**既定の派手な12色は、琥珀の隣で喧嘩する** ──
         // フォルダと文字色に使っている11色と同じ並びを渡して、アプリの
-        // どこを見ても同じ色の家族にする。
+        // どこを見ても同じ色のグループにする。
         themeCSS: '.pieTitleText{font-size:15px;font-weight:700}'
             + '.slice{font-size:13px;font-weight:600}'
             + '.pieCircle{stroke:' + v('--paper', '#fffdf8') + ';stroke-width:2px}'
@@ -6486,7 +6486,7 @@ function drawSteps() {
 /// いま開いているノートに入ってきたもの（`null` なら何も無い）。
 ///
 /// **憶えるのはこの機械の引き出し**（`amber.json`）── 「自分が確認したか」は
-/// 人ごと・機械ごとのことで、フォルダに置くと家族の誰かが読んだ時点で
+/// 人ごと・機械ごとのことで、フォルダに置くとグループの誰かが読んだ時点で
 /// 全員のぶんが消える。ノートにも書かない（ただの Markdown のまま）。
 let incoming = null;
 let incomings = {};
@@ -6781,7 +6781,7 @@ function paintIncoming() {
 ///
 /// **印はノートに書かない。** 憶えるのはこの機械の引き出し（`amber.json`）
 /// ── 「自分が確認したか」は**人ごと・機械ごと**のことで、フォルダに
-/// 置くと家族の誰かが読んだ時点で全員のぶんが消える。
+/// 置くとグループの誰かが読んだ時点で全員のぶんが消える。
 async function mergeIn(path, ours, was) {
     // 向こうの、いまの中身（`read` ── 開くときと同じ口）。
     let theirs;
@@ -6913,7 +6913,7 @@ async function save() {
             //
             // 前はここで「こちらで上書きしますか／向こうを読み直しますか」と
             // 訊いていた ── どちらを押しても、**片方の書いたものが消える**。
-            // 家族で同じ棚を触るのが前提のアプリで、それは強すぎる。
+            // グループで同じ棚を触るのが前提のアプリで、それは強すぎる。
             //
             // 混ぜ方は core（`merge`）── 分かれる前（開いた時点の中身）と、
             // こちらと、向こうの三つを渡す。同じ場所を二人が書いていたら
@@ -7541,9 +7541,18 @@ let calDay = null;
 /// 見方（`month` / `week` / `day`）。**憶える** ── 週で暮らしている人を、
 /// 開くたびに月へ連れ戻さない（依頼 468）。
 let calView = 'month';
-/// **グループカレンダー**（依頼 471）。日と週のときだけ効く ── 月の表を
-/// 人ごとに割ると、一人ぶんの升目が字より小さくなる。これも憶える。
+/// **並べて表示**（依頼 471・名前は依頼 527 で変えた）。日と週のときだけ
+/// 効く ── 月の表を人ごとに割ると、一人ぶんの升目が字より小さくなる。
+/// これも憶える。**「グループカレンダー」とは呼ばない** ── その名前は
+/// グループと共有している予定の入れもののほうが持っている。
 let calGroup = false;
+/// グループカレンダー（依頼 525）── `{ id, name }` か null。**この機械が憶える**
+/// （`amber.json` の `group`）。名前から探し直せないので ── `calendar.app.created`
+/// に一覧を読む力は無い ── 憶えていなければ「まだ無い」と同じことになる。
+let groupCal = null;
+/// 作るときの名前（本人が決めた・2026-09-13）。**Google カレンダーにも、
+/// 端末のカレンダーにも、グループ全員の画面にもこの名前で出る。**
+const GROUP_NAME = 'ambər グループ';
 /// 出さない人（段の鍵）。**全員を並べると読めない** ── 十五人の段から
 /// 三人を探すのは、目でやる仕事としては重い（依頼 473）。憶える。
 let calHide = [];
@@ -7670,14 +7679,30 @@ async function drawCal() {
         || (a.at ? 0 : 1) - (b.at ? 0 : 1)
         || String(a.at).localeCompare(String(b.at))
         || a.title.localeCompare(b.title));
+    // **いま見ているものが一つだけ光る**（依頼 528・案ア）。並べているなら
+    // 「並べて」── 日・週・月と同じ並びに入れたので、光りも一つで済む。
+    const showing = calGroup && calView !== 'month' ? 'crowd' : calView;
     for (const b of box.querySelectorAll('.seg button')) {
-        b.classList.toggle('on', b.dataset.view === calView);
+        b.classList.toggle('on', b.dataset.view === showing);
     }
-    // グループカレンダーは日と週のときだけ。月の表を人ごとに割ると、
-    // 一人ぶんの升目が字より小さくなる。
-    const crowd = box.querySelector('.crowdbtn');
-    crowd.hidden = calView === 'month';
-    crowd.classList.toggle('on', calGroup);
+    // グループカレンダーのボタン ── まだ無ければ「作る」、あれば「招待」。
+    // **見出しを描くところに置く** ── 一度「みんなの表を描く関数」の中に
+    // 書いてしまい、押すまで字が入らず**空のボタンが出た**（画面を撮って
+    // 気づいた）。描く場所と、出す場所を取り違えると、こうなる。
+    const gb = box.querySelector('.groupbtn');
+    if (gb) {
+        // **印を添える**（本人・2026-09-13）── 「＋ 予定を登録する」と同じで、
+        // 絵が入口、字が答え合わせ（依頼 288）。印は左の列の共有と同じ二人 ──
+        // 同じものには同じ形を使う。
+        gb.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true">'
+            + '<g fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"'
+            + ' stroke-linejoin="round">' + RAIL_MARKS.share + '</g></svg>'
+            + '<span>' + (groupCal ? 'グループへ招待' : 'グループを作る') + '</span>';
+        gb.title = groupCal
+            ? '「' + groupCal.name + '」に人を招待します'
+            : '入れた予定が、招待した人に見えるカレンダーを一枚作ります';
+    }
+
     const grouped = calGroup && calView !== 'month';
     // 「人を選ぶ」は、並べているときだけ。
     const pick = box.querySelector('.whobtn');
@@ -7689,8 +7714,12 @@ async function drawCal() {
     }
 
     box.querySelector('.mo').textContent = calTitle();
+    // **件数は帯から外した**（依頼 528・案ア）── 表を見れば分かる。
+    // 空のときだけ、表の真ん中で言う ── 何も無いのか、読めていないのかが
+    // 分からないのがいちばん困る。
     const plans = calShown().filter((s) => s.kind !== 'note').length;
-    box.querySelector('.sum').textContent = plans ? plans + ' 件の予定' : '予定はありません';
+    const none = box.querySelector('.calnone');
+    if (none) none.hidden = plans > 0;
     // **いつ時点の紙かを出す。** チームの予定は置き換わる一枚を読んで
     // いるだけなので、これが無いと古い紙を今の予定だと思って読む。
     //
@@ -7993,6 +8022,45 @@ function crowdWeek(lane, days) {
 /// **一人ずつ切り替えて、そのつど開き直す。** 一度に選ぶ小窓が無い
 /// ので、選んだら閉じずにもう一度出す ── 三人消すのに三回開き直すのは
 /// 面倒だが、「選んでいる途中」が画面に残るぶん、間違いに気づきやすい。
+/// **グループカレンダーを一枚作る**（依頼 525・527）。
+///
+/// 押すのは一回。サインインも、カレンダーの許可も、主（Node）が面倒を見る
+/// ── 使う人に段取りを踏ませない。
+///
+/// **いまの予定は一つも動かない。** 新しいカレンダーが一枚増えるだけで、
+/// 自分のカレンダーごと共有する形は採っていない（仕事の予定まで見えるため）。
+/// 押す前にそう言う ── 「共有」を押した瞬間に何が起きるか分からないのが、
+/// いちばん怖い。
+async function cmdMakeGroup() {
+    if (!await askYes('グループカレンダーを作りますか。\n\n'
+        + '「' + GROUP_NAME + '」というカレンダーが一枚できます。'
+        + 'そこに入れた予定だけが、招待した人に見えます。'
+        + '**いまの予定は一つも動きません。**')) return;
+    say('グループカレンダーを作っています…');
+    const got = await window.amber.calMake(GROUP_NAME);
+    if (!got || got.error) { say('作れません: ' + ((got && got.error) || '返事がありません')); return; }
+    groupCal = { id: got.id, name: got.name };
+    window.amber.remember({ group: groupCal });
+    await drawCal();
+    // **二段あることを、その場で言う。** amber がカレンダーを作っただけでは
+    // 誰にも届かない ── 人を招待する口には審査の要る許可が要るので、
+    // いまは Google の画面で招待してもらう（本人が決めた・2026-09-13）。
+    if (await askYes('「' + got.name + '」を作りました。\n\n'
+        + 'つづけて、グループの人を招待しますか。'
+        + '（Google カレンダーの共有設定が開きます。メールアドレスを入れて送ってください）')) {
+        await window.amber.calShare(got.id);
+    } else {
+        say('あとで、カレンダーの「グループへ招待」からでもできます');
+    }
+}
+
+/// グループに人を招待する。**いまは Google の画面で。**
+async function cmdInvite() {
+    if (!groupCal) return;
+    await window.amber.calShare(groupCal.id);
+    say('Google カレンダーの共有設定を開きました（メールアドレスを入れて送ってください）');
+}
+
 async function cmdWhoPick() {
     for (;;) {
         const lanes = crowdLanes(calView === 'day' ? [calDay] : weekOf(calDay), true);
@@ -8002,7 +8070,7 @@ async function cmdWhoPick() {
             value: l.key,
         }));
         rows.unshift({ name: '── 全員を出す', value: '*' });
-        const pick = await askPick('グループカレンダーに出す人', rows,
+        const pick = await askPick('並べて表示に出す人', rows,
             '選ぶと出し入れできます。閉じるまで続けて選べます', true);
         if (pick === null) return;
         if (pick === '*') calHide = [];
@@ -8300,15 +8368,21 @@ el('cal').addEventListener('click', async (e) => {
     if (e.target.closest('.next')) { step(1); await drawCal(); return; }
     const seg = e.target.closest('.seg button');
     if (seg) {
-        calView = seg.dataset.view;
-        window.amber.remember({ calView });
+        if (seg.dataset.view === 'crowd') {
+            // **並べるのは、時間が横に並ぶときだけ。** 月から押されたら週へ ──
+            // 月の表を人ごとに割ると、一人ぶんの升目が字より小さくなる。
+            calGroup = true;
+            if (calView === 'month') calView = 'week';
+        } else {
+            calView = seg.dataset.view;
+            calGroup = false;
+        }
+        window.amber.remember({ calView, calGroup });
         await drawCal();
         return;
     }
-    if (e.target.closest('.crowdbtn')) {
-        calGroup = !calGroup;
-        window.amber.remember({ calGroup });
-        await drawCal();
+    if (e.target.closest('.groupbtn')) {
+        await (groupCal ? cmdInvite() : cmdMakeGroup());
         return;
     }
     if (e.target.closest('.whobtn')) { await cmdWhoPick(); return; }
@@ -8667,7 +8741,7 @@ const CMDS = [
     { id: 'star', name: 'ブックマークに登録する', key: '⌘D', need: 'note', menu: true, run: cmdStar },
     { id: 'tags', name: 'タグ設定', need: 'note', menu: true, run: cmdTags },
     { id: 'move', name: 'フォルダへ移動', need: 'note', menu: true, run: cmdMove },
-    { id: 'toshare', name: '家族と共有する', need: 'note', menu: true, run: cmdToShare },
+    { id: 'toshare', name: 'グループと共有する', need: 'note', menu: true, run: cmdToShare },
     // **献立には出さない。** 上の帯にベルが居て、押せば同じ小窓が出る
     // ── 同じことを頼む道が二つあると、片方を直した日にもう片方が
     // 古いまま残る。表には残す（⌘⇧P から名前で探せる）。
@@ -8871,7 +8945,7 @@ function openMenu(at, which) {
                 // **押す前に、どこへ戻るかを言う。** 「いちばん上へ」と
                 // 出しておいて別のフォルダへ入るのは、黙って動かすのと同じ。
                 const home = homeOf(state.open);
-                return { ...c, name: '家族との共有をやめる',
+                return { ...c, name: 'グループとの共有をやめる',
                     sub: home ? '「' + home.split('/').pop() + '」へ戻します' : 'いちばん上へ戻します' };
             }
             const to = state.shares[0];
@@ -8879,7 +8953,7 @@ function openMenu(at, which) {
                 // **無ければ作る。** 「共有する」を押した人に、その前に
                 // 「フォルダを作る」を押させない。
                 ? '「' + (to.at.split('/').pop() || 'すべて') + '」へ移します'
-                : '「家族」というフォルダを作って、そこへ移します' };
+                : '「グループ」というフォルダを作って、そこへ移します' };
         }
         return c;
     });
@@ -9142,13 +9216,13 @@ function railMenu(kind, what, at) {
         const isShare = state.shares.some((sh) => sh.at === what);
         if (isShare) {
             items.push({
-                name: '家族を招待',
+                name: 'グループへ招待',
                 sub: 'クラウドの画面が開きます',
                 run: () => window.amber.reveal(what),
             });
         }
         items.push({
-            name: isShare ? '家族との共有をやめる' : '家族と共有するフォルダにする',
+            name: isShare ? 'グループとの共有をやめる' : 'グループと共有するフォルダにする',
             run: () => cmdShare(what, isShare),
         });
         // フォルダの履歴は、**中のノートの姿をまとめて時系列で** ──
@@ -9945,7 +10019,7 @@ async function cmdShare(folder, off) {
     const root = rootOf(folder);
     const shown = bookLabel(folder);
     if (!off) {
-        const ok = await askYes('「' + shown + '」を、家族と分けるフォルダにしますか');
+        const ok = await askYes('「' + shown + '」を、グループと分けるフォルダにしますか');
         if (!ok) return;
     }
     const by = off ? '' : await myName();
@@ -9960,10 +10034,10 @@ async function cmdShare(folder, off) {
         // **二段あることを言う。** amber が印を置いただけでは誰にも届かない
         // ── クラウド側で人に分けるのは、まだ人がやる。
         await askYes('「' + shown + '」を共有のフォルダにしました。\n\n'
-            + 'あとは、このフォルダをクラウド側で家族に分けてください。'
+            + 'あとは、このフォルダをクラウド側でグループの人に分けてください。'
             + '（いま開きますか）')
             ? window.amber.reveal(folder)
-            : say('あとで、フォルダを右押し →「家族を招待」からでもできます');
+            : say('あとで、フォルダを右押し →「グループへ招待」からでもできます');
     } catch (e) {
         say('できません: ' + why(e));
     }
@@ -10021,13 +10095,13 @@ async function cmdToShare() {
     const near = state.shares.find((sh) => rootOf(sh.at) === root) || state.shares[0];
     let to = near ? near.at : undefined;
     if (to === undefined) {
-        const ok = await askYes('「家族」というフォルダを作って、そこへ移しますか');
+        const ok = await askYes('「グループ」というフォルダを作って、そこへ移しますか');
         if (!ok) return;
         const by = await myName();
         if (by === null) return;
         try {
-            await ask('share', { path: root, folder: '家族', by, today: today() });
-            to = root + '/家族';
+            await ask('share', { path: root, folder: 'グループ', by, today: today() });
+            to = root + '/グループ';
         } catch (e) { say('できません: ' + why(e)); return; }
     } else {
         const ok = await askYes('「' + (state.open.title || stem()) + '」を「'
@@ -10889,7 +10963,7 @@ function drawSyncState() {
         if (!syncLater) {
             hide(mark);
             column('before', 'まだ同期していません',
-                'ノートはこのパソコンだけにあります。ほかの端末や家族と同じノートを使うには、Google でサインインします。',
+                'ノートはこのパソコンだけにあります。ほかの端末やグループの人と同じノートを使うには、Google でサインインします。',
                 [{ name: '同期をはじめる', run: () => cmdSync() },
                  { name: 'あとで', quiet: true, run: () => { syncLater = true; drawSyncState(); } }]);
         } else {
@@ -11551,6 +11625,7 @@ const escapeAttr = escapeHtml;
     away = Array.isArray(saved.away) ? saved.away : [];
     if (['month', 'week', 'day'].includes(saved.calView)) calView = saved.calView;
     calGroup = !!saved.calGroup;
+    groupCal = saved.group && saved.group.id ? saved.group : null;
     if (Array.isArray(saved.calHide)) calHide = saved.calHide.filter((k) => typeof k === 'string');
     if (saved.calWeekend === false) calWeekend = false;
     if (typeof saved.calHereColor === 'string' && /^#[0-9a-f]{6}$/i.test(saved.calHereColor)) calHereColor = saved.calHereColor;

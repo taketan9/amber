@@ -560,8 +560,8 @@ final class NotesStore: ObservableObject {
         notes[at] = fresh
     }
 
-    /// 家族と分けてある棚。**一つとは限らない** ── 印はフォルダごとに置くので、
-    /// 家族用と仕事用が両方あっていい。
+    /// グループと分けてある棚。**一つとは限らない** ── 印はフォルダごとに置くので、
+    /// グループ用と仕事用が両方あっていい。
     ///
     /// **教えてもらわなくても分かる。** 印は共有フォルダの中の一枚
     /// （`notebook::SHARE_MARK`）で、フォルダと一緒に旅をする ── 受け取った
@@ -1441,7 +1441,7 @@ final class NotesStore: ObservableObject {
         return got["path"] as? String
     }
 
-    /// ルートからの道（`家族/買い物.md`）。憶えの見出しに使う ── core が
+    /// ルートからの道（`グループ/買い物.md`）。憶えの見出しに使う ── core が
     /// `rel` として返しているのと同じ形。
     private func rel(of note: Note) -> String {
         let name = URL(fileURLWithPath: note.path).lastPathComponent

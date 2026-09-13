@@ -339,7 +339,7 @@ function createDrive(opts) {
         return homeId;
     }
 
-    /// ノートのフォルダ（`家族/買い物`）を Drive の上にも作る ── Drive の画面で
+    /// ノートのフォルダ（`グループ/買い物`）を Drive の上にも作る ── Drive の画面で
     /// 見る人のため。札（`rel`）が本物で、フォルダは見た目。
     async function dir(relDir) {
         if (!relDir) return home();
@@ -374,8 +374,8 @@ function createDrive(opts) {
                 const ap = f.appProperties || {};
                 if (!ap.rel) continue;
                 // **自分のものだけ。** appProperties は同じアプリなら人をまたいで見えるので、
-                // 家族が共有してくれたノートまで「向こうにある」と数えてしまう ── 同じ道に
-                // 下りてきて、こちらの上げは自分の ambər へ行く（二つに割れる）。家族と
+                // グループの人が共有してくれたノートまで「向こうにある」と数えてしまう ── 同じ道に
+                // 下りてきて、こちらの上げは自分の ambər へ行く（二つに割れる）。グループと
                 // 分けるのは別の道（共有フォルダを保存ディレクトリにする・依頼 521 で）。
                 if (f.ownedByMe === false) continue;
                 out.push({ rel: ap.rel, id: f.id, tag: ap.print || f.md5Checksum || '', by: ap.by || '' });

@@ -392,7 +392,7 @@ body.mac #listhead { padding-top: 30px; }
 #cloudsay .wait b { color: #2c6183; }
 #cloudsay .clash { background: color-mix(in srgb, #D07A2E 12%, var(--list)); }
 #cloudsay .clash b { color: var(--amber-deep); }
-/* 共有中の札。**書く前に分かるように** ── 家族が読むノートに、そうと
+/* 共有中の札。**書く前に分かるように** ── グループが読むノートに、そうと
    知らずに書くことがないように。 */
 .row .sharemark {
   margin-left: 6px; font-size: 10px; font-weight: 700; padding: 1px 6px;
@@ -1359,6 +1359,13 @@ body.dropping::after {
   border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
 #calbox .hd button:hover { background: var(--hover); }
 #calbox .body { flex: 1; display: flex; min-height: 0; min-width: 0; }
+/* 空の知らせ。**表の上に重ねる** ── 段を増やすと表が下がる（カレンダーは
+   縦が命）。押すのは下の表なので、当たり判定は通す。 */
+#calbox .calnone {
+  position: absolute; left: 0; right: 0; top: 46%; text-align: center;
+  color: var(--ink-3); font-size: 13px; pointer-events: none; z-index: 1;
+}
+#calbox { position: relative; }
 #calbox .body > * { flex: 1; min-width: 0 }
 #calbox .month { padding: .7rem .9rem; display: flex; flex-direction: column; min-height: 0; }
 #calbox .dow { display: grid; grid-template-columns: repeat(7,1fr); gap: 3px; }
@@ -1440,6 +1447,9 @@ body.dropping::after {
    横に時間（または日付）、縦に人 ── 一日を画面幅に押し込むと三十分の
    会議が線になるので、幅は決め打ちにして横に流す。 */
 #calbox .crowdbtn { margin-left: .2rem }
+/* グループのボタン（依頼 527）── 印と字を並べる。印は左の列の共有と同じ形。 */
+#calbox .groupbtn { display: inline-flex; align-items: center; gap: 5px; }
+#calbox .groupbtn svg { width: 13px; height: 13px; flex: none; color: var(--amber-deep); }
 #calbox .crowdbtn.on { background: var(--sel); border-color: var(--amber); color: var(--ink) }
 #calbox .crowd { flex: 1; min-height: 0; min-width: 0; overflow: hidden;
   padding: .4rem .5rem .5rem; }
@@ -1647,15 +1657,20 @@ body.dropping::after {
         <button data-view="day">日</button>
         <button data-view="week">週</button>
         <button data-view="month">月</button>
+        <!-- **並べて表示も、見方の一つ**（依頼 528・案ア）── 横に時間、縦に人
+             （依頼 471）。別のボタンにしていた頃は帯が一つぶん広く、
+             「自分だけ／グループ／両方」を足すと折れた。 -->
+        <button data-view="crowd" title="横に時間、縦に人で並べます">並べて</button>
       </span>
-      <!-- 横に時間、縦に人（依頼 471）。日と週のときだけ出す。 -->
-      <button class="crowdbtn" title="横に時間、縦に人で並べます" hidden>グループカレンダー</button>
       <button class="whobtn" title="並べる人を選びます" hidden>人を選ぶ</button>
+      <!-- グループカレンダー（依頼 525・527）。**設定の中ではなく、ここに置く**
+           ── IT に明るくない人に「設定を開いてください」と言わないため
+           （`PLANS.ja.md` の前提）。まだ無ければ「作る」、あれば「招待」。 -->
+      <button class="groupbtn"></button>
       <!-- **予定を足す道は、いつも見えているところに。** 前は右の欄の
            いちばん下にあって、日を選ばないと出てこなかった。 -->
       <button class="add">＋ 予定を登録する</button>
       <span class="grow"></span>
-      <span class="sum"></span>
       <!-- 読んでいるあいだの入口（依頼 475）。合言葉は、ここでは訊かない。 -->
       <button class="teamat" hidden></button>
       <!-- **日を替えても読み直さない**（依頼 476）── 読むのは、ここを
@@ -1663,6 +1678,10 @@ body.dropping::after {
       <button class="teamnow" title="いま読みにいきます" hidden>更新</button>
       <button class="x">閉じる</button>
     </div>
+    <!-- **空のときだけ、表の真ん中で言う**（依頼 528・案ア）── 件数は帯から
+         外した（表を見れば分かる）が、何も無いときだけは言う。何も無いのか、
+         読めていないのかが分からないのが、いちばん困る。 -->
+    <div class="calnone" hidden>予定はありません</div>
     <div class="body">
       <div class="month">
         <div class="dow"><i>月</i><i>火</i><i>水</i><i>木</i><i>金</i><i class="sat">土</i><i class="sun">日</i></div>

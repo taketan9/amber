@@ -252,7 +252,7 @@ final class Desk: ObservableObject {
             // **どちらかを捨てない。混ぜる。**
             //
             // 前はここで「やめる／それでも上書き」と訊いていた ── どちらを
-            // 押しても片方の更新が消える。家族で同じ棚を触るのが前提の
+            // 押しても片方の更新が消える。グループで同じ棚を触るのが前提の
             // アプリで、それは強すぎる（窓と同じ直し・依頼 354）。
             let got = try store.merge(tabs[at].note, was: tabs[at].base, ours: tabs[at].whole)
             guard case .ok(let fresh) = try store.save(
@@ -404,7 +404,7 @@ final class Desk: ObservableObject {
     }
 
     /// 入ってきたものの控え。**この機械の引き出しに置く** ── 「自分が
-    /// 確認したか」は人ごと・機械ごとのことで、フォルダに置くと家族の
+    /// 確認したか」は人ごと・機械ごとのことで、フォルダに置くとグループの
     /// 誰かが読んだ時点で全員のぶんが消える。ノートにも書かない。
     private static let seenKey = "amber.incoming"
 

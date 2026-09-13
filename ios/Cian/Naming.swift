@@ -36,13 +36,13 @@ struct Naming: View {
                     Text("共有したノートに「誰が直したか」を出すために使います。ノートには書きません（.md はただのマークダウンのままです）。空のままでも共有はできます。")
                 }
                 Section {
-                    Text("「\(folder)」を、家族と分けるフォルダにします。")
+                    Text("「\(folder)」を、グループと分けるフォルダにします。")
                         .font(.footnote).foregroundStyle(.secondary)
-                    Text("このあと、フォルダそのものをクラウド側で家族に分けてください ── ambər が印を置いただけでは、まだ誰にも届きません。")
+                    Text("このあと、フォルダそのものをクラウド側でグループの人に分けてください ── ambər が印を置いただけでは、まだ誰にも届きません。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("家族と共有する")
+            .navigationTitle("グループと共有する")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("やめる") { dismiss() } }
