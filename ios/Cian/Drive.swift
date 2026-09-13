@@ -261,9 +261,20 @@ final class Drive {
 
     /// **グループカレンダーを消す**（依頼 535）。持ち主が消すと、グループの
     /// 人の画面からも消える ── 呼ぶ側は、押す前にそう言うこと。
-    func dropGroupCalendar(_ id: String) async throws {
+    ///
+    /// **もう向こうに無ければ、消し終わっている**（依頼 536）。人が Google の
+    /// 画面で先に消していることはある ── そこで「Not Found」と言って止まると、
+    /// **amber の憶えだけが永久に外せなくなる**。返すのは「本当に消したか」で、
+    /// `false` は「もう無かった」。
+    @discardableResult
+    func dropGroupCalendar(_ id: String) async throws -> Bool {
         guard !id.isEmpty else { throw Trouble.bad("どのカレンダーか分かりません") }
-        _ = try await api("/calendar/v3/calendars/" + Self.q(id), method: "DELETE")
+        do {
+            _ = try await api("/calendar/v3/calendars/" + Self.q(id), method: "DELETE")
+            return true
+        } catch Trouble.http(let code, _) where code == 404 || code == 410 {
+            return false
+        }
     }
 
     /// そのカレンダーが、まだ向こうにあるか。**消されていたら nil。**

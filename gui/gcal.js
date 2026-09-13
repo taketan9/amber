@@ -119,9 +119,18 @@ function createCal(opts) {
 
     /// 消す。**呼ぶ側は、押す前に「グループの人からも消えます」と言うこと** ──
     /// グループカレンダーは持ち主が消すと全員から消える。
+    ///
+    /// **もう向こうに無ければ、消し終わっている**（依頼 536）。人が Google の
+    /// 画面で先に消していることはある ── そこで「Not Found」と言って止まると、
+    /// **amber の憶えだけが永久に外せなくなる**。`gone` で、もう無かったと言う。
     async function drop(id) {
-        await api('/calendars/' + encodeURIComponent(id), { method: 'DELETE' });
-        return { ok: true };
+        try {
+            await api('/calendars/' + encodeURIComponent(id), { method: 'DELETE' });
+            return { ok: true };
+        } catch (e) {
+            if (/HTTP 404|HTTP 410|Not Found/i.test(e.message)) return { ok: true, gone: true };
+            throw e;
+        }
     }
 
     return { make, get, rename, drop, shareUrl, api };

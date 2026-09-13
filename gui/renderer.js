@@ -8119,7 +8119,11 @@ async function cmdDropGroup() {
     calSide = 'both';
     window.amber.remember({ group: null, calSide });
     await drawCal();
-    say('「' + name + '」を消しました');
+    // **もう無かったときも、そう言う**（依頼 536）── 黙って「消しました」と
+    // 言うと、まだあるのに消したように読める。
+    say(got && got.gone
+        ? '「' + name + '」は、もう Google にありませんでした（amber の憶えからも外しました）'
+        : '「' + name + '」を消しました');
 }
 
 /// グループに人を招待する。**いまは Google の画面で。**

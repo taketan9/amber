@@ -299,14 +299,18 @@ struct Calendaring: View {
         busy = true
         Task {
             do {
-                try await Drive.shared.dropGroupCalendar(CalPrefs.groupId)
+                let killed = try await Drive.shared.dropGroupCalendar(CalPrefs.groupId)
                 let was = groupName
                 CalPrefs.groupName = ""
                 CalPrefs.groupId = ""
                 groupName = ""
                 side = "both"
                 CalPrefs.side = "both"
-                made = "「\(was)」を消しました。"
+                // **もう無かったときも、そう言う**（依頼 536）── 黙って
+                // 「消しました」と言うと、まだあるのに消したように読める。
+                made = killed
+                    ? "「\(was)」を消しました。"
+                    : "「\(was)」は、もう Google にありませんでした。\n\namber の憶えからも外しました。"
                 count()
             } catch {
                 trouble = error.localizedDescription

@@ -53,6 +53,10 @@ const ok = (yes, what, got) => {
                 res.writeHead(200, { 'content-type': 'application/json' });
                 res.end(JSON.stringify(seen.cals.get(newId)));
             } else if (req.method === 'DELETE') {
+                if (!seen.cals.has(id)) {
+                    res.writeHead(404, { 'content-type': 'application/json' });
+                    res.end('{"error":{"message":"Not Found"}}'); return;
+                }
                 seen.cals.delete(id);
                 res.writeHead(204); res.end();
             } else if (req.method === 'PATCH') {
@@ -157,6 +161,15 @@ const ok = (yes, what, got) => {
         // **死ぬ** ── 後ろの検査が一つも走らないまま、✗ が一つも出ない。
         const gone = await cal.get(made.id).catch((e) => 'なげた: ' + e.message);
         ok(gone === null, '消えたら null ── 黙って空の月を出さない', gone);
+
+        // **もう無いものを消すのは、消し終わっていること**（依頼 536）。
+        // 人が Google の画面で先に消していることはある ── そこで止まると
+        // amber の憶えだけが永久に外せなくなる。
+        const twice = await cal.make('二度消す');
+        await cal.drop(twice.id);
+        const again2 = await cal.drop(twice.id).catch((e) => ({ error: e.message }));
+        ok(again2 && again2.ok === true && again2.gone === true,
+           'もう無いものを消しても、落ちずに「もう無かった」と返す', again2);
 
         // **名前から探し直さない。** `calendar.app.created` に一覧を読む力は
         // 無いので、二度押せば二枚できる ── 憶えるのは呼ぶ側の仕事。
