@@ -120,11 +120,13 @@ if (rcedit && rcedit !== true && fs.existsSync(rcedit)) {
 }
 
 // ── 六. 組み方 ──────────────────────────────────────────────────
+// **そのまま打てる一行にする。** 註を行の中に混ぜると、貼り付けたときに
+// そこで壊れる ── 註は下に置く（実際に混ぜてしまい、打てない字になった）。
 const line = ['node scripts\\pack.js --out dist --platform win32',
     '  --electron ..\\' + electronName,
     '  --engine ..\\amber-server-win-x64.exe',
-    rceditName ? '  --rcedit ..\\' + rceditName : '  (--rcedit ..\\rcedit-x64.exe  ← exe の絵と名前を焼くなら)',
-    '  --zip'].join(' ^\n');
+    ...(rceditName ? ['  --rcedit ..\\' + rceditName] : []),
+    '  --zip'].join(' ^\r\n');
 fs.writeFileSync(path.join(kit, '組み方.txt'), [
     'ambər ' + version + ' を、ネットに出られない Windows で組む',
     '',
@@ -143,6 +145,11 @@ fs.writeFileSync(path.join(kit, '組み方.txt'), [
     '   dist\\amber-win-x64\\amber.exe ができます。',
     '   --zip を付けると dist\\amber-win-x64-' + version + '.zip も出ます。',
     '',
+    ...(rceditName ? [] : [
+        '（exe の絵と名前は Electron のままです。焼くなら rcedit-x64.exe を',
+        '  この一式に入れて、--rcedit ..\\rcedit-x64.exe を足してください）',
+        '',
+    ]),
     '困ったら:',
     '  「gui/vendor/ がありません」 … この一式の amber\\gui\\vendor が',
     '                                 欠けています。持ち込み直してください。',
