@@ -112,6 +112,26 @@ mutate "--list が書き出しに進む" "--list は書かない" \
         return 0'
 mutate "--list が絞りを映さない" "外れるものに × が付く" \
     'mark = "  " if chosen(path, args) else "× "' 'mark = "  "'
+mutate "早い束ねの形を試さない" "早い束ねでも同じものが出る" \
+    'return _xml_call(app.GetHierarchy, ("", HS_PAGES), ("", HS_PAGES, ""))' \
+    'return _xml_call(app.GetHierarchy, ("", HS_PAGES, ""))'
+mutate "GetPageContent の [out] を末尾だと思う" "遅い束ねでも同じものが出る" \
+    'return _xml_call(app.GetPageContent, (page_id, info), (page_id, "", info))' \
+    'return _xml_call(app.GetPageContent, (page_id, info), (page_id, info, ""))'
+mutate "例外の有無だけで見分ける" "性悪でも同じものが出る" \
+    'if isinstance(out, str) and out.lstrip().startswith("<"):
+            return out' 'if True:
+            return out'
+mutate "どの形でも駄目なときに黙る" "どの形でも駄目なら黙らない" \
+    'raise trouble' 'return ""'
+mutate "話が通じるかを確かめない" "GetHierarchy が見えない相手は採らない" \
+    'if not hasattr(app, "GetHierarchy"):' 'if False:'
+mutate "版を名指しせず gencache だけに頼る" "型ライブラリを GUID と版で名指しする" \
+    'gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'pass'
+mutate "版を取り違える（偽の 1.0 を掴む）" "型ライブラリを GUID と版で名指しする" \
+    'gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 0)'
+mutate "繋げないとき黙って返る" "全部駄目なら、わけを並べて止まる" \
+    'sys.exit("OneNote (デスクトップ版) に接続できません:' 'return ("OneNote (デスクトップ版) に接続できません:'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

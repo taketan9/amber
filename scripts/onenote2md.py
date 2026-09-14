@@ -105,35 +105,98 @@ log = logging.getLogger("onenote2md")
 # ---------------------------------------------------------------------------
 # COM
 # ---------------------------------------------------------------------------
+ONENOTE_TYPELIB = "{0EA692EE-BB50-4E3C-AEF0-356D91732725}"
+
+
 def connect_onenote():
+    """OneNote に繋ぐ。**束ね方を三通り試して、話が通じたものを採る。**
+
+    素の `Dispatch`（遅い束ね）だけだった版は、会社の Windows で
+    `AttributeError: OneNote.Application.GetHierarchy` になった ── **繋がって
+    いるのに、メソッドの名前が引けない。** OneNote の型ライブラリの登録には
+    中身のない `1.0` の枝が混ざっていて、pywin32 がそれを掴むと名前を引けなく
+    なる（pywin32 の issue 1488）。レジストリを消せば直るが、**会社の端末は
+    グループポリシーが書き戻す**ので、こちら側で避ける ── 版を明示して
+    `EnsureModule` すれば、偽の枝を跨いで本物（1.1）を読む。
+
+    どれで繋がったかは `-v` で出す。**繋がったことと、話が通じることは別**
+    なので、`GetHierarchy` が見えるところまで確かめてから返す。
+    """
     try:
         import win32com.client  # noqa
+        from win32com.client import gencache
     except ImportError:
         sys.exit("pywin32 が必要です:  pip install pywin32")
-    try:
-        app = win32com.client.Dispatch("OneNote.Application")
-    except Exception as e:  # noqa
-        sys.exit(f"OneNote (デスクトップ版) に接続できません: {e}")
-    return app
+
+    def by_version():
+        gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
+        return win32com.client.Dispatch("OneNote.Application")
+
+    def by_gencache():
+        return gencache.EnsureDispatch("OneNote.Application")
+
+    def by_dispatch():
+        return win32com.client.Dispatch("OneNote.Application")
+
+    troubles = []
+    for how, make in (("型ライブラリを版で名指し（1.1）", by_version),
+                      ("gencache に任せる", by_gencache),
+                      ("素の Dispatch（遅い束ね）", by_dispatch)):
+        try:
+            app = make()
+        except Exception as e:  # noqa
+            troubles.append(f"  {how}: {e}")
+            continue
+        if not hasattr(app, "GetHierarchy"):
+            troubles.append(f"  {how}: 繋がったが GetHierarchy が見えない")
+            continue
+        log.debug("OneNote に繋がった（%s）", how)
+        return app
+
+    sys.exit("OneNote (デスクトップ版) に接続できません:\n" + "\n".join(troubles) + """
+
+よくある順に:
+  1. 管理者の窓で走らせている ── OneNote と権限を揃える（普通の窓で叩く）
+  2. OneNote を先に起動していない ── 手で開き、写すノートブックを開いておく
+  3. gen_py の作り置きが壊れている ── %LOCALAPPDATA%\\Temp\\gen_py を消す
+  4. ストア版の OneNote ── COM を持たないので、こちらでは手が出ない""")
 
 
-def call_with_out(func, *args):
-    """pywin32 は遅延バインディングの [out] 引数の扱いが版で違うため両方試す。"""
-    try:
-        return func(*args, "")
-    except TypeError:
-        return func(*args)
+def _xml_call(func, *variants):
+    """OneNote の `[out]` 引数は、束ね方で渡し方が変わる。
+
+    **早い束ね**（`EnsureModule` / `EnsureDispatch`）では `[out]` が戻り値に
+    なるので渡さない。**遅い束ね**では置き場所を渡す ── しかもその位置は
+    メソッドごとに違う（`GetHierarchy` は 3 番目、`GetPageContent` は 2 番目）。
+
+    片方に決め打つと、片方の端末でだけ動くものになる。**両方試して、XML が
+    返ったほうを採る。** 例外だけで見分けないのは、間違った位置に渡しても
+    例外にならず「XML でない何か」が返ることがあるから。
+    """
+    trouble = None
+    for args in variants:
+        try:
+            out = func(*args)
+        except Exception as e:  # noqa
+            trouble = e
+            continue
+        if isinstance(out, tuple):   # (戻り値, out) で返る束ね方もある
+            out = next((v for v in out
+                        if isinstance(v, str) and v.lstrip().startswith("<")), None)
+        if isinstance(out, str) and out.lstrip().startswith("<"):
+            return out
+        trouble = ValueError(f"XML ではないものが返った: {str(out)[:60]!r}")
+    raise trouble
 
 
 def get_hierarchy(app):
-    return call_with_out(app.GetHierarchy, "", HS_PAGES)
+    # 早い束ね: (起点, 深さ) で XML が返る / 遅い束ね: [out] は 3 番目
+    return _xml_call(app.GetHierarchy, ("", HS_PAGES), ("", HS_PAGES, ""))
 
 
 def _get_page(app, page_id, info):
-    try:
-        return app.GetPageContent(page_id, "", info)
-    except TypeError:
-        return app.GetPageContent(page_id, info)
+    # 早い束ね: (ページ, 何を含めるか) / 遅い束ね: [out] は **2 番目**
+    return _xml_call(app.GetPageContent, (page_id, info), (page_id, "", info))
 
 
 def sync_notebooks(app, root, filters, wait):

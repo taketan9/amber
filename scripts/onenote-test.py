@@ -33,6 +33,12 @@ spec = importlib.util.spec_from_file_location("onenote2md", ROOT / "onenote2md.p
 o2m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(o2m)
 
+# **原本を取っておく。** `run()` は `o2m.connect_onenote` を偽物に差し替えるので、
+# あとで繋ぎ方そのものを試すときには、差し替えられた側を呼んでしまう
+# （そして「繋がらない」ではなく「前のテストの偽物が返る」という、
+# いちばん読みにくい落ち方をする）。
+ORIG_CONNECT = o2m.connect_onenote
+
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 )
@@ -491,12 +497,177 @@ def t_list(tmp):
           any(l.startswith("  仕事/議事録") for l in got.splitlines()), got)
 
 
+class EarlyBound(FakeOneNote):
+    """`EnsureModule` / `EnsureDispatch` で束ねたときの形 ── `[out]` は戻り値。
+
+    **わざと厳しくしてある。** 余った引数を黙って受ける偽物にすると、
+    「早い形を試さない」ように壊しても遅い形が通ってしまい、検査が黙る。
+    """
+
+    def GetHierarchy(self, start, scope):
+        return self.hier
+
+    def GetPageContent(self, pid, info):
+        if pid in self.fail:
+            raise RuntimeError("COM がしゃっくりした")
+        self.fetched.append(pid)
+        return self.pages[pid]
+
+
+class LateBound(FakeOneNote):
+    """素の `Dispatch` の形 ── `[out]` の置き場所を渡す。**位置はメソッドで違う。**"""
+
+    def GetHierarchy(self, start, scope, out):        # [out] は 3 番目
+        if out != "":
+            raise TypeError("[out] の位置が違う")
+        return self.hier
+
+    def GetPageContent(self, pid, out, info):        # [out] は **2 番目**
+        if out != "":
+            raise TypeError("[out] の位置が違う")
+        if pid in self.fail:
+            raise RuntimeError("COM がしゃっくりした")
+        self.fetched.append(pid)
+        return self.pages[pid]
+
+
+class Sneaky(FakeOneNote):
+    """間違った渡し方でも**例外にならず、XML でない何か**を返す性悪。
+
+    これが居るから、例外の有無だけで見分けてはいけない。
+    """
+
+    def GetHierarchy(self, start, scope, out=None):
+        return self.hier if out is not None else ""
+
+    def GetPageContent(self, pid, out=None, info=None):
+        if out is None or out != "":
+            return 0          # 早い形では数を返してくる
+        self.fetched.append(pid)
+        return self.pages[pid]
+
+
+def t_binding(tmp):
+    print("束ね方（早い／遅い）──")
+    want = ["仕事/案件/A社/見積.md", "仕事/議事録/9月の定例.md",
+            "仕事/議事録/9月の定例/補足.md", "私用/買い物/週末.md"]
+    for name, cls in (("早い束ね", EarlyBound), ("遅い束ね", LateBound), ("性悪", Sneaky)):
+        out = tmp / f"bind-{cls.__name__}"
+        # **落ちたら NG。** 例外のまま抜けると走査ごと止まり、
+        # 「鳴らなかった」と「検査が無い」が同じ顔になる。
+        try:
+            run(cls(hierarchy(), pages_for()), out)
+            got = _mds(out)
+        except Exception as e:  # noqa
+            got = f"落ちた: {type(e).__name__}: {e}"
+        check(f"{name}でも同じものが出る", got == want, f"{got}")
+
+    class Broken(FakeOneNote):
+        def GetHierarchy(self, *a):
+            raise RuntimeError("どの形でも駄目")
+
+    try:
+        o2m.get_hierarchy(Broken(hierarchy(), pages_for()))
+        check("どの形でも駄目なら黙らない", False, "通ってしまった")
+    except Exception as e:  # noqa
+        check("どの形でも駄目なら黙らない", "どの形でも駄目" in str(e), str(e))
+
+
+# ---------------------------------------------------------------------------
+# connect_onenote ── win32com ごと偽って、束ね方の梯子を確かめる
+# ---------------------------------------------------------------------------
+import types  # noqa: E402
+
+
+class NoTypeInfo:
+    """繋がってはいるが、メソッドの名前が引けない ── 会社の Windows で出た姿。"""
+
+    def __getattr__(self, name):
+        raise AttributeError(f"OneNote.Application.{name}")
+
+
+def _fake_win32com(ensure_module=None, ensure_dispatch=None, dispatch=None):
+    """`import win32com.client` と `from win32com.client import gencache` を通す。"""
+    pkg = types.ModuleType("win32com")
+    client = types.ModuleType("win32com.client")
+    gencache = types.ModuleType("win32com.client.gencache")
+
+    def boom(name):
+        def f(*a, **k):
+            raise RuntimeError(f"{name} は使えない")
+        return f
+
+    gencache.EnsureModule = ensure_module or boom("EnsureModule")
+    gencache.EnsureDispatch = ensure_dispatch or boom("EnsureDispatch")
+    client.Dispatch = dispatch or boom("Dispatch")
+    client.gencache = gencache
+    pkg.client = client
+    return {"win32com": pkg, "win32com.client": client,
+            "win32com.client.gencache": gencache}
+
+
+def _connect_with(**mods):
+    saved = {k: sys.modules.get(k) for k in
+             ("win32com", "win32com.client", "win32com.client.gencache")}
+    sys.modules.update(_fake_win32com(**mods))
+    try:
+        return ORIG_CONNECT()
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+
+def t_connect(tmp):
+    print("OneNote への繋ぎ方 ──")
+    good = FakeOneNote(hierarchy(), pages_for())
+
+    named = []
+    got = _connect_with(ensure_module=lambda *a: named.append(a), dispatch=lambda *a: good)
+    check("版を名指しできれば、それで繋ぐ", got is good)
+    # **ここが今回の肝。** OneNote の型ライブラリの登録には中身のない `1.0` の
+    # 枝が混ざっていて、任せると pywin32 がそれを掴んで名前を引けなくなる。
+    # 版（1.1）を名指しすれば跨げる。
+    check("型ライブラリを GUID と版で名指しする",
+          named and named[0] == (o2m.ONENOTE_TYPELIB, 0, 1, 1), f"{named}")
+
+    got = _connect_with(ensure_dispatch=lambda *a: good)
+    check("駄目なら gencache に任せる", got is good)
+
+    got = _connect_with(dispatch=lambda *a: good)
+    check("それも駄目なら素の Dispatch", got is good)
+
+    # **繋がったことと、話が通じることは別。** 一度目は名前の引けない相手を
+    # 返し、三度目に本物を返す ── 会社の Windows で出たのがこの姿だった。
+    blind = NoTypeInfo()
+    seen = []
+
+    def dispatch(*a):
+        seen.append(1)
+        return blind if len(seen) == 1 else good
+
+    got = _connect_with(ensure_module=lambda *a: None, dispatch=dispatch)
+    check("GetHierarchy が見えない相手は採らない", got is good, f"{type(got).__name__}")
+
+    try:
+        _connect_with()
+        check("全部駄目なら、わけを並べて止まる", False, "通ってしまった")
+    except SystemExit as e:
+        msg = str(e)
+        check("全部駄目なら、わけを並べて止まる",
+              "EnsureModule は使えない" in msg and "Dispatch は使えない" in msg, msg[:80])
+        check("止まるとき、心当たりを出す",
+              "管理者" in msg and "gen_py" in msg and "ストア版" in msg, msg[-120:])
+
+
 def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_structure, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
-                   t_select, t_select_flatten, t_select_prune, t_list):
+                   t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_connect):
             fn(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
