@@ -108,6 +108,50 @@ log = logging.getLogger("onenote2md")
 ONENOTE_TYPELIB = "{0EA692EE-BB50-4E3C-AEF0-356D91732725}"
 
 
+def _can_write(d) -> bool:
+    """そこに本当に書けるか。**`os.access` は Windows では当てにならない** ──
+    ディレクトリについては読み取り専用属性しか見ず、ACL で拒まれる場所でも
+    True を返す。だから実際に一つ置いて、消す。
+
+    **この性質は mac の走査では証明できない** ── POSIX の `os.access` は正しく
+    答えるので、`os.access` に戻しても走査は通ってしまう。ここは Windows の
+    上でしか壊れない。"""
+    try:
+        os.makedirs(d, exist_ok=True)
+        probe = os.path.join(d, f".amber-probe-{os.getpid()}")
+        with open(probe, "w"):
+            pass
+        os.unlink(probe)
+        return True
+    except OSError:
+        return False
+
+
+def _gen_py_somewhere_writable():
+    """makepy の作り置き先。**書けない場所なら、書ける場所へ逃がす。**
+
+    既定は `site-packages\\win32com\\gen_py` で、Python が
+    `C:\\Program Files\\` に入っていると管理者でないと書けない
+    （`PermissionError: ...gen_py\\....py.100000.temp`）。会社の端末で管理者に
+    なれるとは限らないので、こちらで逃がす ── 管理者の窓で一度作る手もあるが、
+    **そこは OneNote に繋げない窓**（権限がずれる）なので、話が噛み合わない。
+
+    **`win32com.client` を読む前に決めること。** gencache は読み込みの時点で
+    この道を見るので、あとから変えても遅い。
+    """
+    import win32com
+
+    default = getattr(win32com, "__gen_path__", "")
+    if default and _can_write(default):
+        return default, False
+    at = os.path.join(tempfile.gettempdir(),
+                      f"amber-gen_py-{sys.version_info[0]}.{sys.version_info[1]}")
+    if not _can_write(at):
+        return default, False        # そこも駄目なら、諦めて既定のまま進む
+    win32com.__gen_path__ = at
+    return at, True
+
+
 def connect_onenote():
     """OneNote に繋ぐ。**束ね方を三通り試して、話が通じたものを採る。**
 
@@ -123,10 +167,17 @@ def connect_onenote():
     なので、`GetHierarchy` が見えるところまで確かめてから返す。
     """
     try:
-        import win32com.client  # noqa
-        from win32com.client import gencache
+        import win32com  # noqa
     except ImportError:
         sys.exit("pywin32 が必要です:  pip install pywin32")
+
+    # **`win32com.client` を読む前に。** 逃がすならここでしか逃がせない。
+    gen_path, moved = _gen_py_somewhere_writable()
+    if moved:
+        log.debug("makepy の作り置き先を移した: %s", gen_path)
+
+    import win32com.client  # noqa
+    from win32com.client import gencache
 
     def by_version():
         gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)

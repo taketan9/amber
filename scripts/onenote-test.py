@@ -586,9 +586,10 @@ class NoTypeInfo:
         raise AttributeError(f"OneNote.Application.{name}")
 
 
-def _fake_win32com(ensure_module=None, ensure_dispatch=None, dispatch=None):
+def _fake_win32com(ensure_module=None, ensure_dispatch=None, dispatch=None, gen_path=None):
     """`import win32com.client` と `from win32com.client import gencache` を通す。"""
     pkg = types.ModuleType("win32com")
+    pkg.__gen_path__ = gen_path or ""
     client = types.ModuleType("win32com.client")
     gencache = types.ModuleType("win32com.client.gencache")
 
@@ -618,6 +619,47 @@ def _connect_with(**mods):
                 sys.modules.pop(k, None)
             else:
                 sys.modules[k] = v
+
+
+def t_gen_py(tmp):
+    print("makepy の作り置き先 ──")
+    ok_dir = tmp / "gen-ok"
+    ok_dir.mkdir(parents=True, exist_ok=True)
+    no_dir = tmp / "gen-no"
+    no_dir.mkdir(parents=True, exist_ok=True)
+    no_dir.chmod(0o500)          # 読めるが書けない
+
+    check("書ける場所は書けると言う", o2m._can_write(str(ok_dir)))
+    check("書けない場所は書けないと言う", not o2m._can_write(str(no_dir)))
+    check("試し書きの跡を残さない", list(ok_dir.iterdir()) == [], f"{list(ok_dir.iterdir())}")
+
+    good = FakeOneNote(hierarchy(), pages_for())
+
+    # 既定が書けるなら、触らない
+    seen = []
+    _connect_with(gen_path=str(ok_dir),
+                  ensure_module=lambda *a: seen.append(sys.modules["win32com"].__gen_path__),
+                  dispatch=lambda *a: good)
+    check("書けるならそのまま使う", seen == [str(ok_dir)], f"{seen}")
+
+    # 既定が書けないなら、書ける場所へ逃がす
+    seen = []
+    _connect_with(gen_path=str(no_dir),
+                  ensure_module=lambda *a: seen.append(sys.modules["win32com"].__gen_path__),
+                  dispatch=lambda *a: good)
+    check("書けないなら逃がす", seen and seen[0] != str(no_dir), f"{seen}")
+    check("逃がし先は書ける場所", seen and o2m._can_write(seen[0]), f"{seen}")
+    # **順番が肝。** 本物の gencache は `win32com.client` を読んだ時点で道を
+    # 見るので、そのあとで逃がしても遅い。**それは mac では起こせない**
+    # （偽の client は読んでも何もしないから、実行の上では順番が見えない）ので、
+    # **並び順そのものを見る。** 粗いが、取り違えは実際にこの形で起きる。
+    body = (ROOT / "onenote2md.py").read_text(encoding="utf-8")
+    body = body[body.index("def connect_onenote("):body.index("def _xml_call(")]
+    check("逃がしてから win32com.client を読む（並び順）",
+          body.index("_gen_py_somewhere_writable()") < body.index("import win32com.client"),
+          "client を読んだあとで逃がしている")
+
+    no_dir.chmod(0o700)          # 片付けられるように戻す
 
 
 def t_connect(tmp):
@@ -667,7 +709,7 @@ def main():
     try:
         for fn in (t_names, t_structure, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
-                   t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_connect):
+                   t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_connect):
             fn(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

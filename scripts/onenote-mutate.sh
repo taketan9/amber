@@ -132,6 +132,23 @@ mutate "版を取り違える（偽の 1.0 を掴む）" "型ライブラリを 
     'gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 0)'
 mutate "繋げないとき黙って返る" "全部駄目なら、わけを並べて止まる" \
     'sys.exit("OneNote (デスクトップ版) に接続できません:' 'return ("OneNote (デスクトップ版) に接続できません:'
+mutate "作り置き先を逃がさない" "書けないなら逃がす" \
+    'win32com.__gen_path__ = at
+    return at, True' 'return default, False'
+# `os.access` に戻す壊し方は**わざと置いていない** ── POSIX の `os.access` は
+# 正しく答えるので mac では鳴らない。Windows の上でしか壊れない性質で、
+# 黙る壊し方を並べると「鳴らないのが普通」になる。
+mutate "試し書きを片付けない" "試し書きの跡を残さない" \
+    'os.unlink(probe)
+        return True' 'return True'
+mutate "逃がす前に client を読む" "逃がしてから win32com.client を読む（並び順）" \
+    'gen_path, moved = _gen_py_somewhere_writable()
+    if moved:
+        log.debug("makepy の作り置き先を移した: %s", gen_path)
+
+    import win32com.client  # noqa' \
+    'import win32com.client  # noqa
+    gen_path, moved = _gen_py_somewhere_writable()'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'
