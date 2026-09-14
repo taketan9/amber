@@ -380,11 +380,123 @@ def t_names(tmp):
     check("日本語は削られない", o2m.sanitize("九月の定例") == "九月の定例")
 
 
+def _mds(out):
+    return sorted(str(q.relative_to(out)) for q in out.rglob("*.md"))
+
+
+def t_select(tmp):
+    print("写すものを選ぶ ──")
+    out = tmp / "sel"
+    app = FakeOneNote(hierarchy(), pages_for())
+    run(app, out, "--only", "議事録")
+    check("--only はそのセクションだけ",
+          _mds(out) == ["仕事/議事録/9月の定例.md", "仕事/議事録/9月の定例/補足.md"], f"{_mds(out)}")
+
+    out = tmp / "sel2"
+    run(FakeOneNote(hierarchy(), pages_for()), out, "--only", "仕事")
+    check("--only にノートブック名を書けば、その下ぜんぶ",
+          _mds(out) == ["仕事/案件/A社/見積.md", "仕事/議事録/9月の定例.md",
+                        "仕事/議事録/9月の定例/補足.md"], f"{_mds(out)}")
+
+    out = tmp / "sel3"
+    run(FakeOneNote(hierarchy(), pages_for()), out, "--only", "案件/A社")
+    check("--only は道で当たる（グループ/セクション）",
+          _mds(out) == ["仕事/案件/A社/見積.md"], f"{_mds(out)}")
+
+    out = tmp / "sel4"
+    run(FakeOneNote(hierarchy(), pages_for()), out, "--skip", "私用")
+    check("--skip は外す",
+          _mds(out) == ["仕事/案件/A社/見積.md", "仕事/議事録/9月の定例.md",
+                        "仕事/議事録/9月の定例/補足.md"], f"{_mds(out)}")
+
+    out = tmp / "sel5"
+    run(FakeOneNote(hierarchy(), pages_for()), out, "--only", "仕事", "--skip", "案件")
+    check("--skip は --only より強い",
+          _mds(out) == ["仕事/議事録/9月の定例.md", "仕事/議事録/9月の定例/補足.md"], f"{_mds(out)}")
+
+    out = tmp / "sel6"
+    run(FakeOneNote(hierarchy(), pages_for()), out, "--only", "ABC")
+    check("当たらなければ一枚も出ない", _mds(out) == [], f"{_mds(out)}")
+
+    out = tmp / "sel7"
+    run(FakeOneNote(hierarchy(), pages_for()), out, "--only", "a社")
+    check("大文字小文字は問わない", _mds(out) == ["仕事/案件/A社/見積.md"], f"{_mds(out)}")
+
+    out = tmp / "sel8"
+    run(FakeOneNote(hierarchy(), pages_for()), out, "--only", "議事録", "--only", "買い物")
+    check("--only は重ねられる",
+          _mds(out) == ["仕事/議事録/9月の定例.md", "仕事/議事録/9月の定例/補足.md",
+                        "私用/買い物/週末.md"], f"{_mds(out)}")
+
+
+def t_select_flatten(tmp):
+    print("絞りは OneNote の道に当たる（畳んだ名前ではなく）──")
+    out = tmp / "flat"
+    run(FakeOneNote(hierarchy(), pages_for()), out, "--flatten-groups", "--only", "案件/A社")
+    check("畳んでも OneNote の道で拾える",
+          _mds(out) == ["仕事/案件 › A社/見積.md"], f"{_mds(out)}")
+
+    out = tmp / "flat2"
+    run(FakeOneNote(hierarchy(), pages_for()), out, "--flatten-groups", "--only", "案件 › A社")
+    check("畳んだ名前では拾わない（同じ --only が旗で違うものを拾わない）",
+          _mds(out) == [], f"{_mds(out)}")
+
+
+def t_select_prune(tmp):
+    print("絞りと --prune ──")
+    out = tmp / "selprune"
+    run(FakeOneNote(hierarchy(), pages_for()), out)
+    check("下ごしらえ: 全部出ている", len(_mds(out)) == 4, f"{_mds(out)}")
+
+    # OneNote 側で消えたページ（絞って写す側にある）
+    gone = out / "仕事" / "議事録" / "むかしのページ.md"
+    gone.write_text('---\ntitle: "むかし"\nonenote_id: "{P7}"\n---\n\n本文\n', encoding="utf-8")
+
+    run(FakeOneNote(hierarchy(), pages_for()), out, "--only", "議事録", "--prune")
+
+    check("絞って外したセクションの写しは残る（前は全滅した）",
+          (out / "仕事" / "案件" / "A社" / "見積.md").is_file()
+          and (out / "私用" / "買い物" / "週末.md").is_file())
+    check("絞って写した側では、消えたページの写しは消える", not gone.exists())
+
+    out2 = tmp / "selprune2"
+    run(FakeOneNote(hierarchy(), pages_for()), out2)
+    run(FakeOneNote(hierarchy(), pages_for()), out2, "--flatten-groups", "--only", "議事録", "--prune")
+    check("畳んだときも、外したセクションの写しは残る",
+          (out2 / "仕事" / "案件" / "A社" / "見積.md").is_file())
+
+
+def t_list(tmp):
+    print("--list ──")
+    import io
+    import contextlib as _c
+
+    buf = io.StringIO()
+    with _c.redirect_stdout(buf):
+        run(FakeOneNote(hierarchy(), pages_for()), tmp / "list", "--list")
+    got = buf.getvalue()
+    check("セクションを道で並べる", "仕事/議事録" in got and "仕事/案件/A社" in got
+          and "私用/買い物" in got, got)
+    check("ページ数が出る", "2 ページ" in got, got)
+    check("鍵のかかったセクションは印が付く", "（鍵）" in got, got)
+    check("ゴミ箱は並べない", "OneNote_RecycleBin" not in got, got)
+    check("--list は書かない", not (tmp / "list").exists())
+
+    buf = io.StringIO()
+    with _c.redirect_stdout(buf):
+        run(FakeOneNote(hierarchy(), pages_for()), tmp / "list2", "--list", "--only", "議事録")
+    got = buf.getvalue()
+    check("外れるものに × が付く", "× 仕事/案件/A社" in got and "× 私用/買い物" in got, got)
+    check("拾うものには × が付かない",
+          any(l.startswith("  仕事/議事録") for l in got.splitlines()), got)
+
+
 def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_structure, t_incremental, t_same_file,
-                   t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock):
+                   t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
+                   t_select, t_select_flatten, t_select_prune, t_list):
             fn(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -23,7 +23,10 @@ onenote2md.py ── デスクトップ版 OneNote を Markdown に（ambər の
 
 使い方
   python onenote2md.py --out D:\\notes                      # 全ノートブック
-  python onenote2md.py --out D:\\notes --notebook "案件A"    # 名前で絞り込み（部分一致）
+  python onenote2md.py --out D:\\notes --list              # 写せるセクションを道で並べる
+  python onenote2md.py --out D:\\notes --notebook "案件A"    # ノートブックで絞る（部分一致）
+  python onenote2md.py --out D:\\notes --only "仕事/議事録"  # セクションで絞る（道に部分一致）
+  python onenote2md.py --out D:\\notes --skip "仕事/私的"    # これだけ外す（--only より強い）
   python onenote2md.py --out D:\\notes --dry-run            # 階層だけ表示、書き込みなし
   python onenote2md.py --out D:\\notes --no-images          # 画像を出力しない
   python onenote2md.py --out "\\\\テナント@SSL\\DavWWWRoot\\sites\\…"   # WebDAV へ直に（遅い。下の註）
@@ -516,7 +519,7 @@ def place_for(parent_dir: Path, h_name: str, page_id: str) -> Path:
 # ---------------------------------------------------------------------------
 # 階層走査
 # ---------------------------------------------------------------------------
-def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, written: set, keep: set):
+def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, written: set, keep: Keep):
     sec_name = sanitize(section_el.get("name"))
     if section_el.get("locked") == "true":
         log.warning("パスワード保護のためスキップ: %s / %s", " / ".join(path_parts), sec_name)
@@ -524,7 +527,8 @@ def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, writte
         # **見えなかった場所は、消えた場所ではない。** 鍵のかかったセクションの
         # 下は今回一枚も出てこないので、`--prune` に任せると前回の写しを
         # まるごと消してしまう（そして次の回も鍵は開かないので、二度と戻らない）。
-        keep.add((out_dir / sec_name).resolve())
+        keep.add_dir(out_dir / sec_name)
+        keep.add_pages_of(section_el)   # 鍵が開いていれば ID も拾える
         return
     sec_dir = out_dir / sec_name
     img_dir = sec_dir / ATTACH
@@ -606,15 +610,26 @@ def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, writte
             md_path.with_suffix(".xml").write_text(xml, encoding="utf-8")
 
 
-def walk_container(app, el, out_dir: Path, path_parts, args, stats, written: set, keep: set, group_prefix=""):
+def walk_container(app, el, out_dir: Path, path_parts, args, stats, written: set, keep: Keep, group_prefix=""):
     """Notebook / SectionGroup の下を再帰的に処理"""
     for child in el:
         tag = strip_ns(child.tag)
         if tag == "Section":
+            raw = sanitize(child.get("name"))
+            # --flatten-groups: グループ名を畳んで一段にする
+            out_name = (group_prefix + " › " + raw) if group_prefix else raw
+            if not chosen("/".join(path_parts + [raw]), args):
+                # **選ばなかった場所は、消えた場所ではない。** `--prune` は
+                # 歩いたノートブックの下を見るので、絞って外したセクションを
+                # 教えておかないと、前回の写しをまるごと消してしまう
+                # （そして次の回も絞りは同じなので、二度と戻らない）。
+                keep.add_dir(out_dir / out_name)
+                keep.add_pages_of(child)
+                stats["filtered_sections"] += 1
+                log.debug("絞りで外した: %s", "/".join(path_parts + [raw]))
+                continue
             if group_prefix:
-                # --flatten-groups: グループ名を畳んで一段にする
-                child_name = group_prefix + " › " + sanitize(child.get("name"))
-                child.set("name", child_name)
+                child.set("name", out_name)
             walk_section(app, child, out_dir, path_parts, args, stats, written, keep)
         elif tag == "SectionGroup":
             if child.get("isRecycleBin") == "true":
@@ -629,11 +644,64 @@ def walk_container(app, el, out_dir: Path, path_parts, args, stats, written: set
                 walk_container(app, child, out_dir / name, path_parts + [name], args, stats, written, keep)
 
 
+class Keep:
+    """`--prune` が触ってはいけないもの ── **見なかった場所と、選ばなかったもの。**
+
+    二本立てなのは、片方だけでは足りないから。
+
+    **選ばなかったセクションは ID で守る。** 階層 XML にページ ID が並んで
+    いるので、その写しが**どこに置かれていても**守れる ── あとから
+    `--flatten-groups` を付けて出力の形が変わっても、セクションの名前が
+    変わっても効く。道だけで守っていた版は、旗を足した次の回に、絞りで
+    外したセクションの写しをまるごと消していた（走査が見つけた）。
+
+    **鍵のかかったセクションは道でしか守れない。** 中が見えないので、
+    ページ ID が一つも出てこない。
+    """
+
+    def __init__(self):
+        self.dirs = set()
+        self.ids = set()
+
+    def add_dir(self, d):
+        self.dirs.add(Path(d).resolve())
+
+    def add_pages_of(self, section_el):
+        for pg in section_el.findall("one:Page", NS):
+            if pg.get("ID"):
+                self.ids.add(pg.get("ID"))
+
+    def covers(self, path: Path, onenote_id: str) -> bool:
+        if onenote_id and onenote_id in self.ids:
+            return True
+        return any(_under(path, d) for d in self.dirs)
+
+
+def chosen(sec_path: str, args) -> bool:
+    """このセクションを写すか。`sec_path` は **OneNote 側の道**
+    （`ノートブック/グループ/セクション`）── 出力先の名前ではない。
+
+    `--flatten-groups` は出力の名前を「グループ › セクション」に畳むが、
+    **絞りはいつも OneNote で見えている道に当たる** ── 畳んだ名前に当てると、
+    同じ `--only` が旗の有無で違うものを拾う。
+
+    `--only` は「どれか一つにでも当たれば写す」、`--skip` は「どれか一つにでも
+    当たれば写さない」。両方あれば `--skip` が勝つ（外すほうが、足すより強い ──
+    逆にすると「外したはずのものが混ざる」ほうの事故になる）。
+    """
+    low = sec_path.lower()
+    if args.only and not any(pat.lower() in low for pat in args.only):
+        return False
+    if args.skip and any(pat.lower() in low for pat in args.skip):
+        return False
+    return True
+
+
 def _under(path: Path, base: Path) -> bool:
     return path == base or base in path.parents
 
 
-def prune(scope: list, keep: set, written: set, stats):
+def prune(scope: list, keep: Keep, written: set, stats):
     """このスクリプトが書いた形（前書きに `onenote_id`）の `.md` のうち、今回出てこなかったものを消す。
 
     **消してよいのは、今回ちゃんと歩いた場所だけ。** 前の版は出力先ぜんたいを
@@ -651,10 +719,11 @@ def prune(scope: list, keep: set, written: set, stats):
             r = at.resolve()
             if r in written:
                 continue
-            if any(_under(r, k) for k in keep):
-                continue
-            if not read_head(at).get("onenote_id"):
+            oid = read_head(at).get("onenote_id")
+            if not oid:
                 continue  # ambər で作ったノートは触らない
+            if keep.covers(r, oid):
+                continue
             try:
                 at.unlink()
                 stats["pruned"] += 1
@@ -670,6 +739,12 @@ def build_parser():
     ap = argparse.ArgumentParser(description="OneNote → Markdown（階層保持・ambər の保存ディレクトリ向け）")
     ap.add_argument("--out", required=True, help="出力先フォルダ（ローカルでも \\\\…@SSL\\DavWWWRoot\\… でも）")
     ap.add_argument("--notebook", action="append", help="対象ノートブック名（部分一致、複数指定可）")
+    ap.add_argument("--only", action="append", metavar="道",
+                    help="このセクションだけ写す。`ノートブック/グループ/セクション` の道に部分一致（複数指定可）")
+    ap.add_argument("--skip", action="append", metavar="道",
+                    help="このセクションは写さない。--only より強い（複数指定可）")
+    ap.add_argument("--list", action="store_true",
+                    help="写せるセクションを道で並べるだけ（--only/--skip を付けると、外れるものに × が付く）")
     ap.add_argument("--dry-run", action="store_true", help="階層表示のみ、書き込みなし")
     ap.add_argument("--no-images", action="store_true", help="画像を出力しない")
     ap.add_argument("--force", action="store_true", help="変わっていないページも書き直す")
@@ -681,6 +756,30 @@ def build_parser():
     ap.add_argument("--log", metavar="ファイル", help="経過をこのファイルにも書き足す（タスク スケジューラ向け）")
     ap.add_argument("-v", "--verbose", action="store_true")
     return ap
+
+
+def list_sections(root, args):
+    """写せるセクションを道で並べる。`--only` / `--skip` を付けて走らせれば、
+    **書き出す前に、絞りが狙ったものを拾っているか**が見える。"""
+    def walk(el, parts):
+        for child in el:
+            tag = strip_ns(child.tag)
+            if tag == "Section":
+                raw = sanitize(child.get("name"))
+                path = "/".join(parts + [raw])
+                n = sum(1 for pg in child.findall("one:Page", NS)
+                        if pg.get("isInRecycleBin") != "true")
+                mark = "  " if chosen(path, args) else "× "
+                lock = "  （鍵）" if child.get("locked") == "true" else ""
+                print(f"{mark}{path}    {n} ページ{lock}")
+            elif tag == "SectionGroup" and child.get("isRecycleBin") != "true":
+                walk(child, parts + [sanitize(child.get("name"))])
+
+    for nb in root.findall("one:Notebook", NS):
+        name = nb.get("name", "")
+        if args.notebook and not any(f.lower() in name.lower() for f in args.notebook):
+            continue
+        walk(nb, [sanitize(name)])
 
 
 def main():
@@ -705,17 +804,21 @@ def main():
 def run(args, out_root: Path):
     app = connect_onenote()
     root = ET.fromstring(get_hierarchy(app))
-    if args.sync and not args.dry_run:
+    if args.sync and not args.dry_run and not args.list:
         if sync_notebooks(app, root, args.notebook, args.sync_wait):
             root = ET.fromstring(get_hierarchy(app))   # 同期後の姿で読み直す
     notebooks = root.findall("one:Notebook", NS)
     if not notebooks:
         sys.exit("開いているノートブックがありません。OneNote 上で対象ノートブックを開いてください。")
 
+    if args.list:
+        list_sections(root, args)
+        return 0
+
     stats = {"pages": 0, "written": 0, "skipped_pages": 0, "images": 0, "errors": 0,
-             "skipped_sections": 0, "pruned": 0, "pruned_images": 0}
+             "skipped_sections": 0, "filtered_sections": 0, "pruned": 0, "pruned_images": 0}
     written: set = set()
-    keep: set = set()
+    keep = Keep()
     scope: list = []
     for nb in notebooks:
         name = nb.get("name", "")
@@ -732,9 +835,11 @@ def run(args, out_root: Path):
     if args.prune and not args.dry_run:
         prune(scope, keep, written, stats)
 
-    log.info("完了: ページ %d（書いた %d・変わらず %d）/ 画像 %d / エラー %d / スキップしたセクション %d / 消した %d（絵 %d）",
+    log.info("完了: ページ %d（書いた %d・変わらず %d）/ 画像 %d / エラー %d / "
+             "セクション: 鍵 %d・絞りで外した %d / 消した %d（絵 %d）",
              stats["pages"], stats["written"], stats["skipped_pages"], stats["images"],
-             stats["errors"], stats["skipped_sections"], stats["pruned"], stats["pruned_images"])
+             stats["errors"], stats["skipped_sections"], stats["filtered_sections"],
+             stats["pruned"], stats["pruned_images"])
     return 1 if stats["errors"] else 0
 
 
