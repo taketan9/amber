@@ -108,6 +108,48 @@ await step('タブ：同じノートをもう一度押しても増えない', `
     await openNote(two[0]);
     if (tabs.length !== n0) return '同じ一本で増えました（' + tabs.length + '）';
     return showing === two[0] ? true : 'そのタブに移っていません';`, true);
+// 三の二の二。**変換の途中で別のノートへ移っても、打った字が消えない**
+// （依頼 558）── 日本語を打つ人は「一区切り打って、まとめて変換」なので、
+// ここで落とすと一度に消える量が大きい。会社の Windows で本人が踏んだ。
+await step('変換の途中で移っても、打った字が残る', `
+    // **使い捨ての一本を自分で作る。** はじめは試しのノートを書き換えて
+    // いたが、**題が一行目から決まる**ので名前が変わり、後ろの段を二度
+    // 巻き込んだ ── 散らかすなら、自分の持ち物の中で散らかす。
+    const 作 = await window.amber.call('new', { dir: state.root, title: '変換の試し', tags: [], text: '' });
+    const 道 = 作.path || (作.note && 作.note.path);
+    await reload({ quiet: true });
+    await openNote(道);
+    await new Promise((g) => setTimeout(g, 500));
+    const two = state.notes.filter((n) => n.path !== showing).slice(0, 1).map((n) => n.path);
+    if (!two.length) return 'ノートが足りません';
+    setView('read');
+    await new Promise((g) => setTimeout(g, 400));
+    // 確定した字を一つ置いてから、**変換中のまま**もう一つ置く。
+    const p = el('read').querySelector('p, div, h1, h2') || el('read');
+    const sel = window.getSelection(); const r = document.createRange();
+    r.selectNodeContents(p); r.collapse(false); sel.removeAllRanges(); sel.addRange(r);
+    el('read').focus();
+    document.execCommand('insertText', false, 'かくてい');
+    await new Promise((g) => setTimeout(g, 900));
+    el('read').dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    document.execCommand('insertText', false, 'みかくていのじ');
+    await new Promise((g) => setTimeout(g, 150));
+    const here = showing;
+    // **確定より先に**別のノートへ（Windows では押しのあとに確定が来る）。
+    await openNote(two[0]);
+    el('read').dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+    await new Promise((g) => setTimeout(g, 600));
+    await openNote(here);
+    await new Promise((g) => setTimeout(g, 900));
+    const now = el('read').textContent;
+    // **片付けてから答える。** 落第でも片付ける ── 散らかしたまま次の段へ
+    // 進むと、落ちた理由がこちらの散らかしなのか本体なのか分からなくなる。
+    await closeTab(道);
+    await ask('delete', { path: showing === 道 ? 道 : 道 });
+    await reload({ quiet: true });
+    if (!now.includes('かくてい')) return '確定した字まで消えました';
+    return now.includes('みかくていのじ') ? true : '変換中だった字が消えました';`, true);
+
 // 三の三。**上限**（依頼 556）── 網なので、ふだんは鳴らない。
 await step('タブ：50 枚を超えたら、古いものから閉じる', `
     const real = tabs.slice();

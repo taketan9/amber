@@ -1549,7 +1549,7 @@ async function closeTab(path) {
     if (at < 0) return;
     if (path === showing) {
         clearTimeout(readTimer);
-        await syncRead();
+        await syncRead(true);
         if (state.dirty) await leaveSave();
         stashTab();
     } else {
@@ -1604,7 +1604,7 @@ async function openNote(path, opts) {
             // もう机の上にある ── そのタブへ。
             if (showing !== path) {
                 clearTimeout(readTimer);
-                await syncRead();
+                await syncRead(true);
                 if (state.dirty) await leaveSave();
                 // 離れるノートの名前を、題に揃えてから（依頼 492・決めごと 2）。
                 if (state.open && state.open.path !== path) await settleName(state.open.path);
@@ -1625,7 +1625,7 @@ async function openNote(path, opts) {
             // **新しいタブは、いまのすぐ右へ。** 端に足すと、たどっていた
             // 順と並びが合わなくなる。
             clearTimeout(readTimer);
-            await syncRead();
+            await syncRead(true);
             if (state.dirty) await leaveSave();
             stashTab();
             tabs.splice(tabs.findIndex((t) => t.path === showing) + 1, 0, { path, keep: null });
@@ -1637,7 +1637,7 @@ async function openNote(path, opts) {
             // **実際に動かすと分かりにくい**（本人）。見たものは残る。
             // 置く先は `⌥` 押しと同じ「いまのすぐ右」── たどった順と並びが合う。
             clearTimeout(readTimer);
-            await syncRead();
+            await syncRead(true);
             if (state.dirty) await leaveSave();
             if (state.open && state.open.path !== path) await settleName(state.open.path);
             stashTab();
@@ -1657,7 +1657,7 @@ async function openNote(path, opts) {
     // ── DOM に打った跡が `syncRead` を通るまで、エディタは前の字のまま。
     // 先に戻さないと、最後の数百ミリ秒ぶんが黙って消える。
     clearTimeout(readTimer);
-    await syncRead();
+    await syncRead(true);
     if (state.dirty) await leaveSave();
     // 離れるノートの名前を、題に揃えてから（依頼 492・決めごと 2）。
     if (state.open && state.open.path !== path && !(opts && opts.guest)) await settleName(state.open.path);
@@ -1974,7 +1974,7 @@ el('read').addEventListener('input', () => { readChanged(); tableBar(); });
 document.addEventListener('selectionchange', () => {
     if (view !== 'write' && state.open) tableBar();
 });
-el('read').addEventListener('blur', () => { clearTimeout(readTimer); syncRead(); }, true);
+el('read').addEventListener('blur', () => { clearTimeout(readTimer); syncRead(true); }, true);
 
 /// 貼り付けは**字だけ**入れる ── ただし、よそから来た HTML は
 /// **Markdown の字に直してから**（依頼 421）。
@@ -3804,11 +3804,19 @@ function landInCell(cell) {
 ///
 /// **描き直さない。** 打っている最中に組み直すと、caret がどこかへ飛ぶ ──
 /// 見た目は既に打った通りになっているので、組み直す理由も無い。
-async function syncRead() {
+async function syncRead(leaving) {
     if (syncing || !state.open || !editor) return;
     // **変換の途中なら、書き戻さない。** 未確定の字はまだ人の字ではない
     // ── 確定してから数え直す（`composing` の註）。
-    if (composing) return;
+    //
+    // **ただし、去るときは別**（依頼 558）。変換の途中で一覧の別のノートを
+    // 押すと、ここで黙って戻っていたので、**打った字がどこにも残らずに
+    // 消えていた**（会社の Windows で本人が踏んだ ── 日本語を打つ人は
+    // 「一区切り打って、まとめて変換」なので、一度に消える量が大きい）。
+    // 押しは `mousedown` で開く（依頼 477）ので、**確定は押しのあとに来る**
+    // ── 待っていると間に合わない。画面に見えている字を、そのまま拾う。
+    // 未確定のままなら読みの仮名で残るが、**消えるよりはるかにましだ。**
+    if (composing && !leaving) return;
     // **面の字が、いま開いているノートのものでなければ書き戻さない。**
     // 前のノートの字を、今のノートへ書くことになる（`readDrawn`）。
     //
@@ -11082,7 +11090,7 @@ async function syncNow(reason) {
         // （帯と選び口もここで付く）。打ちかけなら、保存のときの混ぜに任せる。
         if (openTouched && state.open && !state.dirty && !calOn) {
             clearTimeout(readTimer);
-            await syncRead();
+            await syncRead(true);
             if (!state.dirty) await openNote(state.open.path, { walking: true });
         }
         syncLast = Date.now();
