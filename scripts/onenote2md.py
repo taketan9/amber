@@ -399,6 +399,27 @@ def probe():
 
     say("取り次ぎ側が見ている登録", interface_typelib)
 
+    def object_typelib():
+        """**生きているオブジェクト自身が、どの型ライブラリを名乗るか。**
+
+        ここまで見たのは全部「登録の上ではどうなっているか」だった。
+        だが効くのは**オブジェクトが自分をどう言うか**で、そこが空の枝
+        （版 1.0）を指していれば、登録がいくら正しくても引けない。
+        `GetTypeInfo` そのものが落ちるなら、それもまた答えになる。
+        """
+        raw = cli().Dispatch("OneNote.Application")
+        ole = getattr(raw, "_oleobj_", raw)
+        n = ole.GetTypeInfoCount()
+        if not n:
+            return "型情報を 1 つも持っていない（GetTypeInfoCount = 0）"
+        ti = ole.GetTypeInfo()
+        lib, index = ti.GetContainingTypeLib()
+        a = lib.GetLibAttr()
+        return (f"名乗っている型ライブラリ {a[0]} / lcid {a[1]} / syskind {a[2]} / "
+                f"版 {a[3]}.{a[4]}  （この型は {index} 番目）")
+
+    say("オブジェクト自身の型情報", object_typelib)
+
     print("== 呼び方を試す ==")
 
     def shapes():
