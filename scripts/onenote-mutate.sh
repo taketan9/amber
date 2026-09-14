@@ -124,12 +124,12 @@ mutate "例外の有無だけで見分ける" "性悪でも同じものが出る
             return out'
 mutate "どの形でも駄目なときに黙る" "どの形でも駄目なら黙らない" \
     'raise trouble' 'return ""'
-mutate "話が通じるかを確かめない" "GetHierarchy が見えない相手は採らない" \
+mutate "話が通じるかを確かめない" "「見えない」と「呼べない」を言い分ける" \
     'if not hasattr(app, "GetHierarchy"):' 'if False:'
 mutate "版を名指しせず gencache だけに頼る" "型ライブラリを GUID と版で名指しする" \
-    'mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'mod = None'
-mutate "版を取り違える（偽の 1.0 を掴む）" "型ライブラリを GUID と版で名指しする" \
-    'EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'EnsureModule(ONENOTE_TYPELIB, 0, 1, 0)'
+    'mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, major, minor)' 'mod = None'
+mutate "どちらの段も同じ版を掴む" "版が二つあるなら、もう一方を試す" \
+    '("型ライブラリ 1.0 を名指し", by_typelib(1, 0)),' '("型ライブラリ 1.0 を名指し", by_typelib(1, 1)),'
 mutate "繋げないとき黙って返る" "全部駄目なら、わけを並べて止まる" \
     'sys.exit("OneNote (デスクトップ版) に接続できません:' 'return ("OneNote (デスクトップ版) に接続できません:'
 mutate "作り置き先を逃がさない" "書けないなら逃がす" \
@@ -156,7 +156,7 @@ mutate "書く先だけ動かす（読む先は古いまま）" "書く先と読
         gen_py.__path__ = [at]' 'pass'
 mutate "見つからなくてもやり直さない" "見つからなければ一度やり直す" \
     'importlib.invalidate_caches()
-            mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'raise'
+                mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, major, minor)' 'raise'
 mutate "皮をかぶせない" "一段目が遅い束ねを掴んでも、包んで返す" \
     'return _wrap_with_generated(mod, raw) or raw' 'return raw'
 mutate "名前で型を選ぶ" "選ぶのは名前ではなく「GetHierarchy を持つこと」" \
@@ -175,6 +175,18 @@ mutate "probe が書き出しに進む" "何も書かない" \
     'if args.probe:
         return probe()' 'if False:
         return 0'
+mutate "見えたら合格にする（呼ばない）" "呼んで落ちる相手は採らない" \
+    'try:
+            first = get_hierarchy(app)
+        except Exception as e:  # noqa
+            troubles.append(f"  {how}: 呼ぶと落ちる ── {e}")
+            continue' 'first = None'
+mutate "版は 1.1 しか試さない" "版が二つあるなら、もう一方を試す" \
+    '("型ライブラリ 1.0 を名指し", by_typelib(1, 0)),' ''
+mutate "繋ぐときの答えを捨てて、二度歩く" "階層を二度は取りに行かない" \
+    'app, first = connect_onenote()
+    root = ET.fromstring(first)' 'app, first = connect_onenote()
+    root = ET.fromstring(get_hierarchy(app))'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

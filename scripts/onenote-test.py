@@ -130,8 +130,10 @@ class FakeOneNote:
         self.fail = set(fail)
         self.synced = []
         self.fetched = []
+        self.hier_calls = 0
 
     def GetHierarchy(self, start, scope, out=""):
+        self.hier_calls += 1
         return self.hier
 
     def GetPageContent(self, pid, out, info):
@@ -158,8 +160,12 @@ def pages_for(mod_p1="2026-09-10T02:00:00.000Z", p1_images=0):
 
 
 def run(app, out, *argv):
-    """本体の `run()` を呼ぶ（`main()` の鎖と logging は通さない）。"""
-    o2m.connect_onenote = lambda: app
+    """本体の `run()` を呼ぶ（`main()` の鎖と logging は通さない）。
+
+    `connect_onenote()` は **(相手, 最初の階層 XML)** を返す ── 繋ぐときに
+    一度は訊いているので、その答えを捨てずに使うため。偽物も同じ形で返す。
+    """
+    o2m.connect_onenote = lambda: (app, o2m.get_hierarchy(app))
     ap_argv = ["--out", str(out)] + list(argv)
     parser_args = _parse(ap_argv)
     stats_before = {}
@@ -306,8 +312,7 @@ def t_prune_error(tmp):
         'ID="{P3}" name="見積" pageLevel="1"\n                  dateTime="2026-09-03T01:00:00.000Z" lastModifiedTime="2026-09-03T02:00:00.000Z"',
         'ID="{P3}" name="見積" pageLevel="1"\n                  dateTime="2026-09-03T01:00:00.000Z" lastModifiedTime="2026-09-14T09:00:00.000Z"')
     app2 = FakeOneNote(hier, pages_for(), fail=["{P3}"])
-    code = o2m.run(_parse(["--out", str(out), "--prune"]), out) if False else None
-    o2m.connect_onenote = lambda: app2
+    o2m.connect_onenote = lambda: (app2, o2m.get_hierarchy(app2))
     code = o2m.run(_parse(["--out", str(out), "--prune"]), out)
 
     check("落ちた回は 0 を返さない", code == 1, f"{code}")
@@ -679,8 +684,8 @@ def t_gen_py(tmp):
                 "No module named 'win32com.gen_py.0EA692EE-BB50-4E3C-AEF0-356D91732725x0x1x1'")
         done.append(1)
 
-    got = _connect_with(gen_path=str(no_dir), ensure_module=strict_ensure,
-                        dispatch=lambda *a: good)
+    got, _ = _connect_with(gen_path=str(no_dir), ensure_module=strict_ensure,
+                           dispatch=lambda *a: good)
     # **`got is good` だけでは足りない。** 一段目が転んでも三段目が同じものを
     # 返すので、梯子を落ちたことが見えない。makepy が通ったことまで見る。
     check("書く先と読む先を揃えて逃がす", got is good and done == [1], f"{done}")
@@ -688,14 +693,18 @@ def t_gen_py(tmp):
     # 書いた直後のものが見えないことがある ── 一度だけやり直す
     tries = []
 
-    def flaky(*a):
-        tries.append(1)
-        if len(tries) == 1:
+    def flaky(guid, lcid, major, minor):
+        tries.append((major, minor))
+        # 1.1 の**二度目**だけ通す。やり直さない版では、一度目で諦めて
+        # 次の段（1.0）へ落ちる ── 同じ `good` が返るので、
+        # **何が返ったかだけ見ていると見分けられない。**
+        if (major, minor) != (1, 1) or len(tries) == 1:
             raise ImportError("まだ見えない")
 
-    got = _connect_with(gen_path=str(ok_dir), ensure_module=flaky,
-                        dispatch=lambda *a: good)
-    check("見つからなければ一度やり直す", got is good and len(tries) == 2, f"{tries}")
+    got, _ = _connect_with(gen_path=str(ok_dir), ensure_module=flaky,
+                           dispatch=lambda *a: good)
+    check("見つからなければ一度やり直す",
+          got is good and tries == [(1, 1), (1, 1)], f"{tries}")
 
     no_dir.chmod(0o700)          # 片付けられるように戻す
 
@@ -762,9 +771,9 @@ def t_wrap(tmp):
     # **落ちたら NG。** 包めないと梯子を落ちきって SystemExit になる ──
     # そのまま抜けると走査ごと止まり、「検査が無い」のと同じ顔になる。
     try:
-        got = _connect_with(gen_path=str(tmp / "wrap-gen"),
-                            ensure_module=lambda *a: mod,
-                            dispatch=lambda *a: blind)
+        got, _ = _connect_with(gen_path=str(tmp / "wrap-gen"),
+                               ensure_module=lambda *a: mod,
+                               dispatch=lambda *a: blind)
         ok = hasattr(got, "GetHierarchy") and got is not blind
         why = type(got).__name__
     except BaseException as e:  # noqa
@@ -805,8 +814,66 @@ def t_probe(tmp):
         check(f"{head} が出る", head in got)
     # **壊れた端末で使う道具なので、途中が転んでも最後まで出ること。**
     # mac には win32com が無いので、ここは全行が転ぶ ── それでも最後まで並ぶ。
-    check("一つ転んでも最後まで出る", "皮をかぶせた結果" in got, got[-120:])
+    check("一つ転んでも最後まで出る", "1.0 で包んで、呼んでみる" in got, got[-120:])
     check("転んだ行は印が付く", "✗" in got, got[:200])
+
+
+def t_verify(tmp):
+    print("呼べるまで信じない ──")
+    good = FakeOneNote(hierarchy(), pages_for())
+
+    class Registered:
+        """`GetHierarchy` は見えるが、呼ぶと COM が断る。
+
+        会社の Windows で出たのがこれ ── 皮はかぶさっているのに
+        `ライブラリは登録されていません` になる。**見えることは、使えることでは
+        ない。**
+        """
+
+        def GetHierarchy(self, *a):
+            raise RuntimeError("(-2147319779, 'ライブラリは登録されていません。')")
+
+    broken = Registered()
+    seen = []
+
+    def ensure(guid, lcid, major, minor):
+        seen.append((major, minor))
+
+    def dispatch(*a):
+        return broken if seen and seen[-1] == (1, 1) else good
+
+    try:
+        got, xml = _connect_with(ensure_module=ensure, dispatch=dispatch)
+    except BaseException as e:  # noqa
+        got, xml = None, f"落ちた: {type(e).__name__}"
+    check("呼んで落ちる相手は採らない", got is good, f"{type(got).__name__}")
+    check("版が二つあるなら、もう一方を試す", seen == [(1, 1), (1, 0)], f"{seen}")
+    check("繋ぐときの答えをそのまま返す",
+          isinstance(xml, str) and xml.lstrip().startswith("<"), f"{str(xml)[:40]}")
+
+    # 全部が「見えるのに呼べない」なら、黙って進まず止まる
+    try:
+        _connect_with(ensure_module=lambda *a: None, dispatch=lambda *a: Registered(),
+                      ensure_dispatch=lambda *a: Registered())
+        check("全部呼べないなら止まる", False, "通ってしまった")
+    except SystemExit as e:
+        check("全部呼べないなら止まる", "呼ぶと落ちる" in str(e), str(e)[:80])
+
+    # **「見えない」と「呼べない」は別の話。** 両方を見分けて言う ── この二つを
+    # 混ぜた報せでは、現場で何が起きているか読めない（実際、この session では
+    # その区別だけを頼りに三度進んだ）。
+    try:
+        _connect_with(ensure_module=lambda *a: None, dispatch=lambda *a: NoTypeInfo(),
+                      ensure_dispatch=lambda *a: NoTypeInfo())
+        check("「見えない」と「呼べない」を言い分ける", False, "通ってしまった")
+    except SystemExit as e:
+        check("「見えない」と「呼べない」を言い分ける",
+              "GetHierarchy が見えない" in str(e) and "呼ぶと落ちる" not in str(e), str(e)[:90])
+
+    # 繋ぐときに訊いた答えを捨てない（ページ数の多い棚で二度歩かない）
+    counted = FakeOneNote(hierarchy(), pages_for())
+    run(counted, tmp / "twice")
+    check("階層を二度は取りに行かない", counted.hier_calls == 1, f"{counted.hier_calls}")
 
 
 def t_connect(tmp):
@@ -814,7 +881,7 @@ def t_connect(tmp):
     good = FakeOneNote(hierarchy(), pages_for())
 
     named = []
-    got = _connect_with(ensure_module=lambda *a: named.append(a), dispatch=lambda *a: good)
+    got, _ = _connect_with(ensure_module=lambda *a: named.append(a), dispatch=lambda *a: good)
     check("版を名指しできれば、それで繋ぐ", got is good)
     # **ここが今回の肝。** OneNote の型ライブラリの登録には中身のない `1.0` の
     # 枝が混ざっていて、任せると pywin32 がそれを掴んで名前を引けなくなる。
@@ -822,10 +889,10 @@ def t_connect(tmp):
     check("型ライブラリを GUID と版で名指しする",
           named and named[0] == (o2m.ONENOTE_TYPELIB, 0, 1, 1), f"{named}")
 
-    got = _connect_with(ensure_dispatch=lambda *a: good)
+    got, _ = _connect_with(ensure_dispatch=lambda *a: good)
     check("駄目なら gencache に任せる", got is good)
 
-    got = _connect_with(dispatch=lambda *a: good)
+    got, _ = _connect_with(dispatch=lambda *a: good)
     check("それも駄目なら素の Dispatch", got is good)
 
     # **繋がったことと、話が通じることは別。** 一度目は名前の引けない相手を
@@ -837,7 +904,7 @@ def t_connect(tmp):
         seen.append(1)
         return blind if len(seen) == 1 else good
 
-    got = _connect_with(ensure_module=lambda *a: None, dispatch=dispatch)
+    got, _ = _connect_with(ensure_module=lambda *a: None, dispatch=dispatch)
     check("GetHierarchy が見えない相手は採らない", got is good, f"{type(got).__name__}")
 
     try:
@@ -856,7 +923,7 @@ def main():
     try:
         for fn in (t_names, t_structure, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
-                   t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_connect):
+                   t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_connect):
             fn(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

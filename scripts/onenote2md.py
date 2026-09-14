@@ -206,23 +206,51 @@ def probe():
     say("そこに書けるか", lambda: _can_write(w32().__gen_path__))
     say("作り置き先（読む）",
         lambda: getattr(sys.modules.get("win32com.gen_py"), "__path__", "（無い）"))
+    # **これは「逃がす前」の姿。** 実際に走るときはここから動く ── 動いた先も出す。
+    say("逃がすとどこへ", lambda: _gen_py_somewhere_writable())
 
     print("== 型ライブラリの登録 ==")
 
-    def versions():
-        import winreg
-        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "TypeLib" + chr(92) + ONENOTE_TYPELIB)
-        out = []
-        i = 0
+    def _subkeys(key):
+        out, i = [], 0
         while True:
             try:
+                import winreg
                 out.append(winreg.EnumKey(key, i))
             except OSError:
-                break
+                return out
             i += 1
-        return out or "（版が一つも無い）"
 
-    say("TypeLib" + chr(92) + ONENOTE_TYPELIB + " の版", versions)
+    def versions():
+        """**版ごとに、実体の道とその有無まで見る。**
+
+        会社の端末には `1.0` と `1.1` の両方が登録されていた。版が並んで
+        いるだけでは、どちらが使えるか分からない ── 片方は実体を指して
+        いないことがある（それが `ライブラリは登録されていません` の正体）。
+        だから道を引いて、**ファイルがあるかまで見る。**
+        """
+        import winreg
+        root = "TypeLib" + chr(92) + ONENOTE_TYPELIB
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, root)
+        lines = []
+        for ver in _subkeys(key) or ["（版が一つも無い）"]:
+            vkey = winreg.OpenKey(key, ver)
+            found = False
+            for lcid in _subkeys(vkey):
+                lkey = winreg.OpenKey(vkey, lcid)
+                for arch in _subkeys(lkey):
+                    try:
+                        path = winreg.QueryValue(lkey, arch)
+                    except OSError:
+                        path = "（値が無い）"
+                    here = "ある" if path and os.path.exists(path) else "**無い**"
+                    lines.append(f"{ver} / lcid {lcid} / {arch} = {path}  → {here}")
+                    found = True
+            if not found:
+                lines.append(f"{ver}: 中に lcid が無い ── **空の枝**")
+        return "\n      " + "\n      ".join(lines)
+
+    say("TypeLib" + chr(92) + ONENOTE_TYPELIB, versions)
 
     print("== OneNote ==")
     say("ProgID → CLSID", lambda: str(pyc().CLSIDFromProgID("OneNote.Application")))
@@ -233,14 +261,17 @@ def probe():
 
     say("gencache が知っている型", known)
 
-    def generated():
-        mod = gc().EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
-        names = [n for n in dir(mod)
-                 if isinstance(getattr(mod, n, None), type)
-                 and hasattr(getattr(mod, n), "GetHierarchy")]
-        return f"{getattr(mod, '__name__', '?')} / GetHierarchy を持つ型: {names or '（無い）'}"
+    def generated(major, minor):
+        def f():
+            mod = gc().EnsureModule(ONENOTE_TYPELIB, 0, major, minor)
+            names = [n for n in dir(mod)
+                     if isinstance(getattr(mod, n, None), type)
+                     and hasattr(getattr(mod, n), "GetHierarchy")]
+            return f"{getattr(mod, '__name__', '?')} / GetHierarchy を持つ型: {names or '（無い）'}"
+        return f
 
-    say("EnsureModule(1.1)", generated)
+    say("EnsureModule(1.1)", generated(1, 1))
+    say("EnsureModule(1.0)", generated(1, 0))
 
     def dispatched():
         raw = cli().Dispatch("OneNote.Application")
@@ -248,13 +279,20 @@ def probe():
 
     say("Dispatch が返すもの", dispatched)
 
-    def wrapped():
-        mod = gc().EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
-        raw = cli().Dispatch("OneNote.Application")
-        w = _wrap_with_generated(mod, raw)
-        return f"{type(w).__name__} / GetHierarchy: {hasattr(w, 'GetHierarchy')}" if w else "（包めなかった）"
+    def wrapped(major, minor):
+        def f():
+            mod = gc().EnsureModule(ONENOTE_TYPELIB, 0, major, minor)
+            raw = cli().Dispatch("OneNote.Application")
+            w = _wrap_with_generated(mod, raw) or raw
+            if not hasattr(w, "GetHierarchy"):
+                return f"{type(w).__name__} / GetHierarchy が見えない"
+            # **見えるだけでは足りない ── 呼ぶ。**
+            xml = get_hierarchy(w)
+            return f"{type(w).__name__} / 呼べた（{len(xml)} 字）"
+        return f
 
-    say("皮をかぶせた結果", wrapped)
+    say("1.1 で包んで、呼んでみる", wrapped(1, 1))
+    say("1.0 で包んで、呼んでみる", wrapped(1, 0))
     return 0
 
 
@@ -324,19 +362,19 @@ def connect_onenote():
     except Exception as e:  # noqa
         log.debug("gencache の言い直しに失敗（続ける）: %s", e)
 
-    def by_version():
-        try:
-            mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
-        except ImportError:
-            # 書いた直後のものが見つからないことがある（作り置きが古い）。
-            # 一度だけ、目を覚まさせてやり直す。
-            importlib.invalidate_caches()
-            mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
-        raw = win32com.client.Dispatch("OneNote.Application")
-        if hasattr(raw, "GetHierarchy"):
-            return raw
-        # 遅い束ねのまま返ってきた ── 生成された型のほうから包みにいく。
-        return _wrap_with_generated(mod, raw) or raw
+    def by_typelib(major, minor):
+        def make():
+            try:
+                mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, major, minor)
+            except ImportError:
+                # 書いた直後のものが見つからないことがある（作り置きが古い）。
+                importlib.invalidate_caches()
+                mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, major, minor)
+            raw = win32com.client.Dispatch("OneNote.Application")
+            if hasattr(raw, "GetHierarchy"):
+                return raw
+            return _wrap_with_generated(mod, raw) or raw
+        return make
 
     def by_gencache():
         return gencache.EnsureDispatch("OneNote.Application")
@@ -345,7 +383,11 @@ def connect_onenote():
         return win32com.client.Dispatch("OneNote.Application")
 
     troubles = []
-    for how, make in (("型ライブラリを版で名指し（1.1）", by_version),
+    # **版は一つとは限らない。** 会社の端末には `1.0` と `1.1` の両方が登録されて
+    # いた。どちらが本物かはレジストリの見た目では決まらない（片方は実体を
+    # 指していない）ので、**両方試して、実際に答えが返ったほうを採る。**
+    for how, make in (("型ライブラリ 1.1 を名指し", by_typelib(1, 1)),
+                      ("型ライブラリ 1.0 を名指し", by_typelib(1, 0)),
                       ("gencache に任せる", by_gencache),
                       ("素の Dispatch（遅い束ね）", by_dispatch)):
         try:
@@ -356,8 +398,17 @@ def connect_onenote():
         if not hasattr(app, "GetHierarchy"):
             troubles.append(f"  {how}: 繋がったが GetHierarchy が見えない")
             continue
+        # **見えるだけでは足りない ── 実際に訊いてみる。**
+        # ここを `hasattr` で済ませていた版は、皮はかぶさっているのに呼ぶと
+        # `ライブラリは登録されていません` になる組み合わせを掴んで、
+        # そのまま先へ進んでいた。**合格の合図を、答えそのものにする。**
+        try:
+            first = get_hierarchy(app)
+        except Exception as e:  # noqa
+            troubles.append(f"  {how}: 呼ぶと落ちる ── {e}")
+            continue
         log.debug("OneNote に繋がった（%s）", how)
-        return app
+        return app, first
 
     sys.exit("OneNote (デスクトップ版) に接続できません:\n" + "\n".join(troubles) + """
 
@@ -365,7 +416,10 @@ def connect_onenote():
   1. 管理者の窓で走らせている ── OneNote と権限を揃える（普通の窓で叩く）
   2. OneNote を先に起動していない ── 手で開き、写すノートブックを開いておく
   3. gen_py の作り置きが壊れている ── %LOCALAPPDATA%\\Temp\\gen_py を消す
-  4. ストア版の OneNote ── COM を持たないので、こちらでは手が出ない""")
+  4. ストア版の OneNote ── COM を持たないので、こちらでは手が出ない
+
+`--probe` を付けると、この端末で何が起きているかを並べます。
+そのまま貼ってもらえれば、推し量らずに直せます。""")
 
 
 def _xml_call(func, *variants):
@@ -1075,8 +1129,10 @@ def main():
 def run(args, out_root: Path):
     if args.probe:
         return probe()
-    app = connect_onenote()
-    root = ET.fromstring(get_hierarchy(app))
+    # 繋ぐときに一度は訊いている（そうでないと「繋がった」と言えない）ので、
+    # その答えをそのまま使う ── ページ数の多いノートブックで二度歩かない。
+    app, first = connect_onenote()
+    root = ET.fromstring(first)
     if args.sync and not args.dry_run and not args.list:
         if sync_notebooks(app, root, args.notebook, args.sync_wait):
             root = ET.fromstring(get_hierarchy(app))   # 同期後の姿で読み直す
