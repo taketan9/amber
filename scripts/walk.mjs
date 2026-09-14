@@ -1248,7 +1248,7 @@ if (process.env.TEAMCSV) {
         calGroup = true; calView = 'week';
         const 段 = crowdLanes(weekOf(calDay), true).filter((l) => l.kind === 'team').length;
         calMe = 元; calView = 見方; calGroup = 並; await drawCal();
-        // **既定は「一件も出さない」**（依頼 572 で変えた）ので、増えたことを見る。
+        // **既定は「一件も出さない」**（依頼 574 で変えた）ので、増えたことを見る。
         if (!自分.length) return '決めたのに一件も出ません';
         if (よそ) return 'ほかの人の予定が ' + よそ + ' 件残っています';
         if (段 < 2) return '並べて表示まで絞り込まれました（段 ' + 段 + ' 本）';
@@ -1282,7 +1282,7 @@ if (process.env.TEAMCSV) {
         return true;
     `, true);
 
-    // **上へ・下へ は、見えている段で数える**（依頼 572・本人「非表示の
+    // **上へ・下へ は、見えている段で数える**（依頼 574・本人「非表示の
     // メンバー分なんども上、下としないといけないのが手間だった」）。
     await step('カレンダー：引っ込めた段を跨いで、一回で上へ', `
         const 元 = { order: calOrder.slice(), hide: calHide.slice() };
@@ -1301,7 +1301,7 @@ if (process.env.TEAMCSV) {
         return now[0] === seen[1] ? true : '一回で上へ行きません: ' + JSON.stringify(now.slice(0, 2));
     `, true);
 
-    // **自分を決めていないなら、日・週・月にチームの予定を混ぜない**（依頼 572・
+    // **自分を決めていないなら、日・週・月にチームの予定を混ぜない**（依頼 574・
     // 本人「僕じゃない誰かの予定が表示されている。これはダメだな」）。
     await step('カレンダー：自分を決めるまで、週に人の予定を出さない', `
         const 元 = { me: calMe, view: calView, group: calGroup };
@@ -1315,7 +1315,7 @@ if (process.env.TEAMCSV) {
         return 段 >= 1 ? true : '並べて表示からも消えました';
     `, true);
 
-    // **重なる予定が、重ならずに出る**（依頼 572・本人「2行、3行あるものは
+    // **重なる予定が、重ならずに出る**（依頼 574・本人「2行、3行あるものは
     // 字が重なって見えない」）。
     await step('カレンダー：週で重なる予定は、横に分かれる', `
         const 元 = { me: calMe, view: calView, group: calGroup, day: calDay };
@@ -1337,7 +1337,7 @@ if (process.env.TEAMCSV) {
         return true;
     `, true);
 
-    // **押したら、中身が全部読める**（依頼 572・本人）。
+    // **押したら、中身が全部読める**（依頼 574・本人）。
     await step('カレンダー：読むだけの予定も、押せば中身が出る', `
         calGroup = true; calView = 'day';
         const one = calSlots.find((s) => s.kind === 'team' && s.at);
