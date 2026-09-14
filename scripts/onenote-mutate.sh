@@ -127,9 +127,9 @@ mutate "どの形でも駄目なときに黙る" "どの形でも駄目なら黙
 mutate "話が通じるかを確かめない" "GetHierarchy が見えない相手は採らない" \
     'if not hasattr(app, "GetHierarchy"):' 'if False:'
 mutate "版を名指しせず gencache だけに頼る" "型ライブラリを GUID と版で名指しする" \
-    'gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'pass'
+    'mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'mod = None'
 mutate "版を取り違える（偽の 1.0 を掴む）" "型ライブラリを GUID と版で名指しする" \
-    'gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 0)'
+    'EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'EnsureModule(ONENOTE_TYPELIB, 0, 1, 0)'
 mutate "繋げないとき黙って返る" "全部駄目なら、わけを並べて止まる" \
     'sys.exit("OneNote (デスクトップ版) に接続できません:' 'return ("OneNote (デスクトップ版) に接続できません:'
 mutate "作り置き先を逃がさない" "書けないなら逃がす" \
@@ -155,12 +155,26 @@ mutate "書く先だけ動かす（読む先は古いまま）" "書く先と読
     if gen_py is not None:
         gen_py.__path__ = [at]' 'pass'
 mutate "見つからなくてもやり直さない" "見つからなければ一度やり直す" \
-    'except ImportError:
-            # 書いた直後のものが見つからないことがある（作り置きが古い）。
-            # 一度だけ、目を覚まさせてやり直す。
-            importlib.invalidate_caches()
-            gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'except ImportError:
-            raise'
+    'importlib.invalidate_caches()
+            mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'raise'
+mutate "皮をかぶせない" "一段目が遅い束ねを掴んでも、包んで返す" \
+    'return _wrap_with_generated(mod, raw) or raw' 'return raw'
+mutate "名前で型を選ぶ" "選ぶのは名前ではなく「GetHierarchy を持つこと」" \
+    'if not isinstance(cls, type) or not hasattr(cls, "GetHierarchy"):' \
+    'if not isinstance(cls, type) or not name.startswith("I"):'
+mutate "かぶせられないのに、かぶせたと言う" "かぶせた皮が実物として使えるところまで見る" \
+    'if hasattr(wrapped, "GetHierarchy"):
+                log.debug("makepy の皮をかぶせた: %s", name)
+                return wrapped' 'return wrapped'
+mutate "probe が途中で止まる" "一つ転んでも最後まで出る" \
+    'try:
+            print(f"  {label}: {fn()}")
+        except Exception as e:  # noqa
+            print(f"  {label}: ✗ {type(e).__name__}: {e}")' 'print(f"  {label}: {fn()}")'
+mutate "probe が書き出しに進む" "何も書かない" \
+    'if args.probe:
+        return probe()' 'if False:
+        return 0'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

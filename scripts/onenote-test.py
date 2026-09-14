@@ -700,6 +700,115 @@ def t_gen_py(tmp):
     no_dir.chmod(0o700)          # 片付けられるように戻す
 
 
+def _gen_module(with_decoy=True):
+    """makepy が作る形の偽モジュール ── `GetHierarchy` を持つ型が一つ入っている。"""
+    mod = types.ModuleType("win32com.gen_py.fake")
+
+    class CApplication2:                       # 本命（名前はあてにならない）
+        def __init__(self, ole):
+            self.ole = ole
+
+        def GetHierarchy(self, *a):
+            return "<xml/>"
+
+    mod.CApplication2 = CApplication2
+
+    class AFussy:
+        """型の上には `GetHierarchy` が居るのに、実物には居ない皮。
+
+        `dir()` は名前順なので、**本命より先に当たる。** かぶせたあとに
+        実物を見ないと、こちらを掴んで「かぶせた」と言ってしまう。
+        """
+
+        def __init__(self, ole):
+            self.ole = ole
+
+        @property
+        def GetHierarchy(self):
+            raise AttributeError("この皮は合わない")
+
+    mod.AFussy = AFussy
+    if with_decoy:
+        class IApplication:                    # それらしい名前だが、何も持たない
+            def __init__(self, ole):
+                self.ole = ole
+
+        mod.IApplication = IApplication
+        mod.CLSIDToClassMap = {}               # 型ではないものも混ざっている
+    return mod
+
+
+def t_wrap(tmp):
+    print("makepy の皮をかぶせる ──")
+    blind = NoTypeInfo()
+    mod = _gen_module()
+
+    w = o2m._wrap_with_generated(mod, blind)
+    check("遅い束ねに皮をかぶせられる", w is not None and hasattr(w, "GetHierarchy"),
+          f"{type(w).__name__ if w else None}")
+    # **名前で選ばない。** `IApplication` という名前は、それらしいだけで中身が無い。
+    check("選ぶのは名前ではなく「GetHierarchy を持つこと」",
+          w is not None and type(w).__name__ == "CApplication2", f"{type(w).__name__ if w else None}")
+
+    # **かぶせた皮が実際に使えることまで見る。** 型の上に名前があるだけでは足りない。
+    check("かぶせた皮が実物として使えるところまで見る",
+          w is not None and type(w).__name__ != "AFussy", f"{type(w).__name__ if w else None}")
+
+    check("かぶせる型が無ければ、素直に諦める",
+          o2m._wrap_with_generated(_gen_module_empty(), blind) is None)
+    check("モジュールが無ければ諦める", o2m._wrap_with_generated(None, blind) is None)
+
+    # 梯子の一段目が、遅い束ねを返されても最後まで面倒を見ること
+    # **落ちたら NG。** 包めないと梯子を落ちきって SystemExit になる ──
+    # そのまま抜けると走査ごと止まり、「検査が無い」のと同じ顔になる。
+    try:
+        got = _connect_with(gen_path=str(tmp / "wrap-gen"),
+                            ensure_module=lambda *a: mod,
+                            dispatch=lambda *a: blind)
+        ok = hasattr(got, "GetHierarchy") and got is not blind
+        why = type(got).__name__
+    except BaseException as e:  # noqa
+        ok, why = False, f"落ちた: {type(e).__name__}"
+    check("一段目が遅い束ねを掴んでも、包んで返す", ok, why)
+
+
+def _gen_module_empty():
+    mod = types.ModuleType("win32com.gen_py.empty")
+
+    class Nothing:
+        pass
+
+    mod.Nothing = Nothing
+    return mod
+
+
+def t_probe(tmp):
+    print("--probe ──")
+    import io
+    import contextlib as _c
+
+    out = tmp / "probe-out"
+    buf = io.StringIO()
+    code = None
+    try:
+        with _c.redirect_stdout(buf):
+            code = o2m.run(_parse(["--out", str(out), "--probe"]), out)
+    except BaseException as e:  # noqa
+        # **壊れた端末で使う道具が落ちては意味がない。** 落ちたことを
+        # 検査の答えにする ── 例外のまま抜けると走査ごと止まる。
+        buf.write(f"\n（落ちた: {type(e).__name__}: {e}）")
+    got = buf.getvalue()
+
+    check("0 を返す", code == 0, f"{code}")
+    check("何も書かない", not out.exists())
+    for head in ("== python ==", "== pywin32 ==", "== 型ライブラリの登録 ==", "== OneNote =="):
+        check(f"{head} が出る", head in got)
+    # **壊れた端末で使う道具なので、途中が転んでも最後まで出ること。**
+    # mac には win32com が無いので、ここは全行が転ぶ ── それでも最後まで並ぶ。
+    check("一つ転んでも最後まで出る", "皮をかぶせた結果" in got, got[-120:])
+    check("転んだ行は印が付く", "✗" in got, got[:200])
+
+
 def t_connect(tmp):
     print("OneNote への繋ぎ方 ──")
     good = FakeOneNote(hierarchy(), pages_for())
@@ -747,7 +856,7 @@ def main():
     try:
         for fn in (t_names, t_structure, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
-                   t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_connect):
+                   t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_connect):
             fn(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
