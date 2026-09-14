@@ -1567,15 +1567,15 @@ body.dropping::after {
 /* **人ごとに色を変える**（依頼 498・本人「花木は青、山田はピンク、佐藤は黄」）。
    段（`.ln`）が `--lane` を持ち、その段の帯・札・名前の印はぜんぶその色。
    種類の色（この Mac・よそ・チーム）より、人の色が勝つ。 */
+/* **地の色は `background-color` で置く。`background` の一括指定を使わない**
+   （依頼 561）── あれは `background-image` も道連れに `none` へ戻す。ここは
+   段の色を塗るだけのつもりだったのに、**縞（中身の見えない予定）を消して
+   いた**。しかもこちらのほうが強い（`[style*=…]` のぶん）ので、縞を後ろに
+   動かしても直らない ── 付いている札を DOM で見て、やっと分かった。 */
 #calbox .crowd .ln[style*="--lane"] .bar, #calbox .crowd .ln[style*="--lane"] .chip {
-  border-left-color: var(--lane); background: color-mix(in srgb, var(--lane) 30%, var(--paper)); }
-#calbox .crowd .ln[style*="--lane"] .who::before { background: var(--lane) }
-#calbox .crowd .ln[style*="--lane"] .span { background: color-mix(in srgb, var(--lane) 22%, var(--paper)) }
-/* 中身の見えない予定は、**縞にする** ── 「取れなかった」ではなく
-   「見せてもらえていない」ことが、一目で分かるように。 */
-#calbox .crowd .bar.shut, #calbox .crowd .chip.shut { color: var(--ink-2);
-  background-image: repeating-linear-gradient(135deg, transparent 0 5px,
-    color-mix(in srgb, var(--ink-3) 22%, transparent) 5px 10px); }
+  border-left-color: var(--lane); background-color: color-mix(in srgb, var(--lane) 30%, var(--paper)); }
+#calbox .crowd .ln[style*="--lane"] .who::before { background-color: var(--lane) }
+#calbox .crowd .ln[style*="--lane"] .span { background-color: color-mix(in srgb, var(--lane) 22%, var(--paper)) }
 /* 終日は、一日ぶんの帯。**「終日」と書く** ── 00:00 と書くと、
    その時刻に何かがあるように読める。 */
 #calbox .crowd .span { position: absolute; left: 0; right: 0; top: 3px; bottom: 3px;
@@ -1605,21 +1605,45 @@ body.dropping::after {
 #calbox .crowd .chip i { font-style: normal; color: var(--ink-3);
   font-variant-numeric: tabular-nums }
 #calbox .crowd .chip.away { border-left-color: #6f9fd8;
-  background: color-mix(in srgb, #6f9fd8 16%, transparent) }
+  background-color: color-mix(in srgb, #6f9fd8 16%, transparent) }
 #calbox .crowd .chip.here { border-left-color: #5fa87a;
-  background: color-mix(in srgb, #5fa87a 16%, transparent) }
+  background-color: color-mix(in srgb, #5fa87a 16%, transparent) }
 #calbox .crowd .chip.team { border-left-color: #b98ad0;
-  background: color-mix(in srgb, #b98ad0 16%, transparent) }
+  background-color: color-mix(in srgb, #b98ad0 16%, transparent) }
 #calbox .crowd .more { font-size: .8em; color: var(--ink-2); padding-left: 5px }
 #calbox .allday .ad { font-size: .9em; padding: 2px 7px; border-radius: 4px; color: var(--ink);
   border-left: 3px solid var(--amber-deep); background: color-mix(in srgb, var(--amber) 30%, var(--paper)); cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #calbox .allday .ad.away { border-left-color: #3b78c9;
-  background: color-mix(in srgb, #6f9fd8 16%, transparent) }
+  background-color: color-mix(in srgb, #6f9fd8 16%, transparent) }
 #calbox .allday .ad.team { border-left-color: #8e5cb3;
-  background: color-mix(in srgb, #b98ad0 16%, transparent) }
+  background-color: color-mix(in srgb, #b98ad0 16%, transparent) }
 #calbox .allday .ad.here { border-left-color: var(--cal-here, #2f8a52);
-  background: color-mix(in srgb, #5fa87a 16%, transparent) }
+  background-color: color-mix(in srgb, #5fa87a 16%, transparent) }
+
+/* ── **予定の「確かさ」は、出どころの色より後ろに書く**（依頼 561）──────
+   ここより上の `.chip.team` などは `background:` の一括指定なので、
+   **同じ強さなら後ろが勝つ** ── 前に置いた縞は `background-image: none` に
+   戻されていて、画面では一度も出ていなかった（付いている札を DOM で見て
+   気づいた）。`.ev.lo` で踏んだのと同じ罠（依頼 478）。 */
+
+/* 中身の見えない予定は、**縞にする** ── 「取れなかった」ではなく
+   「見せてもらえていない」ことが、一目で分かるように。 */
+#calbox .crowd .bar.shut, #calbox .crowd .chip.shut { color: var(--ink-2);
+  background-image: repeating-linear-gradient(135deg, transparent 0 4px,
+    color-mix(in srgb, var(--ink-3) 42%, transparent) 4px 8px); }
+
+/* **仮の予定は、点線の枠**（取り決めの `show_as: tentative`）。チームの紙は
+   「いつなら空いているか」を読む紙なので、まだ決まっていないものが確定と
+   同じ顔で並ぶと読めない。**地は塗らない** ── 塗ると、隣の確定した予定と
+   同じ重さに見える。縞とは別の話で、あちらは「見せてもらえていない」、
+   こちらは「まだ決まっていない」。 */
+#calbox .crowd .bar.soft, #calbox .crowd .chip.soft, #calbox .crowd .span.soft,
+#calbox .blk.soft, #calbox .allday .ad.soft, #calbox .d .ev.soft {
+  background-color: transparent;
+  background-image: none;
+  border: 1px dashed color-mix(in srgb, var(--lane, var(--amber-deep)) 70%, transparent);
+  color: var(--ink-2); }
 </style>
 </head>
 <body>

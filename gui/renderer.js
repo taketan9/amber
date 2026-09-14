@@ -7710,6 +7710,19 @@ async function readCalTags(slots) {
     } catch { /* 読めなくても、予定そのものは出す */ }
 }
 
+/// **その予定の「確かさ」を、札にする**（依頼 561）。
+///
+/// チームの紙は「いつなら空いているか」を読むためのものなので、**仮の予定が
+/// 確定の予定と同じ顔で並ぶと、読めない**（取り決めの `show_as`）。
+/// 見た目を増やしすぎないよう、足すのは一つだけ ── **仮（`tentative`）は
+/// 点線の枠**。休み（`oof`）や在宅（`workingElsewhere`）は題がそう言って
+/// いるので、色や形は変えない。**空き（`free`）はそもそも出さない**
+/// （依頼 471・core が落とす）。
+///
+/// 中身の見えない予定（`shut`）は縞（依頼 471）── こちらは別の話で、
+/// 「見せてもらえていない」であって「決まっていない」ではない。
+const evMark = (s) => (s.shut ? ' shut' : '') + (s.show === 'tentative' ? ' soft' : '');
+
 /// そのタグの色（依頼 539）。
 ///
 /// **決めていなければ、十色を順に配る。** 設定を開かなくても色分けされた表が
@@ -7990,7 +8003,7 @@ async function drawCal() {
             // 色はタグ（誰の用事か）にだけ使うので、見えているかどうかは
             // 塗りで言う ── 10px の印は、月の表の一行では小さすぎる。
             '<span class="ev ' + s.kind + (inGroup(s) ? ' sh' : ' lo')
-            + (s.shut ? ' shut' : '') + '"' + tagPaint(s)
+            + evMark(s) + '"' + tagPaint(s)
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '') + '>'
             + (s.at ? escapeHtml(s.at) + ' ' : '') + escapeHtml(s.title) + '</span>').join('');
         const rest = sorted.length > 3 ? '<span class="more">ほか ' + (sorted.length - 3) + '</span>' : '';
@@ -8055,7 +8068,7 @@ function drawHours() {
         const whole = calSlotsShown.filter((s) => s.day === d && !s.at && s.kind !== 'note');
         return '<div><div class="hd' + mark + '">' + weekName(d) + ' '
             + Number(d.slice(8)) + '</div>'
-            + whole.map((s) => '<div class="ad ' + s.kind + '"'
+            + whole.map((s) => '<div class="ad ' + s.kind + evMark(s) + '"'
                 + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
                 + '>' + escapeHtml(s.title) + '</div>').join('') + '</div>';
     }).join('');
@@ -8075,7 +8088,7 @@ function drawHours() {
                 const till = mins(s.to);
                 const high = Math.max(18, ((till !== null && till > from ? till - from : 30)
                     / 60) * HOUR_PX);
-                return '<div class="blk ' + s.kind + '"'
+                return '<div class="blk ' + s.kind + evMark(s) + '"'
                     + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
                     + ' style="top:' + ((from / 60) * HOUR_PX) + 'px;height:' + high + 'px">'
                     + escapeHtml(s.at) + ' ' + escapeHtml(s.title) + '</div>';
@@ -8228,7 +8241,7 @@ function crowdDay(lane, day) {
     // 書く ── `00:00〜23:59` に読み替えると、時刻つきの予定に混ざって
     // 並び、画面に `00:00` という嘘の時刻が出る。
     const whole = mine.filter((s) => !s.at).map((s) =>
-        '<div class="span ' + s.kind + (s.shut ? ' shut' : '') + '"'
+        '<div class="span ' + s.kind + evMark(s) + '"'
         + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
         + ' title="' + escapeAttr('終日 ' + s.title) + '">'
         // **字は、見えているところに貼りつける。** 帯は一日ぶんの幅が
@@ -8240,7 +8253,7 @@ function crowdDay(lane, day) {
         if (from === null) return '';
         const till = mins(s.to);
         const wide = Math.max(24, ((till !== null && till > from ? till - from : 30) / 60) * CROWD_HOUR);
-        return '<div class="bar ' + s.kind + (s.shut ? ' shut' : '') + '"'
+        return '<div class="bar ' + s.kind + evMark(s) + '"'
             + ' style="left:' + ((from / 60) * CROWD_HOUR) + 'px;width:' + wide + 'px"'
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
             + ' title="' + escapeAttr(s.at + (s.to ? '〜' + s.to : '') + ' ' + s.title
@@ -8262,7 +8275,7 @@ function crowdWeek(lane, days) {
         const mine2 = mine.filter((s) => !s.at).concat(mine.filter((s) => s.at));
         const chips = mine2.slice(0, 4).map((s) =>
             '<div class="chip ' + s.kind + (s.at ? '' : ' all')
-            + (s.shut ? ' shut' : '') + '"'
+            + evMark(s) + '"'
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
             + ' title="' + escapeAttr((s.at ? s.at + ' ' : '終日 ') + s.title) + '">'
             + '<i>' + escapeHtml(s.at || '終日') + '</i> '

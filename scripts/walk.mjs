@@ -1185,6 +1185,27 @@ if (process.env.TEAMCSV) {
         return true;
     `, true);
 
+    // **約束した見た目が、本当に画面に出ているか**（依頼 561）。
+    //
+    // 縞（中身の見えない予定）は依頼 471 で決めたのに、**一度も出ていなかった**
+    // ── 段の色を塗る規則が `background:` の一括指定で、`background-image` を
+    // 道連れに消していた。札が付いているかだけ見ていると、こういう形は通る。
+    // **計算後の見た目を見る。**
+    await step('チームの予定表：中身の見えない予定は、本当に縞になっている', `
+        calView = 'week'; calGroup = true; calDay = '2026-09-09';
+        await drawCal();
+        await new Promise((g) => setTimeout(g, 300));
+        const chips = [...el('cal').querySelectorAll('.crowd .chip, .crowd .bar')];
+        const shut = chips.find((c) => /非公開/.test(c.textContent));
+        if (!shut) return '非公開の札が画面にありません';
+        const bg = getComputedStyle(shut).backgroundImage;
+        const plain = chips.find((c) => !/非公開/.test(c.textContent));
+        const ok = bg && bg !== 'none' && /gradient/.test(bg);
+        if (!ok) return '縞になっていません: ' + bg;
+        if (plain && getComputedStyle(plain).backgroundImage === bg) return 'ふつうの予定まで縞です';
+        return true;
+    `, true);
+
     await step('チームの予定表：いつ時点の紙かが、そのまま入口になる', `
         const at = el('cal').querySelector('.teamat');
         if (at.hidden) return 'いつ時点かが出ていません';

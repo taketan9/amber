@@ -611,6 +611,45 @@ mod tests {
             .with_timezone(&chrono::Local)
     }
 
+    /// **v0.3 の見本が、そのまま読めること**（2026-09-14）。
+    ///
+    /// `docs/team-csv.ja.md` の見本そのもの。v0.1 から三つ変わった:
+    /// **`cancelled` の列が消え**、`organizer` は表示名になり、開始と終了は
+    /// 最初からローカル時刻になった。列を落とされても落ちないことを、
+    /// 上の v0.1 の試験とは**別に**見る ── 片方だけ通る形があるので。
+    const DEAL3: &str = "\u{feff}fetched_at,owner,owner_mail,start,end,all_day,subject,location,show_as,sensitivity,organizer,uid\r\n2026-09-10T08:15:00+09:00,山田 武,yamada.takeshi@example.co.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,false,週次定例,会議室A,busy,normal,鈴木 一郎,040000008200E00074C5B7101A82E008\r\n2026-09-10T08:15:00+09:00,山田 武,yamada.takeshi@example.co.jp,2026-09-11T00:00:00+09:00,2026-09-12T00:00:00+09:00,true,終日出張,,oof,normal,,040000008200E00074C5B7101A82E009\r\n2026-09-10T08:15:00+09:00,鈴木 一郎,suzuki.ichiro@example.co.jp,2026-09-10T14:00:00+09:00,2026-09-10T15:00:00+09:00,false,,,busy,private,,040000008200E00074C5B7101A82E00A\r\n";
+
+    #[test]
+    fn the_v03_shape_reads_as_agreed() {
+        let got = of(DEAL3, 2026, 9);
+        assert_eq!(got.fetched, "2026-09-10T08:15:00+09:00", "いつ時点かを出す");
+        assert_eq!(got.people.len(), 2, "二人");
+        assert_eq!(got.plans.len(), 3, "取消の列が無くても、三件そのまま");
+        let 始 = 東京の(10, 0);
+        let one = got.plans.iter().find(|p| p.title == "週次定例").unwrap();
+        assert_eq!(one.at.as_deref(), Some(始.format("%H:%M").to_string().as_str()));
+        assert_eq!(one.mail, "yamada.takeshi@example.co.jp", "鍵はメール");
+        let hidden = got.plans.iter().find(|p| p.shut).unwrap();
+        assert_eq!(hidden.title, "非公開", "件名が見えなくても、予定はある");
+    }
+
+    /// **同じ会議は、出席者の人数ぶん残ること**（v0.3 の鍵・2026-09-14）。
+    ///
+    /// チームの会議は出席者全員の予定表に**同じ識別子・同じ開始**で入る
+    /// （実機で 2,218 件のうち 1,009 件がこれ）── `uid` と開始だけで重ねると、
+    /// **その会議が一人ぶんしか残らない**。人ごとの段に並べる紙なので、
+    /// 鍵には人が要る。
+    #[test]
+    fn the_same_meeting_stays_on_every_attendee() {
+        let csv = "owner,owner_mail,start,end,subject,uid\n                   山田 武,a@x.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,週次定例,U1\n                   鈴木 一郎,b@x.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,週次定例,U1\n                   佐藤 花子,c@x.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,週次定例,U1\n                   山田 武,a@x.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,週次定例,U1\n";
+        let got = of(csv, 2026, 9);
+        assert_eq!(got.people.len(), 3, "三人");
+        assert_eq!(got.plans.len(), 3, "同じ人の同じ行だけを重ねる（三人ぶんは残す）");
+        let mut who: Vec<&str> = got.plans.iter().map(|p| p.mail.as_str()).collect();
+        who.sort();
+        assert_eq!(who, vec!["a@x.jp", "b@x.jp", "c@x.jp"]);
+    }
+
     #[test]
     fn the_agreed_shape_reads_as_agreed() {
         let got = of(DEAL, 2026, 9);
