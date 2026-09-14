@@ -176,6 +176,40 @@ def _strip_resource_index(path: str) -> str:
     return re.sub(r"[\\/]\d+$", "", path or "")
 
 
+def _reg_subkeys(key):
+    out, i = [], 0
+    while True:
+        try:
+            import winreg
+            out.append(winreg.EnumKey(key, i))
+        except OSError:
+            return out
+        i += 1
+
+
+def _registered_arches():
+    """OneNote の型ライブラリが、**どの bit で登録されているか。**
+
+    読めなければ空を返す（Windows でない・枝が無い）── 空のときは
+    何も言わない。**分からないことを分かったように言わない。**
+    """
+    try:
+        import winreg
+    except ImportError:
+        return set()
+    out = set()
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "TypeLib" + chr(92) + ONENOTE_TYPELIB)
+        for ver in _reg_subkeys(key):
+            vkey = winreg.OpenKey(key, ver)
+            for lcid in _reg_subkeys(vkey):
+                lkey = winreg.OpenKey(vkey, lcid)
+                out.update(a.lower() for a in _reg_subkeys(lkey))
+    except OSError:
+        return out
+    return out
+
+
 def _arch_verdict(arches, bits=None):
     """登録されている bit と、いま走っている bit が噛み合っているか。
 
@@ -457,6 +491,16 @@ def connect_onenote():
     def by_dispatch():
         return win32com.client.Dispatch("OneNote.Application")
 
+    def arch_hint():
+        """**分かるなら、答えのほうを言う。**
+
+        レジストリを見れば「この bit では無理」と分かることがある ──
+        そのときに「繋がりません」で終わるのは、知っていることを黙っている
+        のと同じ。
+        """
+        v = _arch_verdict(_registered_arches())
+        return ("\n" + "\n".join(v)) if v else ""
+
     troubles = []
     # **版は一つとは限らない。** 会社の端末には `1.0` と `1.1` の両方が登録されて
     # いた。どちらが本物かはレジストリの見た目では決まらない（片方は実体を
@@ -494,7 +538,7 @@ def connect_onenote():
   4. ストア版の OneNote ── COM を持たないので、こちらでは手が出ない
 
 `--probe` を付けると、この端末で何が起きているかを並べます。
-そのまま貼ってもらえれば、推し量らずに直せます。""")
+そのまま貼ってもらえれば、推し量らずに直せます。""" + arch_hint())
 
 
 def _xml_call(func, *variants):

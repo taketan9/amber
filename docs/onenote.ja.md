@@ -226,6 +226,13 @@ py -3 scripts\onenote2md.py --out X --probe
 
 **これはコードでは直らない。** 直し方は二つ:
 
+> **`Win64` を足しても直らないことがある。** OneNote の型ライブラリが
+> **Win32 のものしか無い**場合、枝を足しても指す先が 64 bit から読めない
+> （`TYPE_E_CANTLOADLIBRARY` / `タイプ ライブラリ／DLL の読み込みエラー`）。
+> そのときは **32 bit の Python を使う**しかない。out-of-process の COM
+> サーバーなので、**32 bit の Python から 64 bit の OneNote は問題なく触れる。**
+> 入っている Python を見るには `py -0p`。
+
 1. **Python の bit を Office に合わせる。** Office が 32 bit なら 32 bit の Python を
    使う。どちらかは `--probe` の `Office の bit` に出る
    （`reg query "HKLM\SOFTWARE\Microsoft\Office\ClickToRun\Configuration" /v Platform`）。

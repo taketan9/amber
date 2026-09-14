@@ -902,6 +902,31 @@ def t_resource_index(tmp):
     check("空でも落ちない", f("") == "" and f(None) == "")
 
 
+def t_arch_hint(tmp):
+    print("繋げないとき、答えのほうを言う ──")
+    check("Windows でなければ黙る（分からないことは言わない）",
+          o2m._registered_arches() == set())
+
+    # 繋げない回の報せに、bit の見立てが載ること
+    saved = o2m._registered_arches
+    o2m._registered_arches = lambda: {"win32"}
+    try:
+        _connect_with()
+        check("繋げないとき bit の見立ても出す", False, "通ってしまった")
+    except SystemExit as e:
+        check("繋げないとき bit の見立ても出す", "win64 の登録が無い" in str(e), str(e)[-120:])
+
+    o2m._registered_arches = lambda: {"win64"}
+    try:
+        _connect_with()
+        check("噛み合っているときは、余計なことを言わない", False, "通ってしまった")
+    except SystemExit as e:
+        check("噛み合っているときは、余計なことを言わない",
+              "登録が無い" not in str(e), str(e)[-120:])
+    finally:
+        o2m._registered_arches = saved
+
+
 def t_connect(tmp):
     print("OneNote への繋ぎ方 ──")
     good = FakeOneNote(hierarchy(), pages_for())
@@ -949,7 +974,7 @@ def main():
     try:
         for fn in (t_names, t_structure, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
-                   t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_resource_index, t_connect):
+                   t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):
             fn(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

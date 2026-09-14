@@ -199,6 +199,12 @@ mutate "資源の番号を落とさない" "exe の中の番号を落とす" \
     'return re.sub(r"[\\/]\d+$", "", path or "")' 'return path or ""'
 mutate "途中の数字まで落とす" "途中の数字は落とさない" \
     'return re.sub(r"[\\/]\d+$", "", path or "")' 'return re.sub(r"\d+", "", path or "")'
+mutate "繋げないとき bit の見立てを黙る" "繋げないとき bit の見立ても出す" \
+    'そのまま貼ってもらえれば、推し量らずに直せます。""" + arch_hint())' \
+    'そのまま貼ってもらえれば、推し量らずに直せます。""")'
+mutate "噛み合っていても言い立てる" "噛み合っているときは、余計なことを言わない" \
+    'return ("\n" + "\n".join(v)) if v else ""' \
+    'return "\n" + "\n".join(v or ["→ **win64 の登録が無い**"])'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'
