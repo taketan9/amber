@@ -370,6 +370,34 @@ def probe():
 
     say("COM サーバーの実体", local_server)
 
+    def interface_typelib():
+        """**取り次ぎ側が見ている登録。**
+
+        別プロセスの COM を呼ぶと、呼び出しは取り次がれる（marshaling）。
+        取り次ぐ側は `HKCR\\Interface\\{IID}\\TypeLib` を見て「どの型ライブラリの
+        どの版か」を引く ── **ここが空の枝を指していれば、型ライブラリ本体が
+        読めていても `ライブラリは登録されていません` になる。**
+        繋がるのに呼べない、のいちばん奥の理由がここに出る。
+        """
+        import winreg
+        mod = gc().EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
+        names = [n for n in dir(mod)
+                 if isinstance(getattr(mod, n, None), type)
+                 and hasattr(getattr(mod, n), "GetHierarchy")]
+        if not names:
+            return "（GetHierarchy を持つ型が無い）"
+        iid = str(getattr(mod, names[0]).CLSID)
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
+                             "Interface" + chr(92) + iid + chr(92) + "TypeLib")
+        lib = winreg.QueryValue(key, None)
+        try:
+            ver = winreg.QueryValueEx(key, "Version")[0]
+        except OSError:
+            ver = "（Version が無い）"
+        return f"{names[0]} {iid} → 型ライブラリ {lib} の版 {ver}"
+
+    say("取り次ぎ側が見ている登録", interface_typelib)
+
     def generated(major, minor):
         def f():
             mod = gc().EnsureModule(ONENOTE_TYPELIB, 0, major, minor)
