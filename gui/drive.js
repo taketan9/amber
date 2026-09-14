@@ -386,14 +386,14 @@ function createDrive(opts) {
     }
 
     /// 一本上げる（`id` があれば上書き）。返すのは `{ id, tag }`。
-    /// 絵の種類（拡張子から）。知らなければ octet-stream。
+    /// 画像の種類（拡張子から）。知らなければ octet-stream。
     function mimeOf(name) {
         const e = (name.split('.').pop() || '').toLowerCase();
         return { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
                  heic: 'image/heic', bmp: 'image/bmp', svg: 'image/svg+xml' }[e] || 'application/octet-stream';
     }
 
-    /// 一本上げる（`id` があれば上書き）。字（`text`）か、絵（`bytes`・依頼 497）。返すのは `{ id, tag }`。
+    /// 一本上げる（`id` があれば上書き）。字（`text`）か、画像（`bytes`・依頼 497）。返すのは `{ id, tag }`。
     async function upload({ rel, text, bytes, print, id }) {
         const relDir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
         const parent = id ? null : await dir(relDir);
@@ -418,7 +418,7 @@ function createDrive(opts) {
         return api('/drive/v3/files/' + q(id) + '?alt=media', { raw: true });
     }
 
-    /// 一本下ろす（絵・そのままの bytes）。
+    /// 一本下ろす（画像・そのままの bytes）。
     async function downloadBytes(id) {
         return api('/drive/v3/files/' + q(id) + '?alt=media', { bytes: true });
     }

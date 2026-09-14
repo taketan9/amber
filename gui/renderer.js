@@ -38,18 +38,18 @@ const imeBusy = (e) => e.isComposing || (e.keyCode === 229 && composing);
 /// core が返す道は土台のもので、Windows では `C:\Users\…\ノート.md`。
 /// `split('/')` で切ると**道まるごと**が名前になる ── 書き出すと
 /// `C：Users…ノート.md` のような名前のファイルができ、ゴミ箱へ入れる
-/// 確認にも道が出る。絵の在りかを求めるほうは、切り落とせずに `''` に
-/// なって**絵が一枚も出なくなる**（Windows でだけ）。
+/// 確認にも道が出る。画像の在りかを求めるほうは、切り落とせずに `''` に
+/// なって**画像が一枚も出なくなる**（Windows でだけ）。
 const baseOf = (at) => String(at || '').split(/[/\\]/).pop();
 /// その一片を落とした残り（末尾の区切りは残す ── 後ろに名前を繋ぐため）。
 const dirOf = (at) => String(at || '').replace(/[^/\\]*$/, '');
 
-/// ファイルの道を、絵に渡せる `file:` の形にする。
+/// ファイルの道を、画像に渡せる `file:` の形にする。
 ///
 /// **Windows の道は、そのままでは URL にならない。**
 /// `'file://' + encodeURI('C:\\Users\\…\\画像.png')` は
 /// `file://C:%5CUsers%5C…` になる ── `C:` が**機械の名前**として読まれ、
-/// 円記号は `%5C` に化ける。会社の端末で「この絵は読めません」と出たのは
+/// 円記号は `%5C` に化ける。会社の端末で「この画像は読めません」と出たのは
 /// これ（mac の道は `/` で始まるので、たまたま斜線が三本になっていた）。
 ///
 /// 正しい形は `file:///C:/Users/…`。円記号を `/` に直し、頭に一本足す。
@@ -257,7 +257,7 @@ function bookChoices() {
     return out;
 }
 
-/// ノートを移す。**同じ保存ディレクトリの中なら `root` を渡す**（core が絵を
+/// ノートを移す。**同じ保存ディレクトリの中なら `root` を渡す**（core が画像を
 /// 連れて行き、同期に「名前が変わった」と憶えさせる）。別の保存ディレクトリへ
 /// 渡るときは渡さない ── 向こうの帳面に、外の道を書かせない（同期は
 /// 片方で消え・片方で新しく上がる、として運ぶ）。
@@ -287,7 +287,7 @@ async function rewatch() {
 /// 前はここに葉（案 S4）を SVG で写して描いていた。写しは `packaging/amber.svg`・
 /// `packaging/amber.py`・`ios/Cian/Writing.swift` にもあり、四か所が同じ形かを
 /// `agree()` が見張っていた ── それでも**アイコンを替えた日に、中の印だけが
-/// 前の絵のまま残った**。見張れるのは「四つの写しが揃っているか」であって、
+/// 前の画像のまま残った**。見張れるのは「四つの写しが揃っているか」であって、
 /// 「アイコンと同じか」ではなかった。同じ一枚を渡せば、ずれようがない。
 ///
 /// 128px の一枚で足りる ── いちばん大きい使い方（54）の2倍と、iPhone の
@@ -1882,14 +1882,14 @@ async function setVim(on) {
     }
 }
 
-/* ── 書く面の絵 ── */
+/* ── 書く面の画像 ── */
 
 /// `![](attachments/…)` の行の下に、実物を小さく出す。
 ///
 /// **字は消さない。** ファイルは Markdown のままで、行はそこにある ──
-/// 消して絵に置き換えると、消した字を直す方法が無くなる（パスを一文字
+/// 消して画像に置き換えると、消した字を直す方法が無くなる（パスを一文字
 /// 変えたいだけのときに困る）。Monaco の `view zone` は行と行のあいだに
-/// 空きを作る仕掛けで、そこへ絵を置く。
+/// 空きを作る仕掛けで、そこへ画像を置く。
 ///
 /// 貼った直後に「本当にこれが入ったのか」を確かめる手が、いまは無かった。
 let zones = [];
@@ -1903,7 +1903,7 @@ function drawZones() {
     const want = [];
     for (let n = 1; n <= model.getLineCount(); n++) {
         const t = model.getLineContent(n).trim();
-        // 行そのものが絵のときだけ。文の途中の絵は文の中に居る。
+        // 行そのものが画像のときだけ。文の途中の画像は文の中に居る。
         const m = /^!\[([^\]]*)\]\(([^)\s]+)\)$/.exec(t);
         if (!m) continue;
         const src = m[2];
@@ -1919,10 +1919,10 @@ function drawZones() {
             box.className = 'zoneimg';
             const img = document.createElement('img');
             img.alt = w.alt;
-            // **読めない絵は、黙って空けない。** 貼り間違いに気づけるように、
+            // **読めない画像は、黙って空けない。** 貼り間違いに気づけるように、
             // 何が読めなかったのかを出す ── ただし、**手を尽くしてから**。
             // 前はここだけ助け船（`fileBytes`）を持っておらず、読む面では
-            // 出る絵が、コードの面でだけ「読めません」と言っていた。
+            // 出る画像が、コードの面でだけ「読めません」と言っていた。
             if (/^file:/i.test(w.src)) img.src = w.src;
             else showPicture(img, absPath(w.src, dir), () => {
                 box.classList.add('bad');
@@ -1955,7 +1955,7 @@ function zonesSoon() {
 ///
 ///   * 面ぜんぶを `contenteditable` にする。打った跡は DOM に付く
 ///   * 落ち着いたら **DOM を Markdown に戻して**、いつもの保存を通す
-///   * **戻せないかたまりは、触らせない** ── 枠・表・図・注記・絵は
+///   * **戻せないかたまりは、触らせない** ── 枠・表・図・注記・画像は
 ///     `contenteditable="false"` にして、押したら書く面へ送る。
 ///     打てるのに保存されない、が**いちばん悪い**
 ///
@@ -1999,7 +1999,7 @@ el('read').addEventListener('blur', () => { clearTimeout(readTimer); syncRead(tr
 /// 選んでコピーした人が欲しかったのは、まさにそこ）。
 ///
 /// だから途中に一枚挟む: `webToMd` が均して、`blockToMd` が字にする。
-/// 絵の貼り付けは別に拾っている。
+/// 画像の貼り付けは別に拾っている。
 el('read').addEventListener('paste', (e) => {
     if (!e.clipboardData) return;
     if ([...e.clipboardData.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'))) return;
@@ -2083,7 +2083,7 @@ function richBlock(node) {
     if (!node || node.nodeType !== 1) return false;
     // **表と注記は触れる。** 字に戻せる形をしているので、触らせない理由が
     // 無い ── 触れないままだと「読む面だけで完結できる」が嘘になる。
-    // 枠（コード）と図と絵だけは、戻せないので書く面へ送る。
+    // 枠（コード）と図と画像だけは、戻せないので書く面へ送る。
     if (['PRE', 'FIGURE'].includes(node.tagName)) return true;
     if (node.classList.contains('mermaid')) return true;
     // **中に枠や図を抱えたかたまりも、触らせない。**
@@ -2102,7 +2102,7 @@ function richBlock(node) {
 
 /// 札を掛け替える。**元の行と元の字を、新しい節へ持たせる。**
 ///
-/// 掛け替えるのは二か所 ── 絵を `<figure>` で包むとき（`findPictures`）と、
+/// 掛け替えるのは二か所 ── 画像を `<figure>` で包むとき（`findPictures`）と、
 /// 行の記号を外して段落にするとき（`asPara`）。持たせないと、次の書き戻しで
 /// **その一行が元の字を失う**（触れないかたまりなら `null` になり、保存が
 /// 止まる）。
@@ -3408,28 +3408,28 @@ function landAt(node, after) {
     sel.addRange(r);
 }
 
-/// ノートの隣に置かれた絵の、ほんとうの在りか。
+/// ノートの隣に置かれた画像の、ほんとうの在りか。
 function absPath(src, dir) {
     return src.startsWith('/') || /^[a-z]:[/\\]/i.test(src) ? src : dir + src;
 }
 
-/// 絵を出す。**読めなかったら、開いているアプリに読んでもらう。**
+/// 画像を出す。**読めなかったら、開いているアプリに読んでもらう。**
 ///
 /// この画面は crmaine の `<webview>` の中でも動く。あちらでは `file://` の
-/// 絵が届かず、**見本のノートの絵だけが出ない**ことになっていた（amber 自身
+/// 画像が届かず、**見本のノートの画像だけが出ない**ことになっていた（amber 自身
 /// の窓では出るので、撮っても分からない ── 向こうで開くまで分からない）。
 ///
 /// `fileBytes` は同梱する側も持っている口で、読んだ中身をそのまま返す ──
 /// `data:` なら、どの入れ物でも出る。**先に `file:` を試すのは、そちらが
-/// 安いから**（大きな絵を毎回 base64 にして持ち歩く理由は、出るなら無い）。
+/// 安いから**（大きな画像を毎回 base64 にして持ち歩く理由は、出るなら無い）。
 ///
 /// **一本にしてある。** 前は読む面とコードの面で別々に書いていて、助け船が
-/// 片方にしか無かった ── 会社の Windows で「この絵は読めません」と出たのは
+/// 片方にしか無かった ── 会社の Windows で「この画像は読めません」と出たのは
 /// そこ（道の直し方も、片方だけ直せば済んでしまう形だった）。
 function showPicture(img, at, onFail) {
     img.src = fileURL(at);
     img.addEventListener('error', async () => {
-        // 助け船で入れ替えた絵も出なかったら、もう手が無い ── そのとき言う。
+        // 助け船で入れ替えた画像も出なかったら、もう手が無い ── そのとき言う。
         if (onFail) img.addEventListener('error', onFail, { once: true });
         try {
             const got = await window.amber.fileBytes(at);
@@ -3543,7 +3543,7 @@ function bestPart(html) {
 ///
 /// **字に直すのは `blockToMd` 一本**（依頼 421）── 面の書き戻しと同じ道を
 /// 通す。ここでやるのは「均す」ことだけ: 要らない札を落とし、入れ物を
-/// ほどき、絵とリンクの行き先を**絶対の道**にする。二本目の変換器を
+/// ほどき、画像とリンクの行き先を**絶対の道**にする。二本目の変換器を
 /// 書かないので、片方だけ直した日に貼り付けと書き戻しがずれない。
 ///
 /// `base` はコピー元のページの URL（分かるとき）── 相対の行き先は
@@ -3581,16 +3581,16 @@ function webClean(html, base) {
         try { return readableUrl(base ? new URL(t, base).href : t); } catch { return t; }
     };
 
-    // **絵は、字にしてから均す。** `inlineToMd` は `<img>` を捨てる
+    // **画像は、字にしてから均す。** `inlineToMd` は `<img>` を捨てる
     // （読む面では包み（`<figure>`）が元の字を持っているので、それでよい）
-    // ── よそから来た絵はその包みが無いので、ここで `![](…)` に直す。
+    // ── よそから来た画像はその包みが無いので、ここで `![](…)` に直す。
     //
     // **落としてくるのではなく、リンクのまま**（本人が決めた・2026-09-09）
     // ── `attachments/` へ落とすと、一本取り込むたびにフォルダが重くなり、
-    // 消す道も無い。要る絵だけ、あとで貼り直せる。
+    // 消す道も無い。要る画像だけ、あとで貼り直せる。
     for (const img of [...body.querySelectorAll('img')]) {
         const src = abs(img.getAttribute('src'));
-        // 一辺が 1px の絵は、たいてい数を数えるためのもの ── 読む字ではない。
+        // 一辺が 1px の画像は、たいてい数を数えるためのもの ── 読む字ではない。
         const tiny = Number(img.getAttribute('width')) === 1
             || Number(img.getAttribute('height')) === 1;
         const alt = (img.getAttribute('alt') || '').trim();
@@ -4602,10 +4602,10 @@ function put(text, caret) {
     editor.focus();
 }
 
-/// 絵をノートの隣に置いて、リンクを打つ。
+/// 画像をノートの隣に置いて、リンクを打つ。
 ///
 /// **ノートの隣に置く。** 同期しているフォルダを別の端末で開いたとき、
-/// 絵だけが来ないノートは「消えたのか、元から無いのか」が分からない。
+/// 画像だけが来ないノートは「消えたのか、元から無いのか」が分からない。
 async function pickPicture() {
     if (!state.open) return;
     const file = await window.amber.pickFile(
@@ -4620,8 +4620,8 @@ async function attach(b64, ext) {
     try {
         const r = await ask('image', { note: state.open.path, b64, ext });
         // **どちらの面でも打つ。** `put` は「表示」の面では黙って帰るので、
-        // ここだけ面を見ずに呼んでいると、**絵はフォルダに置かれたのに
-        // リンクがどこにも入らない** ── 誰も指していない絵が
+        // ここだけ面を見ずに呼んでいると、**画像はフォルダに置かれたのに
+        // リンクがどこにも入らない** ── 誰も指していない画像が
         // `attachments/` に溜まる（ほかの記号は道具帯の側で面を見ている）。
         if (onRead()) await readPut(`![](${r.link})`);
         else put(`![](${r.link})\n`);
@@ -4741,7 +4741,7 @@ function goToLine(line) {
     }
     if (!hit) return;
     hit.scrollIntoView({ block: 'center' });
-    // 触れないかたまり（図・枠・絵）なら、その一つ上の打てるところへ。
+    // 触れないかたまり（図・枠・画像）なら、その一つ上の打てるところへ。
     let land = hit;
     while (land && richBlock(land)) land = land.previousElementSibling;
     // **焦点を渡してから置く。** 置くだけだと、面に焦点が無いあいだの
@@ -4878,7 +4878,7 @@ async function drawRead() {
     headStop(el('read'));
     // 空の注記・引用に、打てる一行を。
     fillAlerts(el('read'));
-    // **札を配るのが先。** 絵や図はこのあと札を掛け替える（`<pre>` →
+    // **札を配るのが先。** 画像や図はこのあと札を掛け替える（`<pre>` →
     // `<div class="mermaid">`、`<img>` → `<figure>`）ので、掛け替える前に
     // 元の字を持たせておかないと、引き継ぐものが無い ── 図を入れたノートで
     // 保存が黙って止まった。
@@ -6140,7 +6140,7 @@ el('read').addEventListener('click', async (e) => {
         }
         return;
     }
-    // **触れないものは、押すと吹き出し。** 図・枠・絵で同じ形に揃える
+    // **触れないものは、押すと吹き出し。** 図・枠・画像で同じ形に揃える
     // （`PAPER.ja.md` 六章の甲・本人が決めた）── 覚えることを一つにする。
     //
     // 前は図と枠で違うことが起きていた（図は工房、枠は並べて表示のその行へ）
@@ -6165,7 +6165,7 @@ el('read').addEventListener('click', async (e) => {
         if (rich && el('read').contains(rich)) {
             const pic = rich.tagName === 'FIGURE';
             popMenu([
-                // **絵の大きさは、押して選べる**（依頼 420）── 記法を
+                // **画像の大きさは、押して選べる**（依頼 420）── 記法を
                 // 覚えていない人が、いちばん変えたがるのがこれ。
                 pic ? { name: '大きさ…', sub: sizeNow(rich), run: () => askSize(rich) } : null,
                 pic ? null : { name: 'コードで直す', sub: '「コード」のその行へ', run: () => toSource(rich) },
@@ -6202,7 +6202,7 @@ async function openLink(href) {
     if (!(await window.amber.openLink(href))) say('この行き先は開けません: ' + href);
 }
 
-/// **絵の大きさの選び肢。**
+/// **画像の大きさの選び肢。**
 ///
 /// 数を訊かない ── 「200px」と打てる人は記法で書ける（`![w:200px]`）。
 /// ここに来るのは打てない人なので、**言葉で選ばせる**。
@@ -6220,7 +6220,7 @@ function sizeNow(fig) {
     return SIZES.find((s) => s.px === w)?.name || (w ? '横 ' + w : '幅いっぱい');
 }
 
-/// 絵の大きさを選んで、**ノートの字に書く**。
+/// 画像の大きさを選んで、**ノートの字に書く**。
 ///
 /// 押して選んだ結果が `![猫 w:200px](…)` という**打てる字**として残る ──
 /// あとから記法で直せるし、amber の外でも読める（芯の 1）。
@@ -6348,7 +6348,7 @@ function readMenu(e) {
 /// **名前を分けてある**（依頼 424）。前は `landAfter` という名前で、
 /// **`readSourceEdit` の末尾にある同じ名前の関数を上書きしていた** ──
 /// 関数の宣言は後ろが勝つので、記号（チェックリスト・リンク・表・水平線）や
-/// 絵の大きさを表示の面から直すたびに、ここへ番号が渡って落ちていた。
+/// 画像の大きさを表示の面から直すたびに、ここへ番号が渡って落ちていた。
 /// 落ちるのは書き終えた**あと**なので、字は入る ── caret だけがどこかへ
 /// 行き、`console` にだけ跡が残る。総ざらいで見つけた。
 function landOnBox(box) {
@@ -7452,9 +7452,9 @@ function markKey(e) {
     return found ? found[2] : null;
 }
 
-/// 貼り付けられたものが絵なら、ノートの隣に置いてリンクを打つ。
+/// 貼り付けられたものが画像なら、ノートの隣に置いてリンクを打つ。
 ///
-/// **捕まえるのは絵のときだけ。** 字の貼り付けはエディタの仕事で、
+/// **捕まえるのは画像のときだけ。** 字の貼り付けはエディタの仕事で、
 /// ここが横取りすると Monaco の取り消しが繋がらなくなる。
 document.addEventListener('paste', async (e) => {
     // **「表示」の面でも受ける。** 前はここで帰っていたので、読む面に
@@ -10796,7 +10796,7 @@ async function cmdToShare() {
         return;
     }
     // 共有の棚は、**そのノートの保存ディレクトリのもの**を先に ── 別の保存
-    // ディレクトリの棚へ渡すと、絵と履歴が付いてこない。
+    // ディレクトリの棚へ渡すと、画像と履歴が付いてこない。
     const root = rootOf(state.open.path);
     const near = state.shares.find((sh) => rootOf(sh.at) === root) || state.shares[0];
     let to = near ? near.at : undefined;
@@ -11078,13 +11078,13 @@ async function cmdExport() {
     }
 }
 
-/// **絵を、書き出す一枚の中へ入れる**（依頼 435）。
+/// **画像を、書き出す一枚の中へ入れる**（依頼 435）。
 ///
-/// 献立は「一枚で完結」と言っているのに、絵は `attachments/…` という
+/// 献立は「一枚で完結」と言っているのに、画像は `attachments/…` という
 /// **隣を指す道**のままだった ── 書き出した HTML を人に送ると、送られた
-/// 側では絵が出ない。言っていることを本当にする。
+/// 側では画像が出ない。言っていることを本当にする。
 ///
-/// 落として来られない絵は、道のまま残す ── 消すと「あったはずのものが
+/// 落として来られない画像は、道のまま残す ── 消すと「あったはずのものが
 /// 無い」になり、そちらのほうが分かりにくい。
 async function inlinePictures(html) {
     const dir = state.open ? dirOf(state.open.path) : '';
@@ -11095,7 +11095,7 @@ async function inlinePictures(html) {
         try {
             const got = await window.amber.fileBytes(absPath(src, dir));
             if (got && got.b64) img.src = 'data:image/' + (got.ext || 'png') + ';base64,' + got.b64;
-        } catch { /* 読めない絵は、道のまま置いておく */ }
+        } catch { /* 読めない画像は、道のまま置いておく */ }
     }
     return doc.body.innerHTML;
 }
@@ -11103,7 +11103,7 @@ async function inlinePictures(html) {
 /// 一枚で完結する HTML。
 ///
 /// **外を参照しない。** 別の機械で開いても字の形が崩れないように、字体は
-/// その機械にあるものだけ。絵は `inlinePictures` が中へ入れてある。
+/// その機械にあるものだけ。画像は `inlinePictures` が中へ入れてある。
 function onePage(title, body) {
     return '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
         + '<title>' + escapeHtml(title) + '</title><style>'
@@ -11337,7 +11337,7 @@ async function settleName(path) {
     if (!r || !r.renamed) return null;
     afterRename(path, r.path);
     await reload({ quiet: true });
-    // 本文の絵のリンクまで書き直されたなら、開いているものを読み直す。
+    // 本文の画像のリンクまで書き直されたなら、開いているものを読み直す。
     if (r.rewrote && state.open && state.open.path === r.path && !state.dirty) {
         await openNote(r.path, { walking: true });
     }
@@ -11492,7 +11492,7 @@ async function syncPlace(place, remote) {
         try {
             if (s.do === 'up') {
                 const print = (await ask('syncprint', { path: at })).print;
-                // 絵は bytes のまま（描く側を通さない・依頼 497）。
+                // 画像は bytes のまま（描く側を通さない・依頼 497）。
                 const r = s.bin
                     ? await window.amber.driveUploadFile({ rel: pre + s.rel, file: at, print, id: s.id || undefined })
                     : await window.amber.driveUpload({ rel: pre + s.rel, text: (await ask('read', { path: at })).text, print, id: s.id || undefined });
@@ -11511,7 +11511,7 @@ async function syncPlace(place, remote) {
                 one.touched = true;
                 if (isOpen) one.openTouched = true;
             } else if (s.do === 'clash' && s.bin) {
-                // **絵は混ぜられない。** こちらを残し、向こうのものは `名前.2.png` として
+                // **画像は混ぜられない。** こちらを残し、向こうのものは `名前.2.png` として
                 // 隣に置く（失うよりよい）。隣に置いた一枚は、次の同期で新しく上がる。
                 const dot = at.lastIndexOf('.');
                 let beside = at.slice(0, dot) + '.2' + at.slice(dot);
@@ -11932,7 +11932,7 @@ async function placeMove(p) {
     if (had > 0 && await askYes('いままでの ' + had + ' 件を、新しい場所へ移しますか')) {
         try {
             // **数えるのは人が数えるもの。** `migrate` が返すのは動かした
-            // ファイルの数（絵も履歴も `.amber` も入る）で、6 件のノートが
+            // ファイルの数（画像も履歴も `.amber` も入る）で、6 件のノートが
             // 「14 件を移しました」になる ── 何が 14 なのか誰も分からない。
             await ask('migrate', { from: p.dir, to: dir });
             say('ノート ' + had + ' 件を、画像と履歴ごと移しました');

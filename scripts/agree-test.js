@@ -14,7 +14,7 @@
  *
  * 実際にそうなった（2026-09-08）: 窓は `<img>` を `<figure>` で包んで
  * 元の字を持たせていたが、**電話は包んでいなかった** ── 表示の面で一度
- * 打つだけで、電話でだけ絵が消えた。往復の試験（`round-test`）は窓の糊
+ * 打つだけで、電話でだけ画像が消えた。往復の試験（`round-test`）は窓の糊
  * しか通していないので、素通りしていた。
  *
  * 見るのは二つ:
@@ -75,11 +75,11 @@ const grab = (head) => {
 const windowGlue = grab('function findPictures(');
 
 /// 電話の糊 ── `Paper.swift` の中の `window.show` が、札を配ったあとに
-/// する絵の包み。**そこだけを抜く**（前後は Swift の文字列の中）。
+/// する画像の包み。**そこだけを抜く**（前後は Swift の文字列の中）。
 const swift = fs.readFileSync(path.join(root, 'ios', 'Cian', 'Paper.swift'), 'utf8');
 const phoneFrom = swift.indexOf("for (const img of box.querySelectorAll('img')) {\n        const alt");
 if (phoneFrom < 0) {
-    console.error('ios/Cian/Paper.swift から絵の包みを切り出せません');
+    console.error('ios/Cian/Paper.swift から画像の包みを切り出せません');
     process.exit(2);
 }
 const phoneTo = swift.indexOf('\n      }\n', phoneFrom);
@@ -145,14 +145,14 @@ const call = (method, params) => new Promise((go) => {
     child.stdin.write(JSON.stringify({ id, method, params }) + '\n');
 });
 
-/// 試すノート。**絵のあるもの**を厚めに ── ずれたのはそこだった。
+/// 試すノート。**画像のあるもの**を厚めに ── ずれたのはそこだった。
 const CASES = [
     '![題](attachments/あ.png)',
     '![](attachments/あ.png)',
     '![width:200px](attachments/あ.png)',
     '![猫 w:200 h:80%](attachments/あ.png)',
     '本文の前\n\n![題](attachments/あ.png)\n\n本文のあと',
-    '![外の絵](https://example.com/a.png)',
+    '![外の画像](https://example.com/a.png)',
     '# 見出し\n\n段落。\n\n![題](attachments/あ.png)\n\n- 一つ\n- 二つ',
     '| 朝 | 夕 |\n| --- | --- |\n| 掃除 | 片づけ |\n\n![題](attachments/あ.png)',
     '```rust\nfn main() {}\n```\n\n![題](attachments/あ.png)',

@@ -12,9 +12,9 @@ import WebKit
 /// Swift で書けば、同じノートが端末によって別の字に保存される**。失うのは
 /// たいてい表と升と図で、気づくのは何回か保存したあと。
 ///
-/// 絵と図は `amber://` で配る。`WKWebView` は文字列から作った頁に隣の
+/// 画像と図は `amber://` で配る。`WKWebView` は文字列から作った頁に隣の
 /// ファイルを読ませないので、**Swift が給仕する**（束ねの中の道具と、
-/// ノートの隣の絵）。ついでに、ノートの外は配らないことがここで保証できる。
+/// ノートの隣の画像）。ついでに、ノートの外は配らないことがここで保証できる。
 /// 道具の帯から「表示」の面へ、合図を渡す口。
 ///
 /// **帯は SwiftUI、面は WebView。** 間に糸を一本通しておかないと、帯は
@@ -35,7 +35,7 @@ final class PaperHand: ObservableObject {
 struct Paper: UIViewRepresentable {
     /// いまのノートの Markdown（前書きを除いた本文）。
     @Binding var text: String
-    /// このノートのあるフォルダ ── 絵の道はここから測る。
+    /// このノートのあるフォルダ ── 画像の道はここから測る。
     let folder: URL
     let dark: Bool
     /// 「表示」の面の字の大きさ（px）。**SwiftUI の段はここに届かない**ので、
@@ -217,7 +217,7 @@ struct Paper: UIViewRepresentable {
       document.documentElement.toggleAttribute('data-dark', !!dark);
       quiet = true;
       box.innerHTML = html;
-      // 絵はノートの隣にある ── `amber://note/` で取りに行く。
+      // 画像はノートの隣にある ── `amber://note/` で取りに行く。
       for (const img of box.querySelectorAll('img')) {
         const src = img.getAttribute('src') || '';
         if (!/^[a-z]+:/i.test(src)) img.src = 'amber://note/' + src;
@@ -225,12 +225,12 @@ struct Paper: UIViewRepresentable {
       armPaper(box, text, true);
       // 空の注記・引用に、打てる一行を（窓と同じ）。
       fillAlerts(box);
-      // **絵は `<figure>` で包む ── 窓の `findPictures` と同じ形にする。**
+      // **画像は `<figure>` で包む ── 窓の `findPictures` と同じ形にする。**
       //
       // 包まないと `<img>` は段の中の札のままで、字に戻すとき
       // `inlineToMd` が捨てる（`case 'IMG': out += ''`）── 窓は包んだ
       // `<figure>` が元の字（`data-md`）を持っているので消えないが、電話は
-      // 包んでいなかったので、**表示の面で一度でも打つと絵が消えた**。
+      // 包んでいなかったので、**表示の面で一度でも打つと画像が消えた**。
       // 消えるのは保存のあとなので、消したつもりの無い人には理由が見えない。
       //
       // **札を配ったあとに包む**（窓と同じ順）── `keepMark` が元の字を
@@ -374,7 +374,7 @@ struct Paper: UIViewRepresentable {
       }
       let art = e.target.closest('.mermaid, pre, figure, img');
       if (!art || !box.contains(art)) return;
-      // **絵は包みごと持つ。** `closest` はいちばん内側を返すので、絵を
+      // **画像は包みごと持つ。** `closest` はいちばん内側を返すので、画像を
       // 叩くと `<img>` が来る ── 元の字（`data-md`）を持っているのは
       // `keepMark` で受け取った `<figure>` のほうなので、そちらへ上がる。
       // 持たずに渡すと、大きさを直す先が分からない（依頼 420）。
@@ -410,7 +410,7 @@ struct Paper: UIViewRepresentable {
       picked = null;
       if (!n) return;
       if (what === 'drop') {
-        // 絵を抜いた段が空になったら、段ごと片づける ── 空の段が残ると、
+        // 画像を抜いた段が空になったら、段ごと片づける ── 空の段が残ると、
         // ノートに要らない空行が増えていく。
         const par = n.parentElement;
         n.remove();
@@ -772,7 +772,7 @@ struct Paper: UIViewRepresentable {
 
         // ── 給仕 ────────────────────────────────────────────
         //
-        // **ノートの外は配らない。** 絵の道はノートの隣から測り、`..` で
+        // **ノートの外は配らない。** 画像の道はノートの隣から測り、`..` で
         // 外へ出ようとするものは返さない ── 人が書いた字を頁に載せている
         // ので、そこが外を指していないことは、こちらで確かめる。
 

@@ -13,7 +13,7 @@
  *         gui/vendor/                       ← **git に入っていないので、ここで足す**
  *       electron-v33.4.11-win32-x64/        ← Electron の一式
  *       amber-server-win-x64.exe            ← エンジン（CRT ごと静的・置くだけで動く）
- *       rcedit-x64.exe                      ← exe の絵と名前を焼く道具（任意）
+ *       rcedit-x64.exe                      ← exe の画像と名前を焼く道具（任意）
  *
  * **ここは網に出る。** 出られない側でやることを、出られる側に寄せるための
  * 道具なので、足りないものは黙って飛ばさず、**どこから取るかを言って止まる**
@@ -146,7 +146,7 @@ fs.writeFileSync(path.join(kit, '組み方.txt'), [
     '   --zip を付けると dist\\amber-win-x64-' + version + '.zip も出ます。',
     '',
     ...(rceditName ? [] : [
-        '（exe の絵と名前は Electron のままです。焼くなら rcedit-x64.exe を',
+        '（exe の画像と名前は Electron のままです。焼くなら rcedit-x64.exe を',
         '  この一式に入れて、--rcedit ..\\rcedit-x64.exe を足してください）',
         '',
     ]),

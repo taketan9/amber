@@ -567,11 +567,11 @@ enum Walk {
         Syncing.shared.desk = nil
         let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         _ = await talk("/_put", ["rel": "attachments/太郎の絵.png", "b64": png, "by": "太郎の Mac"])
-        await step("同期：向こうが置いた絵が、bytes のまま下りてくる") {
+        await step("同期：向こうが置いた画像が、bytes のまま下りてくる") {
             guard let r = await sync.now("手") else { return "運びませんでした" }
             if r.down != 1 { return "下りたのが \(r.down) 本（\(r.trouble.joined(separator: " / ")))" }
             let at = store.rootPath + "/attachments/太郎の絵.png"
-            guard let data = FileManager.default.contents(atPath: at) else { return "絵がありません" }
+            guard let data = FileManager.default.contents(atPath: at) else { return "画像がありません" }
             return data.base64EncodedString() == png ? nil : "bytes が違います"
         }
         // 離れたときに題（# 太郎から）に揃えて 太郎から.md になり、向こうも同じ名前に

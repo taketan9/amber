@@ -874,8 +874,8 @@ fn render(lines: &[String], stamp: bool) -> String {
             continue;
         }
 
-        // 行そのものが絵なら、絵として出す。**どこからが絵かは
-        // `note::lone_image` の1か所** ── iPhone が絵として積む行を窓が
+        // 行そのものが画像なら、画像として出す。**どこからが画像かは
+        // `note::lone_image` の1か所** ── iPhone が画像として積む行を窓が
         // 字で出すと、同じノートが二つの見た目を持つ。
         if let Some(crate::note::Block::Image { alt, link }) = crate::note::lone_image(t) {
             close_all_lists(&mut out, &mut open_lists, &mut li_open);
@@ -1065,14 +1065,14 @@ fn render(lines: &[String], stamp: bool) -> String {
 }
 
 
-/// **絵の大きさを、題の中の指示から読む**（依頼 413）。
+/// **画像の大きさを、題の中の指示から読む**（依頼 413）。
 ///
 /// `![width:200px](猫.png)` ── Marp と同じ書き方にした。新しい記法を
 /// 作らないのは、**ここで作った書き方は他のどこでも通じない**から:
-/// GitHub でも VS Code でも、この行はただの絵に見えるだけで壊れない。
+/// GitHub でも VS Code でも、この行はただの画像に見えるだけで壊れない。
 ///
 /// 読むのは `width:` `w:` `height:` `h:` の四つ。**残りは題のまま**返す
-/// ので、`![猫 w:200px](…)` は「猫」という説明の付いた 200px の絵になる。
+/// ので、`![猫 w:200px](…)` は「猫」という説明の付いた 200px の画像になる。
 ///
 /// 長さは**数と単位だけ**しか通さない ── `style` に人の書いた字を
 /// そのまま入れる道になるので、`}` や `;` の混ざったものは指示と見なさず、
@@ -1092,7 +1092,7 @@ fn picture_size(alt: &str) -> (String, String) {
         }
     }
     // **片方だけ言われたら、もう片方は釣り合わせる。** `width` だけ指して
-    // 高さを CSS のままにすると、`height:auto` を持たない土台で絵が歪む。
+    // 高さを CSS のままにすると、`height:auto` を持たない土台で画像が歪む。
     let css = match (w, h) {
         (None, None) => String::new(),
         (Some(w), None) => format!("width:{w};height:auto"),
@@ -1120,9 +1120,9 @@ fn length(v: &str) -> Option<String> {
     }
 }
 
-/// **絵の大きさを、押して選べるようにするための書き換え**（依頼 420）。
+/// **画像の大きさを、押して選べるようにするための書き換え**（依頼 420）。
 ///
-/// 記法を覚えていない人が、絵を押して「小さめ」を選ぶと、amber が
+/// 記法を覚えていない人が、画像を押して「小さめ」を選ぶと、amber が
 /// `![猫 w:200px](…)` と**書いておく** ── 覚えている人が打つのと同じ字で。
 /// 二つの道が同じところへ着くので、片方で付けた大きさをもう片方で直せる。
 ///
@@ -1130,7 +1130,7 @@ fn length(v: &str) -> Option<String> {
 /// **説明の字は動かさない** ── 書いた人の言葉なので、順番も含めてそのまま。
 pub fn set_picture_size(line: &str, width: Option<&str>) -> String {
     let Some(crate::note::Block::Image { alt, link }) = crate::note::lone_image(line.trim()) else {
-        // 絵の行でないなら、触らない ── 読めないものを書き換えない。
+        // 画像の行でないなら、触らない ── 読めないものを書き換えない。
         return line.to_string();
     };
     let mut words: Vec<&str> = alt
@@ -1143,7 +1143,7 @@ pub fn set_picture_size(line: &str, width: Option<&str>) -> String {
     if let Some(w) = width {
         hold = format!("w:{w}");
         // **指示は後ろに置く。** 説明が先に読めるほうが、コードの面を
-        // 開いた人に「何の絵か」が先に届く。
+        // 開いた人に「何の画像か」が先に届く。
         words.push(&hold);
     }
     format!("![{}]({link})", words.join(" "))
@@ -1167,7 +1167,7 @@ mod tests {
         assert_eq!(one("![w:200px](a.png)", None), "![](a.png)");
         // 縦の指示も一緒に落ちる（大きさは一か所で決める）。
         assert_eq!(one("![猫 h:80px w:1](a.png)", Some("200px")), "![猫 w:200px](a.png)");
-        // **絵の行でないものは、触らない。**
+        // **画像の行でないものは、触らない。**
         assert_eq!(one("ただの本文", Some("200px")), "ただの本文");
         assert_eq!(one("# 見出し", None), "# 見出し");
         // 書いた字を、もう一度読める（往復する）。
@@ -1193,7 +1193,7 @@ mod tests {
         let out = one("![w:200px h:80%](猫.png)");
         assert!(out.contains(r#"style="width:200px;height:80%""#), "{out}");
 
-        // 大きさを言われていない絵は、いままでどおり。
+        // 大きさを言われていない画像は、いままでどおり。
         let out = one("![猫](猫.png)");
         assert!(!out.contains("style="), "{out}");
         assert!(out.contains(r#"alt="猫""#), "{out}");
@@ -1417,14 +1417,14 @@ mod tests {
     }
 
     #[test]
-    fn 行そのものが絵なら絵で出る() {
+    fn 行そのものが画像なら画像で出る() {
         let out = to_html(&lines("![猫](cat.jpg)\n"));
-        assert!(out.contains("<img src=\"cat.jpg\" alt=\"猫\">"), "絵になっていない: {out}");
+        assert!(out.contains("<img src=\"cat.jpg\" alt=\"猫\">"), "画像になっていない: {out}");
         assert!(!out.contains("!<a"), "`!` が字のまま残っている: {out}");
 
         // 出せない先は、隠さずに字で残す。
         let out = to_html(&lines("![だめ](javascript:alert(1))\n"));
-        assert!(!out.contains("<img"), "危ない絵が出ている: {out}");
+        assert!(!out.contains("<img"), "危ない画像が出ている: {out}");
         assert!(!out.contains("javascript:alert(1)</"), "そのまま href になっている: {out}");
         assert!(out.contains("だめ"), "書いてあったものが消えている: {out}");
     }

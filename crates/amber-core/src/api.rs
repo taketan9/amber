@@ -436,7 +436,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     ),
                 })
                 .collect();
-            // 絵も一緒に（依頼 497）。
+            // 画像も一緒に（依頼 497）。
             here.extend(crate::sync::assets(&root));
             let there: Vec<crate::sync::There> = p["remote"]
                 .as_array()
@@ -614,7 +614,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 let dir = root.join(".amber").join("base");
                 std::fs::create_dir_all(&dir)?;
                 for d in &done {
-                    // 絵の分かれる前の姿は取っておかない（混ぜないので要らない）。
+                    // 画像の分かれる前の姿は取っておかない（混ぜないので要らない）。
                     if crate::sync::is_asset(&d.rel) {
                         continue;
                     }
@@ -1016,7 +1016,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
-        // 絵の大きさを、押して選べるように書き換える（依頼 420）。
+        // 画像の大きさを、押して選べるように書き換える（依頼 420）。
         // **決めるのはここ一か所** ── 窓と電話が別々に文字列をいじると、
         // 片方で付けた大きさをもう片方が読めない形になる。
         "imgsize" => {
@@ -1884,7 +1884,7 @@ mod tests {
         std::fs::create_dir_all(&to).unwrap();
         std::fs::write(from.join("a.md"), "---\ntitle: a\n---\n本文\n").unwrap();
         std::fs::write(from.join("仕事").join("b.md"), "---\ntitle: b\n---\n本文\n").unwrap();
-        // 画像もついていく ── 置いていったら、絵のあるノートが全部壊れる。
+        // 画像もついていく ── 置いていったら、画像のあるノートが全部壊れる。
         std::fs::write(from.join("attachments").join("p.png"), [0u8; 4]).unwrap();
 
         let out = call("migrate", &serde_json::json!({

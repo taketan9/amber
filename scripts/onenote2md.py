@@ -10,7 +10,7 @@ onenote2md.py ── デスクトップ版 OneNote を Markdown に（ambər の
       <ノートブック>/
         <セクショングループ>/ … 任意の深さ
           <セクション>/
-            attachments/        … ambər の絵の置き場所（ノートの隣・同じ名前）
+            attachments/        … ambər の画像の置き場所（ノートの隣・同じ名前）
             <ページ>.md
             <ページ>/           … サブページはページ名のフォルダに入る
               <サブページ>.md
@@ -46,7 +46,7 @@ onenote2md.py ── デスクトップ版 OneNote を Markdown に（ambər の
   5. **名前は SharePoint / WebDAV でも通るものに。** `\\ / : * ? " < > |` に加えて
      `# % & ~ { }` と先頭の `_vti_`、末尾の `.` と空白を避ける。一段 120 字まで、
      道ぜんたいで 200 字を超えそうなら詰める（WebDAV の 256 字の壁）。
-  6. **絵は `attachments/`**（ambər の決まり）。ノートの隣のフォルダで、名前は
+  6. **画像は `attachments/`**（ambər の決まり）。ノートの隣のフォルダで、名前は
      `<ページ名>_001.png`。ambər の「使われていない画像」もここを数える。
   7. **深さ。** ambər が一覧に出すのはフォルダ 8 段まで。セクショングループが
      深いノートブックは `--flatten-groups` で「グループ名 › セクション名」を一つの
@@ -98,7 +98,7 @@ NS = {"one": ONE_NS}
 HS_PAGES = 4          # HierarchyScope.hsPages
 XS_2013 = 2           # XMLSchema.xs2013
 PI_BINARY_DATA = 1    # PageInfo.piBinaryData（画像を Base64 で同梱）
-ATTACH = "attachments"   # ambər の絵の置き場所（ノートの隣・この名前）
+ATTACH = "attachments"   # ambər の画像の置き場所（ノートの隣・この名前）
 PATH_LIMIT = 200         # WebDAV の道の長さの壁（256）に余裕を見た数
 
 log = logging.getLogger("onenote2md")
@@ -866,7 +866,7 @@ class PageConverter:
         self.rel_img = rel_img           # md から見た画像フォルダの相対の道
         self.with_images = with_images
         self.img_count = 0
-        self.images: list[str] = []      # 書いた絵の名前（--prune のため）
+        self.images: list[str] = []      # 書いた画像の名前（--prune のため）
         self.styles = {}                 # quickStyleIndex -> style name
         self.tags = {}                   # tagDef index -> name
         for qs in page_el.findall("one:QuickStyleDef", NS):
@@ -1033,7 +1033,7 @@ class PageConverter:
         try:
             raw = base64.b64decode(data_el.text)
             at = self.img_dir / fname
-            # 同じ中身なら書かない（同期に、触っていない絵の更新だけが流れないように）。
+            # 同じ中身なら書かない（同期に、触っていない画像の更新だけが流れないように）。
             if not (at.exists() and at.stat().st_size == len(raw) and at.read_bytes() == raw):
                 at.write_bytes(raw)
             self.images.append(fname)
@@ -1187,7 +1187,7 @@ def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, writte
             continue
 
         md_path.parent.mkdir(parents=True, exist_ok=True)
-        # 絵は**そのページの隣**の attachments/（サブページのフォルダなら、そこの隣）。
+        # 画像は**そのページの隣**の attachments/（サブページのフォルダなら、そこの隣）。
         page_img_dir = md_path.parent / ATTACH
         rel_img = ATTACH
         conv = PageConverter(page_el, page_img_dir, md_path.stem, rel_img, not args.no_images)
@@ -1200,8 +1200,8 @@ def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, writte
         written.add(md_path.resolve())
         for name in conv.images:
             written.add((page_img_dir / name).resolve())
-        # このページの古い絵を片付ける。**いま全部書き直したページの分だけ**なので、
-        # 触っていないページの絵は数に入らない。名前が `<ページ名>_NNN.ext` なので
+        # このページの古い画像を片付ける。**いま全部書き直したページの分だけ**なので、
+        # 触っていないページの画像は数に入らない。名前が `<ページ名>_NNN.ext` なので
         # 隣のページを巻き込まない（`会議_001.png` は `会議録_*` に当たらない）。
         # `--no-images` のときはやらない ── 出さないだけのつもりが全部消える。
         if not args.no_images and page_img_dir.is_dir():
@@ -1211,7 +1211,7 @@ def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, writte
                         old.unlink()
                         stats["pruned_images"] += 1
                     except OSError as e:
-                        log.warning("古い絵を消せない %s: %s", old, e)
+                        log.warning("古い画像を消せない %s: %s", old, e)
         stats["images"] += conv.img_count
         stats["written"] += 1
         if args.save_xml:
@@ -1470,7 +1470,7 @@ def run(args, out_root: Path):
         prune(scope, keep, written, stats)
 
     log.info("完了: ページ %d（書いた %d・変わらず %d）/ 画像 %d / エラー %d / "
-             "セクション: 鍵 %d・絞りで外した %d / 消した %d / 古い絵 %d",
+             "セクション: 鍵 %d・絞りで外した %d / 消した %d / 古い画像 %d",
              stats["pages"], stats["written"], stats["skipped_pages"], stats["images"],
              stats["errors"], stats["skipped_sections"], stats["filtered_sections"],
              stats["pruned"], stats["pruned_images"])

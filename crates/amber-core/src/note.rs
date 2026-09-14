@@ -655,9 +655,9 @@ pub fn create(
 /// 題は写したまま: Markdown の中の題は書いた人の言葉で、amber が
 /// 「（コピー）」を書き足す筋合いは無い（ノートはただの Markdown）。
 ///
-/// 絵は写さない ── `attachments/` は同じフォルダの中で、二つのノートが
-/// 同じ一枚を指すだけ。ノートを消しても絵は残る（`delete` は `.md` しか
-/// 消さない）ので、片方を消してもう片方の絵が欠ける、は起きない。
+/// 画像は写さない ── `attachments/` は同じフォルダの中で、二つのノートが
+/// 同じ一枚を指すだけ。ノートを消しても画像は残る（`delete` は `.md` しか
+/// 消さない）ので、片方を消してもう片方の画像が欠ける、は起きない。
 ///
 /// `into` を渡せば、そこへ写す（テンプレートから作るとき・依頼 417）──
 /// **写す仕組みは一つ**にする。「型から作る」を別の道にすると、`created`
@@ -1234,8 +1234,8 @@ pub fn set_check(text: &str, line: usize, done: bool) -> String {
 
 /// `![alt](link)` and nothing else on the line.
 ///
-/// `markdown::to_html` asks this too. **どこからが絵かは一か所** ── 窓が
-/// 自分で `![` を探しはじめると、iPhone が絵として積む行を窓が字で出す、
+/// `markdown::to_html` asks this too. **どこからが画像かは一か所** ── 窓が
+/// 自分で `![` を探しはじめると、iPhone が画像として積む行を窓が字で出す、
 /// という食い違いが静かに育つ。
 pub(crate) fn lone_image(t: &str) -> Option<Block> {
     let rest = t.strip_prefix("![")?;
@@ -1405,8 +1405,8 @@ pub fn move_to(note: &std::path::Path, dir: &std::path::Path) -> anyhow::Result<
         anyhow::bail!("{} には同じ名前があります", dir.display());
     }
 
-    // 絵が先、ノートは最後。**絵が置けなければ、ノートも動かない** ──
-    // 元の場所のノートは、元の場所にある絵を指したままになる。
+    // 画像が先、ノートは最後。**画像が置けなければ、ノートも動かない** ──
+    // 元の場所のノートは、元の場所にある画像を指したままになる。
     let fresh = crate::naming::bring_pictures(note, &to)?;
     std::fs::rename(note, &to)?;
     if let Some(t) = fresh {

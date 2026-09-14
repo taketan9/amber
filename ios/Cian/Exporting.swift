@@ -3,8 +3,8 @@ import UIKit
 /// **エクスポート**（依頼 516・窓の `cmdExport` と同じ三つ）── Markdown はファイルそのもの、
 /// HTML は一枚で完結する読める形、PDF はそれを刷ったもの。
 ///
-/// 読める形にするのは core（`html`）で、**窓と同じ一組**。絵は一枚の中に入れる
-/// （`data:`）── 人に送った先で絵が出ないのは、「一枚で完結」と言っていることに反する。
+/// 読める形にするのは core（`html`）で、**窓と同じ一組**。画像は一枚の中に入れる
+/// （`data:`）── 人に送った先で画像が出ないのは、「一枚で完結」と言っていることに反する。
 @MainActor
 enum Exporting {
     /// 窓の `onePage` と同じ姿（同じ CSS）。
@@ -26,7 +26,7 @@ enum Exporting {
         """
     }
 
-    /// 絵を一枚の中へ（`attachments/…` のような隣を指す道だけ。`http` などはそのまま）。
+    /// 画像を一枚の中へ（`attachments/…` のような隣を指す道だけ。`http` などはそのまま）。
     private static func inlinePictures(_ html: String, near dir: URL) -> String {
         guard let re = try? NSRegularExpression(pattern: "src=\"([^\"]+)\"") else { return html }
         var out = html

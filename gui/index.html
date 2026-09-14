@@ -584,7 +584,7 @@ body.mac #top { padding-top: 30px; }
 }
 #back:disabled, #fwd:disabled { opacity: .3; }
 
-/* 書く面の絵。**字は消さず、行の下に空きを作って置く** ── 消して絵に
+/* 書く面の画像。**字は消さず、行の下に空きを作って置く** ── 消して画像に
    すると、パスを一文字直したいだけのときに直しようがない。 */
 .zoneimg {
   display: flex; align-items: center; padding: 6px 0 6px 34px;
@@ -648,7 +648,7 @@ body.mac #top { padding-top: 30px; }
    2. **見出しの上下。** 前は上下が同じだけ空いていたので、見出しがどちらの
       段落のものか決まらなかった。**上を厚く、下を薄く** ── 見出しは次の
       かたまりの持ち物。
-   3. **絵。** 前は裸で置いていた。地と同じ白い絵を貼ると、どこからが絵なのか
+   3. **画像。** 前は裸で置いていた。地と同じ白い画像を貼ると、どこからが画像なのか
       分からない。細い枠と丸みと薄い影を付け、`alt` があれば下に添える。 */
 #read {
   flex: 1; min-width: 0; overflow-y: auto;
@@ -790,8 +790,8 @@ body.split #read { border-left: 1px solid var(--line-2); }
 }
 #read a:hover { text-decoration-color: currentColor; }
 
-/* ── 絵 ──
-   裸で置かない。**地と同じ色の絵は、どこからが絵か分からない。** */
+/* ── 画像 ──
+   裸で置かない。**地と同じ色の画像は、どこからが画像か分からない。** */
 #read figure { margin: 1.4em 0; text-align: center; }
 #read img {
   max-width: 100%; height: auto; border-radius: 10px;

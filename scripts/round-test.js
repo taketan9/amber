@@ -77,9 +77,9 @@ global.window = dom.window;
 global.document = dom.window.document;
 global.Node = dom.window.Node;
 global.getSelection = () => dom.window.getSelection();
-// **絵の掛け替えも、本物を通す。** `drawRead` は組んだあとに
+// **画像の掛け替えも、本物を通す。** `drawRead` は組んだあとに
 // `findPictures` を呼び、`<img>` を `<figure>` に包んで札を移す
-// （`keepMark`）── これを通さずに回すと「絵が丸ごと消える」という
+// （`keepMark`）── これを通さずに回すと「画像が丸ごと消える」という
 // 嘘の落第が出る（実際に出して、実機で確かめて分かった）。
 // 切り出しの外にあるので、名前で抜いて同じ環境を用意する。
 const grab = (head) => {
@@ -91,7 +91,7 @@ const grab = (head) => {
 // eslint-disable-next-line no-eval
 (0, eval)(src.slice(from, to)
     + grab('function findPictures(')
-    // 窓の持ちもの ── 絵の在りかを組むのに要るぶんだけ。**中身は見ない**
+    // 窓の持ちもの ── 画像の在りかを組むのに要るぶんだけ。**中身は見ない**
     // ので、道の組み立ては本物でなくてよい（`fileURL` は win-test が見る）。
     + 'function fileURL(at) { return "file://" + at; }\n'
     + 'const dirOf = (at) => String(at || "").replace(/[^/\\\\]*$/, "");\n'
@@ -216,13 +216,13 @@ const ONE = {
     // **初めて開いた人に見せる絵**（依頼 437）── 半分の高さの記号で
     // 描いてあるので、一文字でも欠けると字が崩れる。
     '初めての絵': '```amber\n██████╗  ██████████╗ █████╗\n╚═══██║  ██╔═██╔═██╗ ██╔═██╗\n╚█████╔╝ ╚═╝ ╚═╝ ╚═╝ ╚████╔╝\n```',
-    '絵': '![題](attachments/あ.png)',
-    '絵 題が空': '![](attachments/あ.png)',
+    '画像': '![題](attachments/あ.png)',
+    '画像 題が空': '![](attachments/あ.png)',
     // **大きさの指示は、題の中に書いてある**（Marp と同じ・依頼 413）。
     // 組む側は `style` に移して題から外すが、**戻すときは書いた行のまま**
-    // ── 外した指示が戻らないと、保存のたびに絵が元の大きさへ戻る。
-    '絵 大きさ': '![width:200px](attachments/あ.png)',
-    '絵 大きさと題': '![猫 w:200 h:80%](attachments/あ.png)',
+    // ── 外した指示が戻らないと、保存のたびに画像が元の大きさへ戻る。
+    '画像 大きさ': '![width:200px](attachments/あ.png)',
+    '画像 大きさと題': '![猫 w:200 h:80%](attachments/あ.png)',
     // **生の HTML は、字として戻ること。** core は札を逃がして字にするので
     // （`esc`）、面に知らない札は現れない ── 人が書いた `<details>` が、
     // 保存のたびに削られたりしないことを、ここで見張る。

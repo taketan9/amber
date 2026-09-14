@@ -7,7 +7,7 @@
  *
  *   * 道の区切りを `/` だと思っていた ── Windows の道は `C:\Users\…` で、
  *     `split('/')` は道まるごとを返す。書き出したファイルの名前が道になり、
- *     絵の在りかは空になって**絵が一枚も出なくなった**
+ *     画像の在りかは空になって**画像が一枚も出なくなった**
  *   * Enter は一つだと思っていた ── フルサイズの鍵盤（会社の机にたいてい
  *     載っている）は右の Enter を `NumpadEnter` として送る。点と番号は
  *     画面が勝手に続けるので、**升だけが出ない**という形で現れた
@@ -59,7 +59,7 @@ console.log('Windows の道を、切り分けられるか');
     const win = 'C:\\Users\\t502960\\Documents\\amber\\買い物.md';
     ok(baseOf(win) === '買い物.md', '名前だけを取る', baseOf(win));
     ok(dirOf(win) === 'C:\\Users\\t502960\\Documents\\amber\\', '在りかを取る', dirOf(win));
-    // **在りかが空になると、絵が一枚も出ない。** 実際にそうなった。
+    // **在りかが空になると、画像が一枚も出ない。** 実際にそうなった。
     ok(dirOf(win) !== '', '在りかが空にならない', dirOf(win));
 
     const nix = '/Users/x/Documents/amber/買い物.md';
@@ -106,13 +106,13 @@ console.log('鍵盤の右の Enter も、Enter として受けるか');
             .map(keyText).join(' ')),
         'mac の記号が一つも残らない');
 
-    // ── 絵の在りか ──
+    // ── 画像の在りか ──
     //
-    // 会社の Windows で「この絵は読めません」と出た。`'file://' + 道` は
+    // 会社の Windows で「この画像は読めません」と出た。`'file://' + 道` は
     // mac の道（`/` で始まる）だと**たまたま**斜線が三本になって通るが、
     // Windows の道（`C:\…`）では `C:` が機械の名前として読まれ、円記号は
     // `%5C` に化ける ── mac では一生出ない。
-    console.log('絵の在りかを、絵に渡せる形にする');
+    console.log('画像の在りかを、画像に渡せる形にする');
     ok(fileURL('/Users/t/Documents/amber/attachments/01.png')
         === 'file:///Users/t/Documents/amber/attachments/01.png',
         'mac の道は、斜線三本');
@@ -120,19 +120,19 @@ console.log('鍵盤の右の Enter も、Enter として受けるか');
         === 'file:///C:/Users/t502960/Documents/amber/attachments/01_rag_start.png',
         'Windows の道は、円記号を斜線に直して頭に一本足す',
         fileURL('C:\\Users\\t502960\\Documents\\amber\\attachments\\01_rag_start.png'));
-    ok(!fileURL('C:\\Users\\t\\絵.png').includes('%5C'),
+    ok(!fileURL('C:\\Users\\t\\画像.png').includes('%5C'),
         '円記号は %5C のまま残さない',
-        fileURL('C:\\Users\\t\\絵.png'));
-    ok(fileURL('\\\\server\\share\\絵.png').startsWith('file://server/share/'),
+        fileURL('C:\\Users\\t\\画像.png'));
+    ok(fileURL('\\\\server\\share\\画像.png').startsWith('file://server/share/'),
         'ネットワークの置き場所は、斜線二本のまま（機械の名前が入る）',
-        fileURL('\\\\server\\share\\絵.png'));
-    ok(fileURL('/Users/t/あ い/絵.png') === 'file:///Users/t/%E3%81%82%20%E3%81%84/%E7%B5%B5.png',
+        fileURL('\\\\server\\share\\画像.png'));
+    ok(fileURL('/Users/t/あ い/画像.png') === 'file:///Users/t/%E3%81%82%20%E3%81%84/%E7%94%BB%E5%83%8F.png',
         '空白と日本語は、逃がす',
-        fileURL('/Users/t/あ い/絵.png'));
+        fileURL('/Users/t/あ い/画像.png'));
     ok(fileURL('') === 'file:///', '道が無くても落ちない');
 
     // 道を繋いだうえで、ちゃんと URL になるか（実物と同じ順で通す）。
-    console.log('ノートの隣の絵を、道からたどる');
+    console.log('ノートの隣の画像を、道からたどる');
     const dir = dirOf('C:\\Users\\t502960\\Documents\\amber\\手順.md');
     ok(dir === 'C:\\Users\\t502960\\Documents\\amber\\', '道の頭が取れる', dir);
     ok(fileURL(dir + 'attachments/01_rag_start.png')

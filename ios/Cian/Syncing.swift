@@ -209,7 +209,7 @@ final class Syncing: ObservableObject {
                         report.moved += 1
                         report.touched.insert(to)
                     case "clash" where bin:
-                        // 絵は混ぜられない ── こちらを残し、向こうのものは隣に `名前.2.png`。
+                        // 画像は混ぜられない ── こちらを残し、向こうのものは隣に `名前.2.png`。
                         var beside = Self.numbered(at, 2)
                         var n = 3
                         while FileManager.default.fileExists(atPath: beside) && n < 100 { beside = Self.numbered(at, n); n += 1 }
@@ -320,9 +320,9 @@ final class Syncing: ObservableObject {
         return f.string(from: d)
     }
 
-    // ── 絵の置き方 ──
+    // ── 画像の置き方 ──
 
-    /// 仮の名で書いてから改名 ── 途中で切れても半端な絵を残さない。
+    /// 仮の名で書いてから改名 ── 途中で切れても半端な画像を残さない。
     private static func put(_ bytes: Data, at path: String) throws {
         let url = URL(fileURLWithPath: path)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

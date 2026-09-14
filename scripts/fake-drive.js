@@ -41,7 +41,7 @@ function start(port = 0) {
     const meta = (f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, parents: f.parents,
         appProperties: f.appProperties, md5Checksum: f.md5, trashed: f.trashed, version: String(f.version || 1) });
 
-    /// multipart/related を、metadata（JSON）と中身に割る。**bytes のまま**（絵が通る）。
+    /// multipart/related を、metadata（JSON）と中身に割る。**bytes のまま**（画像が通る）。
     function parts(body, type) {
         const m = /boundary="?([^";]+)"?/.exec(type || '');
         if (!m) return null;
@@ -88,7 +88,7 @@ function start(port = 0) {
                          : json(404, { error: 'ありません' });
             }
             if (u.pathname === '/_put') {
-                // `text`（字）か `b64`（絵）。
+                // `text`（字）か `b64`（画像）。
                 const { rel, text, b64, by } = JSON.parse(body || '{}');
                 const bytes = b64 ? Buffer.from(b64, 'base64') : null;
                 const content = bytes || Buffer.from(String(text || ''), 'utf8');

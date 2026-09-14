@@ -770,7 +770,7 @@ struct DeskView: View {
                     } label: {
                         Label("エクスポート", systemImage: "square.and.arrow.up")
                     }
-                    // 窓のバックアップの「このノート一枚」と同じもの（絵も一緒に zip に）。
+                    // 窓のバックアップの「このノート一枚」と同じもの（画像も一緒に zip に）。
                     Button {
                         do { zipping = try store.backup(scope: "note", what: note.path) }
                         catch { trouble = error.localizedDescription }

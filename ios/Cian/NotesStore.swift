@@ -1360,7 +1360,7 @@ final class NotesStore: ObservableObject {
     func move(_ note: Note, to book: String?) throws {
         guard let root else { return }
         let dir = book.map { root.appendingPathComponent($0) } ?? root
-        // **同じ保存ディレクトリの中なら `root` を渡す**（core が絵を連れて行き、
+        // **同じ保存ディレクトリの中なら `root` を渡す**（core が画像を連れて行き、
         // 同期に「名前が変わった」と憶えさせる・依頼 496）。別の保存ディレクトリへ
         // 渡るときは渡さない ── 向こうの帳面に、外の道を書かせない。
         var p: [String: Any] = ["path": note.path, "dir": dir.path]
@@ -1369,7 +1369,7 @@ final class NotesStore: ObservableObject {
         reload()
     }
 
-    /// 絵の行に、大きさの指示を書く／外す（依頼 420）。**決めるのは core**
+    /// 画像の行に、大きさの指示を書く／外す（依頼 420）。**決めるのは core**
     /// ── 窓と電話が別々に文字列をいじると、片方で付けた大きさをもう片方が
     /// 読めない形になる。
     func sized(_ line: String, width: String?) throws -> String {

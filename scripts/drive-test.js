@@ -243,13 +243,13 @@ const ok = (yes, what, got) => {
         const famDir = [...fd.files().values()].find((f) => f.appProperties.amber === 'dir' && f.appProperties.rel === '家族');
         ok(raw.name === '買いもの.md' && famDir && raw.parents.length === 1 && raw.parents[0] === famDir.id, 'Drive の名前と親フォルダも付け替わる', { name: raw.name, parents: raw.parents });
         ok(await d3.download(a.id) === '# 買い物\n\n- 牛乳 2本\n', '中身はそのまま');
-        // 絵（依頼 497）── bytes のまま上がって、bytes のまま下りる。
+        // 画像（依頼 497）── bytes のまま上がって、bytes のまま下りる。
         const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2, 255, 254, 0x0d, 0x0a, 0x2d, 0x2d]);
-        const pic = await d3.upload({ rel: 'attachments/絵.png', bytes: png, print: 'p9' });
+        const pic = await d3.upload({ rel: 'attachments/画像.png', bytes: png, print: 'p9' });
         const back = await d3.downloadBytes(pic.id);
-        ok(Buffer.isBuffer(back) && back.equals(png), '絵は bytes のまま往復する（改行や境界に似た bytes があっても）', back && back.length);
+        ok(Buffer.isBuffer(back) && back.equals(png), '画像は bytes のまま往復する（改行や境界に似た bytes があっても）', back && back.length);
         const raw2 = fd.files().get(pic.id);
-        ok(raw2.mimeType === 'image/png' && raw2.appProperties.rel === 'attachments/絵.png', '絵の種類と道が札に', raw2 && raw2.mimeType);
+        ok(raw2.mimeType === 'image/png' && raw2.appProperties.rel === 'attachments/画像.png', '画像の種類と道が札に', raw2 && raw2.mimeType);
         const got = await fetch(fd.url + '/_get?rel=' + encodeURIComponent('家族/買いもの.md')).then((r) => r.json());
         ok(got.text === '# 買い物\n\n- 牛乳 2本\n', '向こうの端末を演じる口からも同じ字が見える');
         fd.close();

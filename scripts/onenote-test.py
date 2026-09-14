@@ -227,9 +227,9 @@ def t_structure(tmp):
     check("リンクが [..](..) になる", "[外](https://example.com)" in text)
     check("表が組まれる（見出しの行あり）",
           "| 名 | 値 |\n| --- | --- |\n| あ | い |" in text)
-    check("絵が attachments/ に落ちる",
+    check("画像が attachments/ に落ちる",
           (out / "仕事" / "議事録" / "attachments" / "9月の定例_001.png").is_file())
-    check("絵へのリンクが相対", "](attachments/9月の定例_001.png)" in text)
+    check("画像へのリンクが相対", "](attachments/9月の定例_001.png)" in text)
 
 
 def t_incremental(tmp):
@@ -322,29 +322,29 @@ def t_prune_error(tmp):
 
 
 def t_stale_images(tmp):
-    print("書き直したページの、古い絵 ──")
+    print("書き直したページの、古い画像 ──")
     out = tmp / "img"
     app = FakeOneNote(hierarchy(), pages_for(p1_images=2))
     run(app, out)
     att = out / "仕事" / "議事録" / "attachments"
-    check("下ごしらえ: 絵が二枚", (att / "9月の定例_001.png").is_file()
+    check("下ごしらえ: 画像が二枚", (att / "9月の定例_001.png").is_file()
           and (att / "9月の定例_002.png").is_file())
 
-    # 隣のページの絵（巻き込まれてはいけない）
+    # 隣のページの画像（巻き込まれてはいけない）
     (att / "9月の定例録_001.png").write_bytes(PNG)
 
     app2 = FakeOneNote(hierarchy(mod_p1="2026-09-14T09:00:00.000Z"),
                        pages_for(mod_p1="2026-09-14T09:00:00.000Z", p1_images=1))
     run(app2, out)
-    check("いま使っている絵は残る", (att / "9月の定例_001.png").is_file())
-    check("使わなくなった絵は消える", not (att / "9月の定例_002.png").exists())
-    check("名前が似ているだけの絵は巻き込まない", (att / "9月の定例録_001.png").is_file())
+    check("いま使っている画像は残る", (att / "9月の定例_001.png").is_file())
+    check("使わなくなった画像は消える", not (att / "9月の定例_002.png").exists())
+    check("名前が似ているだけの画像は巻き込まない", (att / "9月の定例録_001.png").is_file())
 
     # --no-images のときに全部消したりしない
     app3 = FakeOneNote(hierarchy(mod_p1="2026-09-14T10:00:00.000Z"),
                        pages_for(mod_p1="2026-09-14T10:00:00.000Z", p1_images=1))
     run(app3, out, "--no-images")
-    check("--no-images でも既にある絵は消さない", (att / "9月の定例_001.png").is_file())
+    check("--no-images でも既にある画像は消さない", (att / "9月の定例_001.png").is_file())
 
 
 def t_sync(tmp):

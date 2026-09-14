@@ -330,7 +330,7 @@ final class Drive {
         return id
     }
 
-    /// 向こうにあるノートと絵の一覧。
+    /// 向こうにあるノートと画像の一覧。
     func list() async throws -> [Remote] {
         var out: [Remote] = []
         var pageToken = ""
@@ -355,7 +355,7 @@ final class Drive {
                 "heic": "image/heic", "bmp": "image/bmp", "svg": "image/svg+xml"][e] ?? "application/octet-stream"
     }
 
-    /// 一本上げる（`id` があれば上書き）。字か絵。返すのは新しい id。
+    /// 一本上げる（`id` があれば上書き）。字か画像。返すのは新しい id。
     func upload(rel: String, text: String? = nil, bytes: Data? = nil, print: String, id: String?) async throws -> String {
         let relDir = rel.contains("/") ? String(rel[..<rel.lastIndex(of: "/")!]) : ""
         let parent = id == nil ? try await dir(relDir) : nil
@@ -381,7 +381,7 @@ final class Drive {
         let (data, _) = try await api("/drive/v3/files/" + Self.q(id) + "?alt=media")
         return String(data: data, encoding: .utf8) ?? ""
     }
-    /// 一本下ろす（絵・bytes のまま）。
+    /// 一本下ろす（画像・bytes のまま）。
     func downloadBytes(_ id: String) async throws -> Data {
         let (data, _) = try await api("/drive/v3/files/" + Self.q(id) + "?alt=media")
         return data

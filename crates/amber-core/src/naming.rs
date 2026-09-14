@@ -12,7 +12,7 @@
 //!    とき**に。題が空なら作った時刻の名前のまま。
 //! 3. 使えない字は**全角に置き換える**。先頭の `.` は外す。長い題は 80 字で切る。
 //! 4. 同じ題は `買い物.2.md` `買い物.3.md`。番号は**加算**（空き番を埋めない）。
-//! 5. 改名に付いてくるもの: 絵（`attachments/<名前>-…`）と本文のリンク・履歴の棚・
+//! 5. 改名に付いてくるもの: 画像（`attachments/<名前>-…`）と本文のリンク・履歴の棚・
 //!    共有から戻る場所の憶え・同期の憶え。
 //! 6. 同期では「削除＋新規」ではなく**名前が変わった**として運ぶ（`sync::moved`）。
 //! 7. すでにある時刻名のノートは、一度だけ題の名前に揃える（`tidy_names`）。
@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 /// 題からファイル名の幹（拡張子なし）。**使えない字は全角に。**
 ///
-/// `file_stem`（絵の名前に使う）は使えない字を `-` に潰すが、ここは読める
+/// `file_stem`（画像の名前に使う）は使えない字を `-` に潰すが、ここは読める
 /// ように全角へ置き換える ── 「A/B」の題のノートは `A／B.md`。
 pub fn title_name(title: &str) -> Option<String> {
     let mut out = String::new();
@@ -140,7 +140,7 @@ pub fn settle(root: &Path, note: &Path) -> anyhow::Result<Option<(PathBuf, bool)
 
 /// 一本を `to` へ。**付いてくるものを一つ残らず連れて行く。**
 ///
-/// 絵・本文のリンク・履歴の棚・共有から戻る場所・同期の憶え。`record_move`
+/// 画像・本文のリンク・履歴の棚・共有から戻る場所・同期の憶え。`record_move`
 /// なら同期の憶えに「まだ向こうに伝えていない改名」を残す（向こうの改名を
 /// こちらに写すときは残さない ── 向こうはもう知っている）。
 pub fn relocate(root: &Path, from: &Path, to: &Path, record_move: bool) -> anyhow::Result<bool> {
@@ -153,13 +153,13 @@ pub fn relocate(root: &Path, from: &Path, to: &Path, record_move: bool) -> anyho
     let Some(to_dir) = to.parent() else { anyhow::bail!("道がありません") };
     std::fs::create_dir_all(to_dir)?;
 
-    // ── 絵と、本文のリンク ──
+    // ── 画像と、本文のリンク ──
     let fresh = bring_pictures(from, to)?;
 
     // ── ノートそのもの ──
     std::fs::rename(from, to)?;
     // **書き戻すのは動いたあと、新しい場所へ。** 先に書くと、移動が転んだ
-    // ときに「元の場所にあるノートが、向こうの絵を指している」状態が残る。
+    // ときに「元の場所にあるノートが、向こうの画像を指している」状態が残る。
     let rewrote = match fresh {
         Some(t) => {
             std::fs::write(to, t)?;
@@ -171,27 +171,27 @@ pub fn relocate(root: &Path, from: &Path, to: &Path, record_move: bool) -> anyho
     Ok(rewrote)
 }
 
-/// ノートが連れて行く絵を、引っ越し先の隣へ。返すのは書き直した本文
+/// ノートが連れて行く画像を、引っ越し先の隣へ。返すのは書き直した本文
 /// （直すところが無ければ `None`）。**ノートそのものは動かさない** ──
-/// 呼ぶ側が最後に動かす（絵が置けないなら、ノートも動かさないため）。
+/// 呼ぶ側が最後に動かす（画像が置けないなら、ノートも動かさないため）。
 ///
 /// **名前では見分けない ── 本文が指しているものを運ぶ。**（依頼 576）
 /// 前は `attachments/<幹>-<時計>` の付け方で見分けていたので、改名で幹が
-/// 変われば見失い（だから改名のたびに絵まで改名していた）、その付け方でない
-/// 絵 ── OneNote から写した `<ページ名>_001.png` など ── は拾えなかった。
+/// 変われば見失い（だから改名のたびに画像まで改名していた）、その付け方でない
+/// 画像 ── OneNote から写した `<ページ名>_001.png` など ── は拾えなかった。
 ///
-/// ほかのノートも指している絵は、動かさずに写す。動かすと、残ったほうは
-/// 一文字も触られていないのに絵を失う。写せば両方が自分の隣の
+/// ほかのノートも指している画像は、動かさずに写す。動かすと、残ったほうは
+/// 一文字も触られていないのに画像を失う。写せば両方が自分の隣の
 /// `attachments/` を見たままで、`..` の付いた道が一本も生まれない ──
 /// ノートはいつでも自分と隣の `attachments/` だけで持ち運べる。
 ///
-/// 探すのは移動元のフォルダの中だけでよい。`..` が無い以上、その絵を
+/// 探すのは移動元のフォルダの中だけでよい。`..` が無い以上、その画像を
 /// 指しうるノートは同じフォルダにしか居ない。
 pub(crate) fn bring_pictures(from: &Path, to: &Path) -> anyhow::Result<Option<String>> {
     let (Some(from_dir), Some(to_dir)) = (from.parent(), to.parent()) else {
         return Ok(None);
     };
-    // **同じフォルダでの改名では、絵に触らない。** 絵は動かず、本文の
+    // **同じフォルダでの改名では、画像に触らない。** 画像は動かず、本文の
     // `attachments/…` も変わらないので、ノートからは今までどおり見える。
     if from_dir == to_dir {
         return Ok(None);
@@ -224,9 +224,9 @@ pub(crate) fn bring_pictures(from: &Path, to: &Path) -> anyhow::Result<Option<St
         taken.push(free.clone());
         if free != name {
             // 符号が読めないノートは書き戻せない ── リンクを直せないまま
-            // 絵の名前だけ変えると、黙って見失う。
+            // 画像の名前だけ変えると、黙って見失う。
             if !utf8 {
-                anyhow::bail!("{} に同じ名前の絵があります: {}", att_to.display(), name);
+                anyhow::bail!("{} に同じ名前の画像があります: {}", att_to.display(), name);
             }
             renamed.push((name.clone(), free.clone()));
         }
@@ -247,7 +247,7 @@ pub(crate) fn bring_pictures(from: &Path, to: &Path) -> anyhow::Result<Option<St
         return Ok(None);
     }
     // `%E6%AC%A1` と書かれたリンクは直せない（ここは字のまま探す）。名前が
-    // ぶつかるのは同じ名前で中身の違う絵が先に居たときだけなので、追って
+    // ぶつかるのは同じ名前で中身の違う画像が先に居たときだけなので、追って
     // いない ── 直せなかったぶんは、前の版と同じ姿で残る。
     let mut out = text.clone();
     for (a, b) in &renamed {
@@ -265,7 +265,7 @@ fn pointed_at_by_others(dir: &Path, me: &Path) -> Vec<PathBuf> {
         if at == me || !is_note(&at) {
             continue;
         }
-        // Shift_JIS のノートも読む。飛ばすと、その一本が指していた絵を
+        // Shift_JIS のノートも読む。飛ばすと、その一本が指していた画像を
         // 「誰も指していない」と見て運び去る。
         if let Some((text, _)) = note_text(&at) {
             out.extend(crate::spare::points_at(&text, dir));
@@ -455,13 +455,13 @@ mod tests {
         assert_eq!(settle(d.path(), &at).unwrap(), None);
     }
 
-    /// ノート二本が同じ絵を指しているところから、片方を動かす。
+    /// ノート二本が同じ画像を指しているところから、片方を動かす。
     ///
-    /// **前の版は、ここで残ったほうを壊していた。** 絵を「幹が一致するもの」
+    /// **前の版は、ここで残ったほうを壊していた。** 画像を「幹が一致するもの」
     /// で見分けて連れ去るので、`会議.md` は一文字も触られていないのに
-    /// 絵を失う ── 気づくのは次に開いた日で、原因からは遠い。
+    /// 画像を失う ── 気づくのは次に開いた日で、原因からは遠い。
     #[test]
-    fn 二本が指している絵は_動かさずに写す() {
+    fn 二本が指している画像は_動かさずに写す() {
         let d = root();
         let r = d.path();
         std::fs::create_dir_all(r.join("attachments")).unwrap();
@@ -477,7 +477,7 @@ mod tests {
         assert_eq!(
             std::fs::read(r.join("attachments/段取り-1.png")).unwrap(),
             vec![7u8],
-            "残ったノートの絵まで連れ去っている",
+            "残ったノートの画像まで連れ去っている",
         );
         // どちらのノートも、**自分の隣**を見たまま。`..` は一本も生えない。
         for at in [&to, &other] {
@@ -485,13 +485,13 @@ mod tests {
             assert!(!text.contains(".."), "`..` の道が生えた: {text}");
             let here = at.parent().unwrap();
             let seen = crate::spare::points_at(&text, here);
-            assert!(seen.iter().any(|p| p.is_file()), "{at:?} から絵が見えない: {seen:?}");
+            assert!(seen.iter().any(|p| p.is_file()), "{at:?} から画像が見えない: {seen:?}");
         }
     }
 
-    /// 誰も指していない絵は、連れて行かない ── それは「使われていない画像」。
+    /// 誰も指していない画像は、連れて行かない ── それは「使われていない画像」。
     #[test]
-    fn 一本しか指していない絵は_連れて行く() {
+    fn 一本しか指していない画像は_連れて行く() {
         let d = root();
         let r = d.path();
         std::fs::create_dir_all(r.join("attachments")).unwrap();
@@ -502,15 +502,15 @@ mod tests {
 
         crate::note::move_to(&mine, &r.join("仕事")).unwrap();
 
-        assert!(r.join("仕事/attachments/段取り-1.png").is_file(), "絵が付いてこない");
+        assert!(r.join("仕事/attachments/段取り-1.png").is_file(), "画像が付いてこない");
         assert!(!r.join("attachments/段取り-1.png").exists(), "元の場所にも残っている");
-        assert!(r.join("attachments/誰も指さない.png").is_file(), "指されていない絵まで連れ去った");
+        assert!(r.join("attachments/誰も指さない.png").is_file(), "指されていない画像まで連れ去った");
     }
 
     /// 名前の付け方では見分けない ── OneNote から写した `<ページ名>_001.png`
-    /// のような絵も、本文が指していれば付いてくる。
+    /// のような画像も、本文が指していれば付いてくる。
     #[test]
-    fn 名前の形が違う絵でも_本文が指していれば付いてくる() {
+    fn 名前の形が違う画像でも_本文が指していれば付いてくる() {
         let d = root();
         let r = d.path();
         std::fs::create_dir_all(r.join("attachments")).unwrap();
@@ -525,12 +525,12 @@ mod tests {
 
         crate::note::move_to(&mine, &r.join("仕事")).unwrap();
 
-        assert!(r.join("仕事/attachments/9月の定例_001.png").is_file(), "幹の形が違う絵が付いてこない");
-        assert!(r.join("仕事/attachments/2026-09-06 19-18-30-1.png").is_file(), "空白入りの絵が付いてこない");
+        assert!(r.join("仕事/attachments/9月の定例_001.png").is_file(), "幹の形が違う画像が付いてこない");
+        assert!(r.join("仕事/attachments/2026-09-06 19-18-30-1.png").is_file(), "空白入りの画像が付いてこない");
     }
 
     #[test]
-    fn 絵とリンクと履歴と憶えが_付いてくる() {
+    fn 画像とリンクと履歴と憶えが_付いてくる() {
         let d = root();
         let r = d.path();
         let at = r.join("2026-09-06 19-18-30.md");
@@ -545,21 +545,21 @@ mod tests {
 
         let (to, rewrote) = settle(r, &at).unwrap().unwrap();
         assert_eq!(to, r.join("旅.md"));
-        // **改名では、絵に触らない**（依頼 576）。絵の名前がノートの名前を
+        // **改名では、画像に触らない**（依頼 576）。画像の名前がノートの名前を
         // 追いかける必要は無い ── 同じフォルダに居るのだから、本文の
         // `attachments/…` はそのままで、ノートからは今までどおり見える。
-        // 追いかけさせていた版は、**同じ絵を指しているもう一本のノートを
+        // 追いかけさせていた版は、**同じ画像を指しているもう一本のノートを
         // 黙って壊していた**（そのノートは一文字も触られていないのに）。
         assert!(!rewrote, "改名で本文を書き直している");
-        assert!(!r.join("attachments/旅-1.png").exists(), "絵まで改名している");
-        assert!(r.join("attachments/2026-09-06 19-18-30-1.png").is_file(), "絵が消えた");
+        assert!(!r.join("attachments/旅-1.png").exists(), "画像まで改名している");
+        assert!(r.join("attachments/2026-09-06 19-18-30-1.png").is_file(), "画像が消えた");
         assert_eq!(
             std::fs::read_to_string(&to).unwrap(),
             "# 旅\n![](attachments/2026-09-06 19-18-30-1.png)\n",
         );
-        // 依頼 492 の「絵も付いてくる」── **ノートから絵が見え続ける**こと。
+        // 依頼 492 の「画像も付いてくる」── **ノートから画像が見え続ける**こと。
         let link = crate::spare::points_at(&std::fs::read_to_string(&to).unwrap(), r);
-        assert!(link.iter().any(|p| p.is_file()), "ノートから絵が見えない: {link:?}");
+        assert!(link.iter().any(|p| p.is_file()), "ノートから画像が見えない: {link:?}");
         assert!(crate::history::shelf(r, &to).unwrap().is_dir(), "履歴の棚が付いてこない");
         assert_eq!(crate::notebook::read(r).came.get("旅.md").map(String::as_str), Some("くらし"));
         let was = crate::sync::recall(r, "drive");

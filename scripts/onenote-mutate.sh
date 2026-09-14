@@ -64,11 +64,11 @@ mutate "取れなかったページを守らない" "前の版が残る" \
         try:'
 mutate "落ちても 0 を返す" "落ちた回は 0 を返さない" \
     'return 1 if stats["errors"] else 0' 'return 0'
-mutate "--no-images の守りを外す" "--no-images でも既にある絵は消さない" \
+mutate "--no-images の守りを外す" "--no-images でも既にある画像は消さない" \
     'if not args.no_images and page_img_dir.is_dir():' 'if page_img_dir.is_dir():'
-mutate "いま使っている絵まで消す" "いま使っている絵は残る" \
+mutate "いま使っている画像まで消す" "いま使っている画像は残る" \
     'if old.name not in conv.images:' 'if True:'
-mutate "隣のページの絵まで巻き込む" "名前が似ているだけの絵は巻き込まない" \
+mutate "隣のページの画像まで巻き込む" "名前が似ているだけの画像は巻き込まない" \
     'page_img_dir.glob(f"{md_path.stem}_*")' 'page_img_dir.glob("*")'
 mutate "鎖を掛けない" "二本目は断られる" \
     'fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)' 'pass'

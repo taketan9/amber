@@ -234,7 +234,7 @@ fn rename_local(here: &mut [Here], was: &mut [Was], from: &str, to: &str) {
     }
 }
 
-/// **絵も運ぶ**（依頼 497）── `attachments/` の中の絵を、ノートと同じ手順書に乗せる。
+/// **画像も運ぶ**（依頼 497）── `attachments/` の中の画像を、ノートと同じ手順書に乗せる。
 ///
 /// 道は `仕事/attachments/段取り-123.png` のように、ノートと同じルートからの道。
 /// 中身は字ではないので混ぜられない ── 両方が変わったら、こちらを残して向こうの
@@ -274,7 +274,7 @@ pub fn assets(root: &std::path::Path) -> Vec<Here> {
     out
 }
 
-/// 絵の道か（同じ手順書の中で、字として読まないもの）。
+/// 画像の道か（同じ手順書の中で、字として読まないもの）。
 pub fn is_asset(rel: &str) -> bool {
     rel.rsplit_once('/').map(|(d, _)| d.ends_with("attachments") || d == "attachments").unwrap_or(false)
         && crate::spare::is_picture(rel.rsplit('/').next().unwrap_or(rel))
@@ -701,7 +701,7 @@ mod tests {
     }
 
     #[test]
-    fn 絵も_手順書に乗る() {
+    fn 画像も_手順書に乗る() {
         let d = tempfile::tempdir().unwrap();
         let r = d.path();
         std::fs::create_dir_all(r.join("attachments")).unwrap();

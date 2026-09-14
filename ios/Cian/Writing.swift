@@ -35,7 +35,7 @@ struct NoteView: View {
     @State private var choosing = false
     /// 絵文字の板を出しているか（依頼 418）。
     @State private var facing = false
-    /// 絵の大きさを訊いているか（依頼 420）。
+    /// 画像の大きさを訊いているか（依頼 420）。
     @State private var sizing = false
     /// 表示の面で叩かれた、触れないかたまり・リンク（依頼 403）。
     /// **どの小窓を出すか**を決めるのはこちら（閉じると空になる）。
@@ -168,7 +168,7 @@ struct NoteView: View {
     /// **押されたもの。** 窓は面の中に吹き出しを描くが、電話は iOS の小窓で
     /// 訊く ── 面の中に自前で描くと、鍵盤や選び目の丸とぶつかる。
     struct Tapped: Identifiable {
-        /// `fig`（図）・`pre`（枠）・`img`（絵）・`link`。
+        /// `fig`（図）・`pre`（枠）・`img`（画像）・`link`。
         let kind: String
         /// 図と枠は元の字、リンクは行き先。
         let at: String
@@ -187,8 +187,8 @@ struct NoteView: View {
     /// 押して選んだ結果が `![猫 w:200px](…)` という**打てる字**として残る ──
     /// あとから記法で直せるし、amber の外でも読める（芯の 1）。
     ///
-    /// 書き換えるのは**その一行だけ** ── 同じ絵を二度貼っている人の、
-    /// もう一方まで変えない（`held.at` は押された絵の元の字）。
+    /// 書き換えるのは**その一行だけ** ── 同じ画像を二度貼っている人の、
+    /// もう一方まで変えない（`held.at` は押された画像の元の字）。
     private func size(_ width: String?) {
         guard let was = held?.at, !was.isEmpty else { return }
         do {
@@ -405,7 +405,7 @@ struct NoteView: View {
                 }
                 .confirmationDialog("画像", isPresented: showing("img"),
                                     titleVisibility: .visible) {
-                    // **絵の大きさは、押して選べる**（依頼 420）── 記法を
+                    // **画像の大きさは、押して選べる**（依頼 420）── 記法を
                     // 覚えていない人が、いちばん変えたがるのがこれ。
                     Button("大きさ…") { sizing = true }
                     Button("消す", role: .destructive) { hand.did("drop") }
