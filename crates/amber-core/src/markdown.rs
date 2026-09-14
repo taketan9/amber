@@ -22,6 +22,9 @@ pub enum Inline {
     Code(String),
     Bold(String),
     Italic(String),
+    /// `***both***` — 太字と斜体。二つ持つので入れ子にしたくなるが、この
+    /// 走査は入れ子を読まない（`inline` の註）ので、一つの札にしてある。
+    BoldItalic(String),
     Strike(String),
     Link {
         text: String,
@@ -44,6 +47,7 @@ impl Inline {
             | Inline::Code(t)
             | Inline::Bold(t)
             | Inline::Italic(t)
+            | Inline::BoldItalic(t)
             | Inline::Strike(t) => t,
             Inline::Link { text, .. } => text,
             Inline::Colored { text, .. } => text,
@@ -100,6 +104,28 @@ pub fn inline(text: &str) -> Vec<Inline> {
                 flush(&mut out, &mut buf);
                 out.push(Inline::Code(chars[i + 1..i + 1 + end].iter().collect()));
                 i += end + 2;
+                continue;
+            }
+        }
+
+        // Bold and italic together, `***…***` or `___…___`.
+        //
+        // **`**` より先に見る。** 後ろに置くと `**` が先に食い、閉じの
+        // `***` の一つ目までを中身にしてしまう ── 太字の頭にアスタリスクが
+        // 一つ生えて出る。これは窓だけの姿だった。iPhone は Apple の
+        // `AttributedString` に渡していて、そちらは正しく読む。
+        //
+        // 閉じが無ければ何もせず下の `**` に落ちるので、`***閉じていない**`
+        // は今日と同じに読まれる。
+        if (c == '*' || c == '_')
+            && i + 2 < chars.len()
+            && chars[i + 1] == c
+            && chars[i + 2] == c
+        {
+            if let Some(end) = find_run3(&chars, i + 3, c) {
+                flush(&mut out, &mut buf);
+                out.push(Inline::BoldItalic(chars[i + 3..end].iter().collect()));
+                i = end + 3;
                 continue;
             }
         }
@@ -161,6 +187,18 @@ pub fn inline(text: &str) -> Vec<Inline> {
     }
     flush(&mut out, &mut buf);
     out
+}
+
+/// The start of a three-character run of `mark` at or after `from`.
+fn find_run3(chars: &[char], from: usize, mark: char) -> Option<usize> {
+    let mut i = from;
+    while i + 2 < chars.len() {
+        if chars[i] == mark && chars[i + 1] == mark && chars[i + 2] == mark {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
 }
 
 /// The start of a two-character `marker` run at or after `from`.
@@ -413,6 +451,11 @@ fn inline_html(text: &str) -> String {
                 out.push_str("<em>");
                 out.push_str(&esc(&t));
                 out.push_str("</em>");
+            }
+            Inline::BoldItalic(t) => {
+                out.push_str("<strong><em>");
+                out.push_str(&esc(&t));
+                out.push_str("</em></strong>");
             }
             Inline::Strike(t) => {
                 out.push_str("<del>");
@@ -1196,6 +1239,36 @@ mod tests {
         assert!(out.contains("<span style=\"color:#0e93a8\">シアン</span>"), "{out}");
         assert!(!out.contains("e=&quot;color"), "span の途中から字が出ている: {out}");
         assert!(out.contains("と、"), "間の字が食われた: {out}");
+    }
+
+    #[test]
+    fn bold_and_italic_together_reads_as_both() {
+        // 同じノートが、窓と iPhone で違って見えていた（わけは `inline`）。
+        for line in ["***両方***", "___両方___"] {
+            let out = to_html(&lines(line));
+            assert!(out.contains("<strong><em>両方</em></strong>"), "{line}: {out}");
+            assert!(!out.contains("*両方"), "印が字として出ている {line}: {out}");
+            assert!(!out.contains("_両方"), "印が字として出ている {line}: {out}");
+        }
+        assert_eq!(inline("***両方***"), vec![Inline::BoldItalic("両方".into())]);
+    }
+
+    #[test]
+    fn three_marks_that_do_not_close_fall_back_to_what_they_were() {
+        // 「三つ見えたら必ず重ねがけ」にすると、閉じていない印のある行が
+        // 今日と違う形に読まれる ── 直したつもりの隣で、触っていない行が変わる。
+        let out = to_html(&lines("***閉じていない**"));
+        assert!(out.contains("<strong>*閉じていない</strong>"), "{out}");
+        // 二つ並んだ太字は、重ねがけではない。
+        assert_eq!(
+            inline("**太****い**"),
+            vec![Inline::Bold("太".into()), Inline::Bold("い".into())],
+        );
+        assert_eq!(inline("2 * 3 = 6"), vec![Inline::Text("2 * 3 = 6".into())]);
+        assert_eq!(inline("`a***b***c`"), vec![Inline::Code("a***b***c".into())]);
+        // **閉じは三つ数える。** 中の `**` で閉じたことにすると、そこから
+        // 三つ飛ぶので `b` が消えたまま出る ── 見え方ではなく、字が落ちる。
+        assert_eq!(inline("***a**b***"), vec![Inline::BoldItalic("a**b".into())]);
     }
 
     #[test]
