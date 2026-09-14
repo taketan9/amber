@@ -7737,6 +7737,23 @@ function tagColor(t) {
     return LANE_COLORS[tagOrder.indexOf(t) % LANE_COLORS.length];
 }
 
+/// **段の並び順**（依頼 562・本人「上下を並べ替えられるようにしたい」）。
+///
+/// 鍵を並べた一覧。ここに居るものが**この順で先に**来て、居ないものは
+/// いままでの決まり（自分 → 人のタグ → この端末 → よそ → チーム、同じ
+/// 種類なら名前順）で後ろに続く ── **知らない人が増えても、決めた並びは
+/// 壊れない**（CSV は毎日書き換わるので、名前で固定すると消えた人の穴が空く）。
+let calOrder = [];
+
+/// **どれが自分か**（依頼 562・本人「日・週・月は僕じゃない人の予定に
+/// なってそうだ」）。
+///
+/// チームの紙は**人ごとの表**なので、日・週・月に全員ぶんを重ねると、
+/// 自分の予定が他人の予定に埋もれる ── 本人が「自分の予定だけ出す」を
+/// 選んだ（2026-09-14）。**並べて表示は別**（あれは全員を見るための面）。
+/// 空なら、いままでどおり全員出す。
+let calMe = '';
+
 /// この端末が見たことのあるタグ（依頼 544）。**選ばせるために憶えておく** ──
 /// 毎回名前を打たせない。予定から読めたものと、人が足したものの両方。
 let tagsKnown = [];
@@ -7786,6 +7803,10 @@ function inGroup(s) {
 function calShown() {
     return calSlots.filter((s) => {
         if (s.kind !== 'note' && calHide.includes(whoOf(s).key)) return false;
+        // **自分を決めてあるなら、チームの紙は自分のぶんだけ**（依頼 562）。
+        // ここは日・週・月が通る道で、並べて表示は通らない（あちらは
+        // `calSlots` を直に読む）── 全員を見る面は、全員のまま。
+        if (s.kind === 'team' && calMe && whoOf(s).key !== calMe) return false;
         if (!groupCal || calSide === 'both') return true;
         return calSide === 'group' ? inGroup(s) : !inGroup(s);
     });
@@ -8050,6 +8071,19 @@ const mins = (t) => {
 /// 予定は「その時刻」しか持たない）は、三十分ぶんの高さにする ──
 /// 潰れて読めないより、少し大きいほうがよい。
 const HOUR_PX = 56;   // index.html の 3.5rem と合わせる
+/// **出す時間帯**（依頼 562・本人が「設定で決める・既定 8〜19」を選んだ）。
+///
+/// 会社の予定表は朝から夕方に詰まっていて、真夜中は一日も使わない ──
+/// 24 時間ぶん敷くと、**見える幅が半分以下**になり、三十分の会議の件名が
+/// 読めなくなる（本人・2026-09-14）。8〜19 なら同じ画面幅で一時間あたりが
+/// 約二倍になる。**家での使い方もあるので、設定で変えられる。**
+let calFrom = 8;
+let calTill = 19;
+/// その時間帯に、時間が何つぶんあるか（目盛りと帯の高さの土台）。
+const calHours = () => Array.from({ length: Math.max(1, calTill - calFrom) }, (_, i) => calFrom + i);
+/// 上からの位置（分 → px）。**時間帯の頭を 0 とする。**
+const calTop = (m) => ((m - calFrom * 60) / 60) * HOUR_PX;
+
 function drawHours() {
     const box = el('cal');
     const days = calView === 'day' ? [calDay] : calDaysOf(weekOf(calDay));
@@ -8076,8 +8110,7 @@ function drawHours() {
     // 時刻の目盛りと、日ごとの帯。
     const cols = box.querySelector('.cols');
     cols.style.gridTemplateColumns = '3rem repeat(' + days.length + ', 1fr)';
-    const hours = [];
-    for (let h = 0; h < 24; h += 1) hours.push(h);
+    const hours = calHours();
     cols.innerHTML = '<div class="clock">'
         + hours.map((h) => '<div>' + h + '</div>').join('') + '</div>'
         + days.map((d) => {
@@ -8088,10 +8121,20 @@ function drawHours() {
                 const till = mins(s.to);
                 const high = Math.max(18, ((till !== null && till > from ? till - from : 30)
                     / 60) * HOUR_PX);
-                return '<div class="blk ' + s.kind + evMark(s) + '"'
+                // **時間帯の外は、上下の端に寄せる** ── 落とすと「その日は
+                // 空いている」と読める。位置は嘘になるが、在ることは本当。
+                const top = Math.min(Math.max(calTop(from), 0), (hours.length * HOUR_PX) - high);
+                const out = from < calFrom * 60 || from >= calTill * 60 ? ' out' : '';
+                // **狭い札は、時刻を省いて件名だけ**（依頼 562・本人）──
+                // 時刻は置かれている位置が言っている。二段に組むので、
+                // 高さが足りるものだけ時刻を出す。
+                const tall = high >= 34;
+                return '<div class="blk ' + s.kind + evMark(s) + out + (tall ? ' two' : '') + '"'
                     + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
-                    + ' style="top:' + ((from / 60) * HOUR_PX) + 'px;height:' + high + 'px">'
-                    + escapeHtml(s.at) + ' ' + escapeHtml(s.title) + '</div>';
+                    + ' title="' + escapeAttr(s.at + ' ' + s.title) + '"'
+                    + ' style="top:' + top + 'px;height:' + high + 'px">'
+                    + (tall ? '<i>' + escapeHtml(s.at) + '</i>' : '')
+                    + '<b>' + escapeHtml(s.title) + '</b></div>';
             }).join('');
             return '<div class="lane" data-day="' + d + '">'
                 + hours.map(() => '<div class="hr"></div>').join('') + blocks + '</div>';
@@ -8102,8 +8145,8 @@ function drawHours() {
     const early = calSlotsShown
         .filter((s) => days.includes(s.day) && s.at)
         .map((s) => mins(s.at)).filter((n) => n !== null);
-    const from = early.length ? Math.min(...early) : 7 * 60;
-    cols.scrollTop = Math.max(0, (from / 60 - 0.5) * HOUR_PX);
+    const from = early.length ? Math.min(...early) : calFrom * 60;
+    cols.scrollTop = Math.max(0, calTop(from) - HOUR_PX * 0.5);
 }
 
 /* ── みんなの予定を、人ごとに並べる（依頼 471） ── */
@@ -8166,6 +8209,8 @@ function crowdLanes(days, whole) {
     for (const w of teamPeople) put('team:' + (w.mail || w.name), w.name, 'team');
     // 人の段は、予定表の段より上に ── グループを見ているときに知りたいのは
     // 「だれの用事か」のほうで、どの予定表から来たかではない。
+    // **憶えた並びが先。** 居ないものは、いままでの決まりで後ろに続く。
+    const fixed = (l) => { const i = calOrder.indexOf(l.key); return i < 0 ? 9999 : i; };
     const rank = (l) => (l.key === 'me' ? 0 : l.kind === 'tag' ? 1
         : l.kind === 'here' ? 2 : l.kind === 'away' ? 3 : 4);
     // **自分のノートの段は、空なら出さない**（依頼 549・本人が決めた）。
@@ -8174,7 +8219,8 @@ function crowdLanes(days, whole) {
     // 「書き出せていない」と「本当に空」が読めなくなる。逆の決まりなので、
     // 消すのは `me` だけと名指しする。
     if (!lanes.get('me').slots.length) lanes.delete('me');
-    const out = [...lanes.values()].sort((a, b) => rank(a) - rank(b)
+    const out = [...lanes.values()].sort((a, b) => fixed(a) - fixed(b)
+        || rank(a) - rank(b)
         || a.name.localeCompare(b.name, 'ja'));
     // **選んだ人だけ並べる。** `whole` が真なら、選ぶための一覧なので全員。
     return whole ? out : out.filter((l) => !calHide.includes(l.key));
@@ -8182,7 +8228,7 @@ function crowdLanes(days, whole) {
 
 /// 一時間ぶんの横幅（日のとき）。字が読める幅を確保して、足りなければ
 /// 横に流す ── 一日を画面幅に押し込むと、三十分の会議が線になる。
-const CROWD_HOUR = 84;
+const CROWD_HOUR = 168;
 
 /// **横に時間（または日付）、縦に人。**
 function drawCrowd() {
@@ -8192,13 +8238,13 @@ function drawCrowd() {
     // **一日は横に流す。週は流さない。** 一日を画面幅に押し込むと三十分の
     // 会議が線になるので幅を決め打ちにするが、週の七日は画面に収まる
     // ほうがよい ── 七日のうち五日しか見えない週の表は、週の表ではない。
-    const wide = calView === 'day' ? ' style="width:' + 24 * CROWD_HOUR + 'px"' : '';
+    const wide = calView === 'day' ? ' style="width:' + calHours().length * CROWD_HOUR + 'px"' : '';
     const cell = calView === 'day' ? ' style="width:' + CROWD_HOUR + 'px"' : '';
     const today = ymd(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
 
     // 上の目盛り。日なら時刻、週なら日付。
     const ticks = calView === 'day'
-        ? Array.from({ length: 24 }, (_, h) =>
+        ? calHours().map((h) =>
             '<div class="tk"' + cell + '>' + h + '</div>').join('')
         : days.map((d) => {
             const w = (new Date(d + 'T00:00:00').getDay() + 6) % 7;
@@ -8229,8 +8275,9 @@ function drawCrowd() {
     if (calView === 'day') {
         const early = calSlots.filter((s) => s.day === days[0] && s.at)
             .map((s) => mins(s.at)).filter((n) => n !== null);
-        const from = early.length ? Math.min(...early) : 8 * 60;
-        crowd.querySelector('.scroll').scrollLeft = Math.max(0, (from / 60 - 0.5) * CROWD_HOUR);
+        const from = early.length ? Math.min(...early) : calFrom * 60;
+        crowd.querySelector('.scroll').scrollLeft =
+            Math.max(0, ((from - calFrom * 60) / 60 - 0.5) * CROWD_HOUR);
     }
 }
 
@@ -8253,16 +8300,23 @@ function crowdDay(lane, day) {
         if (from === null) return '';
         const till = mins(s.to);
         const wide = Math.max(24, ((till !== null && till > from ? till - from : 30) / 60) * CROWD_HOUR);
+        const span = calHours().length * CROWD_HOUR;
+        const left = Math.min(Math.max(((from - calFrom * 60) / 60) * CROWD_HOUR, 0), span - wide);
+        // **狭い札は、時刻を省いて件名だけ**（依頼 562）── 時刻は置かれて
+        // いる位置が言っている。三十分の会議で「13:00」に幅を取られると、
+        // 件名が一文字も読めない。
+        const room = wide >= CROWD_HOUR * 0.75;
         return '<div class="bar ' + s.kind + evMark(s) + '"'
-            + ' style="left:' + ((from / 60) * CROWD_HOUR) + 'px;width:' + wide + 'px"'
+            + ' style="left:' + left + 'px;width:' + wide + 'px"'
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
             + ' title="' + escapeAttr(s.at + (s.to ? '〜' + s.to : '') + ' ' + s.title
                 + (s.place ? '（' + s.place + '）' : '')) + '">'
+            + (room ? '<i>' + escapeHtml(s.at) + '</i> ' : '')
             + escapeHtml(s.title) + '</div>';
     }).join('');
-    const hours = Array.from({ length: 24 }, (_, h) =>
+    const hours = calHours().map((h, i) =>
         '<div class="vr' + (h % 3 === 0 ? ' thick' : '') + '" style="left:'
-        + (h * CROWD_HOUR) + 'px"></div>').join('');
+        + (i * CROWD_HOUR) + 'px"></div>').join('');
     return hours + whole + bars;
 }
 
@@ -8273,19 +8327,39 @@ function crowdWeek(lane, days) {
         // **終日が先。** その日いっぱいの用事は、時刻つきの予定より先に
         // 目に入るほうがよい（居るか居ないかの話なので）。
         const mine2 = mine.filter((s) => !s.at).concat(mine.filter((s) => s.at));
+        // **二段に組む**（依頼 562・本人）── 時刻を上、件名を下。横に
+        // 並べると「13:00」に幅を取られて、件名が三文字で切れる。
         const chips = mine2.slice(0, 4).map((s) =>
-            '<div class="chip ' + s.kind + (s.at ? '' : ' all')
+            '<div class="chip two ' + s.kind + (s.at ? '' : ' all')
             + evMark(s) + '"'
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
-            + ' title="' + escapeAttr((s.at ? s.at + ' ' : '終日 ') + s.title) + '">'
-            + '<i>' + escapeHtml(s.at || '終日') + '</i> '
-            + escapeHtml(s.title) + '</div>').join('');
+            + ' title="' + escapeAttr((s.at ? s.at + ' ' : '終日 ') + s.title
+                + (s.place ? '（' + s.place + '）' : '')) + '">'
+            + '<i>' + escapeHtml(s.at || '終日') + '</i>'
+            + '<b>' + escapeHtml(s.title) + '</b></div>').join('');
         const rest = mine2.length > 4
             ? '<div class="more">ほか ' + (mine2.length - 4) + '</div>' : '';
         return '<div class="cell" data-day="' + d + '">' + chips + rest + '</div>';
     }).join('');
 }
 
+
+/// **段を上下に動かす**（依頼 562）。
+///
+/// 憶えるのは**いま画面に出ている並び**そのもの ── 「この段を一つ上へ」
+/// だけを憶えると、人が増えた日に意味が変わる。動かしたあとの並びを丸ごと
+/// 書き留めるので、**次に開いても同じ順で出る**。
+async function moveLane(key, step) {
+    const lanes = crowdLanes(calView === 'day' ? [calDay] : weekOf(calDay), true);
+    const now = lanes.map((l) => l.key);
+    const at = now.indexOf(key);
+    const to = at + step;
+    if (at < 0 || to < 0 || to >= now.length) return;
+    now.splice(to, 0, now.splice(at, 1)[0]);
+    calOrder = now;
+    window.amber.remember({ calOrder });
+    await drawCal();
+}
 
 /// 出す人を選ぶ。
 ///
@@ -8894,10 +8968,32 @@ el('cal').addEventListener('contextmenu', async (e) => {
         e.preventDefault();
         const key = who.dataset.key;
         const now = who.closest('.ln').style.getPropertyValue('--lane').trim();
-        popMenu(CAL_COLORS.filter(([h]) => LANE_COLORS.includes(h)).map(([h, n]) => ({
-            name: (h === now ? '● ' : '　 ') + n + ' ── ' + who.textContent.trim(),
+        const 名 = who.textContent.trim();
+        const rows = [
+            { name: '上へ', run: () => moveLane(key, -1) },
+            { name: '下へ', sep: true, run: () => moveLane(key, 1) },
+        ];
+        // **「自分はこの人」はチームの段だけ**（依頼 562）── ほかの段は
+        // もともと自分のものなので、選ばせても意味が無い。
+        if (key.startsWith('team:')) {
+            rows.push({
+                name: calMe === key ? '自分の指定をやめる' : '自分はこの人',
+                sub: calMe === key ? '日・週・月に全員ぶんが戻ります'
+                    : '日・週・月は、この人の予定だけになります',
+                sep: true,
+                run: async () => {
+                    calMe = calMe === key ? '' : key;
+                    window.amber.remember({ calMe });
+                    say(calMe ? 名 + ' を自分にしました（日・週・月はこの人の予定だけ）'
+                        : '自分の指定をやめました');
+                    await drawCal();
+                },
+            });
+        }
+        popMenu(rows.concat(CAL_COLORS.filter(([h]) => LANE_COLORS.includes(h)).map(([h, n]) => ({
+            name: (h === now ? '● ' : '　 ') + n + ' ── ' + 名,
             run: async () => { calColors = { ...calColors, [key]: h }; window.amber.remember({ calColors }); await drawCal(); },
-        })), at);
+        }))), at);
         return;
     }
     const item = calItemAt(e);
@@ -8983,9 +9079,29 @@ async function cmdCalSettings() {
         }));
         rows.push({ name: (calWeekend ? '✓　' : '　　') + '土日表示', value: '*weekend', sub: calWeekend ? '' : '月〜金だけ出しています' });
         rows.push({ name: 'カラー設定 ── ' + (calHereColor ? colorName(calHereColor) : '緑（既定）'), value: '*color', sub: '押すと選べます' });
+        rows.push({ name: '出す時間帯 ── ' + calFrom + '時 〜 ' + calTill + '時', value: '*hours',
+            sub: '日・週・並べて に出す幅。狭いほど一つ一つが読みやすくなります' });
         const pick = await askPick('カレンダー表示設定', rows, '押すと出し入れできます。閉じるまで続けて選べます', true);
         if (pick === null) break;
         if (pick === '*weekend') { calWeekend = !calWeekend; window.amber.remember({ calWeekend }); continue; }
+        if (pick === '*hours') {
+            // **始まりを決めて、終わりを決める。** 一度に両方訊く小窓を
+            // 作らない ── 選ぶものが二つある小窓は、押す前に何が起きるか
+            // 分からない。終わりは始まりより後だけを出す。
+            const hh = (n) => ({ name: n + '時', value: String(n) });
+            const a = await askPick('出す時間帯 ── 何時から', Array.from({ length: 13 }, (_, i) => hh(i))
+                .map((r) => (Number(r.value) === calFrom ? { ...r, name: '● ' + r.name } : { ...r, name: '　 ' + r.name })), '', true);
+            if (a === null) continue;
+            const from = Number(a);
+            const b = await askPick('出す時間帯 ── 何時まで',
+                Array.from({ length: 24 - from }, (_, i) => hh(from + i + 1))
+                    .map((r) => (Number(r.value) === calTill ? { ...r, name: '● ' + r.name } : { ...r, name: '　 ' + r.name })), '', true);
+            if (b === null) continue;
+            calFrom = from;
+            calTill = Number(b);
+            window.amber.remember({ calFrom, calTill });
+            continue;
+        }
         if (pick === '*color') {
             const c = await askPick('カラー設定（個人カレンダーの色）', CAL_COLORS.map(([h, n]) => ({
                 name: (h === (calHereColor || '#2f8a52') ? '● ' : '　 ') + n, value: h,
@@ -12044,6 +12160,16 @@ const escapeAttr = escapeHtml;
     if (Array.isArray(saved.tagsKnown)) tagsKnown = saved.tagsKnown.filter((t) => typeof t === 'string');
     if (Array.isArray(saved.calHide)) calHide = saved.calHide.filter((k) => typeof k === 'string');
     if (saved.calWeekend === false) calWeekend = false;
+    // 段の並び順と「自分はこの人」（依頼 562）。
+    if (Array.isArray(saved.calOrder)) calOrder = saved.calOrder.filter((k) => typeof k === 'string');
+    if (typeof saved.calMe === 'string') calMe = saved.calMe;
+    // 出す時間帯（依頼 562）。**筋の通らない組はそのまま受けない** ──
+    // 終わりが始まりより前だと、時間が一つも無い表になる。
+    if (Number.isInteger(saved.calFrom) && Number.isInteger(saved.calTill)
+        && saved.calFrom >= 0 && saved.calTill <= 24 && saved.calTill > saved.calFrom) {
+        calFrom = saved.calFrom;
+        calTill = saved.calTill;
+    }
     if (typeof saved.calHereColor === 'string' && /^#[0-9a-f]{6}$/i.test(saved.calHereColor)) calHereColor = saved.calHereColor;
     if (saved.calColors && typeof saved.calColors === 'object') calColors = saved.calColors;
     paintHereColor();

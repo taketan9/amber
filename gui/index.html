@@ -1484,9 +1484,34 @@ body.dropping::after {
   padding: 4px 0; }
 #calbox .hd.sat { color: #3b78c9 } #calbox .hd.sun { color: #cf4f45 }
 #calbox .hd.today { color: var(--amber); font-weight: 700 }
+/* 縦の表の帯も二段に組む（依頼 562）── 高さが足りるものだけ時刻を出す。 */
+#calbox .blk.two { display: flex; flex-direction: column; }
+#calbox .blk i { font-style: normal; font-size: .85em; opacity: .75;
+  font-variant-numeric: tabular-nums }
+#calbox .blk b { font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap }
+/* **時間帯の外にある予定**（依頼 562）── 端に寄せて置くので、位置が本当
+   ではないことを形で言う。落とすと「その日は空いている」と読めてしまう。 */
+#calbox .blk.out { border-left-style: dotted; opacity: .8 }
+/* **並べて表示の札は二段**（依頼 562・本人）── 時刻を上、件名を下。横に
+   並べると「13:00」に幅を取られて、三十分の会議の件名が三文字で切れる。 */
+#calbox .crowd .chip.two { display: flex; flex-direction: column; align-items: flex-start;
+  line-height: 1.25; white-space: normal; }
+#calbox .crowd .chip.two i { font-size: .82em; }
+#calbox .crowd .chip.two b { font-weight: 600; max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 一日の帯は、幅が足りるときだけ時刻を出す。字は少し小さく ── 三十分の
+   会議で一文字でも多く入れるため。 */
+#calbox .crowd .bar { font-size: .88em; padding: 0 5px }
+#calbox .crowd .bar i { font-style: normal; opacity: .7;
+  font-variant-numeric: tabular-nums }
+#calbox .blk i { font-style: normal; font-size: .85em; opacity: .75;
+  font-variant-numeric: tabular-nums }
+#calbox .blk b { font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap }
 #calbox .blk { position: absolute; left: 2px; right: 2px; border-radius: 5px;
   padding: 2px 7px; font-size: .92em; line-height: 1.4; overflow: hidden; color: var(--ink);
-  border-left: 3px solid var(--amber-deep); background: color-mix(in srgb, var(--amber) 30%, var(--paper)); cursor: pointer; }
+  border-left: 3px solid var(--amber-deep); background-color: color-mix(in srgb, var(--amber) 30%, var(--paper)); cursor: pointer; }
 #calbox .blk.away { border-left-color: #3b78c9;
   background: color-mix(in srgb, #3b78c9 26%, var(--paper)) }
 #calbox .blk.here { border-left-color: var(--cal-here, #2f8a52);

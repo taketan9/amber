@@ -1206,6 +1206,73 @@ if (process.env.TEAMCSV) {
         return true;
     `, true);
 
+    // **決めたことが、次に開いても残っているか**（依頼 562・本人「人を選ぶは
+    // 毎回初期化せず、セットしたことをおぼえてほしい」）。窓を建て直さずに
+    // 見るので、**憶える側の道**（`remember` に渡っているか）を見る。
+    await step('カレンダー：人の出し入れ・並び・自分・時間帯を憶える', `
+        const 元 = { calHide: calHide.slice(), calOrder: calOrder.slice(),
+                     calMe, calFrom, calTill };
+        const lanes = crowdLanes(weekOf(calDay), true).map((l) => l.key);
+        if (lanes.length < 2) return '段が ' + lanes.length + ' 本です';
+        calHide = [lanes[1]]; calOrder = lanes.slice().reverse();
+        calMe = lanes.find((k) => k.startsWith('team:')) || '';
+        calFrom = 9; calTill = 18;
+        window.amber.remember({ calHide, calOrder, calMe, calFrom, calTill });
+        await new Promise((g) => setTimeout(g, 200));
+        const got = await window.amber.recall();
+        Object.assign(window, {});
+        calHide = 元.calHide; calOrder = 元.calOrder; calMe = 元.calMe;
+        calFrom = 元.calFrom; calTill = 元.calTill;
+        window.amber.remember(元);
+        await drawCal();
+        if (!got) return '憶えたものを読み返せません';
+        if (!Array.isArray(got.calHide) || got.calHide.length !== 1) return '人の出し入れが残りません';
+        if (!Array.isArray(got.calOrder) || got.calOrder.length !== lanes.length) return '並びが残りません';
+        if (got.calFrom !== 9 || got.calTill !== 18) return '時間帯が残りません';
+        return typeof got.calMe === 'string' ? true : '自分の指定が残りません';
+    `, true);
+
+    // **「自分はこの人」を決めたら、日・週・月はその人の予定だけ**（依頼 562・
+    // 本人が選んだ）── チームの紙は人ごとの表なので、全員ぶんを重ねると
+    // 自分の予定が他人の予定に埋もれる。**並べて表示は別**（全員を見る面）。
+    await step('カレンダー：自分を決めると、週はその人の予定だけになる', `
+        const 元 = calMe;
+        const 見方 = calView; const 並 = calGroup;
+        calGroup = false; calView = 'week';
+        const 全 = calShown().filter((s) => s.kind === 'team').length;
+        const 誰 = calSlots.find((s) => s.kind === 'team');
+        if (!誰) return 'チームの予定がありません';
+        calMe = whoOf(誰).key;
+        const 自分 = calShown().filter((s) => s.kind === 'team');
+        const よそ = 自分.filter((s) => whoOf(s).key !== calMe).length;
+        // 並べて表示は、決めても全員のまま。
+        calGroup = true; calView = 'week';
+        const 段 = crowdLanes(weekOf(calDay), true).filter((l) => l.kind === 'team').length;
+        calMe = 元; calView = 見方; calGroup = 並; await drawCal();
+        if (全 <= 自分.length) return '絞り込まれていません（' + 全 + ' → ' + 自分.length + '）';
+        if (よそ) return 'ほかの人の予定が ' + よそ + ' 件残っています';
+        if (段 < 2) return '並べて表示まで絞り込まれました（段 ' + 段 + ' 本）';
+        return true;
+    `, true);
+
+    // **段を上下に動かせる**（依頼 562・本人）。
+    await step('カレンダー：段を上へ動かすと、次からその順で出る', `
+        const 元 = calOrder.slice();
+        const was = crowdLanes(weekOf(calDay), true).map((l) => l.key);
+        if (was.length < 3) return '段が ' + was.length + ' 本です';
+        await moveLane(was[2], -1);
+        const now = crowdLanes(weekOf(calDay), true).map((l) => l.key);
+        // **憶えたかまで見る。** 画面の上で動くだけなら、閉じた瞬間に戻る。
+        const kept = await window.amber.recall();
+        calOrder = 元; window.amber.remember({ calOrder }); await drawCal();
+        if (now[1] !== was[2]) return '上へ動きませんでした: ' + JSON.stringify(now.slice(0, 3));
+        if (now[2] !== was[1]) return '入れ替わった相手が違います';
+        if (!kept || !Array.isArray(kept.calOrder) || kept.calOrder[1] !== was[2]) {
+            return '動かしたのに憶えていません';
+        }
+        return true;
+    `, true);
+
     await step('チームの予定表：いつ時点の紙かが、そのまま入口になる', `
         const at = el('cal').querySelector('.teamat');
         if (at.hidden) return 'いつ時点かが出ていません';
