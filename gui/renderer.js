@@ -7723,6 +7723,15 @@ async function readCalTags(slots) {
 /// 「見せてもらえていない」であって「決まっていない」ではない。
 const evMark = (s) => (s.shut ? ' shut' : '') + (s.show === 'tentative' ? ' soft' : '');
 
+/// **描いた札から、その予定に戻れるようにする**（依頼 572）。
+///
+/// 道（`data-at`）だけでは足りない ── **読むだけの予定には道が無い**ので、
+/// 押しても何を出せばいいか分からなかった。描くたびに番号を振り直す
+/// （古い番号が残っても、次に描いた時点で消える）。
+let calMarks = [];
+const evId = (s) => ' data-ev="' + (calMarks.push(s) - 1) + '"';
+const evOf = (el) => (el && el.dataset.ev ? calMarks[Number(el.dataset.ev)] : null);
+
 /// そのタグの色（依頼 539）。
 ///
 /// **決めていなければ、十色を順に配る。** 設定を開かなくても色分けされた表が
@@ -7816,10 +7825,18 @@ function inGroup(s) {
 function calShown() {
     return calSlots.filter((s) => {
         if (s.kind !== 'note' && calHide.includes(whoOf(s).key)) return false;
-        // **自分を決めてあるなら、チームの紙は自分のぶんだけ**（依頼 562）。
+        // **日・週・月に、人の予定を混ぜない**（依頼 562・566）。
+        //
+        // チームの紙は**人ごとの表**なので、全員ぶんを重ねると自分の予定が
+        // 埋もれる ── どころか、**自分じゃない誰かの予定が自分の欄に出る**
+        // （本人・2026-09-14「これはダメだな」）。
+        //
+        // **自分を決めてあれば、その人のぶんだけ。決めていないなら、一件も
+        // 出さない**（並べて表示で見る）── 「全員ぶん」を既定にすると、
+        // 決めるまでずっと誰かの予定を自分のものとして読むことになる。
         // ここは日・週・月が通る道で、並べて表示は通らない（あちらは
         // `calSlots` を直に読む）── 全員を見る面は、全員のまま。
-        if (s.kind === 'team' && calMe && whoOf(s).key !== calMe) return false;
+        if (s.kind === 'team' && whoOf(s).key !== calMe) return false;
         if (!groupCal || calSide === 'both') return true;
         return calSide === 'group' ? inGroup(s) : !inGroup(s);
     });
@@ -7894,6 +7911,7 @@ function calShut() {
 
 async function drawCal() {
     const box = el('cal');
+    calMarks = [];
     calSlots = [];
     awaySlots = [];
     let bad = '';
@@ -7983,7 +8001,15 @@ async function drawCal() {
     // 分からないのがいちばん困る。
     const plans = calShown().filter((s) => s.kind !== 'note').length;
     const none = box.querySelector('.calnone');
-    if (none) none.hidden = plans > 0;
+    if (none) {
+        none.hidden = plans > 0 || grouped;
+        // **なぜ空なのかを言う**（依頼 572）── チームの紙は読めているのに
+        // 「自分」を決めていないと、日・週・月は一件も出ない。黙って空だと
+        // 「読めていない」と見分けがつかない。
+        none.textContent = !calMe && teamPeople.length
+            ? '自分を決めると、ここに自分の予定が出ます（「並べて」で名前を右押し →「自分はこの人」）'
+            : '予定はありません';
+    }
     // **いつ時点の紙かを出す。** チームの予定は置き換わる一枚を読んで
     // いるだけなので、これが無いと古い紙を今の予定だと思って読む。
     //
@@ -8037,7 +8063,7 @@ async function drawCal() {
             // 色はタグ（誰の用事か）にだけ使うので、見えているかどうかは
             // 塗りで言う ── 10px の印は、月の表の一行では小さすぎる。
             '<span class="ev ' + s.kind + (inGroup(s) ? ' sh' : ' lo')
-            + evMark(s) + '"' + tagPaint(s)
+            + evMark(s) + '"' + evId(s) + tagPaint(s)
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '') + '>'
             + (s.at ? escapeHtml(s.at) + ' ' : '') + escapeHtml(s.title) + '</span>').join('');
         const rest = sorted.length > 3 ? '<span class="more">ほか ' + (sorted.length - 3) + '</span>' : '';
@@ -8115,7 +8141,7 @@ function drawHours() {
         const whole = calSlotsShown.filter((s) => s.day === d && !s.at && s.kind !== 'note');
         return '<div><div class="hd' + mark + '">' + weekName(d) + ' '
             + Number(d.slice(8)) + '</div>'
-            + whole.map((s) => '<div class="ad ' + s.kind + evMark(s) + '"'
+            + whole.map((s) => '<div class="ad ' + s.kind + evMark(s) + '"' + evId(s)
                 + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
                 + '>' + escapeHtml(s.title) + '</div>').join('') + '</div>';
     }).join('');
@@ -8128,9 +8154,39 @@ function drawHours() {
         + hours.map((h) => '<div>' + h + '</div>').join('') + '</div>'
         + days.map((d) => {
             const timed = calSlotsShown.filter((s) => s.day === d && s.at);
-            const blocks = timed.map((s) => {
+            // **重なるものは、横に分ける**（依頼 572・本人「2行、3行あるものは
+            // 字が重なって見えない」）。
+            //
+            // 同じ時間に二つあると、前は同じ場所に重ねて描いていて、**下の
+            // 予定は一文字も読めなかった**。時間の重なりで塊にまとめ、その中で
+            // 空いている列へ順に置く ── 塊の中でいちばん多い列数で割る。
+            // **塊ごとに割る**（一日ぶんの最大で割らない）── 朝に三つ重なった
+            // 日は、夕方の一件まで三分の一の幅になってしまう。
+            const put = timed.map((s) => {
                 const from = mins(s.at);
-                if (from === null) return '';
+                const till = mins(s.to);
+                const to = till !== null && till > from ? till : (from === null ? null : from + 30);
+                return { s, from, to };
+            }).filter((x) => x.from !== null).sort((a, b) => a.from - b.from || a.to - b.to);
+            let group = [];
+            let edge = -1;
+            const lay = (rows) => {
+                const cols = [];
+                for (const r of rows) {
+                    let c = cols.findIndex((end) => end <= r.from);
+                    if (c < 0) { c = cols.length; cols.push(0); }
+                    cols[c] = r.to;
+                    r.col = c;
+                }
+                for (const r of rows) { r.wide = cols.length; }
+            };
+            for (const r of put) {
+                if (group.length && r.from >= edge) { lay(group); group = []; }
+                group.push(r);
+                edge = Math.max(edge, r.to);
+            }
+            if (group.length) lay(group);
+            const blocks = put.map(({ s, from, col, wide }) => {
                 const till = mins(s.to);
                 const high = Math.max(18, ((till !== null && till > from ? till - from : 30)
                     / 60) * HOUR_PX);
@@ -8138,14 +8194,17 @@ function drawHours() {
                 // 空いている」と読める。位置は嘘になるが、在ることは本当。
                 const top = Math.min(Math.max(calTop(from), 0), (hours.length * HOUR_PX) - high);
                 const out = from < calFrom * 60 || from >= calTill * 60 ? ' out' : '';
+                // 横の置き場所（重なっているぶんだけ細くなる）。
+                const w = 100 / wide;
+                const side = 'left:calc(' + (col * w) + '% + 2px);width:calc(' + w + '% - 4px);';
                 // **狭い札は、時刻を省いて件名だけ**（依頼 562・本人）──
                 // 時刻は置かれている位置が言っている。二段に組むので、
                 // 高さが足りるものだけ時刻を出す。
                 const tall = high >= 34;
-                return '<div class="blk ' + s.kind + evMark(s) + out + (tall ? ' two' : '') + '"'
+                return '<div class="blk ' + s.kind + evMark(s) + out + (tall ? ' two' : '') + '"' + evId(s)
                     + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
                     + ' title="' + escapeAttr(s.at + ' ' + s.title) + '"'
-                    + ' style="top:' + top + 'px;height:' + high + 'px">'
+                    + ' style="' + side + 'top:' + top + 'px;height:' + high + 'px">'
                     + (tall ? '<i>' + escapeHtml(s.at) + '</i>' : '')
                     + '<b>' + escapeHtml(s.title) + '</b></div>';
             }).join('');
@@ -8273,11 +8332,13 @@ function drawCrowd() {
         }).join('');
 
     const rows = lanes.map((lane, n) => {
-        const track = calView === 'day' ? crowdDay(lane, days[0]) : crowdWeek(lane, days);
+        const got = calView === 'day' ? crowdDay(lane, days[0]) : { html: crowdWeek(lane, days), deep: 1 };
+        const track = got.html;
+        const tall = got.deep > 1 ? ';min-height:' + (got.deep * CROWD_ROW + 6) + 'px' : '';
         // 人の段は、その人の色で（依頼 548）── 予定の一行に差す色と
         // 同じ鍵（`tag:<名前>`）なので、段の色を変えると予定の色も変わる。
         const tint = lane.kind === 'tag' ? tagColor(lane.name) : laneColor(lane.key, n);
-        return '<div class="ln" style="--lane:' + tint + '"><div class="who ' + lane.kind + '"'
+        return '<div class="ln" style="--lane:' + tint + tall + '"><div class="who ' + lane.kind + '"'
             + ' data-key="' + escapeAttr(lane.key) + '" title="押すと引っ込めます。右押しで色を変えます">'
             + '<span>' + escapeHtml(lane.name) + '</span></div>'
             + '<div class="track"' + wide + '>' + track + '</div></div>';
@@ -8307,16 +8368,44 @@ function crowdDay(lane, day) {
     // 書く ── `00:00〜23:59` に読み替えると、時刻つきの予定に混ざって
     // 並び、画面に `00:00` という嘘の時刻が出る。
     const whole = mine.filter((s) => !s.at).map((s) =>
-        '<div class="span ' + s.kind + evMark(s) + '"'
+        '<div class="span ' + s.kind + evMark(s) + '"' + evId(s)
         + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
         + ' title="' + escapeAttr('終日 ' + s.title) + '">'
         // **字は、見えているところに貼りつける。** 帯は一日ぶんの幅が
         // あるので、字を頭に置くと横に流したとたんに画面の外へ出る
         // ── 帯だけが残って、何の帯かが読めなくなる。
         + '<b><i>終日</i> ' + escapeHtml(s.title) + '</b></div>').join('');
-    const bars = mine.filter((s) => s.at).map((s) => {
+    // **重なるものは、縦に積む**（依頼 572・本人「重ならないようにして欲しい」）。
+    //
+    // こちらは横軸が時間なので、縦の表とは逆に**下へずらす**。塊ごとに数える
+    // ── 朝に三つ重なった日に、夕方の一件まで三分の一の高さにしない。
+    const put = mine.filter((s) => s.at).map((s) => {
         const from = mins(s.at);
-        if (from === null) return '';
+        const till = mins(s.to);
+        const to = till !== null && till > from ? till : (from === null ? null : from + 30);
+        return { s, from, to };
+    }).filter((x) => x.from !== null).sort((a, b) => a.from - b.from || a.to - b.to);
+    let group = [];
+    let edge = -1;
+    let deep = 1;
+    const lay = (rows) => {
+        const cols = [];
+        for (const r of rows) {
+            let c = cols.findIndex((end) => end <= r.from);
+            if (c < 0) { c = cols.length; cols.push(0); }
+            cols[c] = r.to;
+            r.row = c;
+        }
+        deep = Math.max(deep, cols.length);
+    };
+    for (const r of put) {
+        if (group.length && r.from >= edge) { lay(group); group = []; }
+        group.push(r);
+        edge = Math.max(edge, r.to);
+    }
+    if (group.length) lay(group);
+    const high = deep > 1 ? CROWD_ROW : 0;
+    const bars = put.map(({ s, from, row }) => {
         const till = mins(s.to);
         const wide = Math.max(24, ((till !== null && till > from ? till - from : 30) / 60) * CROWD_HOUR);
         const span = calHours().length * CROWD_HOUR;
@@ -8325,8 +8414,11 @@ function crowdDay(lane, day) {
         // いる位置が言っている。三十分の会議で「13:00」に幅を取られると、
         // 件名が一文字も読めない。
         const room = wide >= CROWD_HOUR * 0.75;
-        return '<div class="bar ' + s.kind + evMark(s) + '"'
-            + ' style="left:' + left + 'px;width:' + wide + 'px"'
+        // 積むときだけ高さと位置を決める ── 一つしかない段は、いままで
+        // どおり段いっぱい（そのぶん二行に回せる）。
+        const stack = high ? 'top:' + (3 + row * high) + 'px;height:' + (high - 3) + 'px;bottom:auto;' : '';
+        return '<div class="bar ' + s.kind + evMark(s) + '"' + evId(s)
+            + ' style="' + stack + 'left:' + left + 'px;width:' + wide + 'px"'
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
             + ' title="' + escapeAttr(s.at + (s.to ? '〜' + s.to : '') + ' ' + s.title
                 + (s.place ? '（' + s.place + '）' : '')) + '">'
@@ -8336,8 +8428,11 @@ function crowdDay(lane, day) {
     const hours = calHours().map((h, i) =>
         '<div class="vr' + (h % 3 === 0 ? ' thick' : '') + '" style="left:'
         + (i * CROWD_HOUR) + 'px"></div>').join('');
-    return hours + whole + bars;
+    return { html: hours + whole + bars, deep };
 }
+
+/// 積むときの一段の高さ（依頼 572）。
+const CROWD_ROW = 22;
 
 /// 一人ぶん・一週ぶん（横が日付）。
 function crowdWeek(lane, days) {
@@ -8350,7 +8445,7 @@ function crowdWeek(lane, days) {
         // 並べると「13:00」に幅を取られて、件名が三文字で切れる。
         const chips = mine2.slice(0, 4).map((s) =>
             '<div class="chip two ' + s.kind + (s.at ? '' : ' all')
-            + evMark(s) + '"'
+            + evMark(s) + '"' + evId(s)
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
             + ' title="' + escapeAttr((s.at ? s.at + ' ' : '終日 ') + s.title
                 + (s.place ? '（' + s.place + '）' : '')) + '">'
@@ -8369,15 +8464,51 @@ function crowdWeek(lane, days) {
 /// だけを憶えると、人が増えた日に意味が変わる。動かしたあとの並びを丸ごと
 /// 書き留めるので、**次に開いても同じ順で出る**。
 async function moveLane(key, step) {
-    const lanes = crowdLanes(calView === 'day' ? [calDay] : weekOf(calDay), true);
-    const now = lanes.map((l) => l.key);
-    const at = now.indexOf(key);
+    const days = calView === 'day' ? [calDay] : weekOf(calDay);
+    // **数えるのは、見えている段だけ**（依頼 572・本人）── 引っ込めた段まで
+    // 数えると、その人のぶん何度も押すことになる。画面で一つ上に見えている
+    // ところへ、一回で行く。
+    const seen = crowdLanes(days).map((l) => l.key);
+    const now = crowdLanes(days, true).map((l) => l.key);
+    const at = seen.indexOf(key);
     const to = at + step;
-    if (at < 0 || to < 0 || to >= now.length) return;
-    now.splice(to, 0, now.splice(at, 1)[0]);
+    if (at < 0 || to < 0 || to >= seen.length) return;
+    // 引っ込めた段は、いまの並びのまま置いていく ── 戻したときに、
+    // 前に居た場所へ戻る。
+    const from = now.indexOf(key);
+    const mark = now.indexOf(seen[to]);
+    now.splice(from, 1);
+    now.splice(step < 0 ? mark : mark - (mark > from ? 1 : 0), 0, key);
     calOrder = now;
     window.amber.remember({ calOrder });
     await drawCal();
+}
+
+/// **予定の中身を、そのまま出す小窓**（依頼 572・本人「マウスを重ねたり
+/// クリックするとポップアップして全部読めるようにしてほしい」）。
+///
+/// 重なった予定は細くなるし、三十分の会議は幅そのものが足りない ──
+/// **どう詰めても切れる札は残る**ので、押せば全部読める道を用意する。
+/// 出すのは**その予定が持っているものだけ**（時刻・件名・場所・だれの・
+/// 出どころ）── ここで言葉を足さない。
+function popEvent(s, at) {
+    const rows = [];
+    const when = s.at ? s.at + (s.to ? '〜' + s.to : '') : '終日';
+    rows.push({ html: '<b class="evh">' + escapeHtml(s.title || '（題なし）') + '</b>', dim: true });
+    rows.push({ name: when, dim: true });
+    if (s.place) rows.push({ name: s.place, dim: true });
+    const who = s.kind === 'team' ? whoOf(s) : null;
+    if (who) rows.push({ name: who.name, dim: true });
+    if (s.show && s.show !== 'busy') {
+        rows.push({ name: { tentative: '仮の予定', oof: '休み・外出', workingelsewhere: '別の場所で仕事',
+            free: '空き' }[s.show] || s.show, dim: true });
+    }
+    if (s.shut) rows.push({ name: '中身は見えていません', dim: true });
+    // 開ける先があるなら、そこへ行く道も置く ── 読むだけのものには出さない。
+    if (s.path && !s.noNote && s.kind === 'note') {
+        rows.push({ name: 'このノートを開く', sep: true, run: () => { calShut(); openNote(s.path); } });
+    }
+    popMenu(rows, at);
 }
 
 /// 出す人を選ぶ。
@@ -8878,6 +9009,11 @@ el('cal').addEventListener('click', async (e) => {
             await openNote(bar.dataset.at);
             return;
         }
+        // **読むだけのものは、中身を出す**（依頼 572）── 前は「読むだけです」
+        // とだけ言っていた。押した人が知りたいのは、**その札に何が書いて
+        // あるか**であって、直せるかどうかではない。
+        const got = evOf(bar);
+        if (got) { popEvent(got, { x: e.clientX, y: e.clientY }); return; }
         say(bar.classList.contains('team')
             ? 'チームの予定表は読むだけです'
             : 'よその予定表のものなので、ここでは直せません');
@@ -8963,15 +9099,17 @@ function calItemAt(e) {
 }
 
 /// 押した予定を直す（この Mac の予定）か、開く（ノート）か、読むだけと言うか。
-async function calEditItem(item) {
+async function calEditItem(item, at) {
     if (item.kind === 'here' && item.at) { await hereEdit(item.at); return; }
     if (item.at) { calShut(); await openNote(item.at); return; }
+    const got = evOf(item.el);
+    if (got) { popEvent(got, at || { x: 300, y: 300 }); return; }
     say(item.kind === 'team' ? 'チームの予定表は読むだけです' : 'よその予定表のものなので、ここでは直せません');
 }
 
 el('cal').addEventListener('dblclick', async (e) => {
     const item = calItemAt(e);
-    if (item) { e.preventDefault(); await calEditItem(item); return; }
+    if (item) { e.preventDefault(); await calEditItem(item, { x: e.clientX, y: e.clientY }); return; }
     const spot = calSpotAt(e);
     if (!spot) return;
     e.preventDefault();

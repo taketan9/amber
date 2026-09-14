@@ -1239,7 +1239,6 @@ if (process.env.TEAMCSV) {
         const 元 = calMe;
         const 見方 = calView; const 並 = calGroup;
         calGroup = false; calView = 'week';
-        const 全 = calShown().filter((s) => s.kind === 'team').length;
         const 誰 = calSlots.find((s) => s.kind === 'team');
         if (!誰) return 'チームの予定がありません';
         calMe = whoOf(誰).key;
@@ -1249,7 +1248,8 @@ if (process.env.TEAMCSV) {
         calGroup = true; calView = 'week';
         const 段 = crowdLanes(weekOf(calDay), true).filter((l) => l.kind === 'team').length;
         calMe = 元; calView = 見方; calGroup = 並; await drawCal();
-        if (全 <= 自分.length) return '絞り込まれていません（' + 全 + ' → ' + 自分.length + '）';
+        // **既定は「一件も出さない」**（依頼 572 で変えた）ので、増えたことを見る。
+        if (!自分.length) return '決めたのに一件も出ません';
         if (よそ) return 'ほかの人の予定が ' + よそ + ' 件残っています';
         if (段 < 2) return '並べて表示まで絞り込まれました（段 ' + 段 + ' 本）';
         return true;
@@ -1280,6 +1280,87 @@ if (process.env.TEAMCSV) {
         if (数2 !== 数) return '予定が別の段へ移りました（' + 数 + ' → ' + 数2 + '）';
         if (!戻 || 戻.name !== was) return '空にしても戻りません: ' + (戻 && 戻.name);
         return true;
+    `, true);
+
+    // **上へ・下へ は、見えている段で数える**（依頼 572・本人「非表示の
+    // メンバー分なんども上、下としないといけないのが手間だった」）。
+    await step('カレンダー：引っ込めた段を跨いで、一回で上へ', `
+        const 元 = { order: calOrder.slice(), hide: calHide.slice() };
+        const all = crowdLanes(weekOf(calDay), true).map((l) => l.key);
+        if (all.length < 3) return '段が ' + all.length + ' 本です';
+        // まん中を引っ込めて、三つ目を一つ上へ ── 見えている並びでは二つ目。
+        calHide = [all[1]];
+        await drawCal();
+        const seen = crowdLanes(weekOf(calDay)).map((l) => l.key);
+        if (seen.length < 2) return '見えている段が ' + seen.length + ' 本です';
+        await moveLane(seen[1], -1);
+        const now = crowdLanes(weekOf(calDay)).map((l) => l.key);
+        calOrder = 元.order; calHide = 元.hide;
+        window.amber.remember(元.order === calOrder ? {} : { calOrder, calHide });
+        await drawCal();
+        return now[0] === seen[1] ? true : '一回で上へ行きません: ' + JSON.stringify(now.slice(0, 2));
+    `, true);
+
+    // **自分を決めていないなら、日・週・月にチームの予定を混ぜない**（依頼 572・
+    // 本人「僕じゃない誰かの予定が表示されている。これはダメだな」）。
+    await step('カレンダー：自分を決めるまで、週に人の予定を出さない', `
+        const 元 = { me: calMe, view: calView, group: calGroup };
+        calMe = ''; calGroup = false; calView = 'week';
+        const 混 = calShown().filter((s) => s.kind === 'team').length;
+        // 並べて表示は、決めていなくても全員のまま。
+        calGroup = true;
+        const 段 = crowdLanes(weekOf(calDay), true).filter((l) => l.kind === 'team').length;
+        calMe = 元.me; calView = 元.view; calGroup = 元.group; await drawCal();
+        if (混) return '自分を決めていないのに ' + 混 + ' 件出ています';
+        return 段 >= 1 ? true : '並べて表示からも消えました';
+    `, true);
+
+    // **重なる予定が、重ならずに出る**（依頼 572・本人「2行、3行あるものは
+    // 字が重なって見えない」）。
+    await step('カレンダー：週で重なる予定は、横に分かれる', `
+        const 元 = { me: calMe, view: calView, group: calGroup, day: calDay };
+        const one = calSlots.find((s) => s.kind === 'team' && s.at);
+        if (!one) return 'チームの時刻つきの予定がありません';
+        calMe = whoOf(one).key; calGroup = false; calView = 'day'; calDay = one.day;
+        await drawCal();
+        await new Promise((g) => setTimeout(g, 250));
+        const blk = [...el('cal').querySelectorAll('.blk')];
+        calMe = 元.me; calView = 元.view; calGroup = 元.group; calDay = 元.day; await drawCal();
+        if (blk.length < 2) return '帯が ' + blk.length + ' 本です';
+        // 同じ時刻に始まるものが、同じ場所に置かれていないこと。
+        const seen = new Map();
+        for (const b of blk) {
+            const k = b.style.top + '/' + b.style.left;
+            if (seen.has(k)) return '同じ場所に重なっています: ' + k;
+            seen.set(k, 1);
+        }
+        return true;
+    `, true);
+
+    // **押したら、中身が全部読める**（依頼 572・本人）。
+    await step('カレンダー：読むだけの予定も、押せば中身が出る', `
+        calGroup = true; calView = 'day';
+        const one = calSlots.find((s) => s.kind === 'team' && s.at);
+        if (!one) return 'チームの予定がありません';
+        calDay = one.day;
+        await drawCal();
+        await new Promise((g) => setTimeout(g, 250));
+        const bar = el('cal').querySelector('.crowd .bar.team');
+        if (!bar) return '帯がありません';
+        const r = bar.getBoundingClientRect();
+        bar.dispatchEvent(new MouseEvent('click', { bubbles: true,
+            clientX: Math.round(r.left + r.width / 2), clientY: Math.round(r.top + r.height / 2) }));
+        await new Promise((g) => setTimeout(g, 250));
+        const more = el('more');
+        // **閉じる前に見る。** 先に閉じてから「出ているか」を見ていた（自分で
+        // 消しておいて「出ません」と言っていた）。
+        const 出 = !more.hidden;
+        const 字 = more.textContent;
+        closeMenu();
+        if (!出) return '小窓が出ません';
+        // 札では切れていた件名が、小窓では最後まで出ていること。
+        const s2 = evOf(bar);
+        return 字.includes(s2.title) ? true : '件名が出ていません: ' + 字.slice(0, 40);
     `, true);
 
     // **段を上下に動かせる**（依頼 562・本人）。
