@@ -417,6 +417,14 @@ function drawRail() {
             // 月の表を開く ── 押したあとに一覧が空になったら、押した人は
             // 何が起きたか分からない（依頼 467）。
             if (d.dataset.kind === 'cal') { cmdCalendar(); return; }
+            // **行き先を選んだら、カレンダーからは出る**（依頼 554・本人）。
+            //
+            // ノートを開く道には前からある決まり（依頼 478）だが、**こちらの
+            // 道は `calOn` に触っていなかった** ── 「すべてのノート」を押して
+            // 一覧が絞られても、月の表が出たままで、絞った結果が見えない。
+            // 出すには「閉じる」をもう一度押すしかなかった。
+            // 閉じ方は `calShut` に一本ある ── ここで書き直さない。
+            if (calOn) calShut();
             state.dest = { kind: d.dataset.kind, what: d.dataset.what };
             drawRail();
             drawList();
@@ -7744,11 +7752,16 @@ function calMonths() {
     return [...want.values()];
 }
 
-/// カレンダーを閉じて、ノートに戻る。
+/// カレンダーを閉じて、ノートに戻る。**ここが、カレンダーから出る唯一の道。**
 function calShut() {
     calOn = false;
     applyView();
     drawRail();
+    // **帯を戻す**（依頼 554）。`applyView` はカレンダーのあいだ帯を畳むが、
+    // **畳みっぱなしで誰も戻していなかった** ── タブが二枚あっても、
+    // カレンダーから戻ると帯ごと消えていた（「閉じる」でも同じ）。
+    // 出すかどうかを決めるのは `drawStrip` 一本なので、そちらに訊く。
+    drawStrip();
 }
 
 async function drawCal() {
