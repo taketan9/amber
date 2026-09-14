@@ -82,6 +82,7 @@ import base64
 import contextlib
 import hashlib
 import html
+import importlib
 import logging
 import os
 import re
@@ -148,7 +149,19 @@ def _gen_py_somewhere_writable():
                       f"amber-gen_py-{sys.version_info[0]}.{sys.version_info[1]}")
     if not _can_write(at):
         return default, False        # そこも駄目なら、諦めて既定のまま進む
+
+    # **書く先と読む先は別々にある。** pywin32 は `import win32com` した時点で
+    # `win32com.gen_py` モジュールを作り、`__path__` をそのときの `__gen_path__`
+    # で**焼き付ける**。書く先（`__gen_path__`）だけ動かすと、makepy は新しい
+    # 場所へ書き、`__import__("win32com.gen_py.<名前>")` は古い場所を探す ──
+    # `No module named 'win32com.gen_py.0EA692EE-...x0x1x1'`。両方動かす。
     win32com.__gen_path__ = at
+    gen_py = sys.modules.get("win32com.gen_py") or getattr(win32com, "gen_py", None)
+    if gen_py is not None:
+        gen_py.__path__ = [at]
+    # 作ったばかりのフォルダは、Python の作り置きの中では「空」のまま。
+    # pywin32 は `invalidate_caches()` を呼ばないので、こちらで呼ぶ。
+    importlib.invalidate_caches()
     return at, True
 
 
@@ -179,8 +192,23 @@ def connect_onenote():
     import win32com.client  # noqa
     from win32com.client import gencache
 
+    # gencache は読み込みのときに「書けるか」を見て `is_readonly` を決める。
+    # こちらで書ける場所へ移したのに読めないと言われたら、言い直させる。
+    try:
+        if getattr(gencache, "is_readonly", False) and _can_write(gen_path):
+            gencache.is_readonly = False
+            gencache.Rebuild()
+    except Exception as e:  # noqa
+        log.debug("gencache の言い直しに失敗（続ける）: %s", e)
+
     def by_version():
-        gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
+        try:
+            gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
+        except ImportError:
+            # 書いた直後のものが見つからないことがある（作り置きが古い）。
+            # 一度だけ、目を覚まさせてやり直す。
+            importlib.invalidate_caches()
+            gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
         return win32com.client.Dispatch("OneNote.Application")
 
     def by_gencache():

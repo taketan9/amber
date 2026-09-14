@@ -133,8 +133,9 @@ mutate "版を取り違える（偽の 1.0 を掴む）" "型ライブラリを 
 mutate "繋げないとき黙って返る" "全部駄目なら、わけを並べて止まる" \
     'sys.exit("OneNote (デスクトップ版) に接続できません:' 'return ("OneNote (デスクトップ版) に接続できません:'
 mutate "作り置き先を逃がさない" "書けないなら逃がす" \
-    'win32com.__gen_path__ = at
-    return at, True' 'return default, False'
+    'if default and _can_write(default):
+        return default, False' 'if True:
+        return default, False'
 # `os.access` に戻す壊し方は**わざと置いていない** ── POSIX の `os.access` は
 # 正しく答えるので mac では鳴らない。Windows の上でしか壊れない性質で、
 # 黙る壊し方を並べると「鳴らないのが普通」になる。
@@ -149,6 +150,17 @@ mutate "逃がす前に client を読む" "逃がしてから win32com.client �
     import win32com.client  # noqa' \
     'import win32com.client  # noqa
     gen_path, moved = _gen_py_somewhere_writable()'
+mutate "書く先だけ動かす（読む先は古いまま）" "書く先と読む先を揃えて逃がす" \
+    'gen_py = sys.modules.get("win32com.gen_py") or getattr(win32com, "gen_py", None)
+    if gen_py is not None:
+        gen_py.__path__ = [at]' 'pass'
+mutate "見つからなくてもやり直さない" "見つからなければ一度やり直す" \
+    'except ImportError:
+            # 書いた直後のものが見つからないことがある（作り置きが古い）。
+            # 一度だけ、目を覚まさせてやり直す。
+            importlib.invalidate_caches()
+            gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)' 'except ImportError:
+            raise'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

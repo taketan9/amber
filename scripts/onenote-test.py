@@ -590,6 +590,12 @@ def _fake_win32com(ensure_module=None, ensure_dispatch=None, dispatch=None, gen_
     """`import win32com.client` と `from win32com.client import gencache` を通す。"""
     pkg = types.ModuleType("win32com")
     pkg.__gen_path__ = gen_path or ""
+    # **本物と同じ形にする。** pywin32 は `import win32com` の時点で
+    # `gen_py` を作り、`__path__` をそのときの `__gen_path__` で焼き付ける。
+    # ここを省くと「書く先だけ動かした」誤りが走査を素通りする。
+    gen_py = types.ModuleType("win32com.gen_py")
+    gen_py.__path__ = [gen_path or ""]
+    pkg.gen_py = gen_py
     client = types.ModuleType("win32com.client")
     gencache = types.ModuleType("win32com.client.gencache")
 
@@ -603,13 +609,14 @@ def _fake_win32com(ensure_module=None, ensure_dispatch=None, dispatch=None, gen_
     client.Dispatch = dispatch or boom("Dispatch")
     client.gencache = gencache
     pkg.client = client
-    return {"win32com": pkg, "win32com.client": client,
-            "win32com.client.gencache": gencache}
+    return {"win32com": pkg, "win32com.gen_py": gen_py,
+            "win32com.client": client, "win32com.client.gencache": gencache}
 
 
 def _connect_with(**mods):
     saved = {k: sys.modules.get(k) for k in
-             ("win32com", "win32com.client", "win32com.client.gencache")}
+             ("win32com", "win32com.gen_py", "win32com.client",
+              "win32com.client.gencache")}
     sys.modules.update(_fake_win32com(**mods))
     try:
         return ORIG_CONNECT()
@@ -658,6 +665,37 @@ def t_gen_py(tmp):
     check("逃がしてから win32com.client を読む（並び順）",
           body.index("_gen_py_somewhere_writable()") < body.index("import win32com.client"),
           "client を読んだあとで逃がしている")
+
+    # **書く先と読む先が揃っていること。** ここが揃わないと、makepy は書けた
+    # のに `No module named 'win32com.gen_py.…'` になる ── 会社の Windows で
+    # 実際に出た姿。偽の EnsureModule は、本物と同じくそこで転ぶ。
+    done = []
+
+    def strict_ensure(*a):
+        w32 = sys.modules["win32com"]
+        gen = sys.modules["win32com.gen_py"]
+        if gen.__path__[0] != w32.__gen_path__:
+            raise ModuleNotFoundError(
+                "No module named 'win32com.gen_py.0EA692EE-BB50-4E3C-AEF0-356D91732725x0x1x1'")
+        done.append(1)
+
+    got = _connect_with(gen_path=str(no_dir), ensure_module=strict_ensure,
+                        dispatch=lambda *a: good)
+    # **`got is good` だけでは足りない。** 一段目が転んでも三段目が同じものを
+    # 返すので、梯子を落ちたことが見えない。makepy が通ったことまで見る。
+    check("書く先と読む先を揃えて逃がす", got is good and done == [1], f"{done}")
+
+    # 書いた直後のものが見えないことがある ── 一度だけやり直す
+    tries = []
+
+    def flaky(*a):
+        tries.append(1)
+        if len(tries) == 1:
+            raise ImportError("まだ見えない")
+
+    got = _connect_with(gen_path=str(ok_dir), ensure_module=flaky,
+                        dispatch=lambda *a: good)
+    check("見つからなければ一度やり直す", got is good and len(tries) == 2, f"{tries}")
 
     no_dir.chmod(0o700)          # 片付けられるように戻す
 
