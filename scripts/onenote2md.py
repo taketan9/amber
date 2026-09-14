@@ -49,6 +49,22 @@ onenote2md.py ── デスクトップ版 OneNote を Markdown に（ambər の
      深いノートブックは `--flatten-groups` で「グループ名 › セクション名」を一つの
      フォルダ名に畳める。
 
+定時で回すための決まり（2026-09-14・「1時間ごとに、更新があったノートだけ」から）
+  8. **一度に一本だけ**（OS の鎖）。最初の一回は全ページ書くので一時間で終わらない
+     ことがあり、終わる前に次の回が始まると二本が同じファイルを奪い合う。
+  9. **読む前に `--sync`。** 開いているだけのノートブックは、電話や Web で直しても
+     OneNote が同期するまでこの機械の上では古いまま ── こちらは「変わっていない」と
+     見て飛ばす。頼んでおけば次の回には届いている。
+ 10. **`--prune` は歩いた場所だけ。** `--notebook` で絞った回や、ノートブックを
+     閉じていた回に、出力先ぜんたいを消させない。鍵のかかったセクションの下と、
+     取得に失敗したページも残す ── **見えなかった場所は、消えた場所ではない。**
+ 11. **`--log`。** 定時で回すと画面には誰もいない。落ちたことが残らなければ、
+     落ちていないのと見分けがつかない。
+
+  設定の手順とハマりどころは docs/onenote.ja.md。走査は scripts/onenote-test.py
+  （COM を偽物に差し替えるので mac でも通る）、その検査を壊して鳴らすのが
+  scripts/onenote-mutate.sh。
+
 WebDAV（`\\\\テナント@SSL\\DavWWWRoot\\…`）へ直に書くとき
   - Windows の WebClient サービスが動いていること。
   - 一ファイルごとに PUT と PROPFIND が走るので、ページ数が多いと遅い。
@@ -60,11 +76,16 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
+import hashlib
 import html
 import logging
 import os
 import re
 import sys
+import tempfile
+import time
+from datetime import datetime
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -110,6 +131,64 @@ def _get_page(app, page_id, info):
         return app.GetPageContent(page_id, "", info)
     except TypeError:
         return app.GetPageContent(page_id, info)
+
+
+def sync_notebooks(app, root, filters, wait):
+    """OneNote に「いま同期しろ」と頼む（`SyncHierarchy`）。
+
+    一時間ごとに回すなら、これが要る。**この機械で開いているだけのノートブックは、
+    誰かが電話や Web で直しても、OneNote が同期するまで古いまま**で、こちらは
+    「変わっていない」と見て飛ばしてしまう。頼んでおけば次の回には届いている。
+
+    `SyncHierarchy` は頼むだけで、終わるのを待たない。`--sync-wait` の秒だけ
+    待ってから読み直すが、**間に合わなければ次の回で拾う**（一時間ごとなので、
+    遅れても一時間。待ちを長くして毎回粘るより、そのほうが安い）。
+    """
+    ids = []
+    for nb in root.findall("one:Notebook", NS):
+        name = nb.get("name", "")
+        if filters and not any(f.lower() in name.lower() for f in filters):
+            continue
+        ids.append((name, nb.get("ID")))
+    for name, nb_id in ids:
+        try:
+            app.SyncHierarchy(nb_id)
+            log.info("同期を頼んだ: %s", name)
+        except Exception as e:  # noqa
+            log.warning("同期を頼めない %s: %s", name, e)
+    if ids and wait > 0:
+        time.sleep(wait)
+    return bool(ids)
+
+
+@contextlib.contextmanager
+def only_one(out_root: Path):
+    """一度に一本だけ走らせる。**一時間ごとに回すなら、これが要る。**
+
+    最初の一回は全ページを書くので、一時間で終わらないことがある。終わる前に
+    次の回が始まると、二本が同じファイルへ同時に書き、しかも `--prune` は
+    相手がまだ書いていないページを「OneNote 側で消えたページ」と見て消す。
+
+    鎖は OS のもの（PID を書いたファイルではなく）── 落ちても電源が切れても、
+    **誰も外せない鎖が残らない**。置き場所は出力先ではなく一時フォルダ:
+    出力先は ambər の保存ディレクトリで、そこに置いたものは一覧に並ぶ。
+    """
+    key = hashlib.sha1(str(out_root.resolve()).encode("utf-8")).hexdigest()[:16]
+    lock_path = Path(tempfile.gettempdir()) / f"onenote2md-{key}.lock"
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            sys.exit(f"前の回がまだ走っています（鎖: {lock_path}）。今回は何もしません。")
+        yield
+    finally:
+        os.close(fd)
 
 
 # ---------------------------------------------------------------------------
@@ -437,11 +516,15 @@ def place_for(parent_dir: Path, h_name: str, page_id: str) -> Path:
 # ---------------------------------------------------------------------------
 # 階層走査
 # ---------------------------------------------------------------------------
-def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, written: set):
+def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, written: set, keep: set):
     sec_name = sanitize(section_el.get("name"))
     if section_el.get("locked") == "true":
         log.warning("パスワード保護のためスキップ: %s / %s", " / ".join(path_parts), sec_name)
         stats["skipped_sections"] += 1
+        # **見えなかった場所は、消えた場所ではない。** 鍵のかかったセクションの
+        # 下は今回一枚も出てこないので、`--prune` に任せると前回の写しを
+        # まるごと消してしまう（そして次の回も鍵は開かないので、二度と戻らない）。
+        keep.add((out_dir / sec_name).resolve())
         return
     sec_dir = out_dir / sec_name
     img_dir = sec_dir / ATTACH
@@ -478,12 +561,17 @@ def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, writte
         except Exception as e:  # noqa
             log.error("ページ取得失敗 %s: %s", h_name, e)
             stats["errors"] += 1
+            # **取れなかったページを、消えたページと呼ばない。** 書けなかった
+            # ファイルをそのまま `--prune` に渡すと、COM が一度しゃっくりした
+            # だけで前回の写しが消える。前の版を残す。
+            written.add(md_path.resolve())
             continue
         try:
             page_el = ET.fromstring(xml)
         except ET.ParseError as e:
             log.error("XML パース失敗 %s: %s", h_name, e)
             stats["errors"] += 1
+            written.add(md_path.resolve())
             continue
 
         md_path.parent.mkdir(parents=True, exist_ok=True)
@@ -500,13 +588,25 @@ def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, writte
         written.add(md_path.resolve())
         for name in conv.images:
             written.add((page_img_dir / name).resolve())
+        # このページの古い絵を片付ける。**いま全部書き直したページの分だけ**なので、
+        # 触っていないページの絵は数に入らない。名前が `<ページ名>_NNN.ext` なので
+        # 隣のページを巻き込まない（`会議_001.png` は `会議録_*` に当たらない）。
+        # `--no-images` のときはやらない ── 出さないだけのつもりが全部消える。
+        if not args.no_images and page_img_dir.is_dir():
+            for old in page_img_dir.glob(f"{md_path.stem}_*"):
+                if old.name not in conv.images:
+                    try:
+                        old.unlink()
+                        stats["pruned_images"] += 1
+                    except OSError as e:
+                        log.warning("古い絵を消せない %s: %s", old, e)
         stats["images"] += conv.img_count
         stats["written"] += 1
         if args.save_xml:
             md_path.with_suffix(".xml").write_text(xml, encoding="utf-8")
 
 
-def walk_container(app, el, out_dir: Path, path_parts, args, stats, written: set, group_prefix=""):
+def walk_container(app, el, out_dir: Path, path_parts, args, stats, written: set, keep: set, group_prefix=""):
     """Notebook / SectionGroup の下を再帰的に処理"""
     for child in el:
         tag = strip_ns(child.tag)
@@ -515,7 +615,7 @@ def walk_container(app, el, out_dir: Path, path_parts, args, stats, written: set
                 # --flatten-groups: グループ名を畳んで一段にする
                 child_name = group_prefix + " › " + sanitize(child.get("name"))
                 child.set("name", child_name)
-            walk_section(app, child, out_dir, path_parts, args, stats, written)
+            walk_section(app, child, out_dir, path_parts, args, stats, written, keep)
         elif tag == "SectionGroup":
             if child.get("isRecycleBin") == "true":
                 continue
@@ -523,28 +623,50 @@ def walk_container(app, el, out_dir: Path, path_parts, args, stats, written: set
             if args.dry_run:
                 print("  " * len(path_parts) + f"[{name}]")
             if args.flatten_groups:
-                walk_container(app, child, out_dir, path_parts + [name], args, stats, written,
+                walk_container(app, child, out_dir, path_parts + [name], args, stats, written, keep,
                                group_prefix=(group_prefix + " › " if group_prefix else "") + name)
             else:
-                walk_container(app, child, out_dir / name, path_parts + [name], args, stats, written)
+                walk_container(app, child, out_dir / name, path_parts + [name], args, stats, written, keep)
 
 
-def prune(out_root: Path, written: set, stats):
-    """このスクリプトが書いた形（前書きに `onenote_id`）の `.md` のうち、今回出てこなかったものを消す。"""
-    for at in out_root.rglob("*.md"):
-        if at.resolve() in written:
+def _under(path: Path, base: Path) -> bool:
+    return path == base or base in path.parents
+
+
+def prune(scope: list, keep: set, written: set, stats):
+    """このスクリプトが書いた形（前書きに `onenote_id`）の `.md` のうち、今回出てこなかったものを消す。
+
+    **消してよいのは、今回ちゃんと歩いた場所だけ。** 前の版は出力先ぜんたいを
+    歩いていて、`--notebook` で一つに絞って走らせると、**絞られたほうの
+    ノートブックが一枚残らず消えた**（今回出てこないので、全部「消えたページ」に
+    見える）。同じことが、OneNote 側でノートブックを閉じていた回にも起きる。
+
+    だから歩いた範囲（`scope`）の中だけを見て、その中でも見えなかった場所
+    （`keep` ── 鍵のかかったセクション）は避ける。
+    """
+    for nb_dir in scope:
+        if not nb_dir.is_dir():
             continue
-        if not read_head(at).get("onenote_id"):
-            continue  # ambər で作ったノートは触らない
-        try:
-            at.unlink()
-            stats["pruned"] += 1
-            log.info("消した: %s", at)
-        except OSError as e:
-            log.warning("消せない %s: %s", at, e)
+        for at in nb_dir.rglob("*.md"):
+            r = at.resolve()
+            if r in written:
+                continue
+            if any(_under(r, k) for k in keep):
+                continue
+            if not read_head(at).get("onenote_id"):
+                continue  # ambər で作ったノートは触らない
+            try:
+                at.unlink()
+                stats["pruned"] += 1
+                log.info("消した: %s", at)
+            except OSError as e:
+                log.warning("消せない %s: %s", at, e)
 
 
-def main():
+def build_parser():
+    """引数の定義は**ここ一つ**。走査（onenote-test.py）も同じものを使う ──
+    写すと、片方にだけ足した旗で走査が落ちる（しかも落ち方が `AttributeError`
+    なので、何が足りないのか画面から分からない）。"""
     ap = argparse.ArgumentParser(description="OneNote → Markdown（階層保持・ambər の保存ディレクトリ向け）")
     ap.add_argument("--out", required=True, help="出力先フォルダ（ローカルでも \\\\…@SSL\\DavWWWRoot\\… でも）")
     ap.add_argument("--notebook", action="append", help="対象ノートブック名（部分一致、複数指定可）")
@@ -554,22 +676,47 @@ def main():
     ap.add_argument("--prune", action="store_true", help="OneNote 側で消えたページの .md を削除する（ambər で直したものも消える）")
     ap.add_argument("--flatten-groups", action="store_true", help="セクショングループを「グループ › セクション」の一段に畳む（深いノートブック向け）")
     ap.add_argument("--save-xml", action="store_true", help="元の XML も .md と同じ場所に保存（デバッグ用）")
+    ap.add_argument("--sync", action="store_true", help="読む前に OneNote へ同期を頼む（1時間ごとに回すときはこれ）")
+    ap.add_argument("--sync-wait", type=float, default=15.0, metavar="秒", help="--sync のあと読み直すまで待つ秒数（既定 15）")
+    ap.add_argument("--log", metavar="ファイル", help="経過をこのファイルにも書き足す（タスク スケジューラ向け）")
     ap.add_argument("-v", "--verbose", action="store_true")
-    args = ap.parse_args()
+    return ap
+
+
+def main():
+    args = build_parser().parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(message)s")
+    if args.log:
+        # 定時で回すと、画面には誰もいない。**落ちたことが残らなければ、落ちていない
+        # のと見分けがつかない。**
+        fh = logging.FileHandler(args.log, encoding="utf-8")
+        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logging.getLogger().addHandler(fh)
+    log.info("=== onenote2md 開始 %s", datetime.now().isoformat(timespec="seconds"))
 
+    out_root = Path(args.out)
+    with only_one(out_root):
+        code = run(args, out_root)
+    return code
+
+
+def run(args, out_root: Path):
     app = connect_onenote()
     root = ET.fromstring(get_hierarchy(app))
+    if args.sync and not args.dry_run:
+        if sync_notebooks(app, root, args.notebook, args.sync_wait):
+            root = ET.fromstring(get_hierarchy(app))   # 同期後の姿で読み直す
     notebooks = root.findall("one:Notebook", NS)
     if not notebooks:
         sys.exit("開いているノートブックがありません。OneNote 上で対象ノートブックを開いてください。")
 
-    out_root = Path(args.out)
     stats = {"pages": 0, "written": 0, "skipped_pages": 0, "images": 0, "errors": 0,
-             "skipped_sections": 0, "pruned": 0}
+             "skipped_sections": 0, "pruned": 0, "pruned_images": 0}
     written: set = set()
+    keep: set = set()
+    scope: list = []
     for nb in notebooks:
         name = nb.get("name", "")
         if args.notebook and not any(f.lower() in name.lower() for f in args.notebook):
@@ -578,15 +725,18 @@ def main():
         log.info("=== ノートブック: %s", nb_name)
         if args.dry_run:
             print(f"# {nb_name}")
-        walk_container(app, nb, out_root / nb_name, [nb_name], args, stats, written)
+        nb_dir = out_root / nb_name
+        scope.append(nb_dir)
+        walk_container(app, nb, nb_dir, [nb_name], args, stats, written, keep)
 
     if args.prune and not args.dry_run:
-        prune(out_root, written, stats)
+        prune(scope, keep, written, stats)
 
-    log.info("完了: ページ %d（書いた %d・変わらず %d）/ 画像 %d / エラー %d / スキップしたセクション %d / 消した %d",
+    log.info("完了: ページ %d（書いた %d・変わらず %d）/ 画像 %d / エラー %d / スキップしたセクション %d / 消した %d（絵 %d）",
              stats["pages"], stats["written"], stats["skipped_pages"], stats["images"],
-             stats["errors"], stats["skipped_sections"], stats["pruned"])
+             stats["errors"], stats["skipped_sections"], stats["pruned"], stats["pruned_images"])
+    return 1 if stats["errors"] else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

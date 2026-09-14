@@ -1255,6 +1255,33 @@ if (process.env.TEAMCSV) {
         return true;
     `, true);
 
+    // **段の呼び名を変えられる**（依頼 563・本人「僕の予定は『予定表』という
+    // 名称で出力されていそう」）── 鍵はメールなので、名前を変えても予定との
+    // 結びつきは動かない。空にすれば元に戻る。
+    await step('カレンダー：段の呼び名を変えても、予定はその段のまま', `
+        const 元 = { ...calNames };
+        const team = crowdLanes(weekOf(calDay), true).filter((l) => l.kind === 'team');
+        if (!team.length) return 'チームの段がありません';
+        const key = team[0].key;
+        const was = team[0].name;
+        const 数 = calSlots.filter((s) => whoOf(s).key === key).length;
+        calNames = { ...calNames, [key]: '自分' };
+        window.amber.remember({ calNames });
+        await drawCal();
+        const now = crowdLanes(weekOf(calDay), true).find((l) => l.key === key);
+        const 数2 = calSlots.filter((s) => whoOf(s).key === key).length;
+        // 空にしたら元に戻る。
+        calNames = { ...calNames }; delete calNames[key];
+        window.amber.remember({ calNames });
+        await drawCal();
+        const 戻 = crowdLanes(weekOf(calDay), true).find((l) => l.key === key);
+        calNames = 元; window.amber.remember({ calNames }); await drawCal();
+        if (!now || now.name !== '自分') return '呼び名が変わりません: ' + (now && now.name);
+        if (数2 !== 数) return '予定が別の段へ移りました（' + 数 + ' → ' + 数2 + '）';
+        if (!戻 || 戻.name !== was) return '空にしても戻りません: ' + (戻 && 戻.name);
+        return true;
+    `, true);
+
     // **段を上下に動かせる**（依頼 562・本人）。
     await step('カレンダー：段を上へ動かすと、次からその順で出る', `
         const 元 = calOrder.slice();

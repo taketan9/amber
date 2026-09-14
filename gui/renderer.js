@@ -7745,6 +7745,19 @@ function tagColor(t) {
 /// 壊れない**（CSV は毎日書き換わるので、名前で固定すると消えた人の穴が空く）。
 let calOrder = [];
 
+/// **段につけた呼び名**（依頼 563・本人「僕の予定は『予定表』という名称で
+/// 出力されていそう」）。
+///
+/// Outlook は**自分の予定表**の表示名を「予定表」と返す ── 書き出す側で
+/// 直すのが筋だが（そちらは別のセッションの仕事）、**こちらでも呼べる
+/// ようにしておく**。同姓の人が二人来た日にも効くし、書き出す側が何を
+/// 返すかは、こちらの都合では決められない。
+///
+/// **鍵はメール。** 名前を変えても、予定との結びつきは動かない
+/// （`docs/team-csv.ja.md` の取り決め ── 名前は揺れる）。
+let calNames = {};
+const laneName = (key, was) => calNames[key] || was;
+
 /// **どれが自分か**（依頼 562・本人「日・週・月は僕じゃない人の予定に
 /// なってそうだ」）。
 ///
@@ -8156,7 +8169,10 @@ function drawHours() {
 /// **鍵は名前ではない。** 表示名は同姓・改姓・全角半角で揺れるので、
 /// 会社の紙はメールでまとめる（`docs/team-csv.ja.md` の取り決め）。
 function whoOf(s) {
-    if (s.kind === 'team') return { key: 'team:' + (s.mail || s.who), name: s.who || '（名前なし）' };
+    if (s.kind === 'team') {
+        const key = 'team:' + (s.mail || s.who);
+        return { key, name: laneName(key, s.who || '（名前なし）') };
+    }
     if (s.kind === 'away') return { key: 'away:' + (s.from || ''), name: s.from || 'よその予定表' };
     if (s.kind === 'here') return { key: 'here:' + (s.from || ''), name: s.from || 'この端末' };
     return { key: 'me', name: '自分のノート' };
@@ -8206,7 +8222,10 @@ function crowdLanes(days, whole) {
         const who = whoOf(s);
         put(who.key, who.name, s.kind).slots.push(s);
     }
-    for (const w of teamPeople) put('team:' + (w.mail || w.name), w.name, 'team');
+    for (const w of teamPeople) {
+        const key = 'team:' + (w.mail || w.name);
+        put(key, laneName(key, w.name), 'team');
+    }
     // 人の段は、予定表の段より上に ── グループを見ているときに知りたいのは
     // 「だれの用事か」のほうで、どの予定表から来たかではない。
     // **憶えた並びが先。** 居ないものは、いままでの決まりで後ろに続く。
@@ -8973,6 +8992,23 @@ el('cal').addEventListener('contextmenu', async (e) => {
             { name: '上へ', run: () => moveLane(key, -1) },
             { name: '下へ', sep: true, run: () => moveLane(key, 1) },
         ];
+        // **呼び名を変える**（依頼 563）── 書き出す側が「予定表」としか
+        // 言わないことがある。**空にすれば元の名前に戻る。**
+        rows.push({
+            name: '呼び名を変える',
+            sub: calNames[key] ? 'いまは「' + calNames[key] + '」' : '空にすると元に戻ります',
+            sep: !key.startsWith('team:'),
+            run: async () => {
+                const got = await askText('この段の呼び名', calNames[key] || 名,
+                    '空にすると、書き出された名前に戻ります');
+                if (got === null) return;
+                const to = got.trim();
+                calNames = { ...calNames };
+                if (to && to !== 名) calNames[key] = to; else delete calNames[key];
+                window.amber.remember({ calNames });
+                await drawCal();
+            },
+        });
         // **「自分はこの人」はチームの段だけ**（依頼 562）── ほかの段は
         // もともと自分のものなので、選ばせても意味が無い。
         if (key.startsWith('team:')) {
@@ -9064,7 +9100,10 @@ async function calSources() {
         for (const c of (got && got.calendars) || []) out.push({ key: 'here:' + c, name: c + '（このパソコン）' });
     }
     for (const a of away) out.push({ key: 'away:' + a.name, name: a.name + '（カレンダー設定で足したもの）' });
-    for (const w of teamPeople) out.push({ key: 'team:' + (w.mail || w.name), name: w.name + '（チーム）' });
+    for (const w of teamPeople) {
+        const key = 'team:' + (w.mail || w.name);
+        out.push({ key, name: laneName(key, w.name) + '（チーム）' });
+    }
     // 隠しているのに一覧に無いもの（もう無い予定表）も出す ── 戻せないと困る。
     for (const k of calHide) if (!out.some((x) => x.key === k)) out.push({ key: k, name: k.replace(/^[a-z]+:/, '') });
     return out;
@@ -12163,6 +12202,7 @@ const escapeAttr = escapeHtml;
     // 段の並び順と「自分はこの人」（依頼 562）。
     if (Array.isArray(saved.calOrder)) calOrder = saved.calOrder.filter((k) => typeof k === 'string');
     if (typeof saved.calMe === 'string') calMe = saved.calMe;
+    if (saved.calNames && typeof saved.calNames === 'object') calNames = { ...saved.calNames };
     // 出す時間帯（依頼 562）。**筋の通らない組はそのまま受けない** ──
     // 終わりが始まりより前だと、時間が一つも無い表になる。
     if (Number.isInteger(saved.calFrom) && Number.isInteger(saved.calTill)
