@@ -150,6 +150,74 @@ await step('変換の途中で移っても、打った字が残る', `
     if (!now.includes('かくてい')) return '確定した字まで消えました';
     return now.includes('みかくていのじ') ? true : '変換中だった字が消えました';`, true);
 
+// 三の二の三。**表の中の上下は、見た目どおり**（依頼 559・本人）。
+await step('表：下矢印は右ではなく、真下の升へ', `
+    await openNote(${path('よくばり.md')});
+    setView('read');
+    await new Promise((g) => setTimeout(g, 700));
+    const cells = [...el('read').querySelectorAll('table th, table td')];
+    if (cells.length < 4) return '表の升が ' + cells.length + ' つです';
+    landInCell(cells[0]);
+    el('read').focus();
+    el('read').dispatchEvent(new KeyboardEvent('keydown',
+        { code: 'ArrowDown', key: 'ArrowDown', bubbles: true, cancelable: true }));
+    await new Promise((g) => setTimeout(g, 200));
+    let n = getSelection().anchorNode; if (n && n.nodeType === 3) n = n.parentElement;
+    const now = n?.closest('td, th');
+    if (!now) return '升の外に出ました';
+    return now === cells[2] ? true : '行った先は「' + now.textContent.trim() + '」です';`, true);
+await step('表：上矢印は、真上の升へ', `
+    const cells = [...el('read').querySelectorAll('table th, table td')];
+    landInCell(cells[3]);
+    el('read').focus();
+    el('read').dispatchEvent(new KeyboardEvent('keydown',
+        { code: 'ArrowUp', key: 'ArrowUp', bubbles: true, cancelable: true }));
+    await new Promise((g) => setTimeout(g, 200));
+    let n = getSelection().anchorNode; if (n && n.nodeType === 3) n = n.parentElement;
+    const now = n?.closest('td, th');
+    if (!now) return '升の外に出ました';
+    return now === cells[1] ? true : '行った先は「' + now.textContent.trim() + '」です';`, true);
+
+// 三の二の四。**IME が載っているだけの `keyCode 229` で、手当てを飛ばさない**
+// （依頼 560）── 会社の Windows で「⇧Enter が二回押さないと効かない」として出た。
+await step('⇧Enter：IME の付いた 229 でも、一回で改行する', `
+    await openNote(${path('途中.md')});
+    setView('read');
+    await new Promise((g) => setTimeout(g, 700));
+    const p = [...el('read').querySelectorAll('p')].find((x) => x.textContent.length > 10);
+    if (!p) return '段落がありません';
+    const 元 = editor.getValue();
+    const r = document.createRange(); r.selectNodeContents(p); r.collapse(false);
+    const s2 = getSelection(); s2.removeAllRanges(); s2.addRange(r);
+    el('read').focus();
+    const was = p.querySelectorAll('br').length;
+    // **変換は開いていない**のに 229 で届く、という Windows の形。
+    el('read').dispatchEvent(new KeyboardEvent('keydown',
+        { code: 'Enter', key: 'Enter', shiftKey: true, keyCode: 229, bubbles: true, cancelable: true }));
+    await new Promise((g) => setTimeout(g, 300));
+    const now = p.querySelectorAll('br').length;
+    loading = true; editor.setValue(元); loading = false;
+    await save();
+    await new Promise((g) => setTimeout(g, 300));
+    return now > was ? true : '一回では改行しませんでした（br ' + was + ' → ' + now + '）';`, true);
+await step('⇧Enter：本当に変換中なら、IME に渡す', `
+    const p = [...el('read').querySelectorAll('p')].find((x) => x.textContent.length > 10);
+    const 元 = editor.getValue();
+    const r = document.createRange(); r.selectNodeContents(p); r.collapse(false);
+    const s2 = getSelection(); s2.removeAllRanges(); s2.addRange(r);
+    el('read').focus();
+    el('read').dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    const was = p.querySelectorAll('br').length;
+    el('read').dispatchEvent(new KeyboardEvent('keydown',
+        { code: 'Enter', key: 'Enter', shiftKey: true, keyCode: 229, bubbles: true, cancelable: true }));
+    await new Promise((g) => setTimeout(g, 250));
+    const now = p.querySelectorAll('br').length;
+    el('read').dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+    loading = true; editor.setValue(元); loading = false;
+    await save();
+    await new Promise((g) => setTimeout(g, 300));
+    return now === was ? true : '変換中なのに改行しました（br ' + was + ' → ' + now + '）';`, true);
+
 // 三の三。**上限**（依頼 556）── 網なので、ふだんは鳴らない。
 await step('タブ：50 枚を超えたら、古いものから閉じる', `
     const real = tabs.slice();

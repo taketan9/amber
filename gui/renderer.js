@@ -19,6 +19,20 @@ const el = (id) => document.getElementById(id);
 /// のは升だけで、手当てが飛ぶと**升だけが出ない**という形で現れる。
 const isEnter = (e) => e.code === 'Enter' || e.code === 'NumpadEnter';
 
+/// **その鍵は、いま IME が食べているか**（依頼 560）。
+///
+/// `keyCode === 229` は「IME が処理中」の古い合図だが、**Windows では
+/// 変換していなくても付いてくることがある** ── 日本語入力を載せているだけで、
+/// 確定済みの行末で押した `⇧Enter` が 229 で届く。これを「変換中」と見て
+/// 手当てを飛ばすと、既定の `<br>` が一枚だけ入り、**段落の末尾の `<br>`
+/// 一枚は行にならない** ── 会社の Windows で「二回押さないと改行しない」
+/// として出た（本人・2026-09-14）。手元で `keyCode 229` を送って再現した。
+///
+/// **変換が本当に開いているかは、こちらが知っている**（`composing` は
+/// `compositionstart`／`end` で立てている）── 229 はその裏付けがあるときだけ
+/// 信じる。`isComposing` は仕様どおりの合図なので、こちらは常に信じる。
+const imeBusy = (e) => e.isComposing || (e.keyCode === 229 && composing);
+
 /// 道の最後の一片。**区切りは `/` だけではない。**
 ///
 /// core が返す道は土台のもので、Windows では `C:\Users\…\ノート.md`。
@@ -3660,7 +3674,7 @@ function readChanged() {
 /// 升の行の Enter を、`checkEnter` に渡す。**判断は切り出しの側** ──
 /// 電話も同じ関数を呼ぶので、押し心地が端末で分かれない。
 el('read').addEventListener('keydown', (e) => {
-    if (!isEnter(e) || e.isComposing || e.keyCode === 229) return;
+    if (!isEnter(e) || imeBusy(e)) return;
     if (e.metaKey || e.ctrlKey) return;
     let n = getSelection()?.anchorNode;
     if (n && n.nodeType === 3) n = n.parentElement;
@@ -3729,7 +3743,7 @@ el('read').addEventListener('compositionend', () => {
 /// **変換中は IME に渡す。** 文節の区切りがこの鍵で動く（`PAPER.ja.md`
 /// 六章の丁）。
 el('read').addEventListener('keydown', (e) => {
-    if (!['Backspace', 'Delete'].includes(e.code) || e.isComposing || e.keyCode === 229) return;
+    if (!['Backspace', 'Delete'].includes(e.code) || imeBusy(e)) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     // 選んで消すときは、表を壊さないほうが先に受ける。
     if (checkCut(el('read'))) { e.preventDefault(); readChanged(); return; }
@@ -3749,17 +3763,54 @@ el('read').addEventListener('keydown', (e) => {
 /// **変換中は IME に渡す。** 文節の区切りがこの鍵で動く。
 el('read').addEventListener('keydown', (e) => {
     const dir = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }[e.code];
-    if (!dir || e.isComposing || e.keyCode === 229) return;
+    if (!dir || imeBusy(e)) return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;   // 選びと飛びは既定のまま
+    if ((dir === 'down' || dir === 'up') && checkCellArrow(dir)) { e.preventDefault(); return; }
     if (!checkArrow(el('read'), dir)) return;
     e.preventDefault();
 });
+
+/// **表の中の上下は、見た目どおり真下・真上の升へ**（依頼 559・本人）。
+///
+/// 既定は「次の字へ」なので、2×2 の左上で下を押すと**右上**に行く ──
+/// 表は格子に見えているのに、動きだけが一列に並んだ字のままだった。
+/// Tab が「次の升へ」なのと同じ理由で、ここも見えている形に合わせる。
+///
+/// **升の中で行が折り返しているときは、まず升の中を動く。** 一行しか
+/// 無いように見えて二行あることがあるので、caret が升の最後の行に居る
+/// ときだけ隣の行へ渡す（上は最初の行のときだけ）。
+///
+/// 表の外へは出さない ── 最後の行より下、最初の行より上は既定に任せる
+/// （`checkArrow` が表そのものを跨ぐ）。
+function checkCellArrow(dir) {
+    let n = getSelection()?.anchorNode;
+    if (!n) return false;
+    if (n.nodeType === 3) n = n.parentElement;
+    const cell = n?.closest?.('td, th');
+    if (!cell || !el('read').contains(cell)) return false;
+    const r = getSelection().getRangeAt(0).getBoundingClientRect();
+    const box = cell.getBoundingClientRect();
+    const line = parseFloat(getComputedStyle(cell).lineHeight) || r.height || 16;
+    // **一行しかない升は、いつでも渡す**（ほとんどの升がこれ）。折り返して
+    // いる升だけ、まず升の中を動かす ── 升の高さで見分ける（詰めの厚みに
+    // 寄りかからない）。
+    const many = box.height > line * 1.8;
+    if (many && dir === 'down' && r.bottom && r.bottom < box.bottom - line) return false;
+    if (many && dir === 'up' && r.top && r.top > box.top + line) return false;
+    const table = cell.closest('table');
+    const rows = [...table.rows];
+    const at = rows.indexOf(cell.parentElement);
+    const to = rows[at + (dir === 'down' ? 1 : -1)]?.cells[cell.cellIndex];
+    if (!to) return false;
+    landInCell(to);
+    return true;
+}
 
 /// Tab / Shift+Tab ── 一覧の中は段、外は字下げ（`checkTab`）。
 ///
 /// **表の中は、表の道具が先に受ける**（次のセルへ）。
 el('read').addEventListener('keydown', (e) => {
-    if (e.code !== 'Tab' || e.isComposing || e.keyCode === 229) return;
+    if (e.code !== 'Tab' || imeBusy(e)) return;
     // caret の居場所は、字の節のことも升そのもののこともある ──
     // 片方だけ見ると、升の終わりに置いたときだけ効かない。
     let n = getSelection()?.anchorNode;
