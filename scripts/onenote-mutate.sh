@@ -187,6 +187,18 @@ mutate "繋ぐときの答えを捨てて、二度歩く" "階層を二度は取
     'app, first = connect_onenote()
     root = ET.fromstring(first)' 'app, first = connect_onenote()
     root = ET.fromstring(get_hierarchy(app))'
+mutate "bit の食い違いに黙る" "64 bit なのに win32 しか無ければ言う" \
+    'if not arches or want in {a.lower() for a in arches}:
+        return None' 'if True:
+        return None'
+mutate "大文字小文字で取り違える" "大文字小文字は問わない" \
+    'want in {a.lower() for a in arches}' 'want in arches'
+mutate "登録が空でも決めつける" "何も無ければ決めつけない" \
+    'if not arches or want in' 'if want in'
+mutate "資源の番号を落とさない" "exe の中の番号を落とす" \
+    'return re.sub(r"[\\/]\d+$", "", path or "")' 'return path or ""'
+mutate "途中の数字まで落とす" "途中の数字は落とさない" \
+    'return re.sub(r"[\\/]\d+$", "", path or "")' 'return re.sub(r"\d+", "", path or "")'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

@@ -213,8 +213,36 @@ makepy は新しい場所へ書き、読み込みは古い場所を探す ──
 py -3 scripts\onenote2md.py --out X --probe
 ```
 
-**`ライブラリは登録されていません`（`-2147319779` / `TYPE_E_LIBNOTREGISTERED`）は、
-版の取り違え。** 会社の端末には型ライブラリが `1.0` と `1.1` の**両方**登録されて
+**`ライブラリは登録されていません`（`-2147319779` / `TYPE_E_LIBNOTREGISTERED`）の
+本命は、bit の食い違い。** 型ライブラリの登録は bit ごとに枝が分かれている ──
+64 bit のプロセスは `Win64`、32 bit のプロセスは `Win32` を見る。**片方しか無いと、
+皮は正しくかぶさるのに呼んだ瞬間に落ちる**（いちばん読みにくい形）。`--probe` が
+見つけたらそう言う:
+
+```
+1.1 / lcid 0 / Win32 = ...\Office16\ONENOTE.EXE\3  → ある
+→ **この Python は 64 bit なのに、win64 の登録が無い（あるのは ['win32']）。**
+```
+
+**これはコードでは直らない。** 直し方は二つ:
+
+1. **Python の bit を Office に合わせる。** Office が 32 bit なら 32 bit の Python を
+   使う。どちらかは `--probe` の `Office の bit` に出る
+   （`reg query "HKLM\SOFTWARE\Microsoft\Office\ClickToRun\Configuration" /v Platform`）。
+2. **足りない枝を足す。** Office が 64 bit なのに `Win64` が無いなら、登録のほうが
+   欠けている。**自分のユーザーにだけ**足せば管理者は要らない（`HKCU` は `HKCR` に
+   重なって見え、`HKLM` より優先される）:
+
+   ```bat
+   reg add "HKCU\Software\Classes\TypeLib\{0EA692EE-BB50-4E3C-AEF0-356D91732725}\1.1\0\Win64" /ve /d "C:\Program Files\Microsoft Office\root\Office16\ONENOTE.EXE\3" /f
+   ```
+
+   道は `--probe` が出した `Win32` の値をそのまま使う。**戻すときは**
+   `reg delete "HKCU\Software\Classes\TypeLib\{0EA692EE-BB50-4E3C-AEF0-356D91732725}" /f`。
+   会社の端末なので、**やる前に自分の運用ルールを確かめること** ── レジストリを
+   触る話で、こちらから勝手にはやらない。
+
+**（版そのものの取り違えもある。）** 会社の端末には型ライブラリが `1.0` と `1.1` の**両方**登録されて
 いた。並んでいるだけではどちらが使えるか分からず、片方は実体を指していない ──
 その皮で包むと、`GetHierarchy` は見えるのに**呼ぶとここで落ちる。**
 スクリプトは 1.1 → 1.0 の順に試し、**実際に呼んで答えが返ったほうを採る**。

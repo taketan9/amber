@@ -876,6 +876,32 @@ def t_verify(tmp):
     check("階層を二度は取りに行かない", counted.hier_calls == 1, f"{counted.hier_calls}")
 
 
+def t_arch(tmp):
+    print("bit の食い違いを、こちらから言う ──")
+    v = o2m._arch_verdict({"Win32"}, bits=64)
+    check("64 bit なのに win32 しか無ければ言う",
+          v and "win64 の登録が無い" in v[1], f"{v}")
+    check("何が原因かまで言う", v and "ライブラリは登録されていません" in v[2], f"{v}")
+    check("噛み合っていれば黙る", o2m._arch_verdict({"Win64"}, bits=64) is None)
+    check("32 bit 側でも見る", o2m._arch_verdict({"win64"}, bits=32) is not None)
+    check("32 bit で win32 があれば黙る", o2m._arch_verdict({"win32"}, bits=32) is None)
+    check("大文字小文字は問わない", o2m._arch_verdict({"WIN64"}, bits=64) is None)
+    check("何も無ければ決めつけない", o2m._arch_verdict(set(), bits=64) is None)
+
+
+def t_resource_index(tmp):
+    print("型ライブラリの道 ──")
+    f = o2m._strip_resource_index
+    check("exe の中の番号を落とす",
+          f(r"C:\x\ONENOTE.EXE\3") == r"C:\x\ONENOTE.EXE", f(r"C:\x\ONENOTE.EXE\3"))
+    check("番号が無ければそのまま",
+          f(r"C:\x\stdole2.tlb") == r"C:\x\stdole2.tlb")
+    check("斜めの区切りでも落とす", f("/usr/x/lib.tlb/2") == "/usr/x/lib.tlb")
+    check("途中の数字は落とさない",
+          f(r"C:\Office16\ONENOTE.EXE") == r"C:\Office16\ONENOTE.EXE")
+    check("空でも落ちない", f("") == "" and f(None) == "")
+
+
 def t_connect(tmp):
     print("OneNote への繋ぎ方 ──")
     good = FakeOneNote(hierarchy(), pages_for())
@@ -923,7 +949,7 @@ def main():
     try:
         for fn in (t_names, t_structure, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
-                   t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_connect):
+                   t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_resource_index, t_connect):
             fn(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

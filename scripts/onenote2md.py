@@ -165,6 +165,37 @@ def _gen_py_somewhere_writable():
     return at, True
 
 
+def _strip_resource_index(path: str) -> str:
+    """型ライブラリの道から、末尾の**資源の番号**を落とす。
+
+    型ライブラリが exe の中に埋まっていると、登録される道は
+    `…\\ONENOTE.EXE\\3` のようになる。番号ごと `os.path.exists` に渡すと、
+    **在るものまで「無い」と言う** ── そして「実体が無い」は、こちらの
+    見立てをまるごと変えてしまう嘘になる。
+    """
+    return re.sub(r"[\\/]\d+$", "", path or "")
+
+
+def _arch_verdict(arches, bits=None):
+    """登録されている bit と、いま走っている bit が噛み合っているか。
+
+    噛み合っていないと、**皮は正しくかぶさるのに呼んだ瞬間に落ちる** ──
+    いちばん読みにくい形になる（`ライブラリは登録されていません`）。
+    見たことから結論まで言う。
+    """
+    me = bits or (64 if sys.maxsize > 2 ** 32 else 32)
+    want = "win64" if me == 64 else "win32"
+    if not arches or want in {a.lower() for a in arches}:
+        return None
+    return [
+        "",
+        f"→ **この Python は {me} bit なのに、{want} の登録が無い"
+        f"（あるのは {sorted(a.lower() for a in arches)}）。**",
+        "   これが『ライブラリは登録されていません』の正体です。",
+        "   直し方は docs/onenote.ja.md の「ハマりどころ」に。",
+    ]
+
+
 def probe():
     """この端末で何が起きているかを、そのまま並べる。
 
@@ -180,6 +211,7 @@ def probe():
 
     print("== python ==")
     say("版", lambda: sys.version.replace("\n", " "))
+    say("bit", lambda: 64 if sys.maxsize > 2 ** 32 else 32)
     say("実行ファイル", lambda: sys.executable)
 
     print("== pywin32 ==")
@@ -209,6 +241,16 @@ def probe():
     # **これは「逃がす前」の姿。** 実際に走るときはここから動く ── 動いた先も出す。
     say("逃がすとどこへ", lambda: _gen_py_somewhere_writable())
 
+    print("== Office ==")
+
+    def office_bits():
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"SOFTWARE\Microsoft\Office\ClickToRun\Configuration")
+        return winreg.QueryValueEx(key, "Platform")[0]
+
+    say("Office の bit（x64 / x86）", office_bits)
+
     print("== 型ライブラリの登録 ==")
 
     def _subkeys(key):
@@ -233,6 +275,7 @@ def probe():
         root = "TypeLib" + chr(92) + ONENOTE_TYPELIB
         key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, root)
         lines = []
+        arches = set()
         for ver in _subkeys(key) or ["（版が一つも無い）"]:
             vkey = winreg.OpenKey(key, ver)
             found = False
@@ -243,21 +286,34 @@ def probe():
                         path = winreg.QueryValue(lkey, arch)
                     except OSError:
                         path = "（値が無い）"
-                    here = "ある" if path and os.path.exists(path) else "**無い**"
+                    # 道の末尾に `\3` のような**資源の番号**が付くことがある
+                    # （型ライブラリが exe の中に埋まっている場合）。番号ごと
+                    # `os.path.exists` に渡すと、在るものまで「無い」と言う。
+                    real = _strip_resource_index(path)
+                    here = "ある" if real and os.path.exists(real) else "**無い**"
                     lines.append(f"{ver} / lcid {lcid} / {arch} = {path}  → {here}")
+                    arches.add(arch.lower())
                     found = True
             if not found:
                 lines.append(f"{ver}: 中に lcid が無い ── **空の枝**")
+        # **見たことから結論まで言う。** ここが噛み合っていないと、
+        # 皮は正しくかぶさるのに呼んだ瞬間に落ちる ── いちばん読みにくい形。
+        lines.extend(_arch_verdict(arches) or [])
         return "\n      " + "\n      ".join(lines)
 
     say("TypeLib" + chr(92) + ONENOTE_TYPELIB, versions)
 
     print("== OneNote ==")
-    say("ProgID → CLSID", lambda: str(pyc().CLSIDFromProgID("OneNote.Application")))
+    def clsid():
+        import pywintypes
+        return str(pywintypes.IID("OneNote.Application"))   # ProgID も引ける
+
+    say("ProgID → CLSID", clsid)
 
     def known():
-        clsid = pyc().CLSIDFromProgID("OneNote.Application")
-        return gc().GetClassForCLSID(clsid) or "（生成された型を知らない ── だから遅い束ねで返る）"
+        import pywintypes
+        got = gc().GetClassForCLSID(pywintypes.IID("OneNote.Application"))
+        return got or "（生成された型を知らない ── だから遅い束ねで返る）"
 
     say("gencache が知っている型", known)
 
