@@ -536,6 +536,29 @@ class LateBound(FakeOneNote):
         return self.pages[pid]
 
 
+class NeedsSchema(FakeOneNote):
+    """**schema を省くと断る相手。**
+
+    Microsoft の資料は「版を明示せよ、空で渡すな」と書いている ── 空で渡すと
+    OneNote が「いまの版」を探しにいく。その版が登録されていなければ
+    `ライブラリは登録されていません`。会社の Windows で出た形の候補。
+    """
+
+    # **`int なら何でも` では甘い。** `[out]` の置き場所に info（整数）が
+    # 入った形まで通ってしまい、schema を落としても走査が黙る。
+    def GetHierarchy(self, start, scope, xsSchema=None):
+        if xsSchema != o2m.XS_2013:
+            raise RuntimeError("(-2147319779, 'ライブラリは登録されていません。')")
+        self.hier_calls += 1
+        return self.hier
+
+    def GetPageContent(self, pid, info=None, xsSchema=None):
+        if xsSchema != o2m.XS_2013:
+            raise RuntimeError("(-2147319779, 'ライブラリは登録されていません。')")
+        self.fetched.append(pid)
+        return self.pages[pid]
+
+
 class Sneaky(FakeOneNote):
     """間違った渡し方でも**例外にならず、XML でない何か**を返す性悪。
 
@@ -556,7 +579,8 @@ def t_binding(tmp):
     print("束ね方（早い／遅い）──")
     want = ["仕事/案件/A社/見積.md", "仕事/議事録/9月の定例.md",
             "仕事/議事録/9月の定例/補足.md", "私用/買い物/週末.md"]
-    for name, cls in (("早い束ね", EarlyBound), ("遅い束ね", LateBound), ("性悪", Sneaky)):
+    for name, cls in (("早い束ね", EarlyBound), ("遅い束ね", LateBound), ("性悪", Sneaky),
+                      ("schema を要る相手", NeedsSchema)):
         out = tmp / f"bind-{cls.__name__}"
         # **落ちたら NG。** 例外のまま抜けると走査ごと止まり、
         # 「鳴らなかった」と「検査が無い」が同じ顔になる。

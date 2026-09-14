@@ -113,11 +113,12 @@ mutate "--list が書き出しに進む" "--list は書かない" \
 mutate "--list が絞りを映さない" "外れるものに × が付く" \
     'mark = "  " if chosen(path, args) else "× "' 'mark = "  "'
 mutate "早い束ねの形を試さない" "早い束ねでも同じものが出る" \
-    'return _xml_call(app.GetHierarchy, ("", HS_PAGES), ("", HS_PAGES, ""))' \
-    'return _xml_call(app.GetHierarchy, ("", HS_PAGES, ""))'
+    '("", HS_PAGES),
+                     ("", HS_PAGES, ""))' '("", HS_PAGES, ""))'
 mutate "GetPageContent の [out] を末尾だと思う" "遅い束ねでも同じものが出る" \
-    'return _xml_call(app.GetPageContent, (page_id, info), (page_id, "", info))' \
-    'return _xml_call(app.GetPageContent, (page_id, info), (page_id, info, ""))'
+    '(page_id, info),
+                     (page_id, "", info))' '(page_id, info),
+                     (page_id, info, ""))'
 mutate "例外の有無だけで見分ける" "性悪でも同じものが出る" \
     'if isinstance(out, str) and out.lstrip().startswith("<"):
             return out' 'if True:
@@ -205,6 +206,12 @@ mutate "繋げないとき bit の見立てを黙る" "繋げないとき bit �
 mutate "噛み合っていても言い立てる" "噛み合っているときは、余計なことを言わない" \
     'return ("\n" + "\n".join(v)) if v else ""' \
     'return "\n" + "\n".join(v or ["→ **win64 の登録が無い**"])'
+mutate "schema を明示しない（GetHierarchy）" "schema を要る相手でも同じものが出る" \
+    '("", HS_PAGES, XS_2013),
+                     ("", HS_PAGES, "", XS_2013),' ''
+mutate "schema を明示しない（GetPageContent）" "schema を要る相手でも同じものが出る" \
+    '(page_id, info, XS_2013),
+                     (page_id, "", info, XS_2013),' ''
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

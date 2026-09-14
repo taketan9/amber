@@ -96,6 +96,7 @@ import xml.etree.ElementTree as ET
 ONE_NS = "http://schemas.microsoft.com/office/onenote/2013/onenote"
 NS = {"one": ONE_NS}
 HS_PAGES = 4          # HierarchyScope.hsPages
+XS_2013 = 2           # XMLSchema.xs2013
 PI_BINARY_DATA = 1    # PageInfo.piBinaryData（画像を Base64 で同梱）
 ATTACH = "attachments"   # ambər の絵の置き場所（ノートの隣・この名前）
 PATH_LIMIT = 200         # WebDAV の道の長さの壁（256）に余裕を見た数
@@ -398,6 +399,46 @@ def probe():
 
     say("取り次ぎ側が見ている登録", interface_typelib)
 
+    print("== 呼び方を試す ==")
+
+    def shapes():
+        """**当てにいかず、全部試して、どれが通ったかを言う。**
+
+        登録まわりが全部白なのに呼べないなら、残るのは呼び方。
+        引数の並び・`[out]` の位置・schema の有無で組み合わせがあるので、
+        ひとつずつ当たって**結果を並べる**。
+        """
+        mod = gc().EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
+        raw = cli().Dispatch("OneNote.Application")
+        app = _wrap_with_generated(mod, raw) or raw
+        names = [n for n in dir(mod)
+                 if isinstance(getattr(mod, n, None), type)
+                 and hasattr(getattr(mod, n), "GetHierarchy")]
+        dispid = None
+        if names:
+            try:
+                dispid = getattr(mod, names[0]).GetHierarchy.__defaults__
+            except Exception:  # noqa
+                dispid = None
+        out = []
+        tries = [
+            ("包んで (起点, 深さ, schema)", lambda: app.GetHierarchy("", HS_PAGES, XS_2013)),
+            ("包んで (起点, 深さ)", lambda: app.GetHierarchy("", HS_PAGES)),
+            ("素で (起点, 深さ, [out], schema)",
+             lambda: raw.GetHierarchy("", HS_PAGES, "", XS_2013)),
+            ("素で (起点, 深さ, [out])", lambda: raw.GetHierarchy("", HS_PAGES, "")),
+        ]
+        for label, fn in tries:
+            try:
+                got = fn()
+                ok = isinstance(got, str) and got.lstrip().startswith("<")
+                out.append(f"{label}: {'**通った**（' + str(len(got)) + ' 字）' if ok else repr(got)[:60]}")
+            except Exception as e:  # noqa
+                out.append(f"{label}: ✗ {e}")
+        return "\n      " + "\n      ".join(out)
+
+    say("GetHierarchy の呼び方", shapes)
+
     def generated(major, minor):
         def f():
             mod = gc().EnsureModule(ONENOTE_TYPELIB, 0, major, minor)
@@ -596,14 +637,25 @@ def _xml_call(func, *variants):
     raise trouble
 
 
+# **schema は明示する。** Microsoft の資料がそう言っている ── 空で渡すと
+# OneNote 側が「いまの版」を探しにいき、その版が登録されていないと
+# `ライブラリは登録されていません` になりうる。明示したほうを先に試す。
 def get_hierarchy(app):
-    # 早い束ね: (起点, 深さ) で XML が返る / 遅い束ね: [out] は 3 番目
-    return _xml_call(app.GetHierarchy, ("", HS_PAGES), ("", HS_PAGES, ""))
+    # 早い束ね: (起点, 深さ, schema) / 遅い束ね: [out] は 3 番目
+    return _xml_call(app.GetHierarchy,
+                     ("", HS_PAGES, XS_2013),
+                     ("", HS_PAGES, "", XS_2013),
+                     ("", HS_PAGES),
+                     ("", HS_PAGES, ""))
 
 
 def _get_page(app, page_id, info):
-    # 早い束ね: (ページ, 何を含めるか) / 遅い束ね: [out] は **2 番目**
-    return _xml_call(app.GetPageContent, (page_id, info), (page_id, "", info))
+    # 早い束ね: (ページ, 何を含めるか, schema) / 遅い束ね: [out] は **2 番目**
+    return _xml_call(app.GetPageContent,
+                     (page_id, info, XS_2013),
+                     (page_id, "", info, XS_2013),
+                     (page_id, info),
+                     (page_id, "", info))
 
 
 def sync_notebooks(app, root, filters, wait):
