@@ -258,10 +258,51 @@ mutate "思わぬ落ち方を黙って捨てる" "落ちたわけが、記録に
 mutate "画面の字を cp932 のままにする" "cp932 に向けても、最後まで出る" \
     'stream.reconfigure(encoding="utf-8", errors="replace")' 'pass' 
 mutate "読むだけの回も鎖を取る" "鎖の中でも --probe は走る" \
-    'if args.probe or args.list or args.dry_run:
+    'if args.probe or args.check or args.list or args.dry_run:
             return run(args, out_root)' \
     'if False:
             return run(args, out_root)'
+mutate "--check が probe と同じだけ出す" "繋がらないときも、十数行で収まる" \
+    '    try:
+        app, first = connect_onenote()
+    except SystemExit:' '    probe()
+    try:
+        app, first = connect_onenote()
+    except SystemExit:'
+mutate "--check が落ちても 0 を返す" "落ちた回は 0 を返さない" \
+    '        for line in _next_move(me, office, arches, server_here):
+            print(f"  {line}")
+        return 1' '        for line in _next_move(me, office, arches, server_here):
+            print(f"  {line}")
+        return 0'
+mutate "足す一行を出さず docs に送る" "足す一行を、道ごと出す" \
+    'have = _typelib_path("win32" if want == "win64" else "win64")' 'have = None'
+mutate "戻す一行を出さない" "戻す一行も出す" \
+    'out += ["戻すとき:", undo]' 'pass'
+mutate "戻す一行に、消す命令が入らない" "戻す一行も出す" \
+    'undo = f"  reg delete " + chr(34) + root + chr(34) + " /f"' \
+    'undo = ""'
+mutate "繋がっても次の一手を言う" "繋がったら、次の一手は言わない" \
+    '    root = ET.fromstring(first)
+    books =' \
+    '    print("繋がらない。次の一手:")
+    root = ET.fromstring(first)
+    books ='
+mutate "一冊も無いときに黙る" "一冊も無いとき、ストア版の落とし穴を言う" \
+    'if not books:
+        print("  → " + _no_books_hint(store))' 'if False:
+        print("")'
+mutate "ストア版が無くてもその話をする" "ストア版が無ければ、その話はしない" \
+    'if store:
+        return ("ストア版' 'if True:
+        return ("ストア版'
+mutate "読めなくてもストア版の話をする" "読めないときは、黙る" \
+    'if store:
+        print(f"ストア版も入っている: {store}")' 'if store is not False:
+        print(f"ストア版も入っている: {store}")'
+mutate "--check も鎖を取る" "鎖の中でも --check は走る" \
+    'if args.probe or args.check or args.list or args.dry_run:' \
+    'if args.probe or args.list or args.dry_run:'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

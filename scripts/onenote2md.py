@@ -252,6 +252,81 @@ def _arch_verdict(arches, bits=None):
     ]
 
 
+def _office_platform():
+    """Office がどちらの bit で入っているか（`x64` / `x86`）。読めなければ None。"""
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"SOFTWARE\Microsoft\Office\ClickToRun\Configuration")
+        return winreg.QueryValueEx(key, "Platform")[0]
+    except (ImportError, OSError):
+        return None
+
+
+def _local_server():
+    """`OneNote.Application` の COM サーバーの実体（道, 在るか）。読めなければ (None, False)。"""
+    try:
+        import winreg
+        import pywintypes
+        clsid = str(pywintypes.IID("OneNote.Application"))
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
+                             "CLSID" + chr(92) + clsid + chr(92) + "LocalServer32")
+        path = (winreg.QueryValue(key, None) or "").strip().strip('"')
+        real = _strip_resource_index(path)
+        return path, bool(real and os.path.exists(real))
+    except Exception:  # noqa
+        return None, False
+
+
+def _typelib_path(want_arch):
+    """型ライブラリの、その bit の枝が指している道。無ければ None。
+
+    **足りない枝を足すとき、道は自分で調べさせない。** 手で打ち直す人に
+    「docs を見て、`--probe` の出した値をそこから写して」と言うのは、
+    繋がらない端末の前に立っている人に出す注文ではない。
+    """
+    try:
+        import winreg
+    except ImportError:
+        return None
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "TypeLib" + chr(92) + ONENOTE_TYPELIB)
+        for ver in _reg_subkeys(key):
+            vkey = winreg.OpenKey(key, ver)
+            for lcid in _reg_subkeys(vkey):
+                lkey = winreg.OpenKey(vkey, lcid)
+                for arch in _reg_subkeys(lkey):
+                    if arch.lower() != want_arch.lower():
+                        continue
+                    try:
+                        return ver, lcid, winreg.QueryValue(lkey, arch)
+                    except OSError:
+                        continue
+    except OSError:
+        return None
+    return None
+
+
+def _store_onenote():
+    """**ストア版（OneNote for Windows 10）も入っているか。**
+
+    入っていること自体は害ではないが、**COM を持つのはデスクトップ版だけ**
+    なので、ふだんストア版を使っていると「繋がったのに、開いているノート
+    ブックが一冊も無い」になる ── 写すノートブックは**デスクトップ版で**
+    開いていないと、こちらからは見えない。
+    """
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                             r"Software\Classes\ActivatableClasses\Package")
+    except (ImportError, OSError):
+        return None                      # Windows でない・読めない ── 何も言わない
+    for name in _reg_subkeys(key):
+        if name.lower().startswith("microsoft.office.onenote"):
+            return name
+    return False
+
+
 def probe():
     """この端末で何が起きているかを、そのまま並べる。
 
@@ -299,13 +374,10 @@ def probe():
 
     print("== Office ==")
 
-    def office_bits():
-        import winreg
-        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                             r"SOFTWARE\Microsoft\Office\ClickToRun\Configuration")
-        return winreg.QueryValueEx(key, "Platform")[0]
-
-    say("Office の bit（x64 / x86）", office_bits)
+    say("Office の bit（x64 / x86）", lambda: _office_platform() or "（読めない）")
+    say("ストア版も入っているか",
+        lambda: {None: "（読めない）", False: "入っていない"}.get(_store_onenote(),
+                                                                _store_onenote()))
 
     print("== 型ライブラリの登録 ==")
 
@@ -381,14 +453,8 @@ def probe():
         だけで両方出る。動いている OneNote が別の場所から起きていると、
         「繋がるのに呼べない」というちぐはぐな形になる。
         """
-        import winreg
-        import pywintypes
-        clsid = str(pywintypes.IID("OneNote.Application"))
-        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "CLSID" + chr(92) + clsid
-                             + chr(92) + "LocalServer32")
-        path = (winreg.QueryValue(key, None) or "").strip().strip('"')
-        real = _strip_resource_index(path)
-        return f"{path}  → {'ある' if real and os.path.exists(real) else '**無い**'}"
+        path, here = _local_server()
+        return f"{path}  → {'ある' if here else '**無い**'}"
 
     say("COM サーバーの実体", local_server)
 
@@ -514,6 +580,106 @@ def probe():
     say("1.1 で包んで、呼んでみる", wrapped(1, 1))
     say("1.0 で包んで、呼んでみる", wrapped(1, 0))
     return 0
+
+
+def check():
+    """**一画面で終わる診断。**
+
+    `--probe` は 29 行出す。繋がらない端末の姿を残らず並べるための道具で、
+    それはそれで要るのだが、**現場から手で打ち直して渡す人には長すぎる。**
+    読むのは人なので、要るのは「どこが噛み合っていないか」と「次に何を
+    するか」だけ ── それを数行にする。
+
+    繋がったなら一行。繋がらないなら、決め手になる四つと、次の一手。
+    """
+    me = 64 if sys.maxsize > 2 ** 32 else 32
+    office = _office_platform()
+    arches = {a.lower() for a in _registered_arches()}
+    server, server_here = _local_server()
+    store = _store_onenote()
+
+    print(f"Python {sys.version_info[0]}.{sys.version_info[1]} / {me} bit")
+    print(f"Office {office or '（読めない）'}")
+    print(f"型ライブラリの枝: {' '.join(sorted(arches)) or '（読めない）'}")
+    print(f"COM サーバー: {'ある' if server_here else '**無い**'}"
+          + (f"  {server}" if server else ""))
+    if store:
+        print(f"ストア版も入っている: {store}")
+
+    try:
+        app, first = connect_onenote()
+    except SystemExit:
+        print()
+        print("繋がらない。次の一手:")
+        for line in _next_move(me, office, arches, server_here):
+            print(f"  {line}")
+        return 1
+
+    root = ET.fromstring(first)
+    books = [nb.get("name", "") for nb in root.findall("one:Notebook", NS)]
+    print()
+    print(f"繋がった。開いているノートブック {len(books)} 冊: "
+          + ("、".join(books) if books else "（一冊も無い）"))
+    if not books:
+        print("  → " + _no_books_hint(store))
+    return 0
+
+
+def _next_move(me, office, arches, server_here):
+    """**繋がらないときに、次にやることを一つだけ言う。**
+
+    並べると人は選べない。いちばん効きそうなものから、当てはまる一つ。
+    """
+    want = "win64" if me == 64 else "win32"
+    if arches and want not in arches:
+        if office and office.lower() in ("x64", "x86"):
+            office_bits = 64 if office.lower() == "x64" else 32
+            if office_bits == me:
+                # 実体は同じ bit なのに、枝だけが無い ── 足せば読める。
+                out = [f"型ライブラリに {want} の枝が無い（あるのは {sorted(arches)}）。",
+                       f"Office も Python も {me} bit なので、枝を足せば読める。"]
+                have = _typelib_path("win32" if want == "win64" else "win64")
+                if have:
+                    ver, lcid, path = have
+                    add, undo = _reg_lines(ver, lcid, want, path)
+                    out += ["この一行（HKCU なので管理者は要らない）:", add]
+                    out += ["戻すとき:", undo]
+                else:
+                    out.append("足す道は --probe の枝の値をそのまま使う。")
+                out.append("レジストリを触るので、会社の決まりだけ先に確かめて。")
+                return out
+            return [f"型ライブラリに {want} の枝が無く、Office は {office}。",
+                    f"Python を {office_bits} bit に合わせるのがいちばん確か。"]
+        return [f"型ライブラリに {want} の枝が無い（あるのは {sorted(arches)}）。"]
+    if not server_here:
+        return ["COM サーバーの実体が、登録の指す場所に無い。",
+                "デスクトップ版 OneNote を入れ直すか、修復する。"]
+    return ["管理者の窓で走らせていないか（OneNote と権限を揃える）。",
+            "デスクトップ版 OneNote を先に手で開く。",
+            "それでも駄目なら --probe を（長いが、全部出る）。"]
+
+
+def _reg_lines(ver, lcid, want, path):
+    """足す一行と、戻す一行。**道はこちらで埋める。**
+
+    繋がらない端末の前に立っている人に「docs を見て `--probe` の値を
+    そこから写して」と言うのは、注文としておかしい。
+    """
+    b = chr(92)
+    root = "HKCU" + b + "Software" + b + "Classes" + b + "TypeLib" + b + ONENOTE_TYPELIB
+    add = (f'  reg add "{root}{b}{ver}{b}{lcid}{b}{want.capitalize()}"'
+           f' /ve /d "{path}" /f')
+    undo = f"  reg delete " + chr(34) + root + chr(34) + " /f"
+    return add, undo
+
+
+def _no_books_hint(store):
+    """繋がったのに一冊も見えないとき。**ここがストア版の落とし穴。**"""
+    if store:
+        return ("ストア版（OneNote for Windows 10）も入っている。**COM を持つのは"
+                "デスクトップ版だけ**なので、写すノートブックはデスクトップ版の"
+                "ほうで開いておく。")
+    return "OneNote 上で、写したいノートブックを開く（閉じているものは見えない）。"
 
 
 def _wrap_with_generated(mod, raw):
@@ -1352,8 +1518,10 @@ def build_parser():
                     help="このセクションだけ写す。`ノートブック/グループ/セクション` の道に部分一致（複数指定可）")
     ap.add_argument("--skip", action="append", metavar="道",
                     help="このセクションは写さない。--only より強い（複数指定可）")
+    ap.add_argument("--check", action="store_true",
+                    help="繋がるかを数行で言う（繋がらないなら、次の一手も）。手で打ち直して渡せる長さ")
     ap.add_argument("--probe", action="store_true",
-                    help="この端末で何が起きているかを並べる（繋がらないときに、そのまま貼ってほしい）")
+                    help="この端末で何が起きているかを残らず並べる（29 行。--check で足りないとき）")
     ap.add_argument("--list", action="store_true",
                     help="写せるセクションを道で並べるだけ（--only/--skip を付けると、外れるものに × が付く）")
     ap.add_argument("--dry-run", action="store_true", help="階層表示のみ、書き込みなし")
@@ -1405,13 +1573,16 @@ def main():
         fh = logging.FileHandler(args.log, encoding="utf-8")
         fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
         logging.getLogger().addHandler(fh)
-    log.info("=== onenote2md 開始 %s", datetime.now().isoformat(timespec="seconds"))
+    if not (args.check or args.probe):
+        # **読むだけの回に、見出しは要らない。** 画面の字をそのまま人が
+        # 打ち直して渡すので、一行でも短いほうがいい。
+        log.info("=== onenote2md 開始 %s", datetime.now().isoformat(timespec="seconds"))
 
     out_root = Path(args.out) if args.out else Path(".")
     try:
         # **読むだけの回は、鎖を取らない。** 固まっている回を調べるための
         # `--probe` が、その固まっている回のせいで断られるのでは道具にならない。
-        if args.probe or args.list or args.dry_run:
+        if args.probe or args.check or args.list or args.dry_run:
             return run(args, out_root)
         with only_one(out_root):
             return run(args, out_root)
@@ -1432,6 +1603,8 @@ def main():
 def run(args, out_root: Path):
     if args.probe:
         return probe()
+    if args.check:
+        return check()
     if not args.out:
         sys.exit("--out が要ります（出力先フォルダ）。")
     # 繋ぐときに一度は訊いている（そうでないと「繋がった」と言えない）ので、
@@ -1443,7 +1616,7 @@ def run(args, out_root: Path):
             root = ET.fromstring(get_hierarchy(app))   # 同期後の姿で読み直す
     notebooks = root.findall("one:Notebook", NS)
     if not notebooks:
-        sys.exit("開いているノートブックがありません。OneNote 上で対象ノートブックを開いてください。")
+        sys.exit("開いているノートブックがありません。" + _no_books_hint(_store_onenote()))
 
     if args.list:
         list_sections(root, args)

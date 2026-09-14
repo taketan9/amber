@@ -1152,6 +1152,63 @@ def t_cp932(tmp):
     check("--probe に --out は要らない", "== python ==" in r.stdout, r.stdout[:120])
 
 
+def t_check(tmp):
+    print("一画面で終わる診断（--check）──")
+    import io, contextlib
+    EXE = "C:" + chr(92) + "Office16" + chr(92) + "ONENOTE.EXE" + chr(92) + "3"
+    keep = (o2m._office_platform, o2m._registered_arches, o2m._local_server,
+            o2m._store_onenote, o2m._typelib_path, o2m.connect_onenote)
+
+    def say(**kw):
+        o2m._office_platform = kw.get("office", lambda: "x64")
+        o2m._registered_arches = kw.get("arches", lambda: {"win32"})
+        o2m._local_server = kw.get("server", lambda: (EXE, True))
+        o2m._store_onenote = kw.get("store", lambda: False)
+        o2m._typelib_path = kw.get("tl", lambda want: ("1.1", "0", EXE))
+        o2m.connect_onenote = kw.get("connect",
+                                     lambda: (_ for _ in ()).throw(SystemExit("駄目")))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = o2m.check()
+        return code, buf.getvalue()
+
+    try:
+        code, out = say()
+        # **手で打ち直して渡せる長さ。** `--probe` は 29 行出る ── 現場に
+        # 立っている人に、それを写させるのは注文としておかしい。
+        check("繋がらないときも、十数行で収まる", len(out.strip().splitlines()) <= 14,
+              len(out.strip().splitlines()))
+        check("落ちた回は 0 を返さない", code != 0, code)
+        check("噛み合っていない枝を名指しする", "win64 の枝が無い" in out, out)
+        # **道は自分で調べさせない。** 繋がらない端末の前に立っている人に
+        # 「docs を見て、probe の値をそこから写して」は通らない。
+        check("足す一行を、道ごと出す", 'reg add "HKCU' in out and EXE in out, out)
+        check("戻す一行も出す", "reg delete" in out, out)
+
+        _, out = say(arches=lambda: {"win64"},
+                     connect=lambda: (FakeOneNote(hierarchy(), pages_for()), hierarchy()))
+        check("繋がったら、開いているノートブックを数える", "2 冊" in out, out)
+        check("繋がったら、次の一手は言わない", "次の一手" not in out, out)
+
+        empty = '<?xml version="1.0"?><one:Notebooks ' + NBS + '></one:Notebooks>'
+        _, out = say(arches=lambda: {"win64"}, store=lambda: "Microsoft.Office.OneNote_x",
+                     connect=lambda: (FakeOneNote(empty, {}), empty))
+        # **ここがストア版の落とし穴。** 繋がっても、写すものが一つも見えない。
+        check("一冊も無いとき、ストア版の落とし穴を言う",
+              "デスクトップ版" in out and "一冊も無い" in out, out)
+        _, out = say(arches=lambda: {"win64"}, store=lambda: False,
+                     connect=lambda: (FakeOneNote(empty, {}), empty))
+        check("ストア版が無ければ、その話はしない", "ストア版" not in out, out)
+
+        _, out = say(store=lambda: "Microsoft.Office.OneNote_x")
+        check("ストア版が入っていれば、そう言う", "ストア版も入っている" in out, out)
+        _, out = say(store=lambda: None)
+        check("読めないときは、黙る", "ストア版" not in out, out)
+    finally:
+        (o2m._office_platform, o2m._registered_arches, o2m._local_server,
+         o2m._store_onenote, o2m._typelib_path, o2m.connect_onenote) = keep
+
+
 def t_readonly_no_lock(tmp):
     print("読むだけの回は、鎖を取らない ──")
     import subprocess
@@ -1168,6 +1225,10 @@ def t_readonly_no_lock(tmp):
         r = subprocess.run([sys.executable, str(ROOT / "onenote2md.py"),
                             "--out", str(at), "--list"],
                            capture_output=True, text=True, errors="replace")
+        r = subprocess.run([sys.executable, str(ROOT / "onenote2md.py"),
+                            "--out", str(at), "--check"],
+                           capture_output=True, text=True, errors="replace")
+        check("鎖の中でも --check は走る", "Python " in r.stdout, (r.stdout + r.stderr)[:160])
         check("鎖の中でも --list は断られない", "前の回がまだ走っています" not in r.stderr,
               r.stderr[:160])
         # 書く回は、これまでどおり断る。
@@ -1182,7 +1243,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_structure, t_table, t_inline, t_created,
-                   t_log, t_cp932, t_readonly_no_lock, t_incremental, t_same_file,
+                   t_log, t_cp932, t_check, t_readonly_no_lock, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
                    t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):
             fn(tmp)
