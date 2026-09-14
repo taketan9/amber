@@ -463,7 +463,7 @@ struct ContentView: View {
                     // 電話に右押しは無いので、長押しがその手ぶり。窓の
                     // 「⌥ 押し」と同じことをする。
                     Button {
-                        desk.open(note, store, fresh: true)
+                        desk.open(note, store)
                         showing = true
                     } label: {
                         Label("新しいタブで開く", systemImage: "rectangle.stack.badge.plus")

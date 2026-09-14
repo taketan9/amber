@@ -31,9 +31,6 @@ final class Desk: ObservableObject {
         /// their own first line. Typing cannot change it; the sheets can, and
         /// they go through `whole`.
         var head = ""
-        /// 仮のタブか（依頼 522・VS Code のプレビュータブ）。一覧から押しただけなら仮で、
-        /// 次を開くと入れ替わる。書くか「このタブを残す」で本のタブに。
-        var preview = false
         /// What the note says. This is what the editor holds.
         var text = ""
         /// What was on disk when it was opened or last saved.
@@ -110,50 +107,28 @@ final class Desk: ObservableObject {
     var current: Tab? { tabs.first { $0.id == showing } }
 
     /// Open a note, or come back to it if it is already open.
-    /// ノートを机に出す。
+    /// ノートを机に出す。**押したぶんだけ、タブが増える**（依頼 555）。
     ///
-    /// **ふつうに押したら、いまのタブを差し替える。** 前は押すたびに
-    /// `append` していて、入れ替える道がそもそも無かった ── 一覧を上から
-    /// 順に見ただけでタブが溜まる（窓に同じものを持ってきたら、1002 本の
-    /// 棚で 1002 タブになる）。増やしたいときだけ `fresh` で増やす
-    /// （窓の `⌥` 押しと、長押しの「新しいタブで開く」）。
+    /// 前は「仮のタブ」があって、一覧から押しただけのものは次を開くと
+    /// 入れ替わっていた（依頼 522・VS Code の決まり）── **本人が実際に
+    /// 動かして分かりにくいと言ったので撤回した。** 見たものは残る。
     ///
     /// **もう机の上にあるなら、そのタブへ。** 同じノートが二枚並ぶと、
     /// 片方に打った字がもう片方から見えない。
-    /// `store` は差し替えるときだけ要る（**置いていく書きかけを、先に
-    /// 書くため**）。渡さなければ書かない ── 呼ぶ側が既に書いている場合。
-    func open(_ note: Note, _ store: NotesStore? = nil,
-              writing: Bool = false, fresh: Bool = false, pin: Bool = false) {
+    /// `store` はもう要らない（差し替えが無くなったので、置いていく
+    /// 書きかけも無い）が、呼ぶ側の形は変えない。
+    func open(_ note: Note, _ store: NotesStore? = nil, writing: Bool = false) {
         if let at = tabs.firstIndex(where: { $0.id == note.path }) {
             if writing { tabs[at].reading = false }
-            if writing || pin { tabs[at].preview = false }
-        } else if fresh || pin || writing {
-            // 本のタブとして、いまのすぐ右へ（窓と同じ）。
+        } else {
+            // **押したぶんだけ、タブが増える**（依頼 555・本人が依頼 522 を撤回）。
+            // 前は「仮のタブ」があって、一覧から押しただけのものは次を開くと
+            // 入れ替わっていた ── 実際に動かすと分かりにくい（本人）。
+            // 置く先はいまのすぐ右（窓と同じ）── たどった順と並びが合う。
             let t = Tab(note: note, reading: !writing)
             if let now = tabs.firstIndex(where: { $0.id == showing }) { tabs.insert(t, at: now + 1) } else { tabs.append(t) }
-        } else {
-            // **仮のタブ**（依頼 522）── あれば差し替え、無ければいまの右に一枚。
-            // 差し替えるぶんの書きかけは置いていかない（`Tab` ごと捨てるので、
-            // ここで書かないと消える）── 書いていれば仮ではなくなっているはずだが、念のため。
-            var t = Tab(note: note, reading: !writing)
-            t.preview = true
-            if let pre = tabs.firstIndex(where: { $0.preview }) {
-                if let store, tabs[pre].dirty { _ = try? save(tabs[pre].id, store) }
-                if let store { settle(tabs[pre].id, store) }
-                if let again = tabs.firstIndex(where: { $0.preview }) { tabs[again] = t } else { tabs.append(t) }
-            } else if let now = tabs.firstIndex(where: { $0.id == showing }) {
-                tabs.insert(t, at: now + 1)
-            } else {
-                tabs.append(t)
-            }
         }
         showing = note.path
-    }
-
-    /// 仮のタブを本のタブに。
-    func pin(_ id: String) {
-        guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
-        tabs[at].preview = false
     }
 
     /// このノートより右のものを閉じる。
@@ -498,10 +473,7 @@ final class Desk: ObservableObject {
             get: { [weak self] in self?.tabs.indices.contains(at) == true ? self!.tabs[at] : Tab(note: Note(["path": id])!) },
             set: { [weak self] new in
                 guard let self, let now = self.tabs.firstIndex(where: { $0.id == id }) else { return }
-                var next = new
-                // 書いたら本のタブに（依頼 522）。
-                if next.preview && (next.text != self.tabs[now].text || next.head != self.tabs[now].head) { next.preview = false }
-                self.tabs[now] = next
+                self.tabs[now] = new
             }
         )
     }
@@ -956,13 +928,6 @@ struct DeskView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
             }
-            // 仮のタブを出しているときだけ、一言（人の言葉で・依頼 522）。
-            if let t = desk.current, t.preview {
-                Text("まだ読んでいるだけのタブです。ほかのノートを開くと入れ替わります。書き始めるか、タブを長押しして「このタブを残す」で残ります")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12).padding(.bottom, 5)
-            }
             }
             .background(.bar)
             // Swiping to a tab that is off the end of the strip should bring
@@ -982,7 +947,6 @@ struct DeskView: View {
                 Circle().frame(width: 6, height: 6).foregroundStyle(.orange)
             }
             Text(tab.note.shown).lineLimit(1).font(.subheadline)
-                .italic(tab.preview)
             Button {
                 desk.close(tab.id)
             } label: {
@@ -996,16 +960,10 @@ struct DeskView: View {
         .padding(.vertical, 6)
         .background(on ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12),
                     in: Capsule())
-        // 仮のタブは点線（依頼 522）── 斜体だけでは気づきにくい。
-        .overlay(Capsule().strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-            .foregroundStyle(tab.preview ? Color.secondary.opacity(0.6) : Color.clear))
-        .foregroundStyle(on ? Color.accentColor : (tab.preview ? Color.secondary : Color.primary))
+        .foregroundStyle(on ? Color.accentColor : Color.primary)
         .onTapGesture { desk.showing = tab.id }
         .contextMenu {
             // 言い方は本人が決めた（2026-09-12）。
-            if tab.preview {
-                Button { desk.pin(tab.id) } label: { Label("このタブを残す", systemImage: "pin") }
-            }
             Button { desk.close(tab.id) } label: { Label("このノートを閉じる", systemImage: "xmark") }
             Button { desk.closeRight(of: tab.id) } label: { Label("このノートより右のものを閉じる", systemImage: "arrow.right.to.line") }
             Button { desk.closeOthers(tab.id) } label: { Label("このノート以外をすべて閉じる", systemImage: "rectangle.on.rectangle.slash") }

@@ -402,27 +402,27 @@ enum Walk {
             return nil
         }
 
-        // ── 四の五。仮のタブ（依頼 522） ────
+        // ── 四の五。タブ（依頼 555・本人が依頼 522 の仮のタブを撤回） ────
         do {
             let desk = Desk()
             desk.store = store
-            step("仮のタブ：一覧から開いただけなら仮で、次を開くと入れ替わる") {
+            step("タブ：押したぶんだけ増える（入れ替わらない）") {
                 guard store.notes.count >= 3 else { return "ノートが足りません" }
                 let (a, b, c) = (store.notes[0], store.notes[1], store.notes[2])
-                desk.open(a, store, pin: true)
+                desk.open(a, store)
                 desk.open(b, store)
-                if desk.tabs.count != 2 || desk.current?.preview != true { return "仮のタブになっていません（\(desk.tabs.count) 枚）" }
+                if desk.tabs.count != 2 { return "二本目で \(desk.tabs.count) 枚です" }
                 desk.open(c, store)
-                if desk.tabs.count != 2 || desk.showing != c.path { return "入れ替わらず増えました（\(desk.tabs.count) 枚）" }
+                if desk.tabs.count != 3 { return "三本目で \(desk.tabs.count) 枚です（入れ替わっています）" }
+                if desk.showing != c.path { return "三本目が出ていません" }
                 return nil
             }
-            step("仮のタブ：書くと本のタブになり、ほかを閉じられる") {
+            step("タブ：同じノートをもう一度押しても増えない") {
+                guard store.notes.count >= 3 else { return "ノートが足りません" }
+                desk.open(store.notes[1], store)
+                if desk.tabs.count != 3 { return "同じ一本で増えました（\(desk.tabs.count) 枚）" }
+                if desk.showing != store.notes[1].path { return "そのタブに移っていません" }
                 guard let id = desk.current?.id else { return "タブが無い" }
-                try desk.load(id, store)
-                guard var t = desk.binding(id)?.wrappedValue else { return "タブを取れません" }
-                t.text += "\n仮のタブに書いた行"
-                desk.binding(id)?.wrappedValue = t
-                if desk.current?.preview == true { return "書いたのに仮のまま" }
                 desk.closeOthers(id)
                 return desk.tabs.count == 1 ? nil : "ほかを閉じられません（\(desk.tabs.count)）"
             }
