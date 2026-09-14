@@ -147,57 +147,173 @@ pub fn relocate(root: &Path, from: &Path, to: &Path, record_move: bool) -> anyho
     if to.exists() {
         anyhow::bail!("{} はもうあります", to.display());
     }
-    let Some(from_dir) = from.parent() else { anyhow::bail!("道がありません") };
+    if from.parent().is_none() {
+        anyhow::bail!("道がありません")
+    }
     let Some(to_dir) = to.parent() else { anyhow::bail!("道がありません") };
     std::fs::create_dir_all(to_dir)?;
 
     // ── 絵と、本文のリンク ──
-    //
-    // 絵は `attachments/<幹>-<時計>.png` という名前で、幹でノートに結び付く
-    // （`note::move_to` はそれで自分の絵を見分ける）。幹が変わるなら絵も
-    // 改名し、本文のリンクも書き直す ── 絵だけ古い名前で残すと、次にフォルダを
-    // 移した日に置き去りになる。
-    let old_prefix = crate::note::file_stem(&stem_of(from));
-    let new_prefix = crate::note::file_stem(&stem_of(to));
-    let mut renamed_pictures: Vec<(String, String)> = Vec::new();
-    if old_prefix != new_prefix && !old_prefix.is_empty() {
-        let att = from_dir.join("attachments");
-        if let Ok(rd) = std::fs::read_dir(&att) {
-            let mut names: Vec<String> =
-                rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-            names.sort();
-            for n in names {
-                let Some(rest) = n.strip_prefix(&format!("{old_prefix}-")) else { continue };
-                let new_name = format!("{new_prefix}-{rest}");
-                if att.join(&new_name).exists() {
-                    continue; // 取られている ── その絵は古い名前のまま（リンクも触らない）
-                }
-                if std::fs::rename(att.join(&n), att.join(&new_name)).is_ok() {
-                    renamed_pictures.push((n, new_name));
-                }
-            }
-        }
-    }
-    let mut rewrote = false;
-    if !renamed_pictures.is_empty() {
-        // UTF-8 で読めるノートだけ書き直す（Shift_JIS のノートは、絵の名前が
-        // ASCII でないかぎりリンクが古いまま残る ── 壊すよりよい）。
-        if let Ok(text) = std::fs::read_to_string(from) {
-            let mut out = text.clone();
-            for (a, b) in &renamed_pictures {
-                out = out.replace(&format!("attachments/{a}"), &format!("attachments/{b}"));
-            }
-            if out != text {
-                std::fs::write(from, out)?;
-                rewrote = true;
-            }
-        }
-    }
+    let fresh = bring_pictures(from, to)?;
 
     // ── ノートそのもの ──
     std::fs::rename(from, to)?;
+    // **書き戻すのは動いたあと、新しい場所へ。** 先に書くと、移動が転んだ
+    // ときに「元の場所にあるノートが、向こうの絵を指している」状態が残る。
+    let rewrote = match fresh {
+        Some(t) => {
+            std::fs::write(to, t)?;
+            true
+        }
+        None => false,
+    };
     carry(root, from, to, record_move);
     Ok(rewrote)
+}
+
+/// ノートが連れて行く絵を、引っ越し先の隣へ。返すのは書き直した本文
+/// （直すところが無ければ `None`）。**ノートそのものは動かさない** ──
+/// 呼ぶ側が最後に動かす（絵が置けないなら、ノートも動かさないため）。
+///
+/// **名前では見分けない ── 本文が指しているものを運ぶ。**（依頼 576）
+/// 前は `attachments/<幹>-<時計>` の付け方で見分けていたので、改名で幹が
+/// 変われば見失い（だから改名のたびに絵まで改名していた）、その付け方でない
+/// 絵 ── OneNote から写した `<ページ名>_001.png` など ── は拾えなかった。
+///
+/// ほかのノートも指している絵は、動かさずに写す。動かすと、残ったほうは
+/// 一文字も触られていないのに絵を失う。写せば両方が自分の隣の
+/// `attachments/` を見たままで、`..` の付いた道が一本も生まれない ──
+/// ノートはいつでも自分と隣の `attachments/` だけで持ち運べる。
+///
+/// 探すのは移動元のフォルダの中だけでよい。`..` が無い以上、その絵を
+/// 指しうるノートは同じフォルダにしか居ない。
+pub(crate) fn bring_pictures(from: &Path, to: &Path) -> anyhow::Result<Option<String>> {
+    let (Some(from_dir), Some(to_dir)) = (from.parent(), to.parent()) else {
+        return Ok(None);
+    };
+    // **同じフォルダでの改名では、絵に触らない。** 絵は動かず、本文の
+    // `attachments/…` も変わらないので、ノートからは今までどおり見える。
+    if from_dir == to_dir {
+        return Ok(None);
+    }
+    let Some((text, utf8)) = note_text(from) else { return Ok(None) };
+    let att_from = from_dir.join("attachments");
+    let mut mine: Vec<PathBuf> = crate::spare::points_at(&text, from_dir)
+        .into_iter()
+        .filter(|p| p.parent() == Some(att_from.as_path()) && p.is_file())
+        .collect();
+    mine.sort();
+    mine.dedup();
+    if mine.is_empty() {
+        return Ok(None);
+    }
+
+    let shared = pointed_at_by_others(from_dir, from);
+    let att_to = to_dir.join("attachments");
+    let mut plan: Vec<(PathBuf, PathBuf, bool)> = Vec::new();
+    let mut renamed: Vec<(String, String)> = Vec::new();
+    let mut taken: Vec<String> = Vec::new();
+    for p in &mine {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let at = att_to.join(&name);
+        // 先客が**同じ中身**なら、それを使う（写しも改名も要らない）。
+        if !taken.contains(&name) && same_file(p, &at) {
+            continue;
+        }
+        let free = free_picture_name(&att_to, &name, &taken);
+        taken.push(free.clone());
+        if free != name {
+            // 符号が読めないノートは書き戻せない ── リンクを直せないまま
+            // 絵の名前だけ変えると、黙って見失う。
+            if !utf8 {
+                anyhow::bail!("{} に同じ名前の絵があります: {}", att_to.display(), name);
+            }
+            renamed.push((name.clone(), free.clone()));
+        }
+        plan.push((p.clone(), att_to.join(&free), shared.iter().any(|s| s == p)));
+    }
+    if plan.is_empty() && renamed.is_empty() {
+        return Ok(None);
+    }
+    std::fs::create_dir_all(&att_to)?;
+    for (a, b, copy) in &plan {
+        if *copy {
+            std::fs::copy(a, b)?;
+        } else {
+            std::fs::rename(a, b)?;
+        }
+    }
+    if renamed.is_empty() {
+        return Ok(None);
+    }
+    // `%E6%AC%A1` と書かれたリンクは直せない（ここは字のまま探す）。名前が
+    // ぶつかるのは同じ名前で中身の違う絵が先に居たときだけなので、追って
+    // いない ── 直せなかったぶんは、前の版と同じ姿で残る。
+    let mut out = text.clone();
+    for (a, b) in &renamed {
+        out = out.replace(&format!("attachments/{a}"), &format!("attachments/{b}"));
+    }
+    Ok(if out != text { Some(out) } else { None })
+}
+
+/// 同じフォルダの**ほかの**ノートが指している行き先。
+fn pointed_at_by_others(dir: &Path, me: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    for e in rd.flatten() {
+        let at = e.path();
+        if at == me || !is_note(&at) {
+            continue;
+        }
+        // Shift_JIS のノートも読む。飛ばすと、その一本が指していた絵を
+        // 「誰も指していない」と見て運び去る。
+        if let Some((text, _)) = note_text(&at) {
+            out.extend(crate::spare::points_at(&text, dir));
+        }
+    }
+    out
+}
+
+fn is_note(at: &Path) -> bool {
+    at.is_file()
+        && at
+            .extension()
+            .map(|e| {
+                let e = e.to_string_lossy().to_lowercase();
+                e == "md" || e == "markdown"
+            })
+            .unwrap_or(false)
+}
+
+/// ノートの字と、**それが UTF-8 だったか**。偽なら書き戻さない ──
+/// 書き戻すと符号が変わり、頼まれてもいないのにファイルが作り替わる。
+fn note_text(at: &Path) -> Option<(String, bool)> {
+    match std::fs::read_to_string(at) {
+        Ok(t) => Some((t, true)),
+        Err(_) => crate::text::read(at).ok().map(|f| (f.lines.join("\n"), false)),
+    }
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::read(a), std::fs::read(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
+    }
+}
+
+/// `名前.png` が取られていたら `名前-2.png`。
+fn free_picture_name(dir: &Path, name: &str, taken: &[String]) -> String {
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) => (s.to_string(), format!(".{e}")),
+        None => (name.to_string(), String::new()),
+    };
+    let mut n = 1;
+    let mut try_name = name.to_string();
+    while (dir.join(&try_name).exists() || taken.contains(&try_name)) && n < 1000 {
+        n += 1;
+        try_name = format!("{stem}-{n}{ext}");
+    }
+    try_name
 }
 
 /// 道で憶えているものを、新しい道へ連れて行く ── 履歴の棚・共有から戻る場所・
@@ -339,6 +455,80 @@ mod tests {
         assert_eq!(settle(d.path(), &at).unwrap(), None);
     }
 
+    /// ノート二本が同じ絵を指しているところから、片方を動かす。
+    ///
+    /// **前の版は、ここで残ったほうを壊していた。** 絵を「幹が一致するもの」
+    /// で見分けて連れ去るので、`会議.md` は一文字も触られていないのに
+    /// 絵を失う ── 気づくのは次に開いた日で、原因からは遠い。
+    #[test]
+    fn 二本が指している絵は_動かさずに写す() {
+        let d = root();
+        let r = d.path();
+        std::fs::create_dir_all(r.join("attachments")).unwrap();
+        std::fs::write(r.join("attachments/段取り-1.png"), [7u8]).unwrap();
+        let mine = r.join("段取り.md");
+        let other = r.join("会議.md");
+        std::fs::write(&mine, "---\ntitle: 段取り\n---\n\n![](attachments/段取り-1.png)\n").unwrap();
+        std::fs::write(&other, "---\ntitle: 会議\n---\n\n![](attachments/段取り-1.png)\n").unwrap();
+
+        let to = crate::note::move_to(&mine, &r.join("仕事")).unwrap();
+
+        assert_eq!(std::fs::read(r.join("仕事/attachments/段取り-1.png")).unwrap(), vec![7u8]);
+        assert_eq!(
+            std::fs::read(r.join("attachments/段取り-1.png")).unwrap(),
+            vec![7u8],
+            "残ったノートの絵まで連れ去っている",
+        );
+        // どちらのノートも、**自分の隣**を見たまま。`..` は一本も生えない。
+        for at in [&to, &other] {
+            let text = std::fs::read_to_string(at).unwrap();
+            assert!(!text.contains(".."), "`..` の道が生えた: {text}");
+            let here = at.parent().unwrap();
+            let seen = crate::spare::points_at(&text, here);
+            assert!(seen.iter().any(|p| p.is_file()), "{at:?} から絵が見えない: {seen:?}");
+        }
+    }
+
+    /// 誰も指していない絵は、連れて行かない ── それは「使われていない画像」。
+    #[test]
+    fn 一本しか指していない絵は_連れて行く() {
+        let d = root();
+        let r = d.path();
+        std::fs::create_dir_all(r.join("attachments")).unwrap();
+        std::fs::write(r.join("attachments/段取り-1.png"), [7u8]).unwrap();
+        std::fs::write(r.join("attachments/誰も指さない.png"), [8u8]).unwrap();
+        let mine = r.join("段取り.md");
+        std::fs::write(&mine, "# 段取り\n![](attachments/段取り-1.png)\n").unwrap();
+
+        crate::note::move_to(&mine, &r.join("仕事")).unwrap();
+
+        assert!(r.join("仕事/attachments/段取り-1.png").is_file(), "絵が付いてこない");
+        assert!(!r.join("attachments/段取り-1.png").exists(), "元の場所にも残っている");
+        assert!(r.join("attachments/誰も指さない.png").is_file(), "指されていない絵まで連れ去った");
+    }
+
+    /// 名前の付け方では見分けない ── OneNote から写した `<ページ名>_001.png`
+    /// のような絵も、本文が指していれば付いてくる。
+    #[test]
+    fn 名前の形が違う絵でも_本文が指していれば付いてくる() {
+        let d = root();
+        let r = d.path();
+        std::fs::create_dir_all(r.join("attachments")).unwrap();
+        std::fs::write(r.join("attachments/9月の定例_001.png"), [3u8]).unwrap();
+        // **空白入りの名前も。** amber 自身の既定の名前がこの形。
+        std::fs::write(r.join("attachments/2026-09-06 19-18-30-1.png"), [4u8]).unwrap();
+        let mine = r.join("9月の定例.md");
+        std::fs::write(
+            &mine,
+            "# 9月の定例\n![](attachments/9月の定例_001.png)\n![](attachments/2026-09-06 19-18-30-1.png)\n",
+        ).unwrap();
+
+        crate::note::move_to(&mine, &r.join("仕事")).unwrap();
+
+        assert!(r.join("仕事/attachments/9月の定例_001.png").is_file(), "幹の形が違う絵が付いてこない");
+        assert!(r.join("仕事/attachments/2026-09-06 19-18-30-1.png").is_file(), "空白入りの絵が付いてこない");
+    }
+
     #[test]
     fn 絵とリンクと履歴と憶えが_付いてくる() {
         let d = root();
@@ -355,9 +545,21 @@ mod tests {
 
         let (to, rewrote) = settle(r, &at).unwrap().unwrap();
         assert_eq!(to, r.join("旅.md"));
-        assert!(rewrote, "リンクを書き直したと言わない");
-        assert!(r.join("attachments/旅-1.png").exists(), "絵が付いてこない");
-        assert_eq!(std::fs::read_to_string(&to).unwrap(), "# 旅\n![](attachments/旅-1.png)\n");
+        // **改名では、絵に触らない**（依頼 576）。絵の名前がノートの名前を
+        // 追いかける必要は無い ── 同じフォルダに居るのだから、本文の
+        // `attachments/…` はそのままで、ノートからは今までどおり見える。
+        // 追いかけさせていた版は、**同じ絵を指しているもう一本のノートを
+        // 黙って壊していた**（そのノートは一文字も触られていないのに）。
+        assert!(!rewrote, "改名で本文を書き直している");
+        assert!(!r.join("attachments/旅-1.png").exists(), "絵まで改名している");
+        assert!(r.join("attachments/2026-09-06 19-18-30-1.png").is_file(), "絵が消えた");
+        assert_eq!(
+            std::fs::read_to_string(&to).unwrap(),
+            "# 旅\n![](attachments/2026-09-06 19-18-30-1.png)\n",
+        );
+        // 依頼 492 の「絵も付いてくる」── **ノートから絵が見え続ける**こと。
+        let link = crate::spare::points_at(&std::fs::read_to_string(&to).unwrap(), r);
+        assert!(link.iter().any(|p| p.is_file()), "ノートから絵が見えない: {link:?}");
         assert!(crate::history::shelf(r, &to).unwrap().is_dir(), "履歴の棚が付いてこない");
         assert_eq!(crate::notebook::read(r).came.get("旅.md").map(String::as_str), Some("くらし"));
         let was = crate::sync::recall(r, "drive");

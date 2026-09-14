@@ -1382,11 +1382,10 @@ pub fn set_tags(text: &str, tags: &[String]) -> String {
 /// somebody opens the note and cannot tell whether the image was deleted or
 /// never arrived.
 ///
-/// Which pictures are "its" is answerable because of how they were named:
-/// [`attach`] calls them `<the note's stem>-<clock>.<ext>`. A picture some
-/// other note also points at would be moved out from under it — but that can
-/// only happen if somebody wrote the link by hand, and the alternative
-/// (leaving every picture behind) breaks the note that is actually moving.
+/// Which pictures are "its" is answered by **reading the note**, not by
+/// guessing from the file names — [`crate::naming::bring_pictures`] does it.
+/// A picture another note in the folder also points at is **copied** rather
+/// than moved: moving it would break that other note, which nobody touched.
 ///
 /// Nothing is overwritten: a name already taken at the destination stops the
 /// move with the note still where it was.
@@ -1406,32 +1405,13 @@ pub fn move_to(note: &std::path::Path, dir: &std::path::Path) -> anyhow::Result<
         anyhow::bail!("{} には同じ名前があります", dir.display());
     }
 
-    let stem = note
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let mut pictures: Vec<std::path::PathBuf> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(from.join("attachments")) {
-        for e in rd.flatten() {
-            let n = e.file_name().to_string_lossy().into_owned();
-            if n.starts_with(&format!("{stem}-")) {
-                pictures.push(e.path());
-            }
-        }
-    }
-
-    // The note last: if a picture cannot be moved, the note is still where it
-    // was and still points at pictures that are still there.
-    if !pictures.is_empty() {
-        let at = dir.join("attachments");
-        std::fs::create_dir_all(&at)?;
-        for p in &pictures {
-            if let Some(n) = p.file_name() {
-                std::fs::rename(p, at.join(n))?;
-            }
-        }
-    }
+    // 絵が先、ノートは最後。**絵が置けなければ、ノートも動かない** ──
+    // 元の場所のノートは、元の場所にある絵を指したままになる。
+    let fresh = crate::naming::bring_pictures(note, &to)?;
     std::fs::rename(note, &to)?;
+    if let Some(t) = fresh {
+        std::fs::write(&to, t)?;
+    }
     Ok(to)
 }
 
@@ -1953,10 +1933,14 @@ mod tests {
         let note = d.path().join("段取り.md");
         std::fs::write(&note, "# 段取り\n").unwrap();
         let link = attach(&note, &[1, 2, 3], "png").unwrap();
+        // **The link has to be in the note.** Which pictures come is read out
+        // of the body now, not guessed from the file names: a picture nothing
+        // points at is not "its" — it is a spare, and `spare::find` offers it.
+        std::fs::write(&note, format!("# 段取り\n![]({link})\n")).unwrap();
         // Another note's picture, which must stay where it is.
         let other = d.path().join("他.md");
-        std::fs::write(&other, "x").unwrap();
         let others = attach(&other, &[9], "png").unwrap();
+        std::fs::write(&other, format!("x ![]({others})\n")).unwrap();
 
         let book = d.path().join("仕事");
         let moved = move_to(&note, &book).unwrap();

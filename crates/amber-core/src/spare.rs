@@ -91,11 +91,19 @@ fn byte_at(chars: &[char], upto: usize) -> usize {
     chars[..upto].iter().map(|c| c.len_utf8()).sum()
 }
 
+/// このノートが指しているファイル ── 道にして返す。
+///
+/// **「使われていない画像」と同じ読み方を、ノートの引っ越しでも使う。**
+/// 「どの絵がこの一本のものか」は、「どの絵がどこからも指されていないか」と
+/// 同じ問いの裏表で、別々に書くと **片方が見落とした絵を、もう片方が
+/// 消す**（片方は「使われていない」と言い、片方は「連れて行かない」と言う）。
+pub(crate) fn points_at(text: &str, here: &Path) -> Vec<PathBuf> {
+    targets(text).iter().filter_map(|t| resolve(here, t)).collect()
+}
+
 /// 行き先を、ファイルの道に直す。**よそ行きは数えない。**
 fn resolve(from: &Path, target: &str) -> Option<PathBuf> {
-    let t = target.trim();
-    // `![](a.png "説明")` の説明を落とす。
-    let t = t.split_whitespace().next().unwrap_or(t);
+    let t = without_title(target);
     if t.is_empty() { return None; }
     let low = t.to_lowercase();
     if low.starts_with("http://") || low.starts_with("https://")
@@ -110,6 +118,31 @@ fn resolve(from: &Path, target: &str) -> Option<PathBuf> {
     if t.is_empty() { return None; }
     let at = if t.starts_with('/') { PathBuf::from(&t) } else { from.join(&t) };
     Some(tidy(&at))
+}
+
+/// `![](a.png "説明")` の説明を落とす。
+///
+/// **最初の空白で切ってはいけない。** amber が自分で付ける名前には空白が
+/// 入る（既定のノートは `2026-09-06 19-18-30.md` で、その絵は
+/// `2026-09-06 19-18-30-1.png`）。空白で切ると `attachments/2026-09-06` を
+/// 探しにいって外し、**ノートがちゃんと指している絵を「使われていない」と
+/// 数える** ── 人はそれを見て消す。落とすのは、引用符で囲われた説明だけ。
+/// 空白を含む道の正式な書き方 `<a b.png>` も読む。
+fn without_title(target: &str) -> &str {
+    let t = target.trim();
+    if let Some(inner) = t.strip_prefix('<').and_then(|r| r.strip_suffix('>')) {
+        return inner.trim();
+    }
+    for q in ['"', '\''] {
+        let Some(head) = t.strip_suffix(q) else { continue };
+        let Some(at) = head.rfind(q) else { continue };
+        // 引用符の前が空白のときだけ、そこからが説明。
+        let before = &t[..at];
+        if before.ends_with(char::is_whitespace) {
+            return before.trim_end();
+        }
+    }
+    t
 }
 
 /// `%E6%AC%A1` を字に戻す。**戻せなければ、そのまま** ── 半端に戻すより
@@ -229,6 +262,35 @@ pub fn find(root: &Path, rows: &[crate::survey::Row]) -> Found {
     // 新しいものが上 ── 消していいか迷うのは、たいてい最近のもの。
     spare.sort_by(|a, b| b.when.cmp(&a.when).then(a.rel.cmp(&b.rel)));
     Found { spare, unsure }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    /// **空白で切ると、指されている絵を「使われていない」と言う。**
+    /// amber の既定のノートは `2026-09-06 19-18-30.md` で、その絵は
+    /// 空白を二つ含む ── 人はその一覧を見て消す。
+    #[test]
+    fn 空白を含む名前の絵を_見失わない() {
+        let here = Path::new("/notes");
+        let got = resolve(here, "attachments/2026-09-06 19-18-30-1.png");
+        assert_eq!(got, Some(PathBuf::from("/notes/attachments/2026-09-06 19-18-30-1.png")));
+    }
+
+    #[test]
+    fn 引用符の説明は_落とす() {
+        let here = Path::new("/notes");
+        for t in ["a.png \"説明\"", "a.png '説明'", "<a.png>"] {
+            assert_eq!(resolve(here, t), Some(PathBuf::from("/notes/a.png")), "{t}");
+        }
+        // 空白を含む道と説明が、両方あるとき。
+        assert_eq!(
+            resolve(here, "b c.png \"説明\""),
+            Some(PathBuf::from("/notes/b c.png")),
+        );
+        assert_eq!(resolve(here, "<b c.png>"), Some(PathBuf::from("/notes/b c.png")));
+    }
 }
 
 #[cfg(test)]
