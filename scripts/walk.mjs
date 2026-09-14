@@ -108,6 +108,45 @@ await step('タブ：同じノートをもう一度押しても増えない', `
     await openNote(two[0]);
     if (tabs.length !== n0) return '同じ一本で増えました（' + tabs.length + '）';
     return showing === two[0] ? true : 'そのタブに移っていません';`, true);
+// 三の三。**上限**（依頼 556）── 網なので、ふだんは鳴らない。
+await step('タブ：50 枚を超えたら、古いものから閉じる', `
+    const real = tabs.slice();
+    const here = showing;
+    // 偽のタブを 60 枚。**書きかけの札は、いちばん古いものに付ける** ──
+    // 新しいほうに付けると、そもそも閉じる番が回ってこないので、
+    // 「書きかけに触らない」枝を一度も踏まない（外しても鳴らなかった）。
+    tabs = [{ path: here, keep: null, seen: 999 }];
+    for (let i = 0; i < 60; i += 1) {
+        tabs.push({ path: '/偽/' + i + '.md', keep: i === 59 ? { dirty: true } : null, seen: 60 - i });
+    }
+    window.__dirty = '/偽/59.md';
+    await trimTabs();
+    const left = tabs.length;
+    const kept = tabs.some((t) => t.path === window.__dirty);
+    const still = tabs.some((t) => t.path === here);
+    // いちばん古い（seen が小さい）ものから消えているか。書きかけの一枚は
+    // 飛ばすので、その次に古い二枚が代わりに消えていること。
+    const next2 = ['/偽/58.md', '/偽/57.md'].some((p) => tabs.some((t) => t.path === p));
+    const young = tabs.some((t) => t.path === '/偽/0.md');
+    tabs = real; showing = here;
+    drawStrip();
+    if (left !== 50) return '50 枚に戻っていません（' + left + '）';
+    if (!kept) return '書きかけのタブを閉じました（いちばん古い一枚）';
+    if (!still) return 'いま出しているタブを閉じました';
+    if (next2) return '古いほうが残っています';
+    if (!young) return '新しいほうを閉じています';
+    return true;`, true);
+await step('タブ：50 枚までは、何も閉じない', `
+    const real = tabs.slice();
+    const here = showing;
+    tabs = [{ path: here, keep: null, seen: 1 }];
+    for (let i = 0; i < 49; i += 1) tabs.push({ path: '/偽/' + i + '.md', keep: null, seen: i + 2 });
+    await trimTabs();
+    const left = tabs.length;
+    tabs = real; showing = here;
+    drawStrip();
+    return left === 50 ? true : '閉じてはいけないのに閉じました（' + left + '）';`, true);
+
 await step('タブ：右押しの献立は決めた言い方', `
     const d = el('strip').querySelector('.tab');
     d.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));

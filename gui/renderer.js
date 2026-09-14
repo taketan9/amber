@@ -1499,6 +1499,51 @@ function drawStrip() {
 ///
 /// この窓は打てば勝手に保存されるので、閉じる前に一度書いてから閉じる
 /// ── 訊かない（訊くほうが、この窓の作りに合っていない）。
+/// **机の上の上限**（依頼 556・本人「50個とかかなぁ」）。
+///
+/// 依頼 555 で「押したぶんだけ増える」に戻したので、一覧を上から順に
+/// たどると際限なく増える ── 依頼 377 が心配していたのはこれだった
+/// （1002 本の棚を上から見ただけで 1002 タブ）。
+///
+/// **これは網であって、道具ではない。** 50 枚も並べば帯はとうに読めないので、
+/// ふだんの片付けは「このノート以外をすべて閉じる」でやる。ここが効くのは、
+/// 片付けを忘れて何百本も見て回った日だけ ── だから低くしない。低くすると、
+/// **まだ使っているタブが黙って消える**ほうの害が出る。
+const TABS_MAX = 50;
+
+/// 最後に見た順を憶えるための番号。**並び順は「古さ」ではない** ──
+/// 新しいタブはいまのすぐ右に入るので、左にあるものが古いとは限らない。
+let tabTick = 0;
+function markSeen() {
+    const t = tabs.find((x) => x.path === showing);
+    if (t) t.seen = ++tabTick;
+}
+
+/// 上限を超えたぶんだけ、**古いものから**閉じる。
+///
+/// **触らないものが二つある。** いま出しているタブと、**書きかけを抱えた
+/// タブ** ── 閉じる前に書き戻す道はあるが（`closeTab`）、打っている途中の
+/// ものを黙って片付けるくらいなら、上限を超えているほうがよい。
+/// 全部が書きかけなら、一枚も閉じずに超えたままにする。
+async function trimTabs() {
+    if (tabs.length <= TABS_MAX) return;
+    markSeen();
+    const old = tabs
+        .filter((t) => t.path !== showing && !(t.keep && t.keep.dirty))
+        .sort((a, b) => (a.seen || 0) - (b.seen || 0));
+    let over = tabs.length - TABS_MAX;
+    let gone = 0;
+    for (const t of old) {
+        if (over <= 0) break;
+        await closeTab(t.path);
+        over -= 1;
+        gone += 1;
+    }
+    // **黙って消さない。** 押していないのにタブが減るのは、画面の上では
+    // 「勝手に閉じた」にしか見えない。
+    if (gone) say('タブが ' + TABS_MAX + ' 枚を超えたので、古いものを ' + gone + ' 枚閉じました');
+}
+
 async function closeTab(path) {
     const at = tabs.findIndex((t) => t.path === path);
     if (at < 0) return;
@@ -1604,6 +1649,7 @@ async function openNote(path, opts) {
             showing = path;
         }
         rememberTabs();
+        await trimTabs();
     }
     // たどっている最中は積まない ── 積むと前へ戻れなくなる。
     if (!opts || !opts.walking) trailPush(path);
@@ -1674,6 +1720,7 @@ async function openNote(path, opts) {
 /// 一本を出したあとに、画面を揃える。**読んだときも、タブに戻ったときも
 /// 同じ一組**を通す ── 二か所に並べると、片方にだけ増えた描き直しができる。
 function afterTab() {
+    markSeen();
     drawBand();
     drawTitle();
     drawCount();
