@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import os
 import shutil
 import sys
 import tempfile
@@ -104,7 +105,7 @@ def page_xml(pid, title, mod, images=0) -> str:
       <one:OE quickStyleIndex="1"><one:Tag index="0" completed="false"/><one:T><![CDATA[やること]]></one:T></one:OE>
       <one:OE quickStyleIndex="1"><one:T><![CDATA[<a href="https://example.com">外</a>]]></one:T></one:OE>
       <one:OE quickStyleIndex="1">
-        <one:Table>
+        <one:Table hasHeaderRow="true">
           <one:Row>
             <one:Cell><one:OEChildren><one:OE><one:T><![CDATA[名]]></one:T></one:OE></one:OEChildren></one:Cell>
             <one:Cell><one:OEChildren><one:OE><one:T><![CDATA[値]]></one:T></one:OE></one:OEChildren></one:Cell>
@@ -224,7 +225,8 @@ def t_structure(tmp):
     check("箇条書きが - になる", "\n- 箇条" in text)
     check("To Do がチェックボックスになる", "- [ ] やること" in text)
     check("リンクが [..](..) になる", "[外](https://example.com)" in text)
-    check("表が組まれる", "| 名 | 値 |" in text and "| --- | --- |" in text)
+    check("表が組まれる（見出しの行あり）",
+          "| 名 | 値 |\n| --- | --- |\n| あ | い |" in text)
     check("絵が attachments/ に落ちる",
           (out / "仕事" / "議事録" / "attachments" / "9月の定例_001.png").is_file())
     check("絵へのリンクが相対", "](attachments/9月の定例_001.png)" in text)
@@ -993,10 +995,194 @@ def t_connect(tmp):
               "管理者" in msg and "gen_py" in msg and "ストア版" in msg, msg[-120:])
 
 
+
+# ---------------------------------------------------------------------------
+# 中身の変換 ── **ここが道具の目的そのもの。**
+#
+# 階層・差分・`--prune`・COM の繋ぎ方には検査が並んでいたのに、出てくる
+# Markdown を見る検査は素直な一枚に七つだけだった。写したものが読めるかを
+# 見ないのでは、何を確かめているのか分からない。
+# ---------------------------------------------------------------------------
+def _convert(body, styles=None, page_attr=""):
+    """`<one:Outline>` の中身だけ渡して、出てくる Markdown を返す。"""
+    styles = styles if styles is not None else (
+        '<one:QuickStyleDef index="0" name="h1"/>'
+        '<one:QuickStyleDef index="1" name="p"/>'
+        '<one:QuickStyleDef index="2" name="code"/>'
+    )
+    import xml.etree.ElementTree as ET
+    xml = (f'<one:Page {NBS} {page_attr}>{styles}'
+           f'<one:Outline><one:Position x="0" y="0"/><one:OEChildren>{body}'
+           f'</one:OEChildren></one:Outline></one:Page>')
+    conv = o2m.PageConverter(ET.fromstring(xml), Path("/tmp/なし"), "p", "attachments", False)
+    return conv.convert()
+
+
+def _cell(t):
+    return (f'<one:Cell><one:OEChildren><one:OE><one:T><![CDATA[{t}]]></one:T>'
+            f'</one:OE></one:OEChildren></one:Cell>')
+
+
+def t_table(tmp):
+    print("表 ──")
+    rows = f'<one:Row>{_cell("りんご")}{_cell("120円")}</one:Row><one:Row>{_cell("みかん")}{_cell("80円")}</one:Row>'
+
+    got = _convert(f'<one:OE><one:Table hasHeaderRow="true">{rows}</one:Table></one:OE>')
+    check("見出しの行があれば、1行目が見出し", "| りんご | 120円 |\n| --- | --- |\n| みかん | 80円 |" in got, got)
+
+    # **無いのに 1 行目を見出しにすると、そのデータが一行、表から消える。**
+    got = _convert(f'<one:OE><one:Table hasHeaderRow="false">{rows}</one:Table></one:OE>')
+    check("見出しの行が無ければ、データは一行も減らない",
+          "| りんご | 120円 |" in got and "| みかん | 80円 |" in got, got)
+    check("見出しの行が無ければ、空の見出しを置く", "|  |  |\n| --- | --- |" in got, got)
+    # 旗が無いのは「無い」（OneNote の既定）。
+    got = _convert(f'<one:OE><one:Table>{rows}</one:Table></one:OE>')
+    check("旗が無いときも、データは一行も減らない", "| りんご | 120円 |" in got, got)
+
+    two = ('<one:Cell><one:OEChildren>'
+           '<one:OE><one:T><![CDATA[一行目]]></one:T></one:OE>'
+           '<one:OE><one:T><![CDATA[二行目]]></one:T></one:OE>'
+           '</one:OEChildren></one:Cell>')
+    got = _convert(f'<one:OE><one:Table hasHeaderRow="true"><one:Row>{_cell("見出")}{two}</one:Row>'
+                   f'</one:Table></one:OE>')
+    # ambər は本文の札をぜんぶ字にするので、`<br>` は `<br>` という字で出る。
+    check("升の中の改行に、札を残さない", "<br>" not in got, got)
+    check("升の中の改行は、繋いで残す", "一行目 二行目" in got, got)
+
+
+def t_inline(tmp):
+    print("字の中の印 ──")
+    b = "font-weight:bold"
+    got = _convert(f"<one:OE quickStyleIndex=\"2\"><one:T><![CDATA[if <span style='{b}'>x</span> > 0:]]>"
+                   f"</one:T></one:OE>")
+    # **枠の中で `**` は印として読まれない。** 写したコードに無い字が混ざる。
+    check("コードの枠に、印を生やさない", "if x > 0:" in got and "**" not in got, got)
+
+    got = _convert('<one:OE quickStyleIndex="1"><one:T><![CDATA['
+                   '<a href="https://ex.com/a b.docx">資料</a>]]></one:T></one:OE>')
+    check("リンクの URL が空白で切れない", "[資料](https://ex.com/a b.docx)" in got, got)
+
+    got = _convert('<one:OE quickStyleIndex="1"><one:T><![CDATA['
+                   '<a href=https://ex.com/x>括り無し</a>]]></one:T></one:OE>')
+    check("括りの無い href も読む", "[括り無し](https://ex.com/x)" in got, got)
+
+    got = _convert('<one:OE quickStyleIndex="1"><one:T><![CDATA['
+                   '<a href="https://ex.com/?a=1&amp;b=2">と</a>]]></one:T></one:OE>')
+    check("URL の実体参照を戻す", "(https://ex.com/?a=1&b=2)" in got, got)
+
+    # **インクの言い方は一つ。** 二つあると、探す人は片方しか見つけられない
+    # （docs が知っているのも片方だけだった）。
+    ink = _convert('<one:OE quickStyleIndex="1"><one:InkParagraph/></one:OE>')
+    import xml.etree.ElementTree as ET
+    top = o2m.PageConverter(
+        ET.fromstring(f'<one:Page {NBS}><one:InkDrawing><one:Position x="0" y="0"/>'
+                      f'</one:InkDrawing></one:Page>'),
+        Path("/tmp/なし"), "p", "attachments", False).convert()
+    check("インクの言い方は、どこでも同じ",
+          "[インク: 変換対象外]" in ink and "[インク: 変換対象外]" in top, ink + " / " + top)
+
+
+def t_created(tmp):
+    print("前書きの日付 ──")
+    import os
+    import time
+    keep = os.environ.get("TZ")
+    try:
+        os.environ["TZ"] = "Asia/Tokyo"
+        time.tzset()
+        # UTC で 2026-09-01T23:00Z ＝ 東京では 9月2日の朝 8 時。
+        got = o2m.local_date("2026-09-01T23:00:00.000Z")
+        check("UTC を、この機械の日付に直す（東京）", got == "2026-09-02", got)
+        os.environ["TZ"] = "UTC"
+        time.tzset()
+        check("UTC の機械では、そのまま", o2m.local_date("2026-09-01T23:00:00.000Z") == "2026-09-01")
+        # 読めない形でも黙って落ちない ── 前の版と同じ「頭の 10 字」に戻る。
+        # **落ちるのも「黙る」の一種。** 走査ごと止まると、画面には
+        # 「NG が無い」としか出ない（依頼 569 で踏んだ形）。受け止めて NG にする。
+        try:
+            got = o2m.local_date("2026-09-01 01:00")
+        except Exception as e:  # noqa
+            got = f"落ちた: {type(e).__name__}"
+        check("読めない形は、頭の 10 字", got == "2026-09-01", got)
+        # **前書きを通しても効くか。** `local_date` だけ見ていると、
+        # `frontmatter` がそれを呼ぶのをやめても黙る。
+        os.environ["TZ"] = "Asia/Tokyo"
+        time.tzset()
+        fm = o2m.frontmatter("題", ["仕事"], {"dateTime": "2026-09-01T23:00:00.000Z",
+                                             "lastModifiedTime": "", "ID": "{P}"})
+        check("前書きの created も、この機械の日付", "created: 2026-09-02" in fm, fm)
+        check("空なら空", o2m.local_date("") == "" and o2m.local_date(None) == "")
+    finally:
+        if keep is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = keep
+        time.tzset()
+
+
+def t_log(tmp):
+    print("落ちたわけを、記録に残す ──")
+    import subprocess
+    at = tmp / "log"
+    at.mkdir(exist_ok=True)
+    logfile = at / "t.log"
+    r = subprocess.run([sys.executable, str(ROOT / "onenote2md.py"),
+                        "--out", str(at / "o"), "--log", str(logfile)],
+                       capture_output=True, text=True)
+    body = logfile.read_text(encoding="utf-8") if logfile.exists() else ""
+    # **画面には誰もいない。** `pythonw.exe` に stderr は無いので、
+    # `sys.exit("わけ")` の字はどこにも出ないまま終わる。
+    check("落ちた回は 0 を返さない", r.returncode != 0, r.returncode)
+    check("落ちたわけが、記録に残る", "pywin32" in body, body)
+    check("記録に ERROR として残る", "ERROR" in body, body)
+
+
+def t_cp932(tmp):
+    print("画面の字を、ファイルに落とせる ──")
+    import subprocess
+    env = dict(os.environ, PYTHONIOENCODING="cp932")
+    r = subprocess.run([sys.executable, str(ROOT / "onenote2md.py"), "--probe"],
+                       capture_output=True, text=True, env=env, errors="replace")
+    # `✗` も `ambər` の `ə` も cp932 に無い。失敗した行を書こうとして止まる ──
+    # `--probe` が要るのは、まさに失敗する端末の上。
+    check("cp932 に向けても、最後まで出る", "包んで、呼んでみる" in r.stdout, r.stdout[-200:])
+    check("cp932 に向けても、落ちない", r.returncode == 0, r.returncode)
+    r = subprocess.run([sys.executable, str(ROOT / "onenote2md.py"), "--probe"],
+                       capture_output=True, text=True, env=env, errors="replace")
+    check("--probe に --out は要らない", "== python ==" in r.stdout, r.stdout[:120])
+
+
+def t_readonly_no_lock(tmp):
+    print("読むだけの回は、鎖を取らない ──")
+    import subprocess
+    at = tmp / "nolock"
+    at.mkdir(exist_ok=True)
+    # 定時の回が走っている最中を真似る。そこを調べるための道具が、その回の
+    # せいで断られるのでは道具にならない。
+    with o2m.only_one(at):
+        r = subprocess.run([sys.executable, str(ROOT / "onenote2md.py"),
+                            "--out", str(at), "--probe"],
+                           capture_output=True, text=True, errors="replace")
+        check("鎖の中でも --probe は走る", "== python ==" in r.stdout,
+              (r.stdout + r.stderr)[:160])
+        r = subprocess.run([sys.executable, str(ROOT / "onenote2md.py"),
+                            "--out", str(at), "--list"],
+                           capture_output=True, text=True, errors="replace")
+        check("鎖の中でも --list は断られない", "前の回がまだ走っています" not in r.stderr,
+              r.stderr[:160])
+        # 書く回は、これまでどおり断る。
+        r = subprocess.run([sys.executable, str(ROOT / "onenote2md.py"),
+                            "--out", str(at), "--log", str(at / "l.log")],
+                           capture_output=True, text=True, errors="replace")
+        body = (at / "l.log").read_text(encoding="utf-8") if (at / "l.log").exists() else ""
+        check("書く回は、二本目を断る", "前の回がまだ走っています" in body, body[-160:])
+
+
 def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
-        for fn in (t_names, t_structure, t_incremental, t_same_file,
+        for fn in (t_names, t_structure, t_table, t_inline, t_created,
+                   t_log, t_cp932, t_readonly_no_lock, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
                    t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):
             fn(tmp)

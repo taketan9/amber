@@ -89,7 +89,7 @@ import re
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -102,6 +102,27 @@ ATTACH = "attachments"   # ambər の絵の置き場所（ノートの隣・こ�
 PATH_LIMIT = 200         # WebDAV の道の長さの壁（256）に余裕を見た数
 
 log = logging.getLogger("onenote2md")
+
+
+def use_utf8():
+    """画面に出す字を UTF-8 で。
+
+    日本語 Windows の既定は cp932 で、**画面に直に出すぶんには平気だが、
+    ファイルへ向けた瞬間に cp932 になる。** `--probe` が失敗した行に付ける
+    `✗` も、`--help` の `ambər` も cp932 に無いので、そこで
+    `UnicodeEncodeError` が出て途中で止まる ── **いちばん知りたい行で。**
+    `--probe` は繋がらない端末の姿を貼ってもらう道具なので、ファイルに
+    落とせないと使えない。`pythonw.exe` には stdout が無いので、あるときだけ。"""
+    for stream in (sys.stdout, sys.stderr):
+        if not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            try:
+                stream.reconfigure(errors="replace")   # せめて落ちないように
+            except (ValueError, OSError):
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -777,7 +798,9 @@ def strip_ns(tag):
 # インライン変換（<one:T> の中身は HTML 風テキスト）
 # ---------------------------------------------------------------------------
 _SPAN = re.compile(r"<span([^>]*)>((?:(?!<span)(?!</span>).)*)</span>", re.S | re.I)
-_A = re.compile(r"<a\s+[^>]*href=[\"']?([^\"'>\s]+)[\"']?[^>]*>(.*?)</a>", re.S | re.I)
+# `href` は括ってあれば**空白を含んでよい** ── 括りを見ずに空白で切ると、
+# `file:///C:/My Documents/…` のようなリンクが途中で切れて、別の場所を指す。
+_A = re.compile(r"""<a\s+[^>]*href=("[^"]*"|'[^']*'|[^\s>]+)[^>]*>(.*?)</a>""", re.S | re.I)
 _TAG = re.compile(r"<[^>]+>")
 
 
@@ -802,6 +825,20 @@ def _span_repl(m):
     return inner
 
 
+def plain_md(s: str) -> str:
+    """札だけ落として、字はそのまま。
+
+    **コードの枠に入れる字は、これで取る。** `inline_md` を通すと太字の札が
+    `**` になり、元のコードに無い字が混ざる（`if x > 0:` が `if **x** > 0:`）。
+    枠の中で印は印として読まれないので、写したコードがそのままでは動かない。
+    """
+    if not s:
+        return ""
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
+    s = _TAG.sub("", s)
+    return html.unescape(s).replace("\xa0", " ")
+
+
 def inline_md(s: str) -> str:
     if not s:
         return ""
@@ -811,7 +848,8 @@ def inline_md(s: str) -> str:
         if new == s:
             break
         s = new
-    s = _A.sub(lambda m: f"[{_TAG.sub('', m.group(2)).strip()}]({m.group(1)})", s)
+    s = _A.sub(lambda m: f"[{_TAG.sub('', m.group(2)).strip()}]"
+                         f"({html.unescape(m.group(1).strip(chr(34) + chr(39)))})", s)
     s = _TAG.sub("", s)
     s = html.unescape(s).replace("\xa0", " ")
     return s
@@ -861,7 +899,7 @@ class PageConverter:
                 out.append(self.image(el))
                 out.append("")
             elif tag == "InkDrawing":
-                out.append("> [インク描画: 変換対象外]")
+                out.append("> [インク: 変換対象外]")
                 out.append("")
             elif tag == "InsertedFile":
                 out.append(self.inserted_file(el))
@@ -906,15 +944,15 @@ class PageConverter:
                 tag_prefix += f"`#{name}` "
 
         # テキスト（複数の one:T は連結）
-        texts = [inline_md(t.text or "") for t in oe.findall("one:T", NS)]
-        text = "".join(texts)
+        raw = [t.text or "" for t in oe.findall("one:T", NS)]
+        text = "".join(inline_md(x) for x in raw)
 
         if text.strip() or tag_prefix:
             if style.startswith("h") and style[1:].isdigit() and not bullet:
                 level = min(int(style[1:]), 6)
                 lines.append(f"{'#' * level} {text.strip()}")
             elif style == "code" and not bullet:
-                lines.append(f"```\n{text}\n```")
+                lines.append("```\n" + "".join(plain_md(x) for x in raw) + "\n```")
             elif style == "cite" and not bullet:
                 lines.append(f"> {text.strip()}")
             elif bullet:
@@ -955,15 +993,27 @@ class PageConverter:
             for cell in row.findall("one:Cell", NS):
                 ch = cell.find("one:OEChildren", NS)
                 cell_lines = self.oechildren(ch, depth=0) if ch is not None else []
-                cell_text = "<br>".join(l.strip() for l in cell_lines if l.strip())
+                # 升の中の改行は空白にする。前は `<br>` で繋いでいたが、
+                # ambər は本文の札をぜんぶ字にして出すので、画面に
+                # `<br>` という字がそのまま出ていた。Markdown の表に
+                # 改行を入れる書き方は無いので、繋ぐしかない。
+                cell_text = " ".join(l.strip() for l in cell_lines if l.strip())
                 cells.append(cell_text.replace("|", "\\|"))
             rows.append(cells)
         if not rows:
             return []
         width = max(len(r) for r in rows)
         rows = [r + [""] * (width - len(r)) for r in rows]
-        out = ["| " + " | ".join(rows[0]) + " |", "|" + " --- |" * width]
-        for r in rows[1:]:
+        # **見出しの行があるかは、OneNote が知っている。** 無いのに 1 行目を
+        # 見出しにすると、そのデータが一行、表から消える ── 画面の上では
+        # 「一行目が濃いだけ」に見えるので、気づけない。Markdown の表は
+        # 見出しの行を省けないので、無いときは空で置く。
+        if tbl.get("hasHeaderRow") == "true":
+            head, body = rows[0], rows[1:]
+        else:
+            head, body = [""] * width, rows
+        out = ["| " + " | ".join(head) + " |", "|" + " --- |" * width]
+        for r in body:
             out.append("| " + " | ".join(r) + " |")
         return out
 
@@ -1003,6 +1053,22 @@ class PageConverter:
 _FM_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 
 
+def local_date(stamp):
+    """OneNote の時刻を、**この機械の日付**に。
+
+    返ってくるのは UTC（`2026-09-01T23:00:00.000Z`）なので、頭から 10 字を
+    切ると東京では朝 9 時前に書いたものが前の日に並ぶ。日付は人が読むもの
+    なので、人の居る時刻で。
+    """
+    if not stamp:
+        return ""
+    try:
+        t = datetime.strptime(stamp[:19], "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return stamp[:10]            # 読めない形は、そのまま頭を取る
+    return t.replace(tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d")
+
+
 def page_title(page_el, hierarchy_name):
     t = page_el.find("one:Title/one:OE/one:T", NS)
     if t is not None and (t.text or "").strip():
@@ -1012,7 +1078,7 @@ def page_title(page_el, hierarchy_name):
 
 def frontmatter(title, path_parts, page_attr):
     # ambər の `created:` は `YYYY-MM-DD`（時刻つきの ISO も読めるが、揃えておく）。
-    created = (page_attr.get("dateTime") or "")[:10]
+    created = local_date(page_attr.get("dateTime"))
     lines = ["---",
              f'title: "{title.replace(chr(34), chr(39))}"',
              f"created: {created}",
@@ -1074,7 +1140,6 @@ def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, writte
         keep.add_pages_of(section_el)   # 鍵が開いていれば ID も拾える
         return
     sec_dir = out_dir / sec_name
-    img_dir = sec_dir / ATTACH
     log.info("セクション: %s / %s", " / ".join(path_parts), sec_name)
 
     # サブページはページレベルに応じて親ページ名のフォルダに入れる
@@ -1280,7 +1345,8 @@ def build_parser():
     写すと、片方にだけ足した旗で走査が落ちる（しかも落ち方が `AttributeError`
     なので、何が足りないのか画面から分からない）。"""
     ap = argparse.ArgumentParser(description="OneNote → Markdown（階層保持・ambər の保存ディレクトリ向け）")
-    ap.add_argument("--out", required=True, help="出力先フォルダ（ローカルでも \\\\…@SSL\\DavWWWRoot\\… でも）")
+    ap.add_argument("--out", help="出力先フォルダ（ローカルでも \\\\…@SSL\\DavWWWRoot\\… でも）"
+                                 "。--probe だけは無くてよい")
     ap.add_argument("--notebook", action="append", help="対象ノートブック名（部分一致、複数指定可）")
     ap.add_argument("--only", action="append", metavar="道",
                     help="このセクションだけ写す。`ノートブック/グループ/セクション` の道に部分一致（複数指定可）")
@@ -1329,6 +1395,7 @@ def list_sections(root, args):
 
 def main():
     args = build_parser().parse_args()
+    use_utf8()
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(message)s")
@@ -1340,15 +1407,33 @@ def main():
         logging.getLogger().addHandler(fh)
     log.info("=== onenote2md 開始 %s", datetime.now().isoformat(timespec="seconds"))
 
-    out_root = Path(args.out)
-    with only_one(out_root):
-        code = run(args, out_root)
-    return code
+    out_root = Path(args.out) if args.out else Path(".")
+    try:
+        # **読むだけの回は、鎖を取らない。** 固まっている回を調べるための
+        # `--probe` が、その固まっている回のせいで断られるのでは道具にならない。
+        if args.probe or args.list or args.dry_run:
+            return run(args, out_root)
+        with only_one(out_root):
+            return run(args, out_root)
+    except SystemExit as e:
+        # **`sys.exit("わけ")` は stderr にしか出ない。** 定時で回すときの
+        # `pythonw.exe` に stderr は無いので、繋がらない理由も bit の見立ても
+        # どこにも残らず、記録には「開始」の一行だけが残る。
+        if isinstance(e.code, str):
+            log.error("%s", e.code)
+            return 1
+        return e.code or 0
+    except Exception:
+        # 思っていなかった落ち方も同じ ── 追跡は stderr へ消える。
+        log.exception("落ちました")
+        return 1
 
 
 def run(args, out_root: Path):
     if args.probe:
         return probe()
+    if not args.out:
+        sys.exit("--out が要ります（出力先フォルダ）。")
     # 繋ぐときに一度は訊いている（そうでないと「繋がった」と言えない）ので、
     # その答えをそのまま使う ── ページ数の多いノートブックで二度歩かない。
     app, first = connect_onenote()
@@ -1385,7 +1470,7 @@ def run(args, out_root: Path):
         prune(scope, keep, written, stats)
 
     log.info("完了: ページ %d（書いた %d・変わらず %d）/ 画像 %d / エラー %d / "
-             "セクション: 鍵 %d・絞りで外した %d / 消した %d（絵 %d）",
+             "セクション: 鍵 %d・絞りで外した %d / 消した %d / 古い絵 %d",
              stats["pages"], stats["written"], stats["skipped_pages"], stats["images"],
              stats["errors"], stats["skipped_sections"], stats["filtered_sections"],
              stats["pruned"], stats["pruned_images"])

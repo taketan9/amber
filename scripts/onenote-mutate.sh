@@ -212,6 +212,56 @@ mutate "schema を明示しない（GetHierarchy）" "schema を要る相手で�
 mutate "schema を明示しない（GetPageContent）" "schema を要る相手でも同じものが出る" \
     '(page_id, info, XS_2013),
                      (page_id, "", info, XS_2013),' ''
+mutate "見出しの行の旗を見ない" "見出しの行が無ければ、空の見出しを置く" \
+    'if tbl.get("hasHeaderRow") == "true":' 'if True:'
+mutate "見出しの行があっても空で置く" "見出しの行があれば、1行目が見出し" \
+    'if tbl.get("hasHeaderRow") == "true":' 'if False:'
+mutate "升の中の改行を <br> に戻す" "升の中の改行に、札を残さない" \
+    'cell_text = " ".join(l.strip() for l in cell_lines if l.strip())' \
+    'cell_text = "<br>".join(l.strip() for l in cell_lines if l.strip())'
+mutate "升の中の改行を捨てる" "升の中の改行は、繋いで残す" \
+    'cell_text = " ".join(l.strip() for l in cell_lines if l.strip())' \
+    'cell_text = (cell_lines or [""])[0].strip()'
+mutate "コードにも印を通す" "コードの枠に、印を生やさない" \
+    'lines.append("```\n" + "".join(plain_md(x) for x in raw) + "\n```")' \
+    'lines.append(f"```\n{text}\n```")'
+mutate "plain_md が札を落とさない" "コードの枠に、印を生やさない" \
+    's = _TAG.sub("", s)
+    return html.unescape(s).replace("\xa0", " ")' \
+    'return html.unescape(s).replace("\xa0", " ")'
+mutate "href を空白で切る" "リンクの URL が空白で切れない" \
+    'href=("[^"]*"|' 'href=("[^" ]*"|'
+mutate "URL の括りを外さない" "リンクの URL が空白で切れない" \
+    'f"({html.unescape(m.group(1).strip(chr(34) + chr(39)))})", s)' \
+    'f"({m.group(1)})", s)'
+mutate "インクの言い方を二つに戻す" "インクの言い方は、どこでも同じ" \
+    'out.append("> [インク: 変換対象外]")' 'out.append("> [インク描画: 変換対象外]")'
+mutate "UTC のまま頭を切る" "前書きの created も、この機械の日付" \
+    'created = local_date(page_attr.get("dateTime"))' \
+    'created = (page_attr.get("dateTime") or "")[:10]'
+mutate "時差を足さない" "UTC を、この機械の日付に直す（東京）" \
+    'return t.replace(tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d")' \
+    'return t.strftime("%Y-%m-%d")'
+mutate "読めない形で落ちる" "読めない形は、頭の 10 字" \
+    'except ValueError:
+        return stamp[:10]            # 読めない形は、そのまま頭を取る' \
+    'except ValueError:
+        raise'
+mutate "落ちたわけを記録に落とす" "落ちたわけが、記録に残る" \
+    'if isinstance(e.code, str):
+            log.error("%s", e.code)
+            return 1' \
+    'if isinstance(e.code, str):
+            return 1'
+mutate "思わぬ落ち方を黙って捨てる" "落ちたわけが、記録に残る" \
+    'except SystemExit as e:' 'except ZeroDivisionError as e:'
+mutate "画面の字を cp932 のままにする" "cp932 に向けても、最後まで出る" \
+    'stream.reconfigure(encoding="utf-8", errors="replace")' 'pass' 
+mutate "読むだけの回も鎖を取る" "鎖の中でも --probe は走る" \
+    'if args.probe or args.list or args.dry_run:
+            return run(args, out_root)' \
+    'if False:
+            return run(args, out_root)'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'
