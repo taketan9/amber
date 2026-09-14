@@ -317,6 +317,25 @@ def probe():
 
     say("gencache が知っている型", known)
 
+    def local_server():
+        """**COM サーバーの実体が、そこに在るか。**
+
+        `サーバーの実行に失敗しました`（0x80080005）も
+        `ライブラリは登録されていません` も、**登録が指す道にファイルが無い**
+        だけで両方出る。動いている OneNote が別の場所から起きていると、
+        「繋がるのに呼べない」というちぐはぐな形になる。
+        """
+        import winreg
+        import pywintypes
+        clsid = str(pywintypes.IID("OneNote.Application"))
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "CLSID" + chr(92) + clsid
+                             + chr(92) + "LocalServer32")
+        path = (winreg.QueryValue(key, None) or "").strip().strip('"')
+        real = _strip_resource_index(path)
+        return f"{path}  → {'ある' if real and os.path.exists(real) else '**無い**'}"
+
+    say("COM サーバーの実体", local_server)
+
     def generated(major, minor):
         def f():
             mod = gc().EnsureModule(ONENOTE_TYPELIB, 0, major, minor)
