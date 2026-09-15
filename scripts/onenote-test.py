@@ -1210,6 +1210,20 @@ def t_check(tmp):
         _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
                      connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
         check("読めない実体は、32 bit の Python へ導く", "32 bit の Python" in out, out)
+        # **読めないと言われた道を、その場で出す。** ここで `--probe` へ送ると、
+        # 29 行を手で打ち直させることになる。
+        check("読めない道を、その場で出す", "1.1 / win32 = " in out and "1.1 / win64 = " in out, out)
+        # 同じ道を二つの枝が指していたら、片方は写し ── 足しても直らない形。
+        check("同じ道を指していたら、写しだと言う",
+              "同じ道" in out and "足しても直らない" in out, out)
+        _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                     tl=lambda want: ("1.1", "0", EXE + ("64" if want == "win64" else "")),
+                     connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
+        check("違う道を指していれば、写しだとは言わない", "同じ道" not in out, out)
+        # ほかの番号のときは、道の話はしない（要らないことを言わない）。
+        _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                     connect=blew(troubles=["  素の Dispatch: (-2146959355, '権限')"]))
+        check("ほかの番号では、道を出さない", "1.1 / win32 = " not in out, out)
         # 知らない答えなら、決めつけない。
         _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
                      connect=blew(troubles=["  素の Dispatch: 知らない何か"]))

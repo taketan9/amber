@@ -670,8 +670,12 @@ def _next_move(me, office, tree, server_here, troubles=()):
 
     並べると人は選べない。当てはまるものを、効きそうな順に一つ。
     """
-    said = _from_answer(troubles)
+    code, said = _from_answer(troubles)
     if said:
+        if code == "-2147312566":
+            # **読めないと言われた道を、その場で出す。** ここで `--probe` へ
+            # 送ると、29 行を手で打ち直させることになる。
+            said = said + _lib_paths_note()
         return said
     want = "win64" if me == 64 else "win32"
     # **見るのは、こちらが読みにいく版。** 1.1 → 1.0 の順に試すので、
@@ -733,12 +737,43 @@ _ANSWERS = [
 
 
 def _from_answer(troubles):
-    """呼んだときの答えから、分かることがあれば言う。無ければ黙る。"""
+    """呼んだときの答えから、分かることがあれば言う。無ければ黙る。
+
+    返すのは `(番号, 言うこと)`。番号を返すのは、**その先に出す事実が
+    番号ごとに違う**から ── 読めないと言われたなら、読めないその道を出す。
+    """
     joined = " ".join(troubles)
     for needle, said in _ANSWERS:
         if needle in joined:
-            return list(said)
-    return []
+            return needle, list(said)
+    return None, []
+
+
+def _lib_paths_note():
+    """**読めないと言われた、その道を出す。**
+
+    `TYPE_E_CANTLOADLIBRARY` は「登録は白なのに、指す先が読めない」。
+    そこまで来たら見るものは一つ ── **枝が何を指していて、それが在るか。**
+
+    **同じ道を二つの枝が指していたら、片方は写し。** 32 bit の実体しか
+    無いところに `Win64` を足すと、登録は白くなるが**読めるようにはならない**
+    （docs の「Win64 を足しても直らないことがある」）。その形をここで名指しする。
+    """
+    out = []
+    got = {}
+    for arch in ("win32", "win64"):
+        found = _typelib_path(arch)
+        if not found:
+            continue
+        ver, _lcid, path = found
+        got[arch] = path
+        real = _strip_resource_index(path)
+        out.append(f"{ver} / {arch} = {path}"
+                   f"  → {'ある' if real and os.path.exists(real) else '**無い**'}")
+    if len(got) == 2 and got["win32"] == got["win64"]:
+        out.append("win32 と win64 が**同じ道**を指している ── 片方は写し。")
+        out.append("その実体が 32 bit のものなら、64 bit からは読めない（足しても直らない）。")
+    return out
 
 
 def _reg_lines(ver, lcid, want, path):

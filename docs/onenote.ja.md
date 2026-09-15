@@ -305,6 +305,31 @@ py -3 scripts\onenote2md.py --out X --probe
 > そのときは **32 bit の Python を使う**しかない。out-of-process の COM
 > サーバーなので、**32 bit の Python から 64 bit の OneNote は問題なく触れる。**
 > 入っている Python を見るには `py -0p`。
+>
+> **この形は、会社の端末で実際に出た**（2026-09-15）。枝は `1.0` `1.1` とも
+> `win32 win64` が揃っていて、COM サーバーも在るのに、名指しの二つが
+> `TYPE_E_CANTLOADLIBRARY`、`gencache` は「makepy を手で走らせろ」、
+> 素の `Dispatch` は**繋がるのに `GetHierarchy` が見えない** ── つまり
+> **登録は白、実体が読めない。**`--check` は、この番号のときだけ枝の道と
+> 在処を並べる（同じ道を二つの枝が指していたら、片方は写しだと言う）。
+
+### 32 bit の Python を入れる
+
+```bat
+py -0p
+```
+
+`-32` の行が無ければ、[python.org](https://www.python.org/downloads/windows/) の
+**Windows installer (32-bit)** を入れる（いまの 64 bit のものはそのままでよい ──
+`py` が両方を持てる）。入れたら:
+
+```bat
+py -3-32 -m pip install pywin32
+py -3-32 scripts\onenote2md.py --check
+```
+
+**定時で回すときも 32 bit のほうを指す。** タスクの「プログラム」は
+そちらの `pythonw.exe`（道は `py -0p` に出る）。
 
 1. **Python の bit を Office に合わせる。** Office が 32 bit なら 32 bit の Python を
    使う。どちらかは `--probe` の `Office の bit` に出る

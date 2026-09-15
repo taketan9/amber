@@ -319,15 +319,9 @@ mutate "呼んだときの答えを捨てる" "呼んだときの答えを、そ
 mutate "答えを持ち帰らない" "呼んだときの答えを、そのまま出す" \
     'self.troubles = list(troubles)' 'self.troubles = []'
 mutate "答えの番号を読まない" "答えの番号から、原因を名指しする" \
-    'said = _from_answer(troubles)
-    if said:
-        return said' 'if False:
-        return []'
+    'code, said = _from_answer(troubles)' 'code, said = None, []'
 mutate "知らない答えでも決めつける" "知らない答えには、決めつけない" \
-    'for needle, said in _ANSWERS:
-        if needle in joined:
-            return list(said)
-    return []' 'return list(_ANSWERS[0][1])'
+    'return None, []' 'return _ANSWERS[0][0], list(_ANSWERS[0][1])'
 mutate "読み込みエラーを権限の話にする" "読めない実体は、32 bit の Python へ導く" \
     '("-2147312566", ["型ライブラリ／DLL の読み込みエラー（TYPE_E_CANTLOADLIBRARY）。",' \
     '("-2147312566x", ["型ライブラリ／DLL の読み込みエラー（TYPE_E_CANTLOADLIBRARY）。",'
@@ -335,6 +329,16 @@ mutate "読む版に枝が有っても言い立てる" "読む版に枝が有れ
     'if want in arches:
             break' 'if False:
             break'
+mutate "読めない道を出さず probe へ送る" "読めない道を、その場で出す" \
+    'if code == "-2147312566":' 'if False:'
+mutate "同じ道でも黙る" "同じ道を指していたら、写しだと言う" \
+    'if len(got) == 2 and got["win32"] == got["win64"]:' 'if False:'
+mutate "違う道でも「同じ」と言う" "違う道を指していれば、写しだとは言わない" \
+    'if len(got) == 2 and got["win32"] == got["win64"]:' 'if len(got) == 2:'
+mutate "どの番号でも道を出す" "ほかの番号では、道を出さない" \
+    'if code == "-2147312566":' 'if code:'
+mutate "番号を持ち帰らない" "ほかの番号では、道を出さない" \
+    'return needle, list(said)' 'return "-2147312566", list(said)'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'
