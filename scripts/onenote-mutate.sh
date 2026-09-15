@@ -372,7 +372,7 @@ mutate "訊けないときに落ちる" "ランチャーが居なくても、落
         return []' 'except ZeroDivisionError:
         return []'
 mutate "版を一つしか出さない" "版をぜんぶ出す" \
-    'for ver, arch, path in _typelib_values():' 'for ver, arch, path in _typelib_values()[:1]:'
+    'for ver, arch, path, view in _typelib_values():' 'for ver, arch, path, view in _typelib_values()[:1]:'
 mutate "在るか無いかを見ない" "一つも無ければ、bit の話ではないと言う" \
     'if _lib_files_gone():
         return _lib_paths_note() + _gone_note()' 'if False:
@@ -393,6 +393,19 @@ mutate "よそに在っても黙る" "よそに実体が在れば、そこを教
     if found:'
 mutate "どこにも無いのに入っていると言う" "どこにも無ければ、入っていないと言う" \
     '"**デスクトップ版 OneNote が入っていない**（ストア版は COM を持たない）。"' '""'
+mutate "見え方を片方しか読まない" "両方の見え方を読む" \
+    'v32 = _read_typelib(getattr(winreg, "KEY_WOW64_32KEY", 0))' 'v32 = {}'
+mutate "見え方を言わない" "見え方が違えば、どちらの話か言う" \
+    'where = f" [{view}]" if view else ""' 'where = ""'
+mutate "同じでも見え方を言う" "同じなら一つにまとめる" \
+    'if a and b and a == b:
+            out.append((ver, arch, a, ""))
+            continue' 'if False:
+            continue'
+mutate "片方で在っても無いと言う" "片方で在るなら、無い話はしない" \
+    'if real and os.path.exists(real):
+            return False
+    return True' 'return True'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

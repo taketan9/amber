@@ -388,32 +388,61 @@ def _typelib_path(want_arch):
     return None
 
 
-def _typelib_values():
-    """**版 × bit ごとの、指している道**（`[(版, bit, 道)]`）。
+def _read_typelib(flag):
+    """型ライブラリの登録を、**その見え方で**読む。`{(版, bit): 道}`"""
+    out = {}
+    try:
+        import winreg
+    except ImportError:
+        return out
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
+                             "TypeLib" + chr(92) + ONENOTE_TYPELIB, 0,
+                             winreg.KEY_READ | flag)
+    except OSError:
+        return out
+    try:
+        for ver in _reg_subkeys(key):
+            vkey = winreg.OpenKey(key, ver, 0, winreg.KEY_READ | flag)
+            for lcid in _reg_subkeys(vkey):
+                lkey = winreg.OpenKey(vkey, lcid, 0, winreg.KEY_READ | flag)
+                for arch in _reg_subkeys(lkey):
+                    try:
+                        out[(ver, arch.lower())] = winreg.QueryValue(lkey, arch)
+                    except OSError:
+                        continue
+    except OSError:
+        return out
+    return out
 
-    `_typelib_path` は最初に見つかった版を返す ── 診断に使うと、
-    **落ちたのは 1.1 なのに 1.0 の道を見せる**ことになる。
-    版が二つある端末では、それは別のものを見せているのと同じ
-    （依頼 580 で束ねて見て踏んだのと、同じ形）。
+
+def _typelib_values():
+    """**版 × bit ごとの道。32 bit と 64 bit、両方の見え方で読む。**
+
+    レジストリは走っている処理の bit で見え方が変わる（WOW64）。片方しか
+    読まないと、**もう片方の Python で走らせたときに別のものが見える** ──
+    そして「32 bit で叩いたら道が無いと言われた」が、どちらの話なのか
+    分からなくなる。実際にそれで一度、在るファイルを「無い」と言った。
+
+    返すのは `(版, bit, 道, 見え方)`。両方の見え方で同じなら、見え方は空 ──
+    **違うときだけ言う。** 同じものを二度見せると、人が読む行が倍になる。
     """
     try:
         import winreg
     except ImportError:
         return []
+    v64 = _read_typelib(getattr(winreg, "KEY_WOW64_64KEY", 0))
+    v32 = _read_typelib(getattr(winreg, "KEY_WOW64_32KEY", 0))
     out = []
-    try:
-        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "TypeLib" + chr(92) + ONENOTE_TYPELIB)
-        for ver in _reg_subkeys(key):
-            vkey = winreg.OpenKey(key, ver)
-            for lcid in _reg_subkeys(vkey):
-                lkey = winreg.OpenKey(vkey, lcid)
-                for arch in _reg_subkeys(lkey):
-                    try:
-                        out.append((ver, arch.lower(), winreg.QueryValue(lkey, arch)))
-                    except OSError:
-                        continue
-    except OSError:
-        return out
+    for ver, arch in sorted(set(v64) | set(v32)):
+        a, b = v64.get((ver, arch)), v32.get((ver, arch))
+        if a and b and a == b:
+            out.append((ver, arch, a, ""))
+            continue
+        if a:
+            out.append((ver, arch, a, "64bit の見え方"))
+        if b:
+            out.append((ver, arch, b, "32bit の見え方"))
     return out
 
 
@@ -880,11 +909,12 @@ def _lib_paths_note():
     """
     out = []
     seen = {}
-    for ver, arch, path in _typelib_values():
+    for ver, arch, path, view in _typelib_values():
         real = _strip_resource_index(path)
         ok = bool(real and os.path.exists(real))
         seen.setdefault(ver, {})[arch] = path
-        out.append(f"{ver} / {arch} = {path}  → {'ある' if ok else '**無い**'}")
+        where = f" [{view}]" if view else ""
+        out.append(f"{ver} / {arch}{where} = {path}  → {'ある' if ok else '**無い**'}")
     if _lib_files_gone():
         return out                      # 在処が無いなら、写しの話は要らない
     for ver, by in seen.items():
@@ -904,7 +934,7 @@ def _lib_files_gone():
     got = _typelib_values()
     if not got:
         return False
-    for _ver, _arch, path in got:
+    for _ver, _arch, path, _view in got:
         real = _strip_resource_index(path)
         if real and os.path.exists(real):
             return False

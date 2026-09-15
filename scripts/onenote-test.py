@@ -1172,8 +1172,8 @@ def t_check(tmp):
         o2m._store_onenote = kw.get("store", lambda: False)
         o2m._typelib_path = kw.get("tl", lambda want: ("1.1", "0", EXE))
         o2m._typelib_values = kw.get("vals", lambda: [
-            ("1.0", "win32", EXE), ("1.0", "win64", EXE),
-            ("1.1", "win32", EXE), ("1.1", "win64", EXE)])
+            ("1.0", "win32", EXE, ""), ("1.0", "win64", EXE, ""),
+            ("1.1", "win32", EXE, ""), ("1.1", "win64", EXE, "")])
         o2m._onenote_exe = kw.get("exe", lambda: None)
         o2m.os.path.exists = kw.get("exists", lambda p: True)
         o2m.connect_onenote = kw.get("connect", blew())
@@ -1225,7 +1225,7 @@ def t_check(tmp):
         check("同じ道を指していたら、写しだと言う",
               "同じ道" in out and "足しても直らない" in out, out)
         _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
-                     vals=lambda: [("1.1", "win32", EXE), ("1.1", "win64", EXE + "64")],
+                     vals=lambda: [("1.1", "win32", EXE, ""), ("1.1", "win64", EXE + "64", "")],
                      connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
         check("違う道を指していれば、写しだとは言わない", "同じ道" not in out, out)
 
@@ -1234,8 +1234,8 @@ def t_check(tmp):
         # **枝は版ごとに二本ずつ。** 一本ずつだと「写しの話」が元から出ず、
         # 守りを外しても何も変わらない ── 作り物が薄いと、検査は嘘をつく。
         nowhere = "C:" + chr(92) + "無い.exe"
-        gone = [("1.0", "win32", nowhere), ("1.0", "win64", nowhere),
-                ("1.1", "win32", nowhere), ("1.1", "win64", nowhere)]
+        gone = [("1.0", "win32", nowhere, ""), ("1.0", "win64", nowhere, ""),
+                ("1.1", "win32", nowhere, ""), ("1.1", "win64", nowhere, "")]
         _, out = say(tree=lambda: {"1.1": {"win32"}}, vals=lambda: gone,
                      exists=lambda p: False, exe=lambda: None,
                      connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
@@ -1253,9 +1253,26 @@ def t_check(tmp):
               "本物.exe" in out and "修復" in out, out)
         # 一つでも在るなら、その話はしない。
         _, out = say(tree=lambda: {"1.1": {"win32"}},
-                     vals=lambda: [("1.1", "win32", EXE)],
+                     vals=lambda: [("1.1", "win32", EXE, "")],
                      connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
         check("一つでも在れば、入っていない話はしない", "入っていない" not in out, out)
+
+        # **32 bit と 64 bit で見え方が違う。** 片方しか読まないと、
+        # 在るファイルを「無い」と言う ── 実際にそれで一度、遠回りさせた。
+        _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                     vals=lambda: [("1.1", "win64", EXE, "64bit の見え方"),
+                                   ("1.1", "win64", "C:" + chr(92) + "x86" + chr(92) + "無い.exe",
+                                    "32bit の見え方")],
+                     exists=lambda p: "無い" not in p,
+                     connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
+        check("見え方が違えば、どちらの話か言う",
+              "[64bit の見え方]" in out and "[32bit の見え方]" in out, out)
+        check("片方で在るなら、無い話はしない", "ファイルが一つも無い" not in out, out)
+        # 同じなら二度見せない ── 人が読む行が倍になる。
+        _, out = say(tree=lambda: {"1.1": {"win32"}},
+                     vals=lambda: [("1.1", "win32", EXE, "")],
+                     connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
+        check("同じなら、見え方は言わない", "見え方" not in out, out)
 
         # **入れたあとの一手を、こちらで言う。** 32 bit を入れた人は 64 bit の
         # 癖でもう一度同じことを叩く ── そこで同じ答えが返るのでは、入れた
@@ -1342,6 +1359,40 @@ def t_offline(tmp):
     check("pywin32 が無いとき、持ち込むものを言う",
           "wheel" in (r.stdout + r.stderr) or "pywin32" in (r.stdout + r.stderr),
           (r.stdout + r.stderr)[-200:])
+
+
+def t_two_views(tmp):
+    print("レジストリの、二つの見え方 ──")
+    keep = o2m._read_typelib
+    A = "C:" + chr(92) + "本物.exe" + chr(92) + "3"
+    B = "C:" + chr(92) + "x86" + chr(92) + "無い.exe" + chr(92) + "3"
+    try:
+        import sys as _sys
+        flag64, flag32 = 256, 512     # winreg の KEY_WOW64_* に当たるもの
+
+        class FakeWinreg:
+            KEY_WOW64_64KEY = flag64
+            KEY_WOW64_32KEY = flag32
+
+        _sys.modules["winreg"] = FakeWinreg
+        seen = {flag64: {("1.1", "win64"): A}, flag32: {("1.1", "win64"): B}}
+        o2m._read_typelib = lambda f: seen.get(f, {})
+        got = o2m._typelib_values()
+        check("両方の見え方を読む", len(got) == 2, got)
+        check("違うときは、どちらの話か添える",
+              {g[3] for g in got} == {"64bit の見え方", "32bit の見え方"}, got)
+        # **同じなら二度見せない。** 人が読む行が倍になる。
+        seen = {flag64: {("1.1", "win64"): A}, flag32: {("1.1", "win64"): A}}
+        got = o2m._typelib_values()
+        check("同じなら一つにまとめる", got == [("1.1", "win64", A, "")], got)
+        # 片方にしか無い枝も落とさない。
+        seen = {flag64: {("1.1", "win64"): A}, flag32: {}}
+        got = o2m._typelib_values()
+        check("片方にしか無い枝も出す", len(got) == 1 and got[0][3] == "64bit の見え方", got)
+    finally:
+        o2m._read_typelib = keep
+        import sys as _sys
+        _sys.modules.pop("winreg", None)
 
 
 def t_launcher(tmp):
@@ -1444,7 +1495,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_structure, t_table, t_inline, t_created,
-                   t_log, t_cp932, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
+                   t_log, t_cp932, t_two_views, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
                    t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):
             fn(tmp)
