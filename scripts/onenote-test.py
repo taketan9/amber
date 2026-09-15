@@ -1368,6 +1368,47 @@ def t_check(tmp):
               "bit の話ではない" in n32 and "32 bit の Python を使う" not in n32, n32)
         check("32 bit なら、ファイルから読む段へ導く", "ファイルから型ライブラリを読む" in n32, n32)
 
+        # **「繋がらない」と「繋がるのに呼べない」は、別の話。**
+        # 後者なら、取り次ぎ側（`HKCR\Interface\{IID}\TypeLib`）を見る ──
+        # そこが壊れた版を指していれば、束ね方を変えても同じところで落ちる。
+        IID = "{9E0F}"
+        keep_if = o2m._interface_registration
+        try:
+            o2m._interface_registration = lambda: ("IApplication", IID, "{0EA}", "1.0")
+            LIB = "(-2147312566, '読み込みエラー')"
+            _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                         connect=blew(troubles=[
+                             "  型ライブラリ 1.1 を名指し: 呼ぶと落ちる ── " + LIB,
+                             "  型ライブラリ 1.0 を名指し: " + LIB]))
+            check("呼ぶ瞬間なら、取り次ぎ側を出す", "取り次ぎ側が見ている登録" in out, out)
+            check("壊れた版を指していれば、そう言う", "名指しでも読めなかったほう" in out, out)
+            check("取り次ぎ側を直す一行を、道ごと出す",
+                  'reg add "HKCU' in out and IID in out and "/v Version /d 1.1" in out, out)
+            check("戻す一行も出す", "reg delete" in out, out)
+            # **確かなことが分かったら、当て推量は並べない。**
+            check("当て推量を並べない",
+                  "資源に型ライブラリが入っていない" not in out and "片方は写し" not in out, out)
+
+            # 繋がってすらいないなら、取り次ぎ側の話はしない。
+            _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                         connect=blew(troubles=["  型ライブラリ 1.1 を名指し: " + LIB]))
+            check("呼ぶ前に落ちているなら、取り次ぎ側は見ない",
+                  "取り次ぎ側" not in out, out)
+            # 指している版が生きているなら、直せとは言わない。
+            o2m._interface_registration = lambda: ("IApplication", IID, "{0EA}", "1.1")
+            _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                         connect=blew(troubles=[
+                             "  型ライブラリ 1.1 を名指し: 呼ぶと落ちる ── " + LIB,
+                             "  型ライブラリ 1.0 を名指し: " + LIB]))
+            check("生きている版を指しているなら、直せとは言わない", "reg add" not in out, out)
+            # 引けなければ黙る。
+            o2m._interface_registration = lambda: None
+            _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                         connect=blew(troubles=["  1.1 を名指し: 呼ぶと落ちる ── " + LIB]))
+            check("引けなければ、取り次ぎ側の話はしない", "取り次ぎ側" not in out, out)
+        finally:
+            o2m._interface_registration = keep_if
+
         # 知らない答えなら、決めつけない。
         _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
                      connect=blew(troubles=["  素の Dispatch: 知らない何か"]))

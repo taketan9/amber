@@ -826,6 +826,11 @@ def _next_move(me, office, tree, server_here, troubles=()):
         if code == "-2147312566":
             # **読めないと言われた道を、その場で出す。** ここで `--probe` へ
             # 送ると、29 行を手で打ち直させることになる。
+            iface = _interface_note(troubles)
+            if iface:
+                # **呼ぶ瞬間まで行っているなら、読めないという話ではない。**
+                # そこへ当て推量を足すと、確かなほうが埋もれる。
+                return said + _lib_paths_note(speculate=False) + iface
             said = said + _lib_paths_note() + _cant_load_next(me)
         return said
     want = "win64" if me == 64 else "win32"
@@ -909,7 +914,7 @@ def _from_answer(troubles):
     return best, list(dict(_ANSWERS)[best])
 
 
-def _lib_paths_note():
+def _lib_paths_note(speculate=True):
     """**枝が何を指していて、それが在るか。** 版はぜんぶ出す。
 
     一つだけ見せると、落ちた版と違うものを見せうる（依頼 580 で束ねて
@@ -923,8 +928,10 @@ def _lib_paths_note():
         seen.setdefault(ver, {})[arch] = path
         where = f" [{view}]" if view else ""
         out.append(f"{ver} / {arch}{where} = {path}  → {'ある' if ok else '**無い**'}")
-    if _lib_files_gone():
-        return out                      # 在処が無いなら、写しの話は要らない
+    if _lib_files_gone() or not speculate:
+        # 在処が無いとき、そして**もっと確かなことが分かっているとき**は、
+        # 写しの当て推量は要らない ── 並べると、確かなほうが埋もれる。
+        return out
     for ver, by in seen.items():
         if len(by) == 2 and len(set(by.values())) == 1:
             out.append(f"{ver} は win32 と win64 が**同じ道**を指している ── 片方は写し。")
@@ -960,6 +967,75 @@ def _gone_note():
         out.append("探した場所のどこにも ONENOTE.EXE が無い ──")
         out.append("**デスクトップ版 OneNote が入っていない**（ストア版は COM を持たない）。")
         out.append("Microsoft 365 から OneNote を入れる。")
+    return out
+
+
+def _interface_registration():
+    """**取り次ぎ側が見ている登録**（依頼 573 の `--probe` の節を、`--check` へ）。
+
+    別プロセスの COM を呼ぶと、呼び出しは取り次がれる（marshaling）。
+    取り次ぐ側は ``HKCR\\Interface\\{IID}\\TypeLib`` を見て「どの型ライブラリの
+    どの版か」を引く ── **ここが壊れた版を指していれば、型ライブラリ本体が
+    読めていても、呼んだ瞬間に落ちる。**
+
+    「繋がったのに、呼ぶと落ちる」のいちばん奥の理由がここに出る。
+    返すのは `(型の名前, IID, 型ライブラリ, 版)`。引けなければ None。
+    """
+    try:
+        import winreg
+        from win32com.client import gencache
+    except ImportError:
+        return None
+    try:
+        mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
+        names = [n for n in dir(mod)
+                 if isinstance(getattr(mod, n, None), type)
+                 and hasattr(getattr(mod, n), "GetHierarchy")]
+        if not names:
+            return None
+        iid = str(getattr(mod, names[0]).CLSID)
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
+                             "Interface" + chr(92) + iid + chr(92) + "TypeLib")
+        lib = winreg.QueryValue(key, None)
+        try:
+            ver = winreg.QueryValueEx(key, "Version")[0]
+        except OSError:
+            ver = None
+        return names[0], iid, lib, ver
+    except Exception:  # noqa
+        return None
+
+
+def _interface_note(troubles):
+    """呼んだ瞬間に落ちているなら、取り次ぎ側の登録を出す。
+
+    **「繋がらない」と「繋がるのに呼べない」は、別の話。** 後者のときだけ
+    ここを見る ── 束ね方をいくら変えても、取り次ぐ側が壊れた版を指していれば
+    同じところで落ちる。
+    """
+    if not any("呼ぶと落ちる" in t for t in troubles):
+        return []
+    got = _interface_registration()
+    if not got:
+        return []
+    name, iid, lib, ver = got
+    out = ["", "**繋がってはいる ── 落ちているのは呼んだ瞬間。**",
+           f"取り次ぎ側が見ている登録: {name} → 型ライブラリ {lib} の版 {ver or '（無い）'}"]
+    # 呼び方をいくら変えても、取り次ぐ側が壊れた版を指していれば同じ。
+    broken = [v for v in ("1.0", "1.1") if f"型ライブラリ {v} を名指し" in " ".join(troubles)
+              and f"型ライブラリ {v} を名指し: (-2147312566" in " ".join(troubles)]
+    if ver and ver in broken:
+        good = "1.1" if ver == "1.0" else "1.0"
+        b = chr(92)
+        root = "HKCU" + b + "Software" + b + "Classes" + b + "Interface" + b + iid + b + "TypeLib"
+        out += [f"**その版（{ver}）は、名指しでも読めなかったほう。**",
+                f"取り次ぎ側に {good} を見させる（HKCU なので管理者は要らない）:",
+                f'  reg add "{root}" /v Version /d {good} /f',
+                "戻すとき:",
+                f'  reg delete "HKCU{b}Software{b}Classes{b}Interface{b}{iid}" /f',
+                "レジストリを触るので、会社の決まりだけ先に確かめて。"]
+    else:
+        out.append("ここが壊れた版を指していると、束ね方を変えても同じところで落ちる。")
     return out
 
 

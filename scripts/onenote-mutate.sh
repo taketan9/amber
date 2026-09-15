@@ -384,9 +384,7 @@ mutate "一つ無ければ全部無いと言う" "一つでも在れば、入っ
             return True
     return True'
 mutate "無いのに写しの話を被せる" "一つも無ければ、写しの話もしない" \
-    'if _lib_files_gone():
-        return out                      # 在処が無いなら、写しの話は要らない' 'if False:
-        return out'
+    'if _lib_files_gone() or not speculate:' 'if not speculate:'
 mutate "よそに在っても黙る" "よそに実体が在れば、そこを教えて修復へ導く" \
     'found = _onenote_exe()
     if found:' 'found = None
@@ -443,6 +441,27 @@ mutate "64 bit でも bit の話をやめる" "64 bit なら、32 bit を試さ�
     'if me == 64:
         got = _thirty_two_note()' 'if False:
         got = _thirty_two_note()'
+mutate "呼ぶ瞬間でも取り次ぎ側を見ない" "呼ぶ瞬間なら、取り次ぎ側を出す" \
+    'if not any("呼ぶと落ちる" in t for t in troubles):
+        return []' 'if True:
+        return []'
+mutate "繋がる前でも取り次ぎ側を出す" "呼ぶ前に落ちているなら、取り次ぎ側は見ない" \
+    'if not any("呼ぶと落ちる" in t for t in troubles):
+        return []' 'if False:
+        return []'
+mutate "壊れた版かどうかを見ない" "生きている版を指しているなら、直せとは言わない" \
+    'if ver and ver in broken:' 'if ver:'
+mutate "直す一行を出さない" "取り次ぎ側を直す一行を、道ごと出す" \
+    'reg add "{root}" /v Version' 'reg ad "{root}" /v Version'
+mutate "当て推量も並べる" "当て推量を並べない" \
+    'return said + _lib_paths_note(speculate=False) + iface' \
+    'return said + _lib_paths_note() + iface + _cant_load_next(me)'
+mutate "引けなくても言い立てる" "引けなければ、取り次ぎ側の話はしない" \
+    'got = _interface_registration()
+    if not got:
+        return []' 'got = _interface_registration() or ("X", "Y", "Z", None)
+    if not got:
+        return []'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'
