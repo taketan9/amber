@@ -395,6 +395,31 @@ def one_format(path):
     return got, name
 
 
+def unpack_onepkg(at, into):
+    """`.onepkg` を開く。**中身は CAB**（Windows 標準の `expand` で開ける）。
+
+    OneNote が「ノートブック全体は `.pdf` `.xps` `.onepkg` だけ」と言うので、
+    まとめて出すとこの形になる。中に入っているのは `.one` なので、
+    **開けば形式が分かる** ── 書き出した `.one` が公開仕様なら、話が変わる。
+    """
+    import subprocess
+    os.makedirs(into, exist_ok=True)
+    with open(at, "rb") as f:
+        sig = f.read(4)
+    if sig != b"MSCF":
+        return None, f"CAB ではない（先頭は {sig.hex()}）"
+    try:
+        got = subprocess.run(["expand", "-F:*", str(at), str(into)],
+                             capture_output=True, timeout=600)
+    except FileNotFoundError:
+        return None, "expand が無い（Windows の外では開けない）"
+    except subprocess.TimeoutExpired:
+        return None, "expand が返ってこない"
+    if got.returncode != 0:
+        return None, f"expand が転んだ（{got.returncode}）"
+    return into, None
+
+
 def peek(where):
     """`.one` を探して、**どちらの形式かだけ**数える。
 
@@ -411,6 +436,19 @@ def peek(where):
     else:
         found = [q for q in root.rglob("*")
                  if q.is_file() and q.suffix.lower() in kinds]
+    # **`.onepkg` は入れ物。** 中を見ないと、形式は分からない。
+    opened = []
+    for q in [q for q in found if q.suffix.lower() == ".onepkg"]:
+        into = Path(tempfile.gettempdir()) / f"amber-onepkg-{os.getpid()}-{q.stem[:20]}"
+        at, why = unpack_onepkg(q, into)
+        if at is None:
+            print(f"開けない {q.name}: {why}")
+            continue
+        inner = [r for r in Path(at).rglob("*")
+                 if r.is_file() and r.suffix.lower() in kinds]
+        print(f"開いた {q.name} → 中に {len(inner)} 本")
+        opened += inner
+    found += opened
     for q in found:
         kinds[q.suffix.lower()].append(q)
     if not any(kinds.values()):

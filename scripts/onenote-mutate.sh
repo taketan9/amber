@@ -512,6 +512,12 @@ mutate "無いのに 0 を返す" "無い回は 0 を返さない" \
 mutate "--peek も鎖を取る" "鎖の中でも --check は走る" \
     'if args.probe or args.check or args.forget or args.peek or args.list or args.dry_run:' \
     'if args.probe or args.forget or args.list or args.dry_run:'
+mutate "入れ物の中を見ない" "入れ物の中まで数える" \
+    'found += opened' 'found += []'
+mutate "開けなくても黙る" "開けなければ、わけを言う" \
+    'print(f"開けない {q.name}: {why}")' 'pass'
+mutate "CAB でなくても開きにいく" "CAB でなければ、そう言う" \
+    'if sig != b"MSCF":' 'if False:'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

@@ -1612,6 +1612,36 @@ def t_peek(tmp):
     check("無い回は 0 を返さない", code != 0, code)
     code, out = run(tmp / "そんな道は無い")
     check("道が無ければ、そう言う", "ありません" in out and code != 0, out)
+    # ── `.onepkg` は入れ物 ──
+    #
+    # **中を見ないと形式は分からない。** ノートブックをまとめて出すと
+    # この形にしかならない（OneNote が「.pdf .xps .onepkg だけ」と言う）。
+    pkg = tmp / "pkg"
+    pkg.mkdir(exist_ok=True)
+    (pkg / "まとめ.onepkg").write_bytes(b"MSCF" + b"\x00" * 60)
+    keep_un = o2m.unpack_onepkg
+    try:
+        inside = tmp / "inside"
+        inside.mkdir(exist_ok=True)
+        _one(inside / "中身.one", "109ADD3F-911B-49F5-A5D0-1791EDC8AED8")
+        o2m.unpack_onepkg = lambda at, into: (str(inside), None)
+        _, out = run(pkg)
+        check("入れ物の中まで数える", "中に 1 本" in out and "109add3f" in out, out)
+        # 開けなかったら、そう言う ── 黙って 0 本と数えない。
+        o2m.unpack_onepkg = lambda at, into: (None, "expand が無い")
+        _, out = run(pkg)
+        check("開けなければ、わけを言う", "開けない" in out and "expand が無い" in out, out)
+        check("開けなくても、数だけは出す", ".onepkg" in out and "1 本" in out, out)
+    finally:
+        o2m.unpack_onepkg = keep_un
+
+    # CAB でなければ、開かずに断る。
+    notcab = tmp / "notcab"
+    notcab.mkdir(exist_ok=True)
+    (notcab / "ちがう.onepkg").write_bytes(b"PK\x03\x04" + b"\x00" * 60)
+    _, out = run(notcab)
+    check("CAB でなければ、そう言う", "CAB ではない" in out, out)
+
     # 一本を名指ししてもよい。
     _, out = run(d / "古い.one")
     check("ファイル一本でも数える", "1 本" in out, out)
