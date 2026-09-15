@@ -68,8 +68,10 @@ mutate "--no-images の守りを外す" "--no-images でも既にある画像は
     'if not args.no_images and page_img_dir.is_dir():' 'if page_img_dir.is_dir():'
 mutate "いま使っている画像まで消す" "いま使っている画像は残る" \
     'if old.name not in conv.images:' 'if True:'
-mutate "隣のページの画像まで巻き込む" "名前が似ているだけの画像は巻き込まない" \
-    'page_img_dir.glob(f"{md_path.stem}_*")' 'page_img_dir.glob("*")'
+# **`glob` の形を壊す手は置いていない** ── 守っているのは番号の形を見る
+# 正規表現のほうで（すぐ下の「古い画像で番号の形を見ない」が鳴る）、`glob` は
+# 速さのためだけになった。振る舞いの変わらない壊し方を並べると、
+# 「鳴らないのが普通」になる。
 mutate "鎖を掛けない" "二本目は断られる" \
     'fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)' 'pass'
 mutate "--dry-run でも同期を頼む" "--dry-run では頼まない" \
@@ -518,6 +520,25 @@ mutate "開けなくても黙る" "開けなければ、わけを言う" \
     'print(f"開けない {q.name}: {why}")' 'pass'
 mutate "CAB でなくても開きにいく" "CAB でなければ、そう言う" \
     'if sig != b"MSCF":' 'if False:'
+mutate "画像をアンダースコアで名づける" "画像は <幹>-NNN.<ext>" \
+    'fname = f"{self.img_prefix}-{self.img_count:03d}.{ext}"' \
+    'fname = f"{self.img_prefix}_{self.img_count:03d}.{ext}"'
+mutate "幹を 60 字で切らない（写しのほう）" "幹 ああああああああああああ を ああああああああああああ にする" \
+    'if len(out) >= 60:' 'if len(out) >= 120:'
+mutate "ページの幹を 120 字のままにする" "ページの幹も 60 字" \
+    'return name[:60] or fallback' 'return name[:120] or fallback'
+mutate "使えない字を落として詰める" "幹 斜/線 を 斜-線 にする" \
+    'if gap and out:
+            out.append("-")' 'if False:
+            out.append("-")'
+mutate "先頭にも - を置く" "幹 ?? notes を notes にする" \
+    'if gap and out:' 'if gap:'
+mutate "予約名を見ない" "幹 CON を _CON にする" \
+    'return f"_{got}" if head in _RESERVED else got' 'return got'
+mutate "古い画像で番号の形を見ない" "名前が似ているだけの画像は巻き込まない" \
+    'if not ours.match(old.name):
+                    continue' 'if False:
+                    continue'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

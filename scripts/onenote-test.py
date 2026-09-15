@@ -228,8 +228,8 @@ def t_structure(tmp):
     check("表が組まれる（見出しの行あり）",
           "| 名 | 値 |\n| --- | --- |\n| あ | い |" in text)
     check("画像が attachments/ に落ちる",
-          (out / "仕事" / "議事録" / "attachments" / "9月の定例_001.png").is_file())
-    check("画像へのリンクが相対", "](attachments/9月の定例_001.png)" in text)
+          (out / "仕事" / "議事録" / "attachments" / "9月の定例-001.png").is_file())
+    check("画像へのリンクが相対", "](attachments/9月の定例-001.png)" in text)
 
 
 def t_incremental(tmp):
@@ -327,24 +327,30 @@ def t_stale_images(tmp):
     app = FakeOneNote(hierarchy(), pages_for(p1_images=2))
     run(app, out)
     att = out / "仕事" / "議事録" / "attachments"
-    check("下ごしらえ: 画像が二枚", (att / "9月の定例_001.png").is_file()
-          and (att / "9月の定例_002.png").is_file())
+    check("下ごしらえ: 画像が二枚", (att / "9月の定例-001.png").is_file()
+          and (att / "9月の定例-002.png").is_file())
 
-    # 隣のページの画像（巻き込まれてはいけない）
-    (att / "9月の定例録_001.png").write_bytes(PNG)
+    # 隣のページの画像（巻き込まれてはいけない）。**ハイフンは名前の中にも
+    # 出る**ので、`9月の定例-補足-001.png` が `9月の定例-*` に当たってしまう ──
+    # アンダースコアのときより広く当たる。番号の形まで見て外す。
+    (att / "9月の定例録-001.png").write_bytes(PNG)
+    (att / "9月の定例-補足-001.png").write_bytes(PNG)
 
     app2 = FakeOneNote(hierarchy(mod_p1="2026-09-14T09:00:00.000Z"),
                        pages_for(mod_p1="2026-09-14T09:00:00.000Z", p1_images=1))
     run(app2, out)
-    check("いま使っている画像は残る", (att / "9月の定例_001.png").is_file())
-    check("使わなくなった画像は消える", not (att / "9月の定例_002.png").exists())
-    check("名前が似ているだけの画像は巻き込まない", (att / "9月の定例録_001.png").is_file())
+    check("いま使っている画像は残る", (att / "9月の定例-001.png").is_file())
+    check("使わなくなった画像は消える", not (att / "9月の定例-002.png").exists())
+    check("名前が似ているだけの画像は巻き込まない",
+          (att / "9月の定例録-001.png").is_file()
+          and (att / "9月の定例-補足-001.png").is_file(),
+          sorted(q.name for q in att.iterdir()))
 
     # --no-images のときに全部消したりしない
     app3 = FakeOneNote(hierarchy(mod_p1="2026-09-14T10:00:00.000Z"),
                        pages_for(mod_p1="2026-09-14T10:00:00.000Z", p1_images=1))
     run(app3, out, "--no-images")
-    check("--no-images でも既にある画像は消さない", (att / "9月の定例_001.png").is_file())
+    check("--no-images でも既にある画像は消さない", (att / "9月の定例-001.png").is_file())
 
 
 def t_sync(tmp):
@@ -1045,7 +1051,7 @@ def t_connect(tmp):
 # Markdown を見る検査は素直な一枚に七つだけだった。写したものが読めるかを
 # 見ないのでは、何を確かめているのか分からない。
 # ---------------------------------------------------------------------------
-def _convert(body, styles=None, page_attr=""):
+def _convert(body, styles=None, page_attr="", with_images=False):
     """`<one:Outline>` の中身だけ渡して、出てくる Markdown を返す。"""
     styles = styles if styles is not None else (
         '<one:QuickStyleDef index="0" name="h1"/>'
@@ -1056,13 +1062,49 @@ def _convert(body, styles=None, page_attr=""):
     xml = (f'<one:Page {NBS} {page_attr}>{styles}'
            f'<one:Outline><one:Position x="0" y="0"/><one:OEChildren>{body}'
            f'</one:OEChildren></one:Outline></one:Page>')
-    conv = o2m.PageConverter(ET.fromstring(xml), Path("/tmp/なし"), "p", "attachments", False)
+    import tempfile as _tf
+    at = Path(_tf.mkdtemp()) if with_images else Path("/tmp/なし")
+    conv = o2m.PageConverter(ET.fromstring(xml), at, "p", "attachments", with_images)
     return conv.convert()
 
 
 def _cell(t):
     return (f'<one:Cell><one:OEChildren><one:OE><one:T><![CDATA[{t}]]></one:T>'
             f'</one:OE></one:OEChildren></one:Cell>')
+
+
+def t_amber_shape(tmp):
+    print("ambər が読める形 ──")
+    # **正本は Rust のほう**（`crates/amber-core/src/note.rs` の `file_stem`）。
+    # ここは写しなので、**同じ答えになることを確かめる** ── ずれると、ambər が
+    # ノートを改名・移動した日に画像が付いてこない。
+    rust = (ROOT.parent / "crates" / "amber-core" / "src" / "note.rs").read_text(encoding="utf-8")
+    check("正本の規則がまだそこにある（写しの拠りどころ）",
+          "pub fn file_stem" in rust and "out.chars().count() >= 60" in rust)
+    for title, want in [
+        ("ふつう", "ふつう"),
+        ("斜/線", "斜-線"),
+        ("?? notes", "notes"),            # 先頭には `-` を置かない
+        ("a//b", "a-b"),                  # 続いた一続きは `-` 一つ
+        ("  前後  ", "前後"),
+        ("末尾.", "末尾"),
+        ("CON", "_CON"),                  # 予約名
+        ("con.md", "_con.md"),
+        ("あ" * 80, "あ" * 60),           # 60 字まで
+    ]:
+        got = o2m.amber_stem(title)
+        check(f"幹 {title[:12]} を {want[:12]} にする", got == want, got[:20])
+
+    # **画像の名前は `<幹>-NNN.<ext>`。** ambər は「幹 + ハイフン」で見分ける
+    # （`note::attach` が `format!("{}-{stamp}.{ext}")` で書いている）。
+    check("正本が幹とハイフンで名づけている",
+          '-{stamp}.{ext}' in rust and 'attachments/{name}' in rust)
+    got = _convert('<one:OE quickStyleIndex="1"><one:Image format="png">'
+                   f'<one:Data>{PNG_B64}</one:Data></one:Image></one:OE>', with_images=True)
+    check("画像は <幹>-NNN.<ext>", "](attachments/p-001.png)" in got, got)
+    # ページの幹も 60 字 ── ここが 120 のままだと、長い題のページだけ幹がずれる。
+    long = o2m.sanitize("ぺ" * 80)
+    check("ページの幹も 60 字", len(long) == 60 and o2m.amber_stem(long) == long, len(long))
 
 
 def t_table(tmp):
@@ -1751,7 +1793,7 @@ def t_readonly_no_lock(tmp):
 def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
-        for fn in (t_names, t_structure, t_table, t_inline, t_created,
+        for fn in (t_names, t_amber_shape, t_structure, t_table, t_inline, t_created,
                    t_log, t_cp932, t_two_views, t_peek, t_forget, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
                    t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):

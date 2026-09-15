@@ -49,7 +49,9 @@ onenote2md.py ── デスクトップ版 OneNote を Markdown に（ambər の
      `# % & ~ { }` と先頭の `_vti_`、末尾の `.` と空白を避ける。一段 120 字まで、
      道ぜんたいで 200 字を超えそうなら詰める（WebDAV の 256 字の壁）。
   6. **画像は `attachments/`**（ambər の決まり）。ノートの隣のフォルダで、名前は
-     `<ページ名>_001.png`。ambər の「使われていない画像」もここを数える。
+     `<ページ名>-001.png`（**ハイフン** ── `note::attach` と同じ形で、
+     ambər は「幹 + ハイフン」で自分の画像を見分ける）。「使われていない
+     画像」もここを数える。
   7. **深さ。** ambər が一覧に出すのはフォルダ 8 段まで。セクショングループが
      深いノートブックは `--flatten-groups` で「グループ名 › セクション名」を一つの
      フォルダ名に畳める。
@@ -1574,6 +1576,44 @@ def only_one(out_root: Path):
 _INVALID = re.compile(r'[\\/:*?"<>|#%&~{}\x00-\x1f]+')
 
 
+# Windows の予約名（`CON.md` も Windows には CON）。ambər の `note::file_stem`
+# と同じ顔ぶれ。
+_RESERVED = {"CON", "PRN", "AUX", "NUL",
+             *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+def amber_stem(title):
+    """**ambər が画像の名前に使う幹**（`note::file_stem` と同じ規則）。
+
+    正本は `crates/amber-core/src/note.rs` の `pub fn file_stem`。ここは写しで、
+    **写しである以上ずれうる** ── ずれると、ambər がノートを改名・移動した日に
+    画像が付いてこない（あちらは「幹 + ハイフン」で自分の画像を見分ける）。
+    だから走査で、同じ答えになることを確かめている。
+
+      * 使えない字（`/ \\ : * ? " < > |` と制御文字）は落とし、続いた一続きは
+        `-` 一つに潰す。**先頭には置かない**（`?? notes` は `notes`）
+      * 60 字まで
+      * 前後の空白・`.`・全角空白は落とす
+      * 予約名なら頭に `_`
+    """
+    out, gap = [], False
+    for c in (title or "").strip():
+        if c in '/\\:*?"<>|' or ord(c) < 0x20:
+            gap = True
+            continue
+        if gap and out:
+            out.append("-")
+        gap = False
+        if len(out) >= 60:
+            break
+        out.append(c)
+    got = "".join(out).strip(" ." + chr(0x3000))
+    if not got:
+        return ""
+    head = got.split(".")[0].upper()
+    return f"_{got}" if head in _RESERVED else got
+
+
 def sanitize(name, fallback="untitled"):
     name = (name or "").strip()
     name = _INVALID.sub("_", name)
@@ -1584,7 +1624,10 @@ def sanitize(name, fallback="untitled"):
     # Windows の予約名（CON・PRN・AUX・NUL・COM1〜・LPT1〜）。
     if re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])", name):
         name = name + "_"
-    return name[:120] or fallback
+    # **60 字で切る。** ambər の `file_stem` が 60 で切るので、ここを 120 の
+    # ままにすると**長い題のページだけ、画像の幹がずれる** ── そのノートは
+    # 改名・移動したときに画像が付いてこない。
+    return name[:60] or fallback
 
 
 def shorten(path: Path, room: int = PATH_LIMIT) -> Path:
@@ -1837,7 +1880,10 @@ class PageConverter:
         fmt = (img.get("format") or "png").lower()
         ext = {"jpg": "jpg", "jpeg": "jpg", "png": "png", "gif": "gif", "bmp": "bmp", "emf": "emf", "wmf": "wmf"}.get(fmt, fmt)
         self.img_count += 1
-        fname = f"{self.img_prefix}_{self.img_count:03d}.{ext}"
+        # **`<幹>-NNN.<ext>`。** ambər は「幹 + ハイフン」で自分の画像を
+        # 見分ける（`note::attach` と同じ形）── アンダースコアだと、
+        # ノートを改名・移動した日に画像が付いてこない。
+        fname = f"{self.img_prefix}-{self.img_count:03d}.{ext}"
         self.img_dir.mkdir(parents=True, exist_ok=True)
         try:
             raw = base64.b64decode(data_el.text)
@@ -2011,10 +2057,17 @@ def walk_section(app, section_el, out_dir: Path, path_parts, args, stats, writte
             written.add((page_img_dir / name).resolve())
         # このページの古い画像を片付ける。**いま全部書き直したページの分だけ**なので、
         # 触っていないページの画像は数に入らない。名前が `<ページ名>_NNN.ext` なので
-        # 隣のページを巻き込まない（`会議_001.png` は `会議録_*` に当たらない）。
+        # 隣のページを巻き込まない（番号の形まで見るので、`会議-補足-001.png`
+        # は `会議-*` に当たらない）。
         # `--no-images` のときはやらない ── 出さないだけのつもりが全部消える。
         if not args.no_images and page_img_dir.is_dir():
-            for old in page_img_dir.glob(f"{md_path.stem}_*"):
+            # **番号の形まで見る。** `<幹>-*` だけだと、`会議-補足-001.png`
+            # （別のページの画像）が `会議-*` に当たる ── ハイフンは名前の
+            # 中にも出るので、アンダースコアのときより広く当たってしまう。
+            ours = re.compile(re.escape(md_path.stem) + r"-\d{3}\.[^.]+$")
+            for old in page_img_dir.glob(f"{md_path.stem}-*"):
+                if not ours.match(old.name):
+                    continue
                 if old.name not in conv.images:
                     try:
                         old.unlink()
