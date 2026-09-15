@@ -30,6 +30,14 @@ pub enum Inline {
         text: String,
         url: String,
     },
+    /// 本文に裸で書かれた `https://…`（依頼 606・本人が決めた）。
+    ///
+    /// **押せば開くが、ファイルの字は一文字も変えない。** `[字](url)` と
+    /// 同じ形にして保存すると、書いていない記号が勝手に増え、ほかのアプリで
+    /// 開いた人には別の字に見える ── だから `Link` とは別の札にして、
+    /// 書き戻す側（`inlineToMd`）が「これは元から裸だった」と分かるように
+    /// `data-bare` を付けて出す。
+    Bare(String),
     /// `<span style="color:#rrggbb">…</span>` — the one piece of HTML cian
     /// reads, because Markdown has no colour and this is the notation the
     /// most other tools already understand. **Only a validated hex colour
@@ -50,6 +58,7 @@ impl Inline {
             | Inline::BoldItalic(t)
             | Inline::Strike(t) => t,
             Inline::Link { text, .. } => text,
+            Inline::Bare(t) => t,
             Inline::Colored { text, .. } => text,
         }
     }
@@ -164,6 +173,31 @@ pub fn inline(text: &str) -> Vec<Inline> {
             }
         }
 
+        // **裸の `https://…` も、押せば開く**（依頼 606）。
+        //
+        // `[字](url)` を先に見てから、ここに来る ── 括弧の中の url を
+        // 二度拾わないため。**行の中の区切りで止める** ── 日本語の文では
+        // URL のすぐ後ろに句点や閉じ括弧が来るので、そこまで飲み込むと
+        // 行き先が壊れる（`https://x/a。` は開けない）。
+        if (c == 'h' || c == 'H') && (starts_url(&chars, i)) {
+            let mut end = i;
+            while end < chars.len() && !url_stop(chars[end]) {
+                end += 1;
+            }
+            // 末尾の句読点は、たいてい文のほう（`…example.com.` の `.`）。
+            while end > i && matches!(chars[end - 1], '.' | ',' | '、' | '。' | '!' | '?' | ':' | ';') {
+                end -= 1;
+            }
+            let url: String = chars[i..end].iter().collect();
+            // `https://` だけ、のような中身の無いものはただの字。
+            if url.len() > 8 && safe_url(&url).is_some() {
+                flush(&mut out, &mut buf);
+                out.push(Inline::Bare(url));
+                i = end;
+                continue;
+            }
+        }
+
         // Link [text](url)
         if c == '[' {
             if let Some(close) = chars[i + 1..].iter().position(|&x| x == ']') {
@@ -187,6 +221,32 @@ pub fn inline(text: &str) -> Vec<Inline> {
     }
     flush(&mut out, &mut buf);
     out
+}
+
+/// `http://` か `https://` が、ここから始まっているか。
+///
+/// **前が字なら、始まりではない** ── `xhttps://…` や、既に `](` の中に
+/// ある url を二度拾わないため。
+fn starts_url(chars: &[char], at: usize) -> bool {
+    if at > 0 {
+        let before = chars[at - 1];
+        if before.is_alphanumeric() || before == '/' || before == '(' {
+            return false;
+        }
+    }
+    let rest: String = chars[at..].iter().take(8).collect();
+    let low = rest.to_ascii_lowercase();
+    low.starts_with("https://") || low.starts_with("http://")
+}
+
+/// URL は、ここで終わる。**空白と、日本語の文で後ろに来るもの。**
+fn url_stop(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '<' | '>' | '"' | '`' | '｜' | '|' | '、' | '。' | '）' | ')' | '］' | ']'
+                | '」' | '』' | '＞' | '　'
+        )
 }
 
 /// The start of a three-character run of `mark` at or after `from`.
@@ -477,6 +537,15 @@ fn inline_html(text: &str) -> String {
                 }
                 // Shown, not hidden — and not clickable.
                 None => out.push_str(&esc(&text)),
+            },
+            // **`data-bare` は約束。** 書き戻す側はこれを見て、`[…](…)` に
+            // せず URL の字だけを戻す ── ファイルの字が変わらない。
+            Inline::Bare(url) => match safe_url(&url) {
+                Some(href) => out.push_str(&format!(
+                    "<a href=\"{href}\" data-bare=\"1\">{}</a>",
+                    esc(&url)
+                )),
+                None => out.push_str(&esc(&url)),
             },
         }
     }
@@ -1314,6 +1383,51 @@ mod tests {
                 Inline::Strike("f".into()),
             ]
         );
+    }
+
+    /// **裸の URL は、押せるが字は変わらない**（依頼 606・本人が決めた）。
+    ///
+    /// GitHub と同じで、書いた `https://…` はそのまま押して開ける。ただし
+    /// **ファイルの字は一文字も変えない** ── `[url](url)` に書き換えると、
+    /// 打っていない記号が増え、ほかのアプリで開いた人には別の字に見える。
+    /// 書き戻す側（`inlineToMd`）はその印（`data-bare`）を見る。
+    #[test]
+    fn 裸の_url_は押せるが_字は変わらない() {
+        let got = super::to_html(&["見て https://example.com/a 。".to_string()]);
+        assert!(got.contains("data-bare=\"1\""), "裸の印が要る: {got}");
+        assert!(got.contains("href=\"https://example.com/a\""), "{got}");
+        // **句点まで飲み込まない。** `…/a。` は開けない行き先になる。
+        assert!(!got.contains("/a。"), "句点は URL の外: {got}");
+        // **英文の終止符も、文のほう。** 空白で切れないので、末尾で落とす。
+        let dot = super::to_html(&["see https://example.com/a. next".to_string()]);
+        assert!(dot.contains("href=\"https://example.com/a\""), "終止符は URL の外: {dot}");
+        let comma = super::to_html(&["a https://example.com/b, b".to_string()]);
+        assert!(comma.contains("href=\"https://example.com/b\""), "読点も外: {comma}");
+
+        // `[字](url)` は今までどおり ── 裸の印は付かない。
+        let named = super::to_html(&["[例](https://example.com/a)".to_string()]);
+        assert!(!named.contains("data-bare"), "名前付きは裸ではない: {named}");
+
+        // 括弧の中の url を二度拾わない。
+        let once = inline("[例](https://example.com/a)");
+        assert_eq!(once.len(), 1, "{once:?}");
+
+        // **前が字なら、始まりではない。**
+        let glued = inline("xhttps://example.com/a");
+        assert!(
+            !glued.iter().any(|i| matches!(i, Inline::Bare(_))),
+            "字にくっついた綴りは URL ではない: {glued:?}"
+        );
+
+        // 閉じ括弧・鍵括弧で止まる（日本語の文の形）。
+        for line in ["（https://example.com/a）", "「https://example.com/a」"] {
+            let got = super::to_html(&[line.to_string()]);
+            assert!(got.contains("href=\"https://example.com/a\""), "{line}: {got}");
+        }
+
+        // `javascript:` は通さない（`safe_url` の約束はそのまま）。
+        let bad = inline("javascript:alert(1)");
+        assert!(!bad.iter().any(|i| matches!(i, Inline::Bare(_))), "{bad:?}");
     }
 
     #[test]

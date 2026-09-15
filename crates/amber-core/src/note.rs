@@ -134,6 +134,17 @@ pub struct Note {
     /// row. Headings, fences and front matter are left out: they say what the
     /// note is *made of* rather than what it is about.
     pub excerpt: String,
+    /// **探すためだけの字** ── 見出しと、表の升の中身（依頼 606・本人が決めた）。
+    ///
+    /// `excerpt` には入れない。あれは一覧の二行目に出す**一行の要約**で、
+    /// 見出しも表も「何でできているか」であって「何について書いたか」では
+    /// ないから外してある ── その判断は変えない。
+    ///
+    /// **けれど、探せないのは別の話だった。** `## 来期の見通し` と書いた
+    /// 小見出しや、`| ＣＰＵ | ８コア |` の升の中身は、書いた本人にとっては
+    /// まぎれもなく「そのノートに書いたこと」で、探して出てこないほうが驚く。
+    /// 出す字と探す字を分ければ、一行は短いまま探せる。
+    pub findable: String,
     pub tags: Vec<String>,
     /// `updated` from the front matter if it has one, else the file's mtime as
     /// seconds since the epoch. Formatting belongs to whoever is drawing.
@@ -276,6 +287,7 @@ pub fn from_head(path: &Path, lines: &[String]) -> Option<Note> {
         // **題が書き出しの一行から来たなら、その行は二行目に出さない。**
         // 同じ字が二段に並ぶと、一行のノートが二行に見える。
         excerpt: if from_line { excerpt(&body[first_at(body)..]) } else { excerpt(body) },
+        findable: findable(body),
         star: star(&f),
         tags: f.tags,
         updated,
@@ -439,6 +451,58 @@ fn excerpt(body: &[String]) -> String {
     out.chars().take(120).collect()
 }
 
+/// 見出しと、表の升の中身を集める ── **探すためだけに**（依頼 606）。
+///
+/// `excerpt` が落としているもののうち、**人が書いた言葉**はこの二つ。
+/// 画像の道とコード枠は拾わない ── 前者はファイル名、後者は書いた言葉では
+/// あるが、探し先に入れると `fn` や `const` がどのノートにも当たる。
+///
+/// **記号は落とす。** `## **来期**の見通し` を探す人は `来期` と打つので、
+/// `inline` を通して飾りを外す（`excerpt` と同じ理由・依頼 174）。
+/// 表の区切り行（`| --- |`）は字ではないので落とす。
+///
+/// 読むのは `read` が既に取っている頭の数十行だけ ── ファイルを二度読まない。
+fn findable(body: &[String]) -> String {
+    let mut out = String::new();
+    let mut fenced = false;
+    let mut put = |t: &str| {
+        let t: String = crate::markdown::inline(t).iter().map(|i| i.text()).collect();
+        let t = t.trim();
+        if t.is_empty() {
+            return;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(t);
+    };
+    for line in body {
+        let t = line.trim();
+        if t.starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix('#') {
+            put(rest.trim_start_matches('#').trim());
+        } else if t.starts_with('|') {
+            // 区切りの行（`| --- | :--: |`）は形であって字ではない。
+            let cells: Vec<&str> = t.trim_matches('|').split('|').map(str::trim).collect();
+            if cells.iter().all(|c| {
+                !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' ')
+            }) {
+                continue;
+            }
+            for c in cells {
+                put(c);
+            }
+        }
+    }
+    out
+}
+
 /// Take `![alt](link)` out of a line, keeping the alt text if there is any.
 ///
 /// Only images — a plain `[text](link)` is words somebody wrote and reads
@@ -564,6 +628,11 @@ pub fn haystack(n: &Note) -> String {
     }
     s.push(' ');
     s.push_str(&n.excerpt);
+    // 見出しと表の升は**探せるだけ**（一覧の二行目には出さない・依頼 606）。
+    if !n.findable.is_empty() {
+        s.push(' ');
+        s.push_str(&n.findable);
+    }
     s.to_lowercase()
 }
 
@@ -1805,6 +1874,7 @@ mod tests {
             path: "/n/page-0012.md".into(),
             title: "段取り".into(),
             excerpt: "本文です。".into(),
+            findable: "来期の見通し ＣＰＵ ８コア".into(),
             tags: vec!["仕事".into(), "OneNote".into()],
             updated: Some(0),
             created: Some(0),
@@ -1816,6 +1886,41 @@ mod tests {
         assert!(h.contains("#仕事"), "the tag, with its hash: {h}");
         assert!(h.contains("#onenote"), "lowercased, so the filter need not be: {h}");
         assert!(h.contains("本文です"), "and the start of it: {h}");
+        // 見出しと表の升も探せる（依頼 606・本人が決めた）。
+        assert!(h.contains("来期の見通し"), "見出しも探し先に入る: {h}");
+        // `haystack` は小文字に揃える（探す側も揃えるので、これで当たる）。
+        assert!(h.contains("ｃｐｕ"), "表の升も探し先に入る: {h}");
+    }
+
+    /// **出す字と、探す字を分ける**（依頼 606）。
+    ///
+    /// 一覧の二行目（`excerpt`）は一行の要約なので、見出しも表も入れない
+    /// ── そこは変えない。けれど「書いたのに探せない」は別の話で、
+    /// 小見出しや升の中身は書いた本人にとっては書いたことそのもの。
+    #[test]
+    fn 見出しと表の升は探せるが_一覧の二行目には出ない() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = dir.path().join("a.md");
+        std::fs::write(
+            &at,
+            "---\ntitle: 週報\n---\n\n書き出しの一行。\n\n## **来期**の見通し\n\n             | 名前 | 値 |\n| --- | --- |\n| ＣＰＵ | ８コア |\n\n             ```md\n# 枠の中の見出し\n| 枠の中の升 |\n```\n",
+        )
+        .unwrap();
+        let n = read(&at, 60).unwrap();
+        // 一覧の二行目は、いままでどおり地の文だけ。
+        assert_eq!(n.excerpt, "書き出しの一行。", "{:?}", n.excerpt);
+        // 探し先には見出しと升が入る。**飾りは落ちている**（`**来期**` ではない）。
+        let h = haystack(&n);
+        assert!(h.contains("来期の見通し"), "見出し: {h}");
+        assert!(h.contains("ｃｐｕ") && h.contains("８コア"), "升の中身: {h}");
+        assert!(h.contains("名前"), "見出しの行の升も: {h}");
+        // 区切りの行は字ではない。コード枠の中は拾わない。
+        assert!(!h.contains("---"), "区切りの行は入れない: {h}");
+        // **枠の中の見出しは、見出しではない。** 「Markdown の書き方」を
+        // 書いたノートが、中の例文ぜんぶで当たるようになる。
+        assert!(!h.contains("枠の中の見出し"), "コード枠の中の見出しは入れない: {h}");
+        assert!(!h.contains("枠の中の升"), "コード枠の中の表も入れない: {h}");
+        assert!(!h.contains("**"), "飾りは落とす: {h}");
     }
 
     /// **表は、文ではない。**

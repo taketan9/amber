@@ -2427,7 +2427,15 @@ function inlineToMd(node) {
             case 'EM': case 'I': out += inner.trim() ? '*' + inner + '*' : ''; break;
             case 'DEL': case 'S': case 'STRIKE': out += inner.trim() ? '~~' + inner + '~~' : ''; break;
             case 'CODE': out += '`' + c.textContent + '`'; break;
-            case 'A': out += '[' + inner + '](' + (c.getAttribute('href') || '') + ')'; break;
+            case 'A':
+                // **元から裸だった URL は、裸のまま戻す**（依頼 606）。
+                // `[https://x](https://x)` に書き換えると、打っていない
+                // 記号がファイルに増え、ほかのアプリで開いた人には別の字に
+                // 見える ── 押せるようにしただけで、字は変えない約束。
+                out += (c.dataset && c.dataset.bare)
+                    ? inner
+                    : '[' + inner + '](' + (c.getAttribute('href') || '') + ')';
+                break;
             // **行末の印は、そのまま戻す。** 空白二つと `\` はどちらも
             // 「ここで改行」の印で、amber は改行をそのまま描くので**見え方は
             // 同じ**だが、人が打った字なので落とさない（`markdown.rs` の
