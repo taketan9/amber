@@ -210,6 +210,40 @@ body.mac #railtop { height: 34px; padding-left: 88px; }
 .dest .sy + .n { margin-left: 6px; }
 .dest.lost { opacity: .55; }
 
+/* ── 巻き物の棒（依頼 596）──
+   **地の上に浮かせない。** 既定の棒は白い帯と丸い摘みで、琥珀色の地の上に
+   別の板が乗って見える（本人の言葉で「浮いて見える」）。地は透かして、
+   摘みだけを線の色で出す ── **触っていないときは、ほとんど居ない。**
+   幅は 10px 取るが、摘みは内側に 3px の余白を持つので、見えるのは 4px。 */
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line); border-radius: 99px;
+  border: 3px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ink-3); background-clip: content-box; }
+/* **角の四角は出さない。** 縦と横が交わるところに地の色の升が出て、
+   そこだけ板が残って見える。 */
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ── 掴んで動かす縦棒（依頼 596）──
+   **線の上に置く。** 幅を持つ帯を挟むと、그のぶん中身が痩せるうえ、
+   境目が二本に見える。掴めるのは 7px だが、見えるのは元の一本のまま。 */
+.grab {
+  flex: none; width: 0; position: relative; z-index: 5;
+}
+.grab::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -3px; width: 7px;
+  cursor: col-resize;
+}
+/* 掴んでいる間だけ、線を濃くする ── いま何を動かしているかを見せる。 */
+.grab.on::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -1px; width: 2px;
+  background: var(--brand-s);
+}
+body.grabbing { cursor: col-resize; user-select: none; }
+
 /* ── 中: ノートの一覧 ── */
 #list {
   width: 336px; flex: none; display: flex; flex-direction: column;
@@ -1686,6 +1720,7 @@ body.dropping::after {
 </head>
 <body>
   <div id="rail"></div>
+  <div class="grab" id="grab1" data-for="rail"></div>
   <div id="list">
     <div id="listhead">
       <div id="where">すべてのノート</div>
@@ -1712,6 +1747,7 @@ body.dropping::after {
     <div id="picked" hidden></div>
     <div id="rows"></div>
   </div>
+  <div class="grab" id="grab2" data-for="list"></div>
   <div id="pane">
     <div id="guestbar" hidden>
       <span class="what">ほかの場所のノートを、一時的に開いています</span>

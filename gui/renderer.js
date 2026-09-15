@@ -211,11 +211,23 @@ function relOf(path) {
 
 const manyPlaces = () => state.places.length > 1;
 
+/// 道の、いちばん子の名前。**`/` と `\\` の両方で切る。**
+///
+/// `split('/')` だけだと、Windows の道（`C:\Users\…\OneNote`）は一つも
+/// 切れず、**まるごと返る** ── 左の帯に道がそのまま並んで読めなくなる
+/// （現場で出た・依頼 596）。ここは道を相手にするところなので、
+/// 区切りは機械のものに合わせない。
+function leafOf(path) {
+    const s = String(path || '');
+    const at = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+    return at < 0 ? s : s.slice(at + 1);
+}
+
 /// フォルダの見せ名。保存ディレクトリそのものなら、その名前。
 function bookName(dir) {
     const p = placeOf(dir);
     if (p && p.dir === dir) return p.name;
-    return String(dir || '').split('/').pop();
+    return leafOf(dir);
 }
 
 /// フォルダを言葉にする（帯・小窓）。二つ以上あるときは保存ディレクトリの名前を
@@ -1599,6 +1611,62 @@ async function saveTab(t) {
 }
 
 /// 開いていたタブを憶える。**次に開いたとき、同じ机に戻る**（電話と同じ）。
+/// 左の帯と一覧の幅を、掴んで動かす（依頼 596）。
+///
+/// **憶えるのは窓の大きさと同じ道**（`remember`）── 次に開いたとき、
+/// 前と同じ幅で出る。**狭すぎ・広すぎは止める**: 一覧が 140px を切ると
+/// 題が一文字も読めず、画面の半分を越えるとノートが痩せる。
+const GRAB = {
+    rail: { el: 'rail', least: 120, most: 420, key: 'railWidth' },
+    list: { el: 'list', least: 160, most: 640, key: 'listWidth' },
+};
+
+function setPaneWidth(which, px) {
+    const g = GRAB[which];
+    if (!g) return;
+    // **画面の半分は越えさせない。** 窓を細くしたときに、二本で埋まって
+    // ノートが見えなくなる ── 掴んで戻せない形にはしない。
+    const cap = Math.min(g.most, Math.round(window.innerWidth * 0.45));
+    const w = Math.max(g.least, Math.min(cap, Math.round(px)));
+    const node = el(g.el);
+    if (node) node.style.width = w + 'px';
+    return w;
+}
+
+function grabsUp() {
+    for (const [which, g] of Object.entries(GRAB)) {
+        const bar = document.querySelector('.grab[data-for="' + which + '"]');
+        const node = el(g.el);
+        if (!bar || !node) continue;
+        bar.onmousedown = (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            const from = e.clientX;
+            const was = node.getBoundingClientRect().width;
+            bar.classList.add('on');
+            document.body.classList.add('grabbing');
+            const move = (ev) => setPaneWidth(which, was + (ev.clientX - from));
+            const up = () => {
+                document.removeEventListener('mousemove', move);
+                document.removeEventListener('mouseup', up);
+                bar.classList.remove('on');
+                document.body.classList.remove('grabbing');
+                if (!state.guest) {
+                    window.amber.remember({
+                        [g.key]: Math.round(node.getBoundingClientRect().width) });
+                }
+            };
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', up);
+        };
+        // **二度押しで元に戻す。** 動かしすぎた人が、掴み直さずに戻せる。
+        bar.ondblclick = () => {
+            node.style.width = '';
+            if (!state.guest) window.amber.remember({ [g.key]: null });
+        };
+    }
+}
+
 function rememberTabs() {
     if (state.guest) return;
     window.amber.remember({ tabs: tabs.map((t) => t.path) });
@@ -11896,7 +11964,7 @@ async function addPlace() {
     if (!dir) return;
     if (state.places.some((x) => x.dir === dir)) { say('「' + bookName(dir) + '」はもう入っています'); return; }
     if (overlaps(dir)) { say('そこは、ほかの保存ディレクトリと重なります（入れ子にはできません）'); return; }
-    const leaf = dir.split('/').pop() || 'ambər';
+    const leaf = leafOf(dir) || 'ambər';
     let name = leaf;
     for (let n = 2; state.places.some((x) => x.name === name); n += 1) name = leaf + ' ' + n;
     // Drive の上の置き場所（`ambər/<at>/`）。いちばん目のフォルダと名前が
@@ -12374,6 +12442,10 @@ const escapeAttr = escapeHtml;
     // （初めて立ち上げた日がそう）── そのとき ⚙ が出ていないと、
     // 保存場所を決める道がどこにも無い。
     applyView();
+    // 掴んで動かす縦棒（依頼 596）。**憶えた幅を先に戻してから**繋ぐ。
+    grabsUp();
+    if (typeof saved.railWidth === 'number') setPaneWidth('rail', saved.railWidth);
+    if (typeof saved.listWidth === 'number') setPaneWidth('list', saved.listWidth);
     if (saved.railOff) { railOff = true; document.body.classList.add('norail'); }
     if (saved.listOff) { listOff = true; document.body.classList.add('nolist'); }
     // エディタはまだ無い ── 開いたときに入る（`makeEditor` の末尾）。
