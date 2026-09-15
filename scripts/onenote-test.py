@@ -1156,17 +1156,21 @@ def t_check(tmp):
     print("一画面で終わる診断（--check）──")
     import io, contextlib
     EXE = "C:" + chr(92) + "Office16" + chr(92) + "ONENOTE.EXE" + chr(92) + "3"
-    keep = (o2m._office_platform, o2m._registered_arches, o2m._local_server,
+    keep = (o2m._office_platform, o2m._typelib_tree, o2m._local_server,
             o2m._store_onenote, o2m._typelib_path, o2m.connect_onenote)
+
+    def blew(msg="駄目", troubles=()):
+        def f():
+            raise o2m.CannotConnect(msg, troubles)
+        return f
 
     def say(**kw):
         o2m._office_platform = kw.get("office", lambda: "x64")
-        o2m._registered_arches = kw.get("arches", lambda: {"win32"})
+        o2m._typelib_tree = kw.get("tree", lambda: {"1.1": {"win32"}})
         o2m._local_server = kw.get("server", lambda: (EXE, True))
         o2m._store_onenote = kw.get("store", lambda: False)
         o2m._typelib_path = kw.get("tl", lambda want: ("1.1", "0", EXE))
-        o2m.connect_onenote = kw.get("connect",
-                                     lambda: (_ for _ in ()).throw(SystemExit("駄目")))
+        o2m.connect_onenote = kw.get("connect", blew())
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             code = o2m.check()
@@ -1176,7 +1180,7 @@ def t_check(tmp):
         code, out = say()
         # **手で打ち直して渡せる長さ。** `--probe` は 29 行出る ── 現場に
         # 立っている人に、それを写させるのは注文としておかしい。
-        check("繋がらないときも、十数行で収まる", len(out.strip().splitlines()) <= 14,
+        check("繋がらないときも、十数行で収まる", len(out.strip().splitlines()) <= 16,
               len(out.strip().splitlines()))
         check("落ちた回は 0 を返さない", code != 0, code)
         check("噛み合っていない枝を名指しする", "win64 の枝が無い" in out, out)
@@ -1185,18 +1189,44 @@ def t_check(tmp):
         check("足す一行を、道ごと出す", 'reg add "HKCU' in out and EXE in out, out)
         check("戻す一行も出す", "reg delete" in out, out)
 
-        _, out = say(arches=lambda: {"win64"},
+        # **束ねて見ない。** 1.0 に win64、1.1 に win32 ── 束ねると
+        # 「両方ある」に見えるが、こちらが読むのは 1.1 なので落ちる。
+        _, out = say(tree=lambda: {"1.0": {"win64"}, "1.1": {"win32"}})
+        check("枝は版ごとに出す", "1.0=win64" in out and "1.1=win32" in out, out)
+        check("読みにいく版で判じる", "版 1.1 に win64 の枝が無い" in out, out)
+        check("ほかの版に有っても、助けにならないと言う",
+              "助けにならない" in out and "1.0" in out, out)
+        # 読む版に枝が有れば、枝の話はしない。
+        _, out = say(tree=lambda: {"1.0": {"win32"}, "1.1": {"win32", "win64"}})
+        check("読む版に枝が有れば、枝の話はしない", "枝が無い" not in out, out)
+
+        # **呼んだときの答えを捨てない。** 登録が白なら、残る手がかりはそれだけ。
+        _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                     connect=blew(troubles=["  型ライブラリ 1.1 を名指し: 呼ぶと落ちる ──"
+                                            " (-2146959355, 'サーバーの実行に失敗しました。')"]))
+        check("呼んだときの答えを、そのまま出す", "呼んだときの答え" in out
+              and "-2146959355" in out, out)
+        check("答えの番号から、原因を名指しする", "権限のずれ" in out, out)
+        _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                     connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
+        check("読めない実体は、32 bit の Python へ導く", "32 bit の Python" in out, out)
+        # 知らない答えなら、決めつけない。
+        _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                     connect=blew(troubles=["  素の Dispatch: 知らない何か"]))
+        check("知らない答えには、決めつけない", "登録は白" in out, out)
+
+        _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
                      connect=lambda: (FakeOneNote(hierarchy(), pages_for()), hierarchy()))
         check("繋がったら、開いているノートブックを数える", "2 冊" in out, out)
         check("繋がったら、次の一手は言わない", "次の一手" not in out, out)
 
         empty = '<?xml version="1.0"?><one:Notebooks ' + NBS + '></one:Notebooks>'
-        _, out = say(arches=lambda: {"win64"}, store=lambda: "Microsoft.Office.OneNote_x",
+        _, out = say(tree=lambda: {"1.1": {"win64"}}, store=lambda: "Microsoft.Office.OneNote_x",
                      connect=lambda: (FakeOneNote(empty, {}), empty))
         # **ここがストア版の落とし穴。** 繋がっても、写すものが一つも見えない。
         check("一冊も無いとき、ストア版の落とし穴を言う",
               "デスクトップ版" in out and "一冊も無い" in out, out)
-        _, out = say(arches=lambda: {"win64"}, store=lambda: False,
+        _, out = say(tree=lambda: {"1.1": {"win64"}}, store=lambda: False,
                      connect=lambda: (FakeOneNote(empty, {}), empty))
         check("ストア版が無ければ、その話はしない", "ストア版" not in out, out)
 
@@ -1205,7 +1235,7 @@ def t_check(tmp):
         _, out = say(store=lambda: None)
         check("読めないときは、黙る", "ストア版" not in out, out)
     finally:
-        (o2m._office_platform, o2m._registered_arches, o2m._local_server,
+        (o2m._office_platform, o2m._typelib_tree, o2m._local_server,
          o2m._store_onenote, o2m._typelib_path, o2m.connect_onenote) = keep
 
 

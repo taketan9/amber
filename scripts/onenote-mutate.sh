@@ -132,7 +132,7 @@ mutate "版を名指しせず gencache だけに頼る" "型ライブラリを G
 mutate "どちらの段も同じ版を掴む" "版が二つあるなら、もう一方を試す" \
     '("型ライブラリ 1.0 を名指し", by_typelib(1, 0)),' '("型ライブラリ 1.0 を名指し", by_typelib(1, 1)),'
 mutate "繋げないとき黙って返る" "全部駄目なら、わけを並べて止まる" \
-    'sys.exit("OneNote (デスクトップ版) に接続できません:' 'return ("OneNote (デスクトップ版) に接続できません:'
+    'raise CannotConnect("OneNote (デスクトップ版) に接続できません:' 'return ("OneNote (デスクトップ版) に接続できません:'
 mutate "作り置き先を逃がさない" "書けないなら逃がす" \
     'if default and _can_write(default):
         return default, False' 'if True:
@@ -201,8 +201,8 @@ mutate "資源の番号を落とさない" "exe の中の番号を落とす" \
 mutate "途中の数字まで落とす" "途中の数字は落とさない" \
     'return re.sub(r"[\\/]\d+$", "", path or "")' 'return re.sub(r"\d+", "", path or "")'
 mutate "繋げないとき bit の見立てを黙る" "繋げないとき bit の見立ても出す" \
-    'そのまま貼ってもらえれば、推し量らずに直せます。""" + arch_hint())' \
-    'そのまま貼ってもらえれば、推し量らずに直せます。""")'
+    'そのまま貼ってもらえれば、推し量らずに直せます。""" + arch_hint(), troubles)' \
+    'そのまま貼ってもらえれば、推し量らずに直せます。""", troubles)'
 mutate "噛み合っていても言い立てる" "噛み合っているときは、余計なことを言わない" \
     'return ("\n" + "\n".join(v)) if v else ""' \
     'return "\n" + "\n".join(v or ["→ **win64 の登録が無い**"])'
@@ -265,20 +265,20 @@ mutate "読むだけの回も鎖を取る" "鎖の中でも --probe は走る" \
 mutate "--check が probe と同じだけ出す" "繋がらないときも、十数行で収まる" \
     '    try:
         app, first = connect_onenote()
-    except SystemExit:' '    probe()
+    except SystemExit as e:' '    probe()
     try:
         app, first = connect_onenote()
-    except SystemExit:'
+    except SystemExit as e:'
 mutate "--check が落ちても 0 を返す" "落ちた回は 0 を返さない" \
-    '        for line in _next_move(me, office, arches, server_here):
+    '        for line in _next_move(me, office, tree, server_here, troubles):
             print(f"  {line}")
-        return 1' '        for line in _next_move(me, office, arches, server_here):
+        return 1' '        for line in _next_move(me, office, tree, server_here, troubles):
             print(f"  {line}")
         return 0'
 mutate "足す一行を出さず docs に送る" "足す一行を、道ごと出す" \
     'have = _typelib_path("win32" if want == "win64" else "win64")' 'have = None'
 mutate "戻す一行を出さない" "戻す一行も出す" \
-    'out += ["戻すとき:", undo]' 'pass'
+    '"戻すとき:", undo,' '' 
 mutate "戻す一行に、消す命令が入らない" "戻す一行も出す" \
     'undo = f"  reg delete " + chr(34) + root + chr(34) + " /f"' \
     'undo = ""'
@@ -303,6 +303,38 @@ mutate "読めなくてもストア版の話をする" "読めないときは、
 mutate "--check も鎖を取る" "鎖の中でも --check は走る" \
     'if args.probe or args.check or args.list or args.dry_run:' \
     'if args.probe or args.list or args.dry_run:'
+mutate "枝を版ごとに見ず、束ねる" "読みにいく版で判じる" \
+    'arches = tree.get(ver)
+        if arches is None:
+            continue' 'arches = set().union(*tree.values()) if tree else None
+        if arches is None:
+            continue'
+# 構文を壊す壊し方は書かない ── 走査ごと止まると「NG が無い」と同じ顔になる（依頼 569）。
+mutate "枝を版ごとに出さない（版の名前を落とす）" "枝は版ごとに出す" \
+    '{v}=' ''
+mutate "ほかの版に有れば安心する" "ほかの版に有っても、助けにならないと言う" \
+    'elsewhere = [v for v, a in tree.items() if want in a]' 'elsewhere = []'
+mutate "呼んだときの答えを捨てる" "呼んだときの答えを、そのまま出す" \
+    'troubles = getattr(e, "troubles", [])' 'troubles = []'
+mutate "答えを持ち帰らない" "呼んだときの答えを、そのまま出す" \
+    'self.troubles = list(troubles)' 'self.troubles = []'
+mutate "答えの番号を読まない" "答えの番号から、原因を名指しする" \
+    'said = _from_answer(troubles)
+    if said:
+        return said' 'if False:
+        return []'
+mutate "知らない答えでも決めつける" "知らない答えには、決めつけない" \
+    'for needle, said in _ANSWERS:
+        if needle in joined:
+            return list(said)
+    return []' 'return list(_ANSWERS[0][1])'
+mutate "読み込みエラーを権限の話にする" "読めない実体は、32 bit の Python へ導く" \
+    '("-2147312566", ["型ライブラリ／DLL の読み込みエラー（TYPE_E_CANTLOADLIBRARY）。",' \
+    '("-2147312566x", ["型ライブラリ／DLL の読み込みエラー（TYPE_E_CANTLOADLIBRARY）。",'
+mutate "読む版に枝が有っても言い立てる" "読む版に枝が有れば、枝の話はしない" \
+    'if want in arches:
+            break' 'if False:
+            break'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

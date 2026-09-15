@@ -232,6 +232,34 @@ def _registered_arches():
     return out
 
 
+def _typelib_tree():
+    """型ライブラリの登録を、**版ごとに**（`{"1.1": {"win32", "win64"}}`）。
+
+    **束ねて見てはいけない。** 版は一つとは限らず、この端末には `1.0` と
+    `1.1` の両方が登録されていた（依頼 570）。束ねると「1.0 に win64、
+    1.1 に win32」でも**「両方ある」に見える** ── 64 bit の処理は 1.1 を
+    読みにいって落ちるのに、登録は白に見える。いちばん読みにくい形を、
+    こちらで作ってしまう。
+    """
+    try:
+        import winreg
+    except ImportError:
+        return {}
+    out = {}
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "TypeLib" + chr(92) + ONENOTE_TYPELIB)
+        for ver in _reg_subkeys(key):
+            vkey = winreg.OpenKey(key, ver)
+            got = set()
+            for lcid in _reg_subkeys(vkey):
+                lkey = winreg.OpenKey(vkey, lcid)
+                got.update(a.lower() for a in _reg_subkeys(lkey))
+            out[ver] = got
+    except OSError:
+        return out
+    return out
+
+
 def _arch_verdict(arches, bits=None):
     """登録されている bit と、いま走っている bit が噛み合っているか。
 
@@ -585,22 +613,28 @@ def probe():
 def check():
     """**一画面で終わる診断。**
 
-    `--probe` は 29 行出す。繋がらない端末の姿を残らず並べるための道具で、
-    それはそれで要るのだが、**現場から手で打ち直して渡す人には長すぎる。**
+    `--probe` は 29 行出す。繋がらない端末の姿を残らず並べる道具で、それは
+    それで要るのだが、**現場から手で打ち直して渡す人には長すぎる。**
     読むのは人なので、要るのは「どこが噛み合っていないか」と「次に何を
     するか」だけ ── それを数行にする。
 
-    繋がったなら一行。繋がらないなら、決め手になる四つと、次の一手。
+    繋がったなら一行。繋がらないなら、決め手と、**呼んだときの答え**と、
+    次の一手。答えを捨てないのは、**登録が白のときに残る手がかりが
+    そこしかない**から。
     """
     me = 64 if sys.maxsize > 2 ** 32 else 32
     office = _office_platform()
-    arches = {a.lower() for a in _registered_arches()}
+    tree = _typelib_tree()
     server, server_here = _local_server()
     store = _store_onenote()
 
     print(f"Python {sys.version_info[0]}.{sys.version_info[1]} / {me} bit")
     print(f"Office {office or '（読めない）'}")
-    print(f"型ライブラリの枝: {' '.join(sorted(arches)) or '（読めない）'}")
+    # **版ごとに出す。** 束ねると「1.0 に win64、1.1 に win32」が
+    # 「両方ある」に見え、こちらが白だと読み違える。
+    print("型ライブラリの枝: "
+          + ("  ".join(f"{v}={' '.join(sorted(a)) or '（空）'}" for v, a in sorted(tree.items()))
+             or "（読めない）"))
     print(f"COM サーバー: {'ある' if server_here else '**無い**'}"
           + (f"  {server}" if server else ""))
     if store:
@@ -608,10 +642,16 @@ def check():
 
     try:
         app, first = connect_onenote()
-    except SystemExit:
+    except SystemExit as e:
+        troubles = getattr(e, "troubles", [])
+        if troubles:
+            print()
+            print("呼んだときの答え:")
+            for t in troubles:
+                print(" " + t.rstrip()[:120])
         print()
-        print("繋がらない。次の一手:")
-        for line in _next_move(me, office, arches, server_here):
+        print("次の一手:")
+        for line in _next_move(me, office, tree, server_here, troubles):
             print(f"  {line}")
         return 1
 
@@ -625,38 +665,80 @@ def check():
     return 0
 
 
-def _next_move(me, office, arches, server_here):
+def _next_move(me, office, tree, server_here, troubles=()):
     """**繋がらないときに、次にやることを一つだけ言う。**
 
-    並べると人は選べない。いちばん効きそうなものから、当てはまる一つ。
+    並べると人は選べない。当てはまるものを、効きそうな順に一つ。
     """
+    said = _from_answer(troubles)
+    if said:
+        return said
     want = "win64" if me == 64 else "win32"
-    if arches and want not in arches:
-        if office and office.lower() in ("x64", "x86"):
+    # **見るのは、こちらが読みにいく版。** 1.1 → 1.0 の順に試すので、
+    # 1.1 に枝が無ければそこで転ぶ ── ほかの版に有っても助けにならない。
+    for ver in ("1.1", "1.0"):
+        arches = tree.get(ver)
+        if arches is None:
+            continue
+        if want in arches:
+            break                      # この版は読める ── 枝の話ではない
+        elsewhere = [v for v, a in tree.items() if want in a]
+        out = [f"型ライブラリの版 {ver} に {want} の枝が無い"
+               f"（あるのは {sorted(arches) or '何も'}）。"]
+        if elsewhere:
+            out.append(f"{want} が有るのは版 {elsewhere} のほう ── "
+                       f"こちらは {ver} から読むので、そちらは助けにならない。")
+        have = _typelib_path("win32" if want == "win64" else "win64")
+        if have and office and office.lower() in ("x64", "x86"):
             office_bits = 64 if office.lower() == "x64" else 32
             if office_bits == me:
-                # 実体は同じ bit なのに、枝だけが無い ── 足せば読める。
-                out = [f"型ライブラリに {want} の枝が無い（あるのは {sorted(arches)}）。",
-                       f"Office も Python も {me} bit なので、枝を足せば読める。"]
-                have = _typelib_path("win32" if want == "win64" else "win64")
-                if have:
-                    ver, lcid, path = have
-                    add, undo = _reg_lines(ver, lcid, want, path)
-                    out += ["この一行（HKCU なので管理者は要らない）:", add]
-                    out += ["戻すとき:", undo]
-                else:
-                    out.append("足す道は --probe の枝の値をそのまま使う。")
-                out.append("レジストリを触るので、会社の決まりだけ先に確かめて。")
+                hver, lcid, path = have
+                add, undo = _reg_lines(ver, lcid, want, path)
+                out += [f"Office も Python も {me} bit なので、枝を足せば読める。",
+                        "この一行（HKCU なので管理者は要らない）:", add,
+                        "戻すとき:", undo,
+                        "レジストリを触るので、会社の決まりだけ先に確かめて。"]
                 return out
-            return [f"型ライブラリに {want} の枝が無く、Office は {office}。",
-                    f"Python を {office_bits} bit に合わせるのがいちばん確か。"]
-        return [f"型ライブラリに {want} の枝が無い（あるのは {sorted(arches)}）。"]
+            out.append(f"Office は {office} ── Python を {office_bits} bit に"
+                       "合わせるのがいちばん確か。")
+        return out
     if not server_here:
         return ["COM サーバーの実体が、登録の指す場所に無い。",
                 "デスクトップ版 OneNote を入れ直すか、修復する。"]
-    return ["管理者の窓で走らせていないか（OneNote と権限を揃える）。",
-            "デスクトップ版 OneNote を先に手で開く。",
+    return ["登録は白。残るのは権限か、OneNote 自身か、呼び方。",
+            "管理者の窓で走らせていないか（OneNote と権限を揃える・普通の窓で）。",
+            "デスクトップ版 OneNote を先に手で開き、サインインまで済ませる。",
+            "%LOCALAPPDATA%" + chr(92) + "Temp" + chr(92) + "gen_py を消してからもう一度。",
             "それでも駄目なら --probe を（長いが、全部出る）。"]
+
+
+# **答えの中の数字は、そのまま原因を名指しする。** COM は落ちた理由を
+# 番号で言う ── 読み方を知っていれば、推し量らずに済む。
+_ANSWERS = [
+    ("-2147319779", ["型ライブラリが読めない（TYPE_E_LIBNOTREGISTERED）。",
+                     "枝は有っても、指す先が読めていない ── 版の取り違えか、",
+                     "実体が 32 bit のものしか無い。--probe の「版ごとの実体」を見る。"]),
+    ("-2147312566", ["型ライブラリ／DLL の読み込みエラー（TYPE_E_CANTLOADLIBRARY）。",
+                     "枝は足りているが、その先が今の bit からは読めない。",
+                     "32 bit の Python を使う（out-of-process なので OneNote は 64 bit のままでよい）。"]),
+    ("-2146959355", ["権限のずれ（0x80080005・サーバーの実行に失敗しました）。",
+                     "管理者の窓からは、昇格していない OneNote に繋げない。普通の窓で叩く。",
+                     "タスク スケジューラなら「最上位の特権で実行する」も外す。"]),
+    ("-2147221164", ["その CLSID が登録されていない（REGDB_E_CLASSNOTREG）。",
+                     "デスクトップ版 OneNote を修復する（ストア版は COM を持たない）。"]),
+    ("-2147221005", ["ProgID が引けない（Invalid class string）。",
+                     "デスクトップ版 OneNote が入っていない ── ストア版だけでは繋がらない。"]),
+    ("-2147024891", ["拒まれた（アクセスが拒否されました）。権限のずれ ── 普通の窓で叩く。"]),
+]
+
+
+def _from_answer(troubles):
+    """呼んだときの答えから、分かることがあれば言う。無ければ黙る。"""
+    joined = " ".join(troubles)
+    for needle, said in _ANSWERS:
+        if needle in joined:
+            return list(said)
+    return []
 
 
 def _reg_lines(ver, lcid, want, path):
@@ -710,6 +792,19 @@ def _wrap_with_generated(mod, raw):
                 log.debug("makepy の皮をかぶせた: %s", name)
                 return wrapped
     return None
+
+
+class CannotConnect(SystemExit):
+    """繋げなかった ── **四つの呼び方が、それぞれ何と言ったか**を持つ。
+
+    `SystemExit` のままなので、上の `main` の扱いは変わらない。持たせたのは
+    `--check` のため: **登録が白なら、残る手がかりはこの答えしかない。**
+    捨てると、いちばん知りたいところで何も言えなくなる。
+    """
+
+    def __init__(self, message, troubles):
+        super().__init__(message)
+        self.troubles = list(troubles)
 
 
 def connect_onenote():
@@ -806,7 +901,7 @@ def connect_onenote():
         log.debug("OneNote に繋がった（%s）", how)
         return app, first
 
-    sys.exit("OneNote (デスクトップ版) に接続できません:\n" + "\n".join(troubles) + """
+    raise CannotConnect("OneNote (デスクトップ版) に接続できません:\n" + "\n".join(troubles) + """
 
 よくある順に:
   1. 管理者の窓で走らせている ── OneNote と権限を揃える（普通の窓で叩く）
@@ -815,7 +910,7 @@ def connect_onenote():
   4. ストア版の OneNote ── COM を持たないので、こちらでは手が出ない
 
 `--probe` を付けると、この端末で何が起きているかを並べます。
-そのまま貼ってもらえれば、推し量らずに直せます。""" + arch_hint())
+そのまま貼ってもらえれば、推し量らずに直せます。""" + arch_hint(), troubles)
 
 
 def _xml_call(func, *variants):
