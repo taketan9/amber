@@ -962,7 +962,8 @@ def _gone_note():
     found = _onenote_exe()
     if found:
         out.append(f"デスクトップ版の実体は、ここに在る: {found}")
-        out.append("登録のほうが古い ── Office の「修復」（オンライン修復）で焼き直す。")
+        out.append("登録のほうが古い ── Office の修復で焼き直す:")
+        out.extend("  " + l for l in _repair_lines())
     else:
         out.append("探した場所のどこにも ONENOTE.EXE が無い ──")
         out.append("**デスクトップ版 OneNote が入っていない**（ストア版は COM を持たない）。")
@@ -1006,6 +1007,18 @@ def _interface_registration():
         return None
 
 
+def _repair_lines():
+    """Office の登録を焼き直す道 ── **網の要らないほうを先に言う。**
+
+    ずっと「オンライン修復」と言っていたが、**あの端末は網に出られない**
+    （依頼 582）。勧めていたのは、そこではできないことだった。
+    **クイック修復は網が要らない**（手元のファイルから直す）ので、そちらが先。
+    """
+    return ["設定 →「アプリ」→ Microsoft 365 →「変更」→ **クイック修復**。",
+            "**クイック修復は網が要らない**（手元のファイルから登録を焼き直す）。",
+            "それでも駄目なら「オンライン修復」だが、そちらは網が要る。"]
+
+
 def _interface_note(troubles):
     """呼んだ瞬間に落ちているなら、取り次ぎ側の登録を出す。
 
@@ -1035,7 +1048,15 @@ def _interface_note(troubles):
                 f'  reg delete "HKCU{b}Software{b}Classes{b}Interface{b}{iid}" /f',
                 "レジストリを触るので、会社の決まりだけ先に確かめて。"]
     else:
-        out.append("ここが壊れた版を指していると、束ね方を変えても同じところで落ちる。")
+        # **取り次ぎ側は生きている版を指している。それでも呼ぶと落ちる。**
+        # こちら側でできることは、もう無い ── 名前を引くのも、呼びを受けるのも
+        # OneNote がやる。そこが自分の型ライブラリを読めていない。
+        out += [f"**その版（{ver}）は生きている ── 取り次ぎ側は壊れていない。**",
+                "こちらの束ね方で直せるところは、もう無い。",
+                "名前を引くのも呼びを受けるのも OneNote 自身なので、",
+                "**落ちているのは OneNote の側** ── 自分の型ライブラリを読めていない。",
+                "Office の登録を焼き直す:"]
+        out.extend("  " + l for l in _repair_lines())
     return out
 
 
@@ -1053,10 +1074,11 @@ def _cant_load_next(me):
         return ["32 bit の Python でも試す（out-of-process なので OneNote は 64 bit のままでよい）。",
                 "オフラインなら持ち込むのは二つ ── installer と pywin32 の wheel",
                 "（docs の「32 bit の Python を、この道具のためだけに」）。"]
-    return ["**32 bit でも同じ答えなら、bit の話ではない。**",
-            "ファイルは在るのに、その資源に型ライブラリが入っていないか、読めない。",
-            "`ファイルから型ライブラリを読む` の行に、道ごとの言い分が出ている ──",
-            "それも駄目なら Office の「修復」（オンライン修復）で焼き直す。"]
+    return (["**32 bit でも同じ答えなら、bit の話ではない。**",
+             "ファイルは在るのに、その資源に型ライブラリが入っていないか、読めない。",
+             "`ファイルから型ライブラリを読む` の行に、道ごとの言い分が出ている ──",
+             "それも駄目なら Office の登録を焼き直す:"]
+            + ["  " + l for l in _repair_lines()])
 
 
 def _thirty_two_note():
