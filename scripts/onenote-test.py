@@ -1767,6 +1767,30 @@ def t_from_files(tmp):
             code = f"落ちた: {type(e).__name__}"
         check("読めないファイルは、落ちずにエラーと数える", code == 1, code)
 
+        # **0 ページを黙って通さない。** たいていは読めない形式のほう
+        # （`638DE92F…`）── わけを言わないと、人は何をすればいいか分からない。
+        ost.pages = lambda d: []
+        import uuid as _uu
+        src4 = tmp / "読めない形式"
+        src4.mkdir(exist_ok=True)
+        (src4 / "議事録.one").write_bytes(
+            b"\x00" * 48 + _uu.UUID("638de92f-a6d4-4bc1-9a36-b3fc2511a5b7").bytes_le)
+        out4 = tmp / "fromfiles4"
+        import logging
+        buf = io.StringIO()
+        h = logging.StreamHandler(buf)
+        o2m.log.addHandler(h)
+        was = o2m.log.level
+        o2m.log.setLevel(logging.INFO)
+        try:
+            o2m.run(_parse(["--out", str(out4), str(src4)]), out4)
+        finally:
+            o2m.log.removeHandler(h)
+            o2m.log.setLevel(was)
+        said = buf.getvalue()
+        check("1 ページも取れなかったら、形式のわけを言う",
+              "1 ページも取れなかった" in said and "形式" in said, said[-300:])
+
         # **いまの版を選ぶ規則**は、偽物を挟まずに直に試す ── `pages` を丸ごと
         # 差し替えていると、そこが壊れても走査は気づかない。
         check("いまの版は、最後の改訂",
@@ -1780,6 +1804,202 @@ def t_from_files(tmp):
         check("改訂が無ければ、空", empty == [], empty)
     finally:
         ost.pages = keep
+
+
+def t_onestore_shape(tmp):
+    print("`.one` の中身を Markdown に ──")
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("onestore", ROOT / "onestore.py")
+    ost = iu.module_from_spec(spec)
+    spec.loader.exec_module(ost)
+
+    def md(**kw):
+        got = {"text": kw.pop("text", "字"), "indent": kw.pop("indent", 0),
+               "style": kw.pop("style", ""), "bold": False, "italic": False,
+               "strike": False, "list": None, "todo": False, "y": 0, "x": 0}
+        got.update(kw)
+        return ost.as_markdown(got)
+
+    check("見出しは #", md(text="決めたこと", style="h1") == "# 決めたこと", md(style="h1"))
+    check("深い見出しも段に合わせる", md(style="h3") == "### 字", md(style="h3"))
+    check("見出しは 6 段まで", md(style="h9") == "###### 字", md(style="h9"))
+    check("太字は **", md(bold=True) == "**字**", md(bold=True))
+    check("斜体は *", md(italic=True) == "*字*", md(italic=True))
+    check("取り消し線は ~~", md(strike=True) == "~~字~~", md(strike=True))
+    check("箇条書きは -", md(list="bullet") == "- 字", md(list="bullet"))
+    check("番号は 1.", md(list="number") == "1. 字", md(list="number"))
+    check("チェックは升", md(todo=True) == "- [ ] 字", md(todo=True))
+    check("引用は >", md(style="cite") == "> 字", md(style="cite"))
+    check("コードは枠", md(style="code") == "```\n字\n```", md(style="code"))
+    check("深さは字下げ", md(indent=2, list="bullet") == "    - 字", md(indent=2, list="bullet"))
+    # **印は外側から。** 中に入れると `**- 字**` になって、箇条書きが消える。
+    check("箇条書きの印は、太字の外",
+          md(list="bullet", bold=True) == "- **字**", md(list="bullet", bold=True))
+
+    # **ページ頭の日付と時刻は、本文ではない。**
+    for pid in (ost.P_IS_DATE, ost.P_IS_TIME, ost.P_IS_BOILER, ost.P_IS_TITLE):
+        got = ost.line_of({ost.P_ASCII: b"Friday, November 22, 2019", pid: 1})
+        check(f"0x{pid:04X} の行は本文に混ぜない", got is None, got)
+    check("ふつうの行は残る",
+          ost.line_of({ost.P_ASCII: b"a"}) is not None)
+    check("空の行は落とす", ost.line_of({ost.P_ASCII: b"   "}) is None)
+
+    # **上から下、同じ高さなら左から右**（COM の道と同じ潰し方）。
+    import struct as st
+
+    # **本物の `pages` の並べ方を見る。** ここで自分で `sorted` を書いて
+    # 確かめても、本体がそうしているかは何も言っていない。
+    keep_sp, keep_rp = ost.spaces, ost.read_props
+    try:
+        def four(v):
+            return st.pack("<I", v)
+        made = [{"oid": i, "jcid": ost.JC_TEXT, "stp": 0, "cb": 0} for i in range(3)]
+        made.append({"oid": 3, "jcid": ost.JC_PAGE, "stp": 0, "cb": 0})
+        props = {0: {ost.P_ASCII: b"shita", ost.P_Y: four(200), ost.P_X: four(0)},
+                 1: {ost.P_ASCII: b"migi", ost.P_Y: four(100), ost.P_X: four(90)},
+                 2: {ost.P_ASCII: b"hidari", ost.P_Y: four(100), ost.P_X: four(10)},
+                 3: {}}
+        ost.spaces = lambda d: [("os", {1: made})]
+        ost.read_props = lambda d, o: props[o["oid"]]
+        got = [l["text"] for l in ost.pages(b"")[0]["lines"]]
+        check("並びは上から下・左から右", got == ["hidari", "migi", "shita"], got)
+    finally:
+        ost.spaces, ost.read_props = keep_sp, keep_rp
+
+
+def t_tables(tmp):
+    print("表 ──")
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("onestore", ROOT / "onestore.py")
+    ost = iu.module_from_spec(spec)
+    spec.loader.exec_module(ost)
+    keep = ost.read_props
+    try:
+        objs, props = [], {}
+
+        def add(jc, text=None):
+            o = {"oid": len(objs), "jcid": jc, "stp": 0, "cb": 0}
+            objs.append(o)
+            if text is None:
+                props[o["oid"]] = {}
+            elif text.isascii():
+                props[o["oid"]] = {ost.P_ASCII: text.encode("latin-1")}
+            else:
+                props[o["oid"]] = {ost.P_UNICODE: text.encode("utf-16-le")}
+
+        add(ost.JC_TABLE)
+        add(ost.JC_ROW); add(ost.JC_CELL); add(ost.JC_TEXT, "name")
+        add(ost.JC_CELL); add(ost.JC_TEXT, "value")
+        add(ost.JC_ROW); add(ost.JC_CELL); add(ost.JC_TEXT, "apple")
+        add(ost.JC_CELL); add(ost.JC_TEXT, "120")
+        ost.read_props = lambda d, o: props[o["oid"]]
+        got = ost.tables(b"", objs)
+        check("表・行・升をたどる", got and got[0]["rows"] == [["name", "value"], ["apple", "120"]],
+              got)
+        md = ost.table_markdown(got[0])
+        check("Markdown の表になる", md[1] == "| --- | --- |" and "| apple | 120 |" in md, md)
+        # **1 行目を見出しにすると、そのデータが一行消える**（依頼 578 と同じ形）。
+        # 「1 行目が残っている」だけでは足りない ── 見出しに使っても残って
+        # 見えるので、**見出しの行が空であること**と**行の数**の両方を見る。
+        check("見出しの行は空で置く（データを一行も減らさない）",
+              md[0].replace("|", "").strip() == ""
+              and len(md) == len(got[0]["rows"]) + 2
+              and "| name | value |" in md[2:], md)
+
+        # **升の数が行ごとに違う表は、揃えないと画面の上で崩れる。**
+        # OneNote では升を結合できるので、揃っていない表は普通に出てくる。
+        objs.clear(); props.clear()
+        add(ost.JC_TABLE)
+        add(ost.JC_ROW); add(ost.JC_CELL); add(ost.JC_TEXT, "a")
+        add(ost.JC_CELL); add(ost.JC_TEXT, "b")
+        add(ost.JC_ROW); add(ost.JC_CELL); add(ost.JC_TEXT, "c")
+        md = ost.table_markdown(ost.tables(b"", objs)[0])
+        check("升の数を、行ごとに揃える",
+              len({r.count("|") for r in md}) == 1 and "| c |  |" in md, md)
+
+        # 升の中が複数行なら、空白で繋ぐ（Markdown の表に改行は入らない）。
+        objs.clear(); props.clear()
+        add(ost.JC_TABLE); add(ost.JC_ROW); add(ost.JC_CELL)
+        add(ost.JC_TEXT, "one"); add(ost.JC_TEXT, "two")
+        got = ost.tables(b"", objs)
+        check("升の中の改行は、空白で繋ぐ", got[0]["rows"] == [["one two"]], got)
+
+        # **表の中の字は、本文に二度出さない。**
+        objs.clear(); props.clear()
+        add(ost.JC_PAGE)
+        add(ost.JC_TEXT, "そとの字")
+        add(ost.JC_TABLE); add(ost.JC_ROW); add(ost.JC_CELL); add(ost.JC_TEXT, "なかの字")
+        keep_sp = ost.spaces
+        try:
+            ost.spaces = lambda d: [("os", {1: list(objs)})]
+            pg = ost.pages(b"")[0]
+            body = [l["text"] for l in pg["lines"]]
+            check("表の中の字は、本文に二度出さない",
+                  body == ["そとの字"] and pg["tables"][0]["rows"] == [["なかの字"]],
+                  (body, pg["tables"]))
+        finally:
+            ost.spaces = keep_sp
+    finally:
+        ost.read_props = keep
+
+
+def t_empty_space(tmp):
+    print("中身のない空間 ──")
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("onestore", ROOT / "onestore.py")
+    ost = iu.module_from_spec(spec)
+    spec.loader.exec_module(ost)
+    keep_sp, keep_rp = ost.spaces, ost.read_props
+    try:
+        # **セクションそのものの空間**（題は持つが `Page` が無い）と、
+        # **本物のページ**（`Page` が居る）を並べる。
+        sec = [{"oid": 0, "jcid": ost.JC_PAGEMETA, "stp": 0, "cb": 0}]
+        page = [{"oid": 1, "jcid": ost.JC_PAGE, "stp": 0, "cb": 0},
+                {"oid": 2, "jcid": ost.JC_PAGEMETA, "stp": 0, "cb": 0}]
+        titles = {0: "セクションの名前", 2: "ほんとうのページ"}
+        ost.spaces = lambda d: [("a", {1: sec}), ("b", {1: page})]
+        ost.read_props = lambda d, o: ({ost.P_TITLE: titles[o["oid"]].encode("utf-16-le")}
+                                       if o["oid"] in titles else {})
+        got = ost.pages(b"")
+        check("Page の無い空間は、ページにしない（空のノートを作らない）",
+              [g["title"] for g in got] == ["ほんとうのページ"], got)
+    finally:
+        ost.spaces, ost.read_props = keep_sp, keep_rp
+
+
+def t_cab(tmp):
+    print("CAB の目録（日本語の名前）──")
+    import struct as st
+
+    def cab(entries, utf8=False):
+        files = b""
+        for name, size in entries:
+            raw = name.replace("/", chr(92)).encode("utf-8" if utf8 else "cp932")
+            files += st.pack("<IIHHHH", size, 0, 0, 0, 0, 0x80 if utf8 else 0) + raw + b"\0"
+        head = bytearray(36)
+        head[0:4] = b"MSCF"
+        st.pack_into("<I", head, 16, 36)
+        st.pack_into("<H", head, 26, len(entries))
+        return bytes(head) + files
+
+    at = tmp / "t.cab"
+    want = [("400_打合せ/月_定例.one", 111), ("400_打合せ/金_定例.one", 222), ("表紙.one", 333)]
+    # **`expand` は日本語の名前を壊す。** 中身は開かせて、名前はこちらで読む。
+    for label, utf8 in (("cp932", False), ("UTF-8 の旗つき", True)):
+        at.write_bytes(cab(want, utf8))
+        got = o2m.cab_names(at)
+        check(f"目録を読む（{label}）", got == want, got)
+    # **フォルダはそのまま。** ここを潰すと多層が一段になり、取りこぼしに見える。
+    check("名前の中の \\ は、フォルダの区切り",
+          all("/" in n for n, _ in o2m.cab_names(at) if "打合せ" in n),
+          o2m.cab_names(at))
+    # **CAB の形をしていても、頭が MSCF でなければ読まない。** 中身が全部ゼロの
+    # 偽物では足りない ── 読みにいっても空が返るので、検査が黙る。
+    fake = bytearray(cab(want, utf8))
+    fake[:4] = b"PK\x03\x04"
+    at.write_bytes(bytes(fake))
+    check("CAB でなければ、空を返す（決めつけない）", o2m.cab_names(at) == [],
+          o2m.cab_names(at))
 
 
 def t_launcher(tmp):
@@ -1887,7 +2107,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_amber_shape, t_structure, t_table, t_inline, t_created,
-                   t_log, t_cp932, t_two_views, t_from_files, t_peek, t_forget, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
+                   t_log, t_cp932, t_two_views, t_onestore_shape, t_tables, t_empty_space, t_cab, t_from_files, t_peek, t_forget, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
                    t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):
             fn(tmp)

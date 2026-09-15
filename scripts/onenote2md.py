@@ -90,10 +90,11 @@ import importlib
 import logging
 import os
 import re
+import struct
 import sys
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -397,6 +398,53 @@ def one_format(path):
     return got, name
 
 
+def cab_names(at):
+    """CAB の**目録**を読む ── `[(名前, 大きさ)]`（入っている順）。
+
+    **`expand` は日本語の名前を壊す。** 本文は無事なのに、セクションの名前
+    （＝ファイル名）だけが化けるのはこれ（現場で出た・依頼 597）。
+    中身は `expand` に開かせて、**名前はこちらで読む。**
+
+    名前の符号は旗で決まる ── `_A_NAME_IS_UTF`（0x80）が立っていれば UTF-8、
+    立っていなければ機械の符号（日本語 Windows なら cp932）。
+    **名前に `\\` が入っていれば、それはフォルダ** ── セクショングループが
+    そこに入っている。
+
+    読めなければ空を返す。**分からないことを分かったように言わない。**
+    """
+    try:
+        d = at.read_bytes() if hasattr(at, "read_bytes") else open(at, "rb").read()
+    except OSError:
+        return []
+    if len(d) < 36 or d[:4] != b"MSCF":
+        return []
+    coff_files, n_files, flags = (struct.unpack("<I", d[16:20])[0],
+                                  struct.unpack("<H", d[26:28])[0],
+                                  struct.unpack("<H", d[30:32])[0])
+    i = coff_files
+    out = []
+    for _ in range(n_files):
+        if i + 16 > len(d):
+            break
+        cb = struct.unpack("<I", d[i:i + 4])[0]
+        attribs = struct.unpack("<H", d[i + 14:i + 16])[0]
+        j = d.find(b"\0", i + 16)
+        if j < 0:
+            break
+        raw = d[i + 16:j]
+        for enc in (("utf-8",) if attribs & 0x80 else ("cp932", "cp1252", "utf-8")):
+            try:
+                name = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            name = raw.decode("latin-1")
+        out.append((name.replace(chr(92), "/"), cb))
+        i = j + 1
+    return out
+
+
 def unpack_onepkg(at, into):
     """`.onepkg` を開く。**中身は CAB**（Windows 標準の `expand` で開ける）。
 
@@ -444,6 +492,36 @@ def load_onestore():
     return mod
 
 
+def opened_sections(pkg, at):
+    """開いた `.onepkg` の中身を、**入れ物の中の道ごと**返す。
+
+    `[(ノートブック, 道の並び, ファイル)]` ── 道の並びはセクショングループ。
+    前の版は `rglob` で `.one` を集めるだけで**どのフォルダに居たかを捨てて
+    いた**ので、`400_打合せ/月_定例` のような多層が一段に潰れ、**取りこぼして
+    いるように見えた**（現場で気づかれた・依頼 597）。
+
+    名前は CAB の目録から取る（`expand` は日本語を壊す）。目録と実物は
+    **大きさで突き合わせる** ── 名前が化けている以上、名前では繋げない。
+    """
+    listed = [(n, cb) for n, cb in cab_names(pkg) if n.lower().endswith(".one")]
+    on_disk = sorted(Path(at).rglob("*.one"), key=lambda q: q.stat().st_size)
+    left = list(on_disk)
+    out = []
+    for name, cb in listed:
+        got = next((q for q in left if q.stat().st_size == cb), None)
+        if got is None:
+            continue
+        left.remove(got)
+        parts = [x for x in name.split("/") if x and x not in (".", "..")]
+        out.append((pkg.stem, parts[:-1], got, Path(parts[-1]).stem))
+    if not out:
+        # 目録が読めなかった（CAB でない・壊れている）── 名前は化けたままだが、
+        # **黙って何も出さないよりはよい。**
+        out = [(pkg.stem, list(q.relative_to(at).parts[:-1]), q, q.stem)
+               for q in sorted(on_disk)]
+    return out
+
+
 def from_files(where, args, out_root):
     """**書き出したファイルから写す。** COM を通らない道（依頼 594）。
 
@@ -474,18 +552,22 @@ def from_files(where, args, out_root):
             if at is None:
                 log.error("開けない %s: %s", q.name, why)
                 continue
-            sections += [(q.stem, r) for r in sorted(Path(at).rglob("*.one"))]
+            sections += opened_sections(q, Path(at))
         else:
-            sections.append((q.parent.name, q))
+            sections.append((q.parent.name, [], q, q.stem))
     if not sections:
         sys.exit(f"{root} の下に .one がありません。")
 
     stats = {"pages": 0, "written": 0, "skipped_pages": 0, "images": 0, "errors": 0,
              "skipped_sections": 0, "filtered_sections": 0, "pruned": 0, "pruned_images": 0}
     written: set = set()
-    for book, at in sections:
-        nb, sec = sanitize(book), sanitize(at.stem)
-        if not chosen(f"{nb}/{sec}", args):
+    for book, groups, at, name in sections:
+        nb = sanitize(book)
+        # **セクショングループは、フォルダのまま。** ここを潰すと
+        # `400_打合せ/月_定例` が一段になり、取りこぼしに見える。
+        gs = [sanitize(g) for g in groups]
+        sec = sanitize(name)
+        if not chosen("/".join([nb] + gs + [sec]), args):
             stats["filtered_sections"] += 1
             log.debug("絞りで外した: %s/%s", nb, sec)
             continue
@@ -495,8 +577,17 @@ def from_files(where, args, out_root):
             log.error("読めない %s: %s", at.name, e)
             stats["errors"] += 1
             continue
-        log.info("セクション: %s / %s（%d ページ）", nb, sec, len(got))
-        sec_dir = out_root / nb / sec
+        log.info("セクション: %s（%d ページ）", "/".join([nb] + gs + [sec]), len(got))
+        if not got:
+            # **0 ページを黙って通さない。** たいていは形式のほう
+            # （`638DE92F…` は読めない ── 依頼 591）。わけを言う。
+            _, what = one_format(at)
+            log.warning("%s は 1 ページも取れなかった ── %s", sec, what)
+            stats["skipped_sections"] += 1
+        sec_dir = out_root / nb
+        for g in gs:
+            sec_dir = sec_dir / g
+        sec_dir = sec_dir / sec
         levels = {1: sec_dir}
         for pg in got:
             stats["pages"] += 1
@@ -518,16 +609,37 @@ def from_files(where, args, out_root):
             if args.dry_run:
                 print("  " * level + f"- {title}")
                 continue
-            lines = []
-            for ln in pg["lines"]:
-                body = ln["text"].strip()
-                if not body:
-                    continue
-                lines.append("  " * min(ln["indent"], 6) + body if ln["indent"] else body)
+            # **画像は、ノートの隣の `attachments/` へ**（ambər の決まり・依頼 593）。
+            img_dir = md_path.parent / ATTACH
+            stem = amber_stem(md_path.stem)
+            shots = []
+            if not args.no_images:
+                for i, im in enumerate(pg.get("images") or [], 1):
+                    ext = (Path(im.get("name") or "").suffix or ".png").lstrip(".").lower()
+                    kind = ext if ext in ("png", "jpg", "jpeg", "gif", "bmp", "webp") else "png"
+                    fname = f"{stem}-{i:03d}.{kind}"
+                    img_dir.mkdir(parents=True, exist_ok=True)
+                    at_img = img_dir / fname
+                    raw = im.get("bytes") or b""
+                    if not (at_img.exists() and at_img.stat().st_size == len(raw)
+                            and at_img.read_bytes() == raw):
+                        at_img.write_bytes(raw)
+                    shots.append(f"![]({ATTACH}/{fname})")
+                    stats["images"] += 1
+            lines = [onestore.as_markdown(ln) for ln in pg["lines"]]
+            lines = [x for x in lines if x and x.strip()]
+            # **表は、ページの上での位置に置く。** 末尾にまとめると、
+            # 前後の文と離れて何の表か分からなくなる。
+            for t in pg.get("tables") or []:
+                lines.append("\n".join(onestore.table_markdown(t)))
+            lines += shots
             md_path.parent.mkdir(parents=True, exist_ok=True)
+            created = pg.get("created")
+            day = (datetime(1980, 1, 1) + timedelta(seconds=created)).strftime("%Y-%m-%d") \
+                if created else datetime.now().strftime("%Y-%m-%d")
             head = ["---", f'title: "{title.replace(chr(34), chr(39))}"',
-                    f"created: {datetime.now().strftime('%Y-%m-%d')}",
-                    f'onenote_path: "{nb} / {sec}"', "---", ""]
+                    f"created: {day}",
+                    f'onenote_path: "{" / ".join([nb] + gs + [sec])}"', "---", ""]
             with open(md_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write("\n".join(head) + f"# {title}\n\n" + "\n\n".join(lines) + "\n")
             written.add(md_path.resolve())

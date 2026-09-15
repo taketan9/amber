@@ -550,7 +550,7 @@ mutate "同じ題を上書きする" "同じ題は上書きせず、ずらす" \
 mutate "サブページを親の下に置かない" "サブページは親の下へ" \
     'parent = levels.get(level - 1, sec_dir) if level > 1 else sec_dir' 'parent = sec_dir'
 mutate "ファイルの道でも絞りを見ない" "--only で外れたら書かない" \
-    'if not chosen(f"{nb}/{sec}", args):' 'if False:'
+    'if not chosen("/".join([nb] + gs + [sec]), args):' 'if False:'
 mutate "読めないファイルで落ちる" "読めないファイルは、落ちずにエラーと数える" \
     'except Exception as e:  # noqa
             log.error("読めない %s: %s", at.name, e)' 'except ZeroDivisionError as e:
@@ -569,6 +569,57 @@ mutate "隣の一枚を import で頼る" "よその場所から走らせても�
 mutate "無いときに黙って進む" "隣に居なければ、そう言う（追跡ではなく）" \
     'if not at.is_file():
         sys.exit(f"{at} がありません（`git pull` は済んでいますか）。")' 'pass'
+mutate "見出しを段に合わせない" "深い見出しも段に合わせる" \
+    'return "#" * min(int(style[1:]), 6)' 'return "#" * min(1, 6)'
+mutate "見出しの段を止めない" "見出しは 6 段まで" \
+    'min(int(style[1:]), 6)' 'int(style[1:])'
+mutate "箇条書きの印を太字の中に入れる" "箇条書きの印は、太字の外" \
+    'body = line["text"].strip()
+    if line.get("bold"):' 'body = line["text"].strip()
+    if False:'
+mutate "日付の行も本文に混ぜる" "0x1CB5 の行は本文に混ぜない" \
+    'if p.get(P_IS_DATE) or p.get(P_IS_TIME) or p.get(P_IS_BOILER):
+        return None' 'if False:
+        return None'
+mutate "題の行も本文に混ぜる" "0x1CB4 の行は本文に混ぜない" \
+    'if p.get(P_IS_TITLE):
+        return None' 'if False:
+        return None'
+mutate "空の行も残す" "空の行は落とす" \
+    'if not text.strip():
+        return None' 'if False:
+        return None'
+mutate "ページの上の順に並べない" "並びは上から下・左から右" \
+    'lines.sort(key=lambda l: (l["y"], l["x"]))' 'pass'
+mutate "CAB の目録を読まない" "目録を読む（cp932）" \
+    'if len(d) < 36 or d[:4] != b"MSCF":
+        return []' 'return []'
+mutate "CAB でなくても読みにいく" "CAB でなければ、空を返す（決めつけない）" \
+    'or d[:4] != b"MSCF":' ':'
+mutate "名前の符号の旗を見ない" "目録を読む（cp932）" \
+    'for enc in (("utf-8",) if attribs & 0x80 else ("cp932", "cp1252", "utf-8")):' \
+    'for enc in ("utf-8",):'
+mutate "入れ物の中のフォルダを捨てる" "目録を読む（cp932）" \
+    'out.append((name.replace(chr(92), "/"), cb))' \
+    'out.append((name.split(chr(92))[-1], cb))'
+mutate "升の中の改行を捨てる（最後だけ残す）" "升の中の改行は、空白で繋ぐ" \
+    't["rows"] = [[" ".join(c) for c in r] for r in t["rows"] if r]' \
+    't["rows"] = [[(c[-1] if c else "") for c in r] for r in t["rows"] if r]'
+mutate "1 行目を見出しに使う（データが一行消える）" "見出しの行は空で置く" \
+    'out = ["|" + "  |" * width, "|" + " --- |" * width]' \
+    'out = ["| " + " | ".join(rows.pop(0)) + " |", "|" + " --- |" * width]'
+mutate "升の数を行ごとに揃えない" "升の数を、行ごとに揃える" \
+    'for c in r] + [""] * (width - len(r)) for r in rows]' \
+    'for c in r] for r in rows]'
+mutate "表の中の字を本文にも出す" "表の中の字は、本文に二度出さない" \
+    'skip.add(id(o))' \
+    'pass'
+mutate "Page の無い空間もページにする" "Page の無い空間は、ページにしない（空のノートを作らない）" \
+    'if not any(o["jcid"] == JC_PAGE for o in last):
+            continue' 'if False:
+            continue'
+mutate "0 ページを黙って通す" "1 ページも取れなかったら、形式のわけを言う" \
+    'log.warning("%s は 1 ページも取れなかった ── %s", sec, what)' 'pass'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'
