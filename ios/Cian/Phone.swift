@@ -83,7 +83,7 @@ enum Phone {
     private static func slot(_ e: EKEvent, _ day: String, _ at: String?) -> Calendaring.Slot {
         Calendaring.Slot(
             day: day, at: at,
-            title: e.title ?? "（題なし）",
+            title: e.title ?? "（タイトルなし）",
             // **ここでは道の代わりに、iOS の言う名札を持つ** ── あとで
             // その予定そのものを開く／直すときに要る。
             path: e.eventIdentifier ?? "",

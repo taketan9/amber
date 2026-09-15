@@ -57,7 +57,7 @@ struct Choosing: View {
                             }
                             .font(.footnote.weight(.semibold))
                         } header: {
-                            Text(f.key == "tags" ? "タグ" : f.key == "title" ? "題" : f.key)
+                            Text(f.key == "tags" ? "タグ" : f.key == "title" ? "タイトル" : f.key)
                         }
                     }
                 } else {

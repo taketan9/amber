@@ -801,7 +801,7 @@ el('title').addEventListener('contextmenu', (e) => {
     e.preventDefault();
     const path = state.open.path;
     popMenu([
-        { name: '題を直す', run: renameTitle },
+        { name: 'タイトルを直す', run: renameTitle },
         { name: 'ファイル名を写す', run: () => copyText(baseOf(path), 'ファイル名') },
         { name: '場所をコピー', run: () => copyText(path, '保存場所') },
         { name: 'Finder で表示', sep: true, run: () => window.amber.reveal(path) },
@@ -1881,11 +1881,11 @@ async function titleDone(keep) {
         loading = false;
         state.dirty = true;
         await save();
-        say(to ? '題を「' + to + '」にしました' : '題を外しました（見出しから決まります）');
+        say(to ? 'タイトルを「' + to + '」にしました' : 'タイトルを外しました（見出しから決まります）');
         // **欄から出た瞬間に、ファイル名も題に**（依頼 492・決めごと 1）。
         if (state.open) await settleName(state.open.path);
     } catch (e) {
-        say('題を直せません: ' + why(e));
+        say('タイトルを直せません: ' + why(e));
         drawTitle();
     }
 }
@@ -3949,7 +3949,7 @@ async function syncRead(leaving) {
     const body = readToMd();
     if (body === null) {
         // **黙って止まらない。** 打った字が消えたように見えるのがいちばん悪い。
-        say('保存できません ── 図かコード枠の元の字が取れません。'
+        say('保存できません ── 図かコード枠の元の文字が取れません。'
             + '「コード」で直してください');
         el('state').textContent = '保存できません';
         drawSaveNow();
@@ -4214,7 +4214,7 @@ async function readSourceEdit(change, node, stay) {
     const blocks = [...box.children].map((n) =>
         richBlock(n) ? n.dataset.md : (blockToMd(n) ?? ''));
     if (blocks.some((b) => b === undefined)) {
-        say('ここからは書き戻せません（コードか図の元の字が取れません）');
+        say('ここからは書き戻せません（コードか図の元の文字が取れません）');
         return;
     }
     try {
@@ -4876,7 +4876,7 @@ function setFont(step, quiet) {
     if (editor) editor.updateOptions({ fontSize: px });
     el('read').style.fontSize = (px - 0.5) + 'px';
     // 起動して戻すときは黙る ── 開いた瞬間に札が出る理由は無い。
-    if (!quiet && fontStep !== 0) say('字の大きさ ' + px + 'px（⌘0 で戻る）');
+    if (!quiet && fontStep !== 0) say('文字の大きさ ' + px + 'px（⌘0 で戻る）');
 }
 
 function toggleRead() { setView(view === 'read' ? 'write' : 'read'); }
@@ -5197,7 +5197,7 @@ async function cmdDiagram() {
         md = '```mermaid\nmindmap\n  root((' + root + '))\n'
             + parts(v).map((t) => '    ' + t).join('\n') + '\n```';
     } else if (kind === 'time') {
-        const title = await ask3('年表の題', '', '今年');
+        const title = await ask3('年表のタイトル', '', '今年');
         if (title === null) return;
         const v = await ask3('できごと', '「いつ: なに」を読点で区切ってください',
             '4月: 引っ越し、7月: 新しい仕事、11月: 旅行');
@@ -5208,7 +5208,7 @@ async function cmdDiagram() {
         });
         md = '```mermaid\ntimeline\n  title ' + title + '\n' + rows.join('\n') + '\n```';
     } else if (kind === 'gantt') {
-        const title = await ask3('予定表の題', '', '段取り');
+        const title = await ask3('予定表のタイトル', '', '段取り');
         if (title === null) return;
         const v = await ask3('やること', '「なに: 始まり, 何日」を読点で区切ってください',
             '下ごしらえ: 2026-09-10, 3d、本番: 2026-09-13, 5d');
@@ -5591,23 +5591,23 @@ const DIAGRAM_FORM = {
         cols: [{ k: 'a', label: '箱の中の言葉', w: 3, ph: '書く' }],
     },
     pie: {
-        name: '円グラフ', title: '題', add: '割合を足す',
+        name: '円グラフ', title: 'タイトル', add: '割合を足す',
         cols: [{ k: 'a', label: '名前', w: 3, ph: '仕事' },
                { k: 'b', label: '数', w: 1, ph: '5' }],
     },
     quad: {
-        name: '四象限', title: '題', add: 'やることを足す',
+        name: '四象限', title: 'タイトル', add: 'やることを足す',
         cols: [{ k: 'a', label: 'やること', w: 3, ph: '週報' },
                { k: 'b', label: '影響', w: 1, ph: '0.8', slide: true },
                { k: 'c', label: '期限の近さ', w: 1, ph: '0.9', slide: true }],
     },
     time: {
-        name: '年表', title: '題', add: 'できごとを足す',
+        name: '年表', title: 'タイトル', add: 'できごとを足す',
         cols: [{ k: 'a', label: 'いつ', w: 1, ph: '4月' },
                { k: 'b', label: 'なに', w: 3, ph: '引っ越し' }],
     },
     gantt: {
-        name: '予定表', title: '題', add: 'やることを足す',
+        name: '予定表', title: 'タイトル', add: 'やることを足す',
         cols: [{ k: 'a', label: 'やること', w: 3, ph: '下ごしらえ' },
                { k: 'b', label: '始まり', w: 1, ph: '2026-09-10', date: true },
                { k: 'c', label: '長さ', w: 1, ph: '3d' }],
@@ -5617,7 +5617,7 @@ const DIAGRAM_FORM = {
         cols: [{ k: 'a', label: '枝', w: 1, ph: '仕事' }],
     },
     seq: {
-        name: 'やりとり', title: '題', add: 'やりとりを足す',
+        name: 'やりとり', title: 'タイトル', add: 'やりとりを足す',
         cols: [{ k: 'a', label: 'だれが', w: 2, ph: '私' },
                { k: 'b', label: 'だれに', w: 2, ph: '相手' },
                { k: 'c', label: 'なにを', w: 3, ph: 'お願いする' },
@@ -5634,7 +5634,7 @@ let studioTimer = 0;
 /// 工房を開く。`node` は読む面の図（`.mermaid`）か、描けなかった枠。
 async function studioOpen(node) {
     const md = node && node.dataset ? node.dataset.md : undefined;
-    if (md === undefined) { say('この図の元の字が取れません'); return; }
+    if (md === undefined) { say('この図の元の文字が取れません'); return; }
     const src = fenceBody(md);
     if (src === null) { say('図ではありません'); return; }
     const data = mmdParse(src);
@@ -5683,7 +5683,7 @@ function studioDraw() {
     // 起きないより、押せないと見えているほうがいい。
     swap.disabled = studio.raw && !studio.data;
     swap.title = swap.disabled
-        ? 'この図は表にできません（手で書いた形）。字で直してください'
+        ? 'この図は表にできません（手で書いた形）。コードで直してください'
         : '';
 
     const form = box.querySelector('.form');
@@ -5704,7 +5704,7 @@ function studioDraw() {
     if (spec.deep) {
         form.append(tag('div', 'note',
             '「→」で一段深く、「←」で一段浅く。枝の下に枝を、'
-            + 'そのまた下にも書けます（mermaid の枝と枝のあいだには字を置けないので、'
+            + 'そのまた下にも書けます（mermaid の枝と枝のあいだには文字を置けないので、'
             + '間に入れたい言葉は一段の枝として足してください）。'));
     }
 }
@@ -6107,7 +6107,7 @@ el('studioswap').onclick = () => {
         // 字 → 表。読めなければ、表にせず言う ── 読めない字を無理に
         // 表へ入れると、読めなかったところが消える。
         const back = mmdParse(studio.text);
-        if (!back) { say('いまの字は表にできません。字のまま直してください'); return; }
+        if (!back) { say('いまの文字は表にできません。文字のまま直してください'); return; }
         studio.data = back;
         studio.raw = false;
     } else {
@@ -6714,7 +6714,7 @@ function drawBand() {
 
 /// 前書きの鍵の、人の言葉。
 function fieldName(key) {
-    return { title: '題', tags: 'タグ', created: '作った日', remind: '通知' }[key] || key;
+    return { title: 'タイトル', tags: 'タグ', created: '作った日', remind: '通知' }[key] || key;
 }
 
 /// 改行を行に含めたまま、行に割る（core の `records` と同じ割り方）。
@@ -8567,7 +8567,7 @@ async function moveLane(key, step) {
 function popEvent(s, at) {
     const rows = [];
     const when = s.at ? s.at + (s.to ? '〜' + s.to : '') : '終日';
-    rows.push({ html: '<b class="evh">' + escapeHtml(s.title || '（題なし）') + '</b>', dim: true });
+    rows.push({ html: '<b class="evh">' + escapeHtml(s.title || '（タイトルなし）') + '</b>', dim: true });
     rows.push({ name: when, dim: true });
     if (s.place) rows.push({ name: s.place, dim: true });
     const who = s.kind === 'team' ? whoOf(s) : null;
@@ -8915,7 +8915,7 @@ function askEvent(head, at0) {
         const t = title.value.trim().replace(/\s+/g, ' ');
         if (!t) { err.textContent = 'タイトルを入れてください'; err.hidden = false; title.focus(); return; }
         if (!all.checked) {
-            if (!start.value) { err.textContent = '開始の時刻を選んでください（終日なら「終日」に印を）'; err.hidden = false; start.focus(); return; }
+            if (!start.value) { err.textContent = '開始の時刻を選んでください（終日なら「終日」にチェックを）'; err.hidden = false; start.focus(); return; }
             if (!end.value) { err.textContent = '終了の時刻を選んでください'; err.hidden = false; end.focus(); return; }
             if (end.value <= start.value) { err.textContent = '終了は開始より後にしてください'; err.hidden = false; end.focus(); return; }
         }
@@ -12257,7 +12257,7 @@ async function cmdHistory(at, isBook) {
         say('読めません: ' + why(e));
         return;
     }
-    const go = await askPick(pick.when + ' の姿', [
+    const go = await askPick(pick.when + ' のバージョン', [
         { name: 'このバージョンを見る', sub: '読むだけ。いまのノートは動きません', value: 'peek' },
         { name: 'このバージョンに戻す', sub: 'いまのバージョンも一つ残ります', value: 'back' },
         { name: pick.kept ? '保護をやめる' : 'このバージョンを保護する',
@@ -12270,7 +12270,7 @@ async function cmdHistory(at, isBook) {
         return;
     }
     if (go === 'peek') {
-        await openGuestText(pick.when + ' の姿', old);
+        await openGuestText(pick.when + ' のバージョン', old);
         return;
     }
     // **戻す前に、いまを一世代残す。** 戻しすぎても戻れるように。
@@ -12278,7 +12278,7 @@ async function cmdHistory(at, isBook) {
     await ask('write', { path: note, text: old, force: true });
     await reload({});
     if (state.open && state.open.path === note) await openNote(note);
-    say(pick.when + ' の姿に戻しました（いまの姿も残してあります）');
+    say(pick.when + ' のバージョンに戻しました（いまのバージョンも残してあります）');
 }
 
 /// 前の姿を、読むだけの一本として開く。

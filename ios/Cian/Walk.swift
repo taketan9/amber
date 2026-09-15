@@ -316,7 +316,7 @@ enum Walk {
                 try Phone.rename(made.path, to: name + "・直した")
                 got = Phone.month(2026, 9)
                 if !got.contains(where: { $0.title == name + "・直した" }) {
-                    return "直したのに、題が変わっていません"
+                    return "直したのに、タイトルが変わっていません"
                 }
 
                 try Phone.drop(made.path)
@@ -337,7 +337,7 @@ enum Walk {
                 let hand = Clipping()
                 await hand.warm()
                 let got = try await hand.clip(url)
-                if got.title.isEmpty { return "題が取れません" }
+                if got.title.isEmpty { return "タイトルが取れません" }
                 if !got.body.contains("出典:") { return "出どころの行がありません" }
                 return nil
             }
@@ -385,7 +385,7 @@ enum Walk {
             try "# よその一枚\n\n一覧には入らない。\n".write(to: at, atomically: true, encoding: .utf8)
             defer { try? FileManager.default.removeItem(at: at) }
             guard let n = store.openOutside(at) else { return "開けません: \(store.trouble ?? "")" }
-            if n.title != "よその一枚" { return "題が \(n.title)" }
+            if n.title != "よその一枚" { return "タイトルが \(n.title)" }
             if !store.isOutside(n.path) { return "一時的に開いている印が付いていません" }
             if store.notes.contains(where: { $0.path == at.path }) { return "一覧に入っています" }
             return nil
@@ -537,7 +537,7 @@ enum Walk {
             return t.contains("十個") && !t.contains("六個") ? nil : "向こうの字が違います"
         }
         // ファイル名は題に合わせる（依頼 502）── 離れたときと、時刻名の揃え直し。
-        await step("名前：一行目で題が決まるノートは、離れたときに名前が揃う") {
+        await step("名前：一行目でタイトルが決まるノートは、離れたときに名前が揃う") {
             let made = try Cian.call("new", ["dir": store.rootPath, "title": ""])
             guard let path = made["path"] as? String else { return "作れません" }
             _ = try Cian.call("write", ["path": path, "text": "名前は一行目から\n\n本文。\n", "force": true])
@@ -550,7 +550,7 @@ enum Walk {
             if names.contains(path.split(separator: "/").last.map(String.init) ?? "?") { return "時刻の名前のままです" }
             return names.contains("名前は一行目から.md") ? nil : "揃っていません: " + names.prefix(8).joined(separator: " / ")
         }
-        await step("名前：時刻の名前のノートは、一度に題の名前に揃う") {
+        await step("名前：時刻の名前のノートは、一度にタイトルの名前に揃う") {
             let made = try Cian.call("new", ["dir": store.rootPath, "title": ""])
             guard let path = made["path"] as? String else { return "作れません" }
             _ = try Cian.call("write", ["path": path, "text": "めそぽたみあ\n", "force": true])

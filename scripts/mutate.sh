@@ -38,7 +38,7 @@ fi
 
 after=$(python3 scripts/requests.py 2>&1 | grep -c "✗" || true)
 if [ "$after" = "0" ]; then
-    echo "✗ 壊しても鳴りません: $file の「$from」"
+    echo "✗ 壊しても気づきません: $file の「$from」"
     echo "  検査が別の場所に当たっているか、書き方が緩すぎます。"
     exit 1
 fi

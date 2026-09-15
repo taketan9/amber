@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# onenote-test.py の検査を、一つずつ壊して鳴らせる。
+# onenote-test.py の検査を、一つずつ壊して確かめる。
 #
 # `scripts/mutate.sh` と同じ理由でこれは script になっている ── 一度、手で
 # 打ち直した版が黙って通り、「検査が効かない」のと見分けがつかなかった。
@@ -26,13 +26,13 @@ fi
 
 silent=0
 
-mutate() {  # 名前 / 鳴ってほしい検査 / 何を / 何に
+mutate() {  # 名前 / 気づいてほしい検査 / 何を / 何に
     local name="$1" want="$2" from="$3" to="$4"
     restore
     # **本当に変わったかは、中身の指紋で見る。** はじめ `grep -F "$to"` で
     # 見ていたが、`to` が複数行だと grep はそれを**行の並び**と読み、
     # どれか一行が元からあれば通る ── 一文字も置換されていないのに
-    # 「壊した」と言い、続く「鳴らなかった」が検査のせいに見えた。
+    # 「壊した」と言い、続く「気づかなかった」が検査のせいに見えた。
     local was
     was=$(shasum "${TARGETS[@]}" | cut -d" " -f1 | tr -d "\n")
     for t in "${TARGETS[@]}"; do
@@ -46,9 +46,9 @@ mutate() {  # 名前 / 鳴ってほしい検査 / 何を / 何に
     local out
     out=$(python3 scripts/onenote-test.py 2>&1)
     if printf '%s\n' "$out" | grep -qF "NG   $want"; then
-        echo "鳴った   $name"
+        echo "気づいた   $name"
     else
-        echo "★黙った $name  →  $want"
+        echo "★見逃した $name  →  $want"
         printf '%s\n' "$out" | grep -F "NG " | head -5
         silent=$((silent + 1))
     fi
@@ -74,9 +74,9 @@ mutate "--no-images の守りを外す" "--no-images でも既にある画像は
 mutate "いま使っている画像まで消す" "いま使っている画像は残る" \
     'if old.name not in conv.images:' 'if True:'
 # **`glob` の形を壊す手は置いていない** ── 守っているのは番号の形を見る
-# 正規表現のほうで（すぐ下の「古い画像で番号の形を見ない」が鳴る）、`glob` は
+# 正規表現のほうで（すぐ下の「古い画像で番号の形を見ない」で気づく）、`glob` は
 # 速さのためだけになった。振る舞いの変わらない壊し方を並べると、
-# 「鳴らないのが普通」になる。
+# 「気づかないのが普通」になってしまう。
 mutate "鎖を掛けない" "二本目は断られる" \
     'fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)' 'pass'
 mutate "--dry-run でも同期を頼む" "--dry-run では頼まない" \
@@ -145,8 +145,8 @@ mutate "作り置き先を逃がさない" "書けないなら逃がす" \
         return default, False' 'if True:
         return default, False'
 # `os.access` に戻す壊し方は**わざと置いていない** ── POSIX の `os.access` は
-# 正しく答えるので mac では鳴らない。Windows の上でしか壊れない性質で、
-# 黙る壊し方を並べると「鳴らないのが普通」になる。
+# 正しく答えるので mac では気づけない。Windows の上でしか壊れない性質で、
+# 気づけない壊し方を並べると「気づかないのが普通」になってしまう。
 mutate "試し書きを片付けない" "試し書きの跡を残さない" \
     'os.unlink(probe)
         return True' 'return True'
@@ -427,10 +427,10 @@ mutate "読めないのを「無い」と言う" "読めなければ「読めな
 mutate "読めないのに結論を出す" "読めないのに「無い」と結論しない" \
     'if server_here is False:' 'if not server_here:'
 # **ここは壊し方を置いていない**（`os.access` と同じ理由）── どちらも
-# `winreg` の上でしか壊れず、mac には `winreg` が無いので鳴らない。
+# `winreg` の上でしか壊れず、mac には `winreg` が無いので気づけない。
 #   * COM サーバーを pywintypes 経由で引く（pywin32 の無い Python で見失う）
 #   * Office の bit を 32bit の見え方で読む（32 bit の処理から見えない枝）
-# 黙る壊し方を並べると「鳴らないのが普通」になる。
+# 気づけない壊し方を並べると「気づかないのが普通」になってしまう。
 mutate "ファイルから読む段を外す" "在る道だけ読みにいく" \
     '("ファイルから型ライブラリを読む", by_file),' ''
 mutate "無い道まで読みにいく" "在る道だけ読みにいく" \
@@ -627,7 +627,7 @@ mutate "CRLF で書く" "改行は LF" \
 restore
 echo
 if [ "$silent" != "0" ]; then
-    echo "★ $silent 件が黙っています ── その検査は何も守っていません。"
+    echo "★ $silent 件、壊しても気づきません ── その検査は何も守っていません。"
     exit 1
 fi
-echo "すべて鳴りました。"
+echo "壊すと、ぜんぶ気づきました。"

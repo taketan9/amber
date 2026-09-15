@@ -1140,9 +1140,17 @@ pub fn terms(query: &str) -> Vec<Vec<Term>> {
         // `http://…` や「10:30」を書いただけで消える語ができると、
         // 探せなくなったことに気づけない。
         let (field, w) = match rest.split_once(':') {
-            Some((f, v)) if !v.is_empty() && matches!(f, "title" | "tag" | "book" | "題" | "タグ" | "フォルダ") => {
+            Some((f, v))
+                if !v.is_empty()
+                    && matches!(
+                        f,
+                        "title" | "tag" | "book" | "タイトル" | "題" | "タグ" | "フォルダ"
+                    ) =>
+            {
                 let f = match f {
-                    "題" => "title",
+                    // **画面は「タイトル」と言うので、そう打てる。**
+                    // 「題」も受け続ける ── 前から打てたものを取り上げない。
+                    "タイトル" | "題" => "title",
                     "タグ" => "tag",
                     "フォルダ" => "book",
                     other => other,
@@ -1640,6 +1648,8 @@ mod tests {
         assert_eq!(flat("tag:定型"), vec![vec!["tag:定型"]]);
         assert_eq!(flat("タグ:定型"), vec![vec!["tag:定型"]]);
         assert_eq!(flat("book:仕事 題:週報"), vec![vec!["book:仕事", "title:週報"]]);
+        // 画面が「タイトル」と言うようになったので、そう打てる（「題」も残す）。
+        assert_eq!(flat("タイトル:週報"), vec![vec!["title:週報"]]);
         // 二重引用符で、空白を含む一語。
         assert_eq!(flat("title:\"週次 報告\""), vec![vec!["title:週次 報告"]]);
         assert_eq!(flat("\"AND を含む句\"").len(), 1);
