@@ -337,55 +337,42 @@ def _office_platform():
     """Office がどちらの bit で入っているか（`x64` / `x86`）。読めなければ None。"""
     try:
         import winreg
+        # **64bit の見え方で読む。** ここは 64bit 側にしか無いので、
+        # 32 bit の処理が素直に開くと「読めない」になる（WOW64）。
         key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                             r"SOFTWARE\Microsoft\Office\ClickToRun\Configuration")
+                             r"SOFTWARE\Microsoft\Office\ClickToRun\Configuration", 0,
+                             winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0))
         return winreg.QueryValueEx(key, "Platform")[0]
     except (ImportError, OSError):
         return None
 
 
 def _local_server():
-    """`OneNote.Application` の COM サーバーの実体（道, 在るか）。読めなければ (None, False)。"""
-    try:
-        import winreg
-        import pywintypes
-        clsid = str(pywintypes.IID("OneNote.Application"))
-        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
-                             "CLSID" + chr(92) + clsid + chr(92) + "LocalServer32")
-        path = (winreg.QueryValue(key, None) or "").strip().strip('"')
-        real = _strip_resource_index(path)
-        return path, bool(real and os.path.exists(real))
-    except Exception:  # noqa
-        return None, False
+    """`OneNote.Application` の COM サーバーの実体 ── `(道, 在るか)`。
 
-
-def _typelib_path(want_arch):
-    """型ライブラリの、その bit の枝が指している道。無ければ None。
-
-    **足りない枝を足すとき、道は自分で調べさせない。** 手で打ち直す人に
-    「docs を見て、`--probe` の出した値をそこから写して」と言うのは、
-    繋がらない端末の前に立っている人に出す注文ではない。
+    在るかは **三通り**: `True` / `False` / `None`（**見られなかった**）。
+    前は pywintypes で ProgID を引いていたので、**pywin32 の無い Python では
+    引けず、それを「無い」と言っていた** ── そして「入れ直すか修復する」と、
+    見てもいないことから結論を出していた。**分からないことを分かったように
+    言わない。** ProgID → CLSID はレジストリだけで引ける。
     """
     try:
         import winreg
     except ImportError:
-        return None
+        return None, None
     try:
-        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "TypeLib" + chr(92) + ONENOTE_TYPELIB)
-        for ver in _reg_subkeys(key):
-            vkey = winreg.OpenKey(key, ver)
-            for lcid in _reg_subkeys(vkey):
-                lkey = winreg.OpenKey(vkey, lcid)
-                for arch in _reg_subkeys(lkey):
-                    if arch.lower() != want_arch.lower():
-                        continue
-                    try:
-                        return ver, lcid, winreg.QueryValue(lkey, arch)
-                    except OSError:
-                        continue
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
+                             "OneNote.Application" + chr(92) + "CLSID")
+        clsid = (winreg.QueryValue(key, None) or "").strip()
+        if not clsid:
+            return None, None
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
+                             "CLSID" + chr(92) + clsid + chr(92) + "LocalServer32")
+        path = (winreg.QueryValue(key, None) or "").strip().strip('"')
     except OSError:
-        return None
-    return None
+        return None, None
+    real = _strip_resource_index(path)
+    return path, bool(real and os.path.exists(real))
 
 
 def _read_typelib(flag):
@@ -444,6 +431,19 @@ def _typelib_values():
         if b:
             out.append((ver, arch, b, "32bit の見え方"))
     return out
+
+
+def _typelib_path(want_arch):
+    """型ライブラリの、その bit の枝が指している道。無ければ None。
+
+    **足りない枝を足すとき、道は自分で調べさせない。** 手で打ち直す人に
+    「docs を見て、`--probe` の出した値をそこから写して」と言うのは、
+    繋がらない端末の前に立っている人に出す注文ではない。
+    """
+    for ver, arch, path, _view in _typelib_values():
+        if arch == want_arch.lower():
+            return ver, "0", path
+    return None
 
 
 def _onenote_exe():
@@ -772,7 +772,8 @@ def check():
     print("型ライブラリの枝: "
           + ("  ".join(f"{v}={' '.join(sorted(a)) or '（空）'}" for v, a in sorted(tree.items()))
              or "（読めない）"))
-    print(f"COM サーバー: {'ある' if server_here else '**無い**'}"
+    print("COM サーバー: "
+          + {True: "ある", False: "**無い**", None: "（読めない）"}[server_here]
           + (f"  {server}" if server else ""))
     if store:
         # **入っていること自体は困らない。** 見えるのは 365 側に開いている
@@ -856,7 +857,9 @@ def _next_move(me, office, tree, server_here, troubles=()):
             out.append(f"Office は {office} ── Python を {office_bits} bit に"
                        "合わせるのがいちばん確か。")
         return out
-    if not server_here:
+    if server_here is False:
+        # **見て「無い」と分かったときだけ言う。** 見られなかったのは、
+        # 無かったのとは違う。
         return ["COM サーバーの実体が、登録の指す場所に無い。",
                 "デスクトップ版 OneNote を入れ直すか、修復する。"]
     return ["登録は白。残るのは権限か、OneNote 自身か、呼び方。",
@@ -895,10 +898,18 @@ def _from_answer(troubles):
     番号ごとに違う**から ── 読めないと言われたなら、読めないその道を出す。
     """
     joined = " ".join(troubles)
-    for needle, said in _ANSWERS:
-        if needle in joined:
-            return needle, list(said)
-    return None, []
+    # **数えてから決める。** 先に並べた順で拾うと、**四つのうち三つが
+    # 同じことを言っているのに、一つだけ違う答えを採る**（現場で実際に
+    # そうなった ── 三つが「サーバーの実行に失敗」なのに、一つだけの
+    # 「登録されていません」を返した）。同じ数なら、表の順。
+    best, n_best = None, 0
+    for needle, _said in _ANSWERS:
+        n = joined.count(needle)
+        if n > n_best:
+            best, n_best = needle, n
+    if best is None:
+        return None, []
+    return best, list(dict(_ANSWERS)[best])
 
 
 def _lib_paths_note():

@@ -338,7 +338,7 @@ mutate "違う道でも「同じ」と言う" "違う道を指していれば、
 mutate "どの番号でも道を出す" "ほかの番号では、道を出さない" \
     'if code == "-2147312566":' 'if code:'
 mutate "番号を持ち帰らない" "ほかの番号では、道を出さない" \
-    'return needle, list(said)' 'return "-2147312566", list(said)'
+    'return best, list(dict(_ANSWERS)[best])' 'return "-2147312566", list(dict(_ANSWERS)[best])'
 mutate "持ち込む wheel の版を言わない" "この Python の版に合う wheel を名指しする" \
     'tag = f"cp{v[0]}{v[1]}"' 'tag = "cpXY"'
 mutate "bit を取り違える" "32 bit の wheel は win32" \
@@ -406,6 +406,26 @@ mutate "片方で在っても無いと言う" "片方で在るなら、無い話
     'if real and os.path.exists(real):
             return False
     return True' 'return True'
+mutate "答えを数えず、表の順で拾う" "多いほうの答えを採る" \
+    'best, n_best = None, 0
+    for needle, _said in _ANSWERS:
+        n = joined.count(needle)
+        if n > n_best:
+            best, n_best = needle, n' 'best, n_best = None, 0
+    for needle, _said in _ANSWERS:
+        if needle in joined:
+            best = needle
+            break'
+mutate "読めないのを「無い」と言う" "読めなければ「読めない」と言う" \
+    '+ {True: "ある", False: "**無い**", None: "（読めない）"}[server_here]' \
+    '+ ("ある" if server_here else "**無い**")'
+mutate "読めないのに結論を出す" "読めないのに「無い」と結論しない" \
+    'if server_here is False:' 'if not server_here:'
+# **ここは壊し方を置いていない**（`os.access` と同じ理由）── どちらも
+# `winreg` の上でしか壊れず、mac には `winreg` が無いので鳴らない。
+#   * COM サーバーを pywintypes 経由で引く（pywin32 の無い Python で見失う）
+#   * Office の bit を 32bit の見え方で読む（32 bit の処理から見えない枝）
+# 黙る壊し方を並べると「鳴らないのが普通」になる。
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

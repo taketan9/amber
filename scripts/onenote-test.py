@@ -1295,6 +1295,27 @@ def t_check(tmp):
         _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
                      connect=blew(troubles=["  素の Dispatch: (-2146959355, '権限')"]))
         check("ほかの番号では、道を出さない", "1.1 / win32 = " not in out, out)
+        # **数えてから決める。** 先に並べた順で拾うと、四つのうち三つが同じことを
+        # 言っているのに、一つだけ違う答えを採る（現場で実際にそうなった）。
+        _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                     connect=blew(troubles=[
+                         "  1.1 を名指し: (-2146959355, 'サーバーの実行に失敗しました')",
+                         "  1.0 を名指し: (-2147319779, 'ライブラリは登録されていません')",
+                         "  gencache: (-2146959355, 'サーバーの実行に失敗しました')",
+                         "  素の Dispatch: (-2146959355, 'サーバーの実行に失敗しました')"]))
+        check("多いほうの答えを採る", "権限のずれ" in out, out)
+        check("少ないほうに引きずられない", "TYPE_E_LIBNOTREGISTERED" not in out, out)
+
+        # **見られなかったのは、無かったのとは違う。**
+        _, out = say(server=lambda: (None, None), tree=lambda: {"1.1": {"win32", "win64"}},
+                     connect=blew(troubles=["  素の Dispatch: 知らない何か"]))
+        check("読めなければ「読めない」と言う", "（読めない）" in out, out)
+        check("読めないのに「無い」と結論しない", "入れ直すか、修復する" not in out, out)
+        _, out = say(server=lambda: ("C:" + chr(92) + "無い.exe", False),
+                     tree=lambda: {"1.1": {"win32", "win64"}},
+                     connect=blew(troubles=["  素の Dispatch: 知らない何か"]))
+        check("見て無ければ、そう言う", "入れ直すか、修復する" in out, out)
+
         # 知らない答えなら、決めつけない。
         _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
                      connect=blew(troubles=["  素の Dispatch: 知らない何か"]))
