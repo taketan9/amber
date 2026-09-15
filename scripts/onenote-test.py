@@ -1253,6 +1253,68 @@ def t_check(tmp):
          o2m._store_onenote, o2m._typelib_path, o2m.connect_onenote) = keep
 
 
+def t_offline(tmp):
+    print("網に出られない端末で（オフライン）──")
+    got = o2m.wheel_hint()
+    body = "\n".join(got)
+    v = sys.version_info
+    # **持ち込むファイルの名前を言う。** 「pip install pywin32」は、網の無い
+    # 端末では何も起きない ── 要るのはどのファイルを運ぶかで、それは
+    # この Python の版と bit で決まる。
+    check("この Python の版に合う wheel を名指しする", f"cp{v[0]}{v[1]}" in body, body)
+    # **取り違えやすいのは bit。** `win32` は 32 bit で、`win_amd64` が 64 bit。
+    name = next(l for l in got if l.startswith("この Python に合う wheel"))
+    check("bit も名指しする", name.endswith("win_amd64.whl") or name.endswith("win32.whl"), name)
+    check("取り違えないよう、bit の読み方を書く", "32 bit" in body and "64 bit" in body, body)
+    check("網を見に行かせない", "--no-index" in body, body)
+    check("連れも探しに行かせない", "--no-deps" in body, body)
+
+    # **32 bit のほうが本題。** この機械では走らせられないので、bit を渡して見る
+    # （`_arch_verdict` と同じ手）。
+    n32 = next(l for l in o2m.wheel_hint(32) if l.startswith("この Python に合う wheel"))
+    n64 = next(l for l in o2m.wheel_hint(64) if l.startswith("この Python に合う wheel"))
+    check("32 bit の wheel は win32", n32.endswith("win32.whl"), n32)
+    check("64 bit の wheel は win_amd64", n64.endswith("win_amd64.whl"), n64)
+    run32 = " ".join(o2m.wheel_hint(32))
+    run64 = " ".join(o2m.wheel_hint(64))
+    check("32 bit なら -32 の呼び方で言う", "-32 -m pip" in run32, run32)
+    check("64 bit では -32 と言わない", "-32" not in run64, run64)
+
+    # pywin32 の無い端末で繋ごうとすると、そのまま出る。
+    import subprocess
+    r = subprocess.run([sys.executable, str(ROOT / "onenote2md.py"), "--check"],
+                       capture_output=True, text=True, errors="replace")
+    check("pywin32 が無いとき、持ち込むものを言う",
+          "wheel" in (r.stdout + r.stderr) or "pywin32" in (r.stdout + r.stderr),
+          (r.stdout + r.stderr)[-200:])
+
+
+def t_two_onenotes(tmp):
+    print("365 とストア版、両方を使う ──")
+    import io, contextlib
+    empty = '<?xml version="1.0"?><one:Notebooks ' + NBS + '></one:Notebooks>'
+    keep = (o2m._office_platform, o2m._typelib_tree, o2m._local_server,
+            o2m._store_onenote, o2m.connect_onenote)
+    try:
+        o2m._office_platform = lambda: "x64"
+        o2m._typelib_tree = lambda: {"1.1": {"win64"}}
+        o2m._local_server = lambda: ("C:" + chr(92) + "ONENOTE.EXE", True)
+        o2m._store_onenote = lambda: "Microsoft.Office.OneNote_x"
+        o2m.connect_onenote = lambda: (FakeOneNote(empty, {}), empty)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            o2m.check()
+        out = buf.getvalue()
+        # **両方入っていること自体は困らない。** 困るのはどちらで開いているか。
+        check("両方あることを、責めずに言う", "365 側に開いたものだけが写せる" in out, out)
+        check("一冊も無いとき、どちらで開くかを言う",
+              "365 側でも開いておく" in out, out)
+        check("「使うな」とは言わない", "使わない" not in out and "やめ" not in out, out)
+    finally:
+        (o2m._office_platform, o2m._typelib_tree, o2m._local_server,
+         o2m._store_onenote, o2m.connect_onenote) = keep
+
+
 def t_readonly_no_lock(tmp):
     print("読むだけの回は、鎖を取らない ──")
     import subprocess
@@ -1287,7 +1349,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_structure, t_table, t_inline, t_created,
-                   t_log, t_cp932, t_check, t_readonly_no_lock, t_incremental, t_same_file,
+                   t_log, t_cp932, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
                    t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):
             fn(tmp)

@@ -45,13 +45,16 @@ OneNote へは戻らない。
 - **Windows**。デスクトップ版 OneNote（Microsoft 365 / 2016 以降）。
   ストア版の「OneNote for Windows 10」は COM を持たないので**使えない**。
 
-> **二つとも入っていることがある。** 会社の端末でそうなっていた
-> （OneNote 365 と OneNote for Windows 10）。入っていること自体は害では
-> ないが、**ふだんストア版で書いていると、デスクトップ版には一冊も開いて
-> いない** ── そうなると繋がっても写すものが無く、「繋がったのに何も
-> 出ない」になる。**写すノートブックは、デスクトップ版のほうで開く。**
-> どちらが入っているかは `--check` が言う。
-- Python 3 と `pip install pywin32`。
+> **二つとも入っていて、二つとも使っていることがある。** 会社の端末が
+> そうだった（OneNote 365 と OneNote for Windows 10 を両方開いて操作する）。
+> **それで構わない。** ただし**こちらから見えるのは 365 側に開いている
+> ノートブックだけ** ── ストア版は COM を持たないので、そちらにしか
+> 開いていないものは写せない。「繋がったのに何も出ない」はたいていこれ。
+> **写したいノートブックは、365 側でも開いておく。**
+> 両方入っているかは `--check` が言う。
+- Python 3 と pywin32。**オフラインの端末なら** wheel を持ち込んで
+  `py -3 -m pip install --no-index --no-deps "<その .whl>"`（下記）。
+  どの wheel が要るかは `--check` が名前で言う。
 - 写したいノートブックが OneNote 上で**開いている**こと。閉じているものは
   OneNote から見えないので、写しも作られない。
 
@@ -313,20 +316,45 @@ py -3 scripts\onenote2md.py --out X --probe
 > **登録は白、実体が読めない。**`--check` は、この番号のときだけ枝の道と
 > 在処を並べる（同じ道を二つの枝が指していたら、片方は写しだと言う）。
 
-### 32 bit の Python を入れる
+### 32 bit の Python を入れる（オフラインの端末で）
+
+**網に出られない端末なので、`pip install` は使えない。** 持ち込むのは
+**二つのファイル**だけ。
+
+| | |
+|---|---|
+| ① Python の installer | [python.org](https://www.python.org/downloads/windows/) の **Windows installer (32-bit)**。名前に `-amd64` が**付いていない**ほうが 32 bit |
+| ② pywin32 の wheel | [PyPI の pywin32](https://pypi.org/project/pywin32/#files) から、名前が `cp<版>-cp<版>-win32.whl` のもの |
+
+**②は①で入れる Python の版に合わせる。** 3.9 を入れるなら `cp39`、
+3.12 なら `cp312`。**bit も名前で決まる** ── `win32` が 32 bit、
+`win_amd64` が 64 bit。取り違えると `pip` が「このプラットフォーム用ではない」
+と断る。
+
+> どれを持ち込めばいいかは、**道具が言う。** pywin32 の入っていない Python で
+> `--check` を叩くと、その Python に合う wheel の名前と入れ方が出る。
+
+入れる（いまの 64 bit の Python はそのままでよい ── `py` が両方を持てる）:
 
 ```bat
 py -0p
 ```
 
-`-32` の行が無ければ、[python.org](https://www.python.org/downloads/windows/) の
-**Windows installer (32-bit)** を入れる（いまの 64 bit のものはそのままでよい ──
-`py` が両方を持てる）。入れたら:
+```bat
+py -3-32 -m pip install --no-index --no-deps "D:\持ち込み\pywin32-306-cp39-cp39-win32.whl"
+```
+
+`--no-index` が「網を見に行くな」、`--no-deps` が「連れを探しに行くな」
+（pywin32 に連れは無いので、念のため）。
 
 ```bat
-py -3-32 -m pip install pywin32
 py -3-32 scripts\onenote2md.py --check
 ```
+
+> **`DLL load failed` と言われたら**、pywin32 の後始末が要る:
+> `py -3-32 <Python の道>\Scripts\pywin32_postinstall.py -install`。
+> **管理者が要る**ので、まずは付けずに動くか見てから。近ごろの wheel は
+> 自分で道を通すので、たいてい要らない。
 
 **定時で回すときも 32 bit のほうを指す。** タスクの「プログラム」は
 そちらの `pythonw.exe`（道は `py -0p` に出る）。

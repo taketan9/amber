@@ -19,7 +19,9 @@ onenote2md.py ── デスクトップ版 OneNote を Markdown に（ambər の
   - Windows + デスクトップ版 OneNote（Microsoft 365 / 2016 以降）
     ※ Store 版（OneNote for Windows 10）は COM 非対応
   - 変換対象のノートブックがすべて OneNote 上で「開いている」こと
-  - pip install pywin32
+  - pywin32（**オフラインの端末なら** wheel を持ち込んで
+    `py -3-32 -m pip install --no-index --no-deps "<その .whl>"`。
+    どの wheel が要るかは `--check` が名前で言う）
 
 使い方
   python onenote2md.py --out D:\\notes                      # 全ノートブック
@@ -278,6 +280,25 @@ def _arch_verdict(arches, bits=None):
         "   これが『ライブラリは登録されていません』の正体です。",
         "   直し方は docs/onenote.ja.md の「ハマりどころ」に。",
     ]
+
+
+def wheel_hint(bits=None):
+    """**この Python に合う wheel の名前**と、オフラインでの入れ方。
+
+    繋ぐ先はインターネットの無い端末で、持ち込めるのはファイルだけ。
+    `pip install pywin32` と言うだけでは、そこでは何も起きない ── 要るのは
+    **どのファイルを持ち込むか**で、それはこの Python の版と bit で決まる。
+    間違えやすいのは bit のほうで、`win32` が 32 bit、`win_amd64` が 64 bit。
+    """
+    v = sys.version_info
+    tag = f"cp{v[0]}{v[1]}"
+    me = bits or (64 if sys.maxsize > 2 ** 32 else 32)
+    arch = "win32" if me == 32 else "win_amd64"
+    launcher = f"py -{v[0]}.{v[1]}" + ("-32" if arch == "win32" else "")
+    return [f"この Python に合う wheel: pywin32-*-{tag}-{tag}-{arch}.whl",
+            "（`win32` が 32 bit・`win_amd64` が 64 bit。取り違えると入らない）",
+            "持ち込んだら、網に出ずに入れる:",
+            f'  {launcher} -m pip install --no-index --no-deps "<その .whl>"']
 
 
 def _office_platform():
@@ -638,7 +659,9 @@ def check():
     print(f"COM サーバー: {'ある' if server_here else '**無い**'}"
           + (f"  {server}" if server else ""))
     if store:
-        print(f"ストア版も入っている: {store}")
+        # **入っていること自体は困らない。** 見えるのは 365 側に開いている
+        # ぶんだけ、というだけ ── 責める話ではないので、そう書く。
+        print(f"ストア版も入っている（365 側に開いたものだけが写せる）: {store}")
 
     try:
         app, first = connect_onenote()
@@ -649,6 +672,13 @@ def check():
             print("呼んだときの答え:")
             for t in troubles:
                 print(" " + t.rstrip()[:120])
+        elif isinstance(e.code, str):
+            # **答えが無いのに止まったなら、止めた言い分がある。** pywin32 が
+            # 入っていない、鎖に断られた ── 飲み込むと、いちばん短い道で
+            # 分かることを黙ることになる。
+            print()
+            for line in e.code.splitlines():
+                print(line)
         print()
         print("次の一手:")
         for line in _next_move(me, office, tree, server_here, troubles):
@@ -724,7 +754,9 @@ _ANSWERS = [
                      "実体が 32 bit のものしか無い。--probe の「版ごとの実体」を見る。"]),
     ("-2147312566", ["型ライブラリ／DLL の読み込みエラー（TYPE_E_CANTLOADLIBRARY）。",
                      "枝は足りているが、その先が今の bit からは読めない。",
-                     "32 bit の Python を使う（out-of-process なので OneNote は 64 bit のままでよい）。"]),
+                     "32 bit の Python を使う（out-of-process なので OneNote は 64 bit のままでよい）。",
+                     "オフラインなら持ち込むのは二つ ── 32 bit の Python の installer と、",
+                     "その版に合う pywin32 の wheel（docs の「32 bit の Python を入れる」）。"]),
     ("-2146959355", ["権限のずれ（0x80080005・サーバーの実行に失敗しました）。",
                      "管理者の窓からは、昇格していない OneNote に繋げない。普通の窓で叩く。",
                      "タスク スケジューラなら「最上位の特権で実行する」も外す。"]),
@@ -791,11 +823,15 @@ def _reg_lines(ver, lcid, want, path):
 
 
 def _no_books_hint(store):
-    """繋がったのに一冊も見えないとき。**ここがストア版の落とし穴。**"""
+    """繋がったのに一冊も見えないとき。**ここがストア版との境目。**
+
+    二つ入っていること自体は困らない。困るのは**どちらで開いているか**で、
+    こちらから見えるのはデスクトップ版に開いているものだけ。
+    """
     if store:
-        return ("ストア版（OneNote for Windows 10）も入っている。**COM を持つのは"
-                "デスクトップ版だけ**なので、写すノートブックはデスクトップ版の"
-                "ほうで開いておく。")
+        return ("こちらから見えるのは**デスクトップ版（365）に開いているノートブック"
+                "だけ**。ストア版（OneNote for Windows 10）は COM を持たないので、"
+                "そちらで開いていても写せない ── 写したいものは 365 側でも開いておく。")
     return "OneNote 上で、写したいノートブックを開く（閉じているものは見えない）。"
 
 
@@ -859,7 +895,7 @@ def connect_onenote():
     try:
         import win32com  # noqa
     except ImportError:
-        sys.exit("pywin32 が必要です:  pip install pywin32")
+        sys.exit("pywin32 が要ります。\n" + "\n".join("  " + l for l in wheel_hint()))
 
     # **`win32com.client` を読む前に。** 逃がすならここでしか逃がせない。
     gen_path, moved = _gen_py_somewhere_writable()
@@ -942,7 +978,9 @@ def connect_onenote():
   1. 管理者の窓で走らせている ── OneNote と権限を揃える（普通の窓で叩く）
   2. OneNote を先に起動していない ── 手で開き、写すノートブックを開いておく
   3. gen_py の作り置きが壊れている ── %LOCALAPPDATA%\\Temp\\gen_py を消す
-  4. ストア版の OneNote ── COM を持たないので、こちらでは手が出ない
+  4. ストア版にしか開いていない ── 見えるのはデスクトップ版（365）に開いたぶんだけ
+
+まず `--check` を。数行で言います（`--probe` は全部出しますが、長い）。
 
 `--probe` を付けると、この端末で何が起きているかを並べます。
 そのまま貼ってもらえれば、推し量らずに直せます。""" + arch_hint(), troubles)

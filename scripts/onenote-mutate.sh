@@ -294,12 +294,12 @@ mutate "一冊も無いときに黙る" "一冊も無いとき、ストア版の
         print("")'
 mutate "ストア版が無くてもその話をする" "ストア版が無ければ、その話はしない" \
     'if store:
-        return ("ストア版' 'if True:
-        return ("ストア版'
+        return ("こちらから見えるのは' 'if True:
+        return ("こちらから見えるのは'
 mutate "読めなくてもストア版の話をする" "読めないときは、黙る" \
     'if store:
-        print(f"ストア版も入っている: {store}")' 'if store is not False:
-        print(f"ストア版も入っている: {store}")'
+        # **入っていること自体は困らない。**' 'if store is not False:
+        # **入っていること自体は困らない。**'
 mutate "--check も鎖を取る" "鎖の中でも --check は走る" \
     'if args.probe or args.check or args.list or args.dry_run:' \
     'if args.probe or args.list or args.dry_run:'
@@ -339,6 +339,23 @@ mutate "どの番号でも道を出す" "ほかの番号では、道を出さな
     'if code == "-2147312566":' 'if code:'
 mutate "番号を持ち帰らない" "ほかの番号では、道を出さない" \
     'return needle, list(said)' 'return "-2147312566", list(said)'
+mutate "持ち込む wheel の版を言わない" "この Python の版に合う wheel を名指しする" \
+    'tag = f"cp{v[0]}{v[1]}"' 'tag = "cpXY"'
+mutate "bit を取り違える" "32 bit の wheel は win32" \
+    'arch = "win32" if me == 32 else "win_amd64"' 'arch = "win_amd64"'
+mutate "網を見に行かせる" "網を見に行かせない" \
+    '-m pip install --no-index --no-deps' '-m pip install'
+mutate "32 bit でも -32 を言わない" "32 bit なら -32 の呼び方で言う" \
+    'launcher = f"py -{v[0]}.{v[1]}" + ("-32" if arch == "win32" else "")' \
+    'launcher = f"py -{v[0]}.{v[1]}"'
+mutate "止めた言い分を飲み込む" "pywin32 が無いとき、持ち込むものを言う" \
+    'elif isinstance(e.code, str):' 'elif False:'
+mutate "両方あることを責める" "両方あることを、責めずに言う" \
+    'print(f"ストア版も入っている（365 側に開いたものだけが写せる）: {store}")' \
+    'print(f"ストア版も入っている: {store}")'
+mutate "どちらで開くかを言わない" "一冊も無いとき、どちらで開くかを言う" \
+    '"そちらで開いていても写せない ── 写したいものは 365 側でも開いておく。")' \
+    '"そちらで開いていても写せない。")'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'
