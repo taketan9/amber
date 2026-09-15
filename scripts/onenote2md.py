@@ -369,6 +369,83 @@ def forget():
     return 0
 
 
+# `.one` の形式。**二つある。**
+ONE_FORMATS = {
+    "109add3f-911b-49f5-a5d0-1791edc8aed8": ("公開仕様（MS-ONESTORE）", True),
+    "638de92f-a6d4-4bc1-9a36-b3fc2511a5b7": ("未公開の別形式（Office 365 由来）", False),
+}
+
+
+def one_format(path):
+    """`.one` の形式 GUID を読む ── **先頭 64 バイトだけ。**
+
+    中身は見ない。見るのは「どちらの形式か」だけで、それは 48 バイト目からの
+    16 バイトに書いてある。**会社のノートを外へ出さずに決められる。**
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(64)
+    except OSError as e:
+        return None, f"読めない（{e.strerror or e}）"
+    if len(head) < 64:
+        return None, "短すぎる"
+    import uuid
+    got = str(uuid.UUID(bytes_le=head[48:64])).lower()
+    name, _ok = ONE_FORMATS.get(got, ("知らない形式", False))
+    return got, name
+
+
+def peek(where):
+    """`.one` を探して、**どちらの形式かだけ**数える。
+
+    散らばっているものを一つずつ開いて道を打ち直すのは、人にやらせる仕事では
+    ない ── フォルダを一つ指せば、機械が歩いて数える。
+    """
+    root = Path(where)
+    if not root.exists():
+        print(f"ありません: {root}")
+        return 1
+    kinds = {".one": [], ".onetoc2": [], ".onepkg": []}
+    if root.is_file():
+        found = [root]
+    else:
+        found = [q for q in root.rglob("*")
+                 if q.is_file() and q.suffix.lower() in kinds]
+    for q in found:
+        kinds[q.suffix.lower()].append(q)
+    if not any(kinds.values()):
+        print(f"{root} の下に .one はありませんでした。")
+        print("ノートブックが SharePoint にしか無いのかもしれません（手元は別の形）。")
+        return 1
+
+    counts, sample = {}, {}
+    for q in kinds[".one"]:
+        got, name = one_format(q)
+        key = f"{(got or '?')[:8]}…（{name}）"
+        counts[key] = counts.get(key, 0) + 1
+        sample.setdefault(key, q)
+    print(f"歩いた: {root}")
+    for ext in (".one", ".onetoc2", ".onepkg"):
+        if kinds[ext]:
+            print(f"  {ext:10} {len(kinds[ext])} 本")
+    print()
+    for key, n in sorted(counts.items(), key=lambda kv: -kv[1]):
+        print(f"  {n:4} 本  {key}")
+        print(f"          例: {sample[key]}")
+    # **数えたら、意味を言う。** 数字だけ見せて人に判じさせない。
+    ok = sum(n for k, n in counts.items()
+             if any(k.startswith(g[:8]) for g, (_n, good) in ONE_FORMATS.items() if good))
+    total = sum(counts.values())
+    print()
+    if total and ok == total:
+        print("→ **ぜんぶ公開仕様。** ファイルから直に読む道（案C）が通ります。")
+    elif ok:
+        print(f"→ 公開仕様は {ok}/{total} 本。混ざっています。")
+    else:
+        print("→ **一本も公開仕様ではありません。** ファイルから直に読む道は重くなります。")
+    return 0
+
+
 def _office_platform():
     """Office がどちらの bit で入っているか（`x64` / `x86`）。読めなければ None。"""
     try:
@@ -2046,6 +2123,8 @@ def build_parser():
                     help="このセクションだけ写す。`ノートブック/グループ/セクション` の道に部分一致（複数指定可）")
     ap.add_argument("--skip", action="append", metavar="道",
                     help="このセクションは写さない。--only より強い（複数指定可）")
+    ap.add_argument("--peek", metavar="道",
+                    help=".one を探して、どちらの形式かだけ数える（中身は読まない）")
     ap.add_argument("--forget", action="store_true",
                     help="makepy の作り置きを捨てる（次に繋いだときに作り直す）")
     ap.add_argument("--check", action="store_true",
@@ -2103,7 +2182,7 @@ def main():
         fh = logging.FileHandler(args.log, encoding="utf-8")
         fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
         logging.getLogger().addHandler(fh)
-    if not (args.check or args.probe or args.forget):
+    if not (args.check or args.probe or args.forget or args.peek):
         # **読むだけの回に、見出しは要らない。** 画面の字をそのまま人が
         # 打ち直して渡すので、一行でも短いほうがいい。
         log.info("=== onenote2md 開始 %s", datetime.now().isoformat(timespec="seconds"))
@@ -2112,7 +2191,7 @@ def main():
     try:
         # **読むだけの回は、鎖を取らない。** 固まっている回を調べるための
         # `--probe` が、その固まっている回のせいで断られるのでは道具にならない。
-        if args.probe or args.check or args.forget or args.list or args.dry_run:
+        if args.probe or args.check or args.forget or args.peek or args.list or args.dry_run:
             return run(args, out_root)
         with only_one(out_root):
             return run(args, out_root)
@@ -2133,6 +2212,8 @@ def main():
 def run(args, out_root: Path):
     if args.probe:
         return probe()
+    if args.peek:
+        return peek(args.peek)
     if args.forget:
         return forget()
     if args.check:

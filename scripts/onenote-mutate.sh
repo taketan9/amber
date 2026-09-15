@@ -258,7 +258,7 @@ mutate "思わぬ落ち方を黙って捨てる" "落ちたわけが、記録に
 mutate "画面の字を cp932 のままにする" "cp932 に向けても、最後まで出る" \
     'stream.reconfigure(encoding="utf-8", errors="replace")' 'pass' 
 mutate "読むだけの回も鎖を取る" "鎖の中でも --probe は走る" \
-    'if args.probe or args.check or args.forget or args.list or args.dry_run:
+    'if args.probe or args.check or args.forget or args.peek or args.list or args.dry_run:
             return run(args, out_root)' \
     'if False:
             return run(args, out_root)'
@@ -301,7 +301,7 @@ mutate "読めなくてもストア版の話をする" "読めないときは、
         # **入っていること自体は困らない。**' 'if store is not False:
         # **入っていること自体は困らない。**'
 mutate "--check も鎖を取る" "鎖の中でも --check は走る" \
-    'if args.probe or args.check or args.forget or args.list or args.dry_run:' \
+    'if args.probe or args.check or args.forget or args.peek or args.list or args.dry_run:' \
     'if args.probe or args.forget or args.list or args.dry_run:'
 mutate "枝を版ごとに見ず、束ねる" "読みにいく版で判じる" \
     'arches = tree.get(ver)
@@ -483,13 +483,35 @@ mutate "無いときに探した先を言わない" "無ければ、探した先
     'print("作り置きはありませんでした（探した先: " + " / ".join(where) + "）")' \
     'print("作り置きはありませんでした")'
 mutate "--forget も鎖を取る" "鎖の中でも --forget は走る" \
-    'if args.probe or args.check or args.forget or args.list or args.dry_run:' \
-    'if args.probe or args.check or args.list or args.dry_run:'
+    'if args.probe or args.check or args.forget or args.peek or args.list or args.dry_run:' \
+    'if args.probe or args.check or args.peek or args.list or args.dry_run:'
 mutate "高いほうを先に勧める" "残っている手を、安いほうから並べる" \
     '"  1. 作り置きを捨ててもう一度（捨てても困らない・作り直される）:",
                 "     scripts" + chr(92) + me + " --forget",
                 "  2. Office の登録を焼き直す:"]' \
     '"  2. Office の登録を焼き直す:"]'
+mutate "下まで歩かない" "下まで歩いて数える" \
+    'found = [q for q in root.rglob("*")' 'found = [q for q in root.glob("*")'
+mutate "形式を見ずに数える" "形式ごとに分ける" \
+    'got = str(uuid.UUID(bytes_le=head[48:64])).lower()' 'got = "00000000-0000-0000-0000-000000000000"'
+mutate "目次まで形式に数える" "形式を数えるのは .one だけ" \
+    'for q in kinds[".one"]:' 'for q in found:'
+mutate "数だけ見せて、意味を言わない" "混ざっていればそう言う" \
+    'print(f"→ 公開仕様は {ok}/{total} 本。混ざっています。")' 'pass'
+mutate "ぜんぶ公開仕様でも言わない" "ぜんぶ公開仕様なら、通ると言う" \
+    'if total and ok == total:' 'if False:'
+mutate "一本も無いのに通ると言う" "一本も無ければ、重いと言う" \
+    'if total and ok == total:' 'if total:'
+mutate "道の例を出さない" "探す道の例を出す" \
+    'print(f"          例: {sample[key]}")' 'pass'
+mutate "無いときに SharePoint の線を黙る" "一つも無ければ、SharePoint の線を言う" \
+    'print("ノートブックが SharePoint にしか無いのかもしれません（手元は別の形）。")' 'pass'
+mutate "無いのに 0 を返す" "無い回は 0 を返さない" \
+    'print("ノートブックが SharePoint にしか無いのかもしれません（手元は別の形）。")
+        return 1' 'return 0'
+mutate "--peek も鎖を取る" "鎖の中でも --check は走る" \
+    'if args.probe or args.check or args.forget or args.peek or args.list or args.dry_run:' \
+    'if args.probe or args.forget or args.list or args.dry_run:'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

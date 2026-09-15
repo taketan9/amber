@@ -1553,6 +1553,70 @@ def t_forget(tmp):
         o2m.tempfile = keep
 
 
+def _one(at, fmt_guid):
+    """作り物の `.one`。**見るのは先頭 64 バイトだけ**なので、そこだけ本物にする。"""
+    import uuid
+    head = bytearray(64)
+    head[0:16] = uuid.UUID("7B5C52E4-D88C-4DA7-AEB1-5378D02996D3").bytes_le
+    head[48:64] = uuid.UUID(fmt_guid).bytes_le
+    at.write_bytes(bytes(head) + b"\x00" * 64)
+
+
+def t_peek(tmp):
+    print(".one の形式を数える（--peek）──")
+    import io, contextlib
+    d = tmp / "peek"
+    (d / "奥").mkdir(parents=True, exist_ok=True)
+    _one(d / "古い.one", "109ADD3F-911B-49F5-A5D0-1791EDC8AED8")
+    _one(d / "奥" / "365-1.one", "638DE92F-A6D4-4BC1-9A36-B3FC2511A5B7")
+    _one(d / "奥" / "365-2.one", "638DE92F-A6D4-4BC1-9A36-B3FC2511A5B7")
+    (d / "目次.onetoc2").write_bytes(b"\x00" * 64)
+    (d / "ただの.md").write_text("x", encoding="utf-8")
+
+    def run(where):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = o2m.peek(str(where))
+        return code, buf.getvalue()
+
+    code, out = run(d)
+    check("下まで歩いて数える", "3 本" in out and "2 本" in out and "1 本" in out, out)
+    check("形式ごとに分ける", "109add3f" in out and "638de92f" in out, out)
+    check("目次も数える", ".onetoc2" in out, out)
+    check("関係ないファイルは数えない", "ただの" not in out, out)
+    # **形式を数えるのは `.one` だけ。** 目次（`.onetoc2`）を混ぜると、
+    # 「何本が読めるか」の分母が狂う ── 判断に使う数字なので、狂うと痛い。
+    check("形式を数えるのは .one だけ", "1/3 本" in out and "目次" not in out, out)
+    # **数えたら、意味を言う。** 数字だけ見せて人に判じさせない。
+    check("混ざっていればそう言う", "混ざっています" in out, out)
+    check("探す道の例を出す", "365-1.one" in out or "365-2.one" in out, out)
+    check("見つかった回は 0 を返す", code == 0, code)
+
+    only = tmp / "peek-ok"
+    only.mkdir(exist_ok=True)
+    _one(only / "a.one", "109ADD3F-911B-49F5-A5D0-1791EDC8AED8")
+    _, out = run(only)
+    check("ぜんぶ公開仕様なら、通ると言う", "ぜんぶ公開仕様" in out, out)
+
+    bad = tmp / "peek-ng"
+    bad.mkdir(exist_ok=True)
+    _one(bad / "a.one", "638DE92F-A6D4-4BC1-9A36-B3FC2511A5B7")
+    _, out = run(bad)
+    check("一本も無ければ、重いと言う", "一本も公開仕様ではありません" in out, out)
+
+    empty = tmp / "peek-empty"
+    empty.mkdir(exist_ok=True)
+    code, out = run(empty)
+    # **無いときこそ、意味がある。** SharePoint にしか無い形かもしれない。
+    check("一つも無ければ、SharePoint の線を言う", "SharePoint" in out, out)
+    check("無い回は 0 を返さない", code != 0, code)
+    code, out = run(tmp / "そんな道は無い")
+    check("道が無ければ、そう言う", "ありません" in out and code != 0, out)
+    # 一本を名指ししてもよい。
+    _, out = run(d / "古い.one")
+    check("ファイル一本でも数える", "1 本" in out, out)
+
+
 def t_launcher(tmp):
     print("ランチャーに訊く（py -0p）──")
     # **本物で叩く。** この機械に `py` は無い ── 診断の道具は壊れた機械の
@@ -1658,7 +1722,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_structure, t_table, t_inline, t_created,
-                   t_log, t_cp932, t_two_views, t_forget, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
+                   t_log, t_cp932, t_two_views, t_peek, t_forget, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
                    t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):
             fn(tmp)
