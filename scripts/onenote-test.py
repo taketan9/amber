@@ -1157,7 +1157,8 @@ def t_check(tmp):
     import io, contextlib
     EXE = "C:" + chr(92) + "Office16" + chr(92) + "ONENOTE.EXE" + chr(92) + "3"
     keep = (o2m._office_platform, o2m._typelib_tree, o2m._local_server,
-            o2m._store_onenote, o2m._typelib_path, o2m.connect_onenote)
+            o2m._store_onenote, o2m._typelib_path, o2m.connect_onenote,
+            o2m._typelib_values, o2m._onenote_exe, o2m.os.path.exists)
 
     def blew(msg="駄目", troubles=()):
         def f():
@@ -1170,6 +1171,11 @@ def t_check(tmp):
         o2m._local_server = kw.get("server", lambda: (EXE, True))
         o2m._store_onenote = kw.get("store", lambda: False)
         o2m._typelib_path = kw.get("tl", lambda want: ("1.1", "0", EXE))
+        o2m._typelib_values = kw.get("vals", lambda: [
+            ("1.0", "win32", EXE), ("1.0", "win64", EXE),
+            ("1.1", "win32", EXE), ("1.1", "win64", EXE)])
+        o2m._onenote_exe = kw.get("exe", lambda: None)
+        o2m.os.path.exists = kw.get("exists", lambda p: True)
         o2m.connect_onenote = kw.get("connect", blew())
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -1213,13 +1219,43 @@ def t_check(tmp):
         # **読めないと言われた道を、その場で出す。** ここで `--probe` へ送ると、
         # 29 行を手で打ち直させることになる。
         check("読めない道を、その場で出す", "1.1 / win32 = " in out and "1.1 / win64 = " in out, out)
+        # **版はぜんぶ出す。** 一つだけ見せると、落ちた版と違うものを見せうる。
+        check("版をぜんぶ出す", "1.0 / win32 = " in out and "1.1 / win32 = " in out, out)
         # 同じ道を二つの枝が指していたら、片方は写し ── 足しても直らない形。
         check("同じ道を指していたら、写しだと言う",
               "同じ道" in out and "足しても直らない" in out, out)
         _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
-                     tl=lambda want: ("1.1", "0", EXE + ("64" if want == "win64" else "")),
+                     vals=lambda: [("1.1", "win32", EXE), ("1.1", "win64", EXE + "64")],
                      connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
         check("違う道を指していれば、写しだとは言わない", "同じ道" not in out, out)
+
+        # **一つも無いなら、話はそこで変わる。** bit でも枝でもなく、
+        # 登録が居ないものを指している。
+        # **枝は版ごとに二本ずつ。** 一本ずつだと「写しの話」が元から出ず、
+        # 守りを外しても何も変わらない ── 作り物が薄いと、検査は嘘をつく。
+        nowhere = "C:" + chr(92) + "無い.exe"
+        gone = [("1.0", "win32", nowhere), ("1.0", "win64", nowhere),
+                ("1.1", "win32", nowhere), ("1.1", "win64", nowhere)]
+        _, out = say(tree=lambda: {"1.1": {"win32"}}, vals=lambda: gone,
+                     exists=lambda p: False, exe=lambda: None,
+                     connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
+        check("一つも無ければ、bit の話ではないと言う",
+              "ファイルが一つも無い" in out and "bit の話でも枝の話でもない" in out, out)
+        # **在るか無いかが先。** bit の話を被せると、要らない道へ人を送る。
+        check("一つも無ければ、32 bit の話はしない", "32 bit の Python を使う" not in out, out)
+        check("一つも無ければ、写しの話もしない", "同じ道" not in out, out)
+        check("どこにも無ければ、入っていないと言う",
+              "入っていない" in out, out)
+        _, out = say(tree=lambda: {"1.1": {"win32"}}, vals=lambda: gone,
+                     exists=lambda p: False, exe=lambda: "D:" + chr(92) + "本物.exe",
+                     connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
+        check("よそに実体が在れば、そこを教えて修復へ導く",
+              "本物.exe" in out and "修復" in out, out)
+        # 一つでも在るなら、その話はしない。
+        _, out = say(tree=lambda: {"1.1": {"win32"}},
+                     vals=lambda: [("1.1", "win32", EXE)],
+                     connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
+        check("一つでも在れば、入っていない話はしない", "入っていない" not in out, out)
 
         # **入れたあとの一手を、こちらで言う。** 32 bit を入れた人は 64 bit の
         # 癖でもう一度同じことを叩く ── そこで同じ答えが返るのでは、入れた
@@ -1237,6 +1273,7 @@ def t_check(tmp):
             check("居なければ、その話はしない", "叩き直す" not in out, out)
         finally:
             o2m._other_pythons = keep_py
+
         # ほかの番号のときは、道の話はしない（要らないことを言わない）。
         _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
                      connect=blew(troubles=["  素の Dispatch: (-2146959355, '権限')"]))
@@ -1267,7 +1304,8 @@ def t_check(tmp):
         check("読めないときは、黙る", "ストア版" not in out, out)
     finally:
         (o2m._office_platform, o2m._typelib_tree, o2m._local_server,
-         o2m._store_onenote, o2m._typelib_path, o2m.connect_onenote) = keep
+         o2m._store_onenote, o2m._typelib_path, o2m.connect_onenote,
+         o2m._typelib_values, o2m._onenote_exe, o2m.os.path.exists) = keep
 
 
 def t_offline(tmp):

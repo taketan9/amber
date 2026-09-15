@@ -332,9 +332,9 @@ mutate "読む版に枝が有っても言い立てる" "読む版に枝が有れ
 mutate "読めない道を出さず probe へ送る" "読めない道を、その場で出す" \
     'if code == "-2147312566":' 'if False:'
 mutate "同じ道でも黙る" "同じ道を指していたら、写しだと言う" \
-    'if len(got) == 2 and got["win32"] == got["win64"]:' 'if False:'
+    'if len(by) == 2 and len(set(by.values())) == 1:' 'if False:'
 mutate "違う道でも「同じ」と言う" "違う道を指していれば、写しだとは言わない" \
-    'if len(got) == 2 and got["win32"] == got["win64"]:' 'if len(got) == 2:'
+    'if len(by) == 2 and len(set(by.values())) == 1:' 'if len(by) == 2:'
 mutate "どの番号でも道を出す" "ほかの番号では、道を出さない" \
     'if code == "-2147312566":' 'if code:'
 mutate "番号を持ち帰らない" "ほかの番号では、道を出さない" \
@@ -358,8 +358,8 @@ mutate "どちらで開くかを言わない" "一冊も無いとき、どちら
     '"そちらで開いていても写せない。")'
 mutate "入れたあとの一手を言わない" "32 bit が居れば、そちらで叩き直す一行を出す" \
     'tag = _thirty_two_bit_here()
-    if tag and sys.maxsize > 2 ** 32:' 'tag = None
-    if tag and sys.maxsize > 2 ** 32:'
+    if not (tag and sys.maxsize > 2 ** 32):' 'tag = None
+    if not (tag and sys.maxsize > 2 ** 32):'
 mutate "居なくても言い立てる" "居なければ、その話はしない" \
     'if tag.endswith("-32"):
             return tag' 'if True:
@@ -371,6 +371,28 @@ mutate "訊けないときに落ちる" "ランチャーが居なくても、落
     'except Exception:  # noqa
         return []' 'except ZeroDivisionError:
         return []'
+mutate "版を一つしか出さない" "版をぜんぶ出す" \
+    'for ver, arch, path in _typelib_values():' 'for ver, arch, path in _typelib_values()[:1]:'
+mutate "在るか無いかを見ない" "一つも無ければ、bit の話ではないと言う" \
+    'if _lib_files_gone():
+        return _lib_paths_note() + _gone_note()' 'if False:
+        return []'
+mutate "一つ無ければ全部無いと言う" "一つでも在れば、入っていない話はしない" \
+    'if real and os.path.exists(real):
+            return False
+    return True' 'if real and os.path.exists(real):
+            return True
+    return True'
+mutate "無いのに写しの話を被せる" "一つも無ければ、写しの話もしない" \
+    'if _lib_files_gone():
+        return out                      # 在処が無いなら、写しの話は要らない' 'if False:
+        return out'
+mutate "よそに在っても黙る" "よそに実体が在れば、そこを教えて修復へ導く" \
+    'found = _onenote_exe()
+    if found:' 'found = None
+    if found:'
+mutate "どこにも無いのに入っていると言う" "どこにも無ければ、入っていないと言う" \
+    '"**デスクトップ版 OneNote が入っていない**（ストア版は COM を持たない）。"' '""'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

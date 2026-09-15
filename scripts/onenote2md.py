@@ -388,6 +388,61 @@ def _typelib_path(want_arch):
     return None
 
 
+def _typelib_values():
+    """**版 × bit ごとの、指している道**（`[(版, bit, 道)]`）。
+
+    `_typelib_path` は最初に見つかった版を返す ── 診断に使うと、
+    **落ちたのは 1.1 なのに 1.0 の道を見せる**ことになる。
+    版が二つある端末では、それは別のものを見せているのと同じ
+    （依頼 580 で束ねて見て踏んだのと、同じ形）。
+    """
+    try:
+        import winreg
+    except ImportError:
+        return []
+    out = []
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "TypeLib" + chr(92) + ONENOTE_TYPELIB)
+        for ver in _reg_subkeys(key):
+            vkey = winreg.OpenKey(key, ver)
+            for lcid in _reg_subkeys(vkey):
+                lkey = winreg.OpenKey(vkey, lcid)
+                for arch in _reg_subkeys(lkey):
+                    try:
+                        out.append((ver, arch.lower(), winreg.QueryValue(lkey, arch)))
+                    except OSError:
+                        continue
+    except OSError:
+        return out
+    return out
+
+
+def _onenote_exe():
+    """**デスクトップ版 OneNote の実体が、どこに在るか。**
+
+    登録が指す先に無いなら、次に知りたいのは「入っていないのか、
+    別の場所から起きているのか」。Click-to-Run の入れ場所を訊いて、
+    ありそうなところを順に見る ── 見つからなければ何も言わない。
+    """
+    roots = []
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"SOFTWARE\Microsoft\Office\ClickToRun\Configuration")
+        got = winreg.QueryValueEx(key, "InstallationPath")[0]
+        if got:
+            roots.append(got)
+    except Exception:  # noqa
+        pass
+    roots += [r"C:\Program Files\Microsoft Office", r"C:\Program Files (x86)\Microsoft Office"]
+    for root in roots:
+        for mid in ("root" + chr(92) + "Office16", "Office16", "root" + chr(92) + "Office15"):
+            at = os.path.join(root, mid, "ONENOTE.EXE")
+            if os.path.exists(at):
+                return at
+    return None
+
+
 def _store_onenote():
     """**ストア版（OneNote for Windows 10）も入っているか。**
 
@@ -732,12 +787,16 @@ def _next_move(me, office, tree, server_here, troubles=()):
 
     並べると人は選べない。当てはまるものを、効きそうな順に一つ。
     """
+    # **在るか無いかが先。** ファイルが一つも無いなら、番号が何であれ
+    # 答えはそれ ── そこへ bit の話を被せると、要らない道へ人を送る。
+    if _lib_files_gone():
+        return _lib_paths_note() + _gone_note()
     code, said = _from_answer(troubles)
     if said:
         if code == "-2147312566":
             # **読めないと言われた道を、その場で出す。** ここで `--probe` へ
             # 送ると、29 行を手で打ち直させることになる。
-            said = said + _lib_paths_note()
+            said = said + _lib_paths_note() + _thirty_two_note()
         return said
     want = "win64" if me == 64 else "win32"
     # **見るのは、こちらが読みにいく版。** 1.1 → 1.0 の順に試すので、
@@ -814,38 +873,66 @@ def _from_answer(troubles):
 
 
 def _lib_paths_note():
-    """**読めないと言われた、その道を出す。**
+    """**枝が何を指していて、それが在るか。** 版はぜんぶ出す。
 
-    `TYPE_E_CANTLOADLIBRARY` は「登録は白なのに、指す先が読めない」。
-    そこまで来たら見るものは一つ ── **枝が何を指していて、それが在るか。**
-
-    **同じ道を二つの枝が指していたら、片方は写し。** 32 bit の実体しか
-    無いところに `Win64` を足すと、登録は白くなるが**読めるようにはならない**
-    （docs の「Win64 を足しても直らないことがある」）。その形をここで名指しする。
+    一つだけ見せると、落ちた版と違うものを見せうる（依頼 580 で束ねて
+    見て踏んだのと、同じ形）。
     """
     out = []
-    got = {}
-    for arch in ("win32", "win64"):
-        found = _typelib_path(arch)
-        if not found:
-            continue
-        ver, _lcid, path = found
-        got[arch] = path
+    seen = {}
+    for ver, arch, path in _typelib_values():
         real = _strip_resource_index(path)
-        out.append(f"{ver} / {arch} = {path}"
-                   f"  → {'ある' if real and os.path.exists(real) else '**無い**'}")
-    if len(got) == 2 and got["win32"] == got["win64"]:
-        out.append("win32 と win64 が**同じ道**を指している ── 片方は写し。")
-        out.append("その実体が 32 bit のものなら、64 bit からは読めない（足しても直らない）。")
-    # **入れたあとの一手を、こちらで言う。** 32 bit を入れた人は、64 bit の
-    # 癖でもう一度同じことを叩く ── そこで同じ答えが返るのでは、入れた
-    # 意味が伝わらない。
-    tag = _thirty_two_bit_here()
-    if tag and sys.maxsize > 2 ** 32:
-        here = os.path.basename(__file__)
-        out.append(f"**32 bit の Python がこの機械に居る（{tag}）。そちらで叩き直す:**")
-        out.append(f"  py -{tag} scripts" + chr(92) + here + " --check")
+        ok = bool(real and os.path.exists(real))
+        seen.setdefault(ver, {})[arch] = path
+        out.append(f"{ver} / {arch} = {path}  → {'ある' if ok else '**無い**'}")
+    if _lib_files_gone():
+        return out                      # 在処が無いなら、写しの話は要らない
+    for ver, by in seen.items():
+        if len(by) == 2 and len(set(by.values())) == 1:
+            out.append(f"{ver} は win32 と win64 が**同じ道**を指している ── 片方は写し。")
+            out.append("その実体が 32 bit のものなら、64 bit からは読めない（足しても直らない）。")
+            break
     return out
+
+
+def _lib_files_gone():
+    """**登録が指す先に、ファイルが一つも無いか。**
+
+    そうなら、話は bit でも枝でもない ── 登録が**居ないものを指している**。
+    枝が何本あっても、読める道は一本も無い。
+    """
+    got = _typelib_values()
+    if not got:
+        return False
+    for _ver, _arch, path in got:
+        real = _strip_resource_index(path)
+        if real and os.path.exists(real):
+            return False
+    return True
+
+
+def _gone_note():
+    """ファイルが一つも無いときに言うこと。入っていないのか、よそに在るのか。"""
+    out = ["**登録が指す先に、ファイルが一つも無い。** bit の話でも枝の話でもない。"]
+    found = _onenote_exe()
+    if found:
+        out.append(f"デスクトップ版の実体は、ここに在る: {found}")
+        out.append("登録のほうが古い ── Office の「修復」（オンライン修復）で焼き直す。")
+    else:
+        out.append("探した場所のどこにも ONENOTE.EXE が無い ──")
+        out.append("**デスクトップ版 OneNote が入っていない**（ストア版は COM を持たない）。")
+        out.append("Microsoft 365 から OneNote を入れる。")
+    return out
+
+
+def _thirty_two_note():
+    """32 bit が居るなら、そちらで叩き直す一行。"""
+    tag = _thirty_two_bit_here()
+    if not (tag and sys.maxsize > 2 ** 32):
+        return []
+    me = os.path.basename(__file__)
+    return [f"**32 bit の Python がこの機械に居る（{tag}）。そちらで叩き直す:**",
+            "  py -" + tag + " scripts" + chr(92) + me + " --check"]
 
 
 def _reg_lines(ver, lcid, want, path):
