@@ -1404,6 +1404,11 @@ def t_check(tmp):
             # **そこまで白いなら、こちらの手は尽きている。** そう言う。
             check("生きている版なら、落ちているのは向こう側だと言う",
                   "落ちているのは OneNote の側" in out, out)
+            # **残っている手を、安いほうから。** 作り置きを捨てるのはただ。
+            def at(word):
+                return out.index(word) if word in out else -1
+            check("残っている手を、安いほうから並べる",
+                  0 <= at("--forget") < at("クイック修復") < at("--probe"), out)
             # **網の要らないほうを先に言う。** あの端末は網に出られない（依頼 582）
             # ので、「オンライン修復」を先に勧めるのは、できないことを勧めること。
             check("網の要らない修復を先に言う",
@@ -1518,6 +1523,36 @@ def t_two_views(tmp):
         _sys.modules.pop("winreg", None)
 
 
+def t_forget(tmp):
+    print("作り置きを捨てる（--forget）──")
+    import io, contextlib, tempfile as tf
+    keep = o2m.tempfile
+    fake = tmp / "tmphome"
+    fake.mkdir(exist_ok=True)
+    at = fake / f"amber-gen_py-{sys.version_info[0]}.{sys.version_info[1]}"
+    at.mkdir(exist_ok=True)
+    (at / "なにか.py").write_text("x", encoding="utf-8")
+    try:
+        o2m.tempfile = type("t", (), {"gettempdir": staticmethod(lambda: str(fake))})()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = o2m.forget()
+        out = buf.getvalue()
+        # **人に二つのフォルダを行き来させない。** docs の言う場所と、
+        # こちらが逃がした先は別（依頼 567）── 機械が両方消す。
+        check("逃がした先の作り置きを捨てる", not at.exists(), list(fake.iterdir()))
+        check("捨てたものを言う", str(at) in out, out)
+        check("捨てた回は 0 を返す", code == 0, code)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            o2m.forget()
+        out = buf.getvalue()
+        check("無ければ、探した先を言う", "探した先" in out and str(fake) in out, out)
+        check("捨てても困らないと言う", "作り直されます" in out, out)
+    finally:
+        o2m.tempfile = keep
+
+
 def t_launcher(tmp):
     print("ランチャーに訊く（py -0p）──")
     # **本物で叩く。** この機械に `py` は無い ── 診断の道具は壊れた機械の
@@ -1604,6 +1639,11 @@ def t_readonly_no_lock(tmp):
                             "--out", str(at), "--check"],
                            capture_output=True, text=True, errors="replace")
         check("鎖の中でも --check は走る", "Python " in r.stdout, (r.stdout + r.stderr)[:160])
+        r = subprocess.run([sys.executable, str(ROOT / "onenote2md.py"),
+                            "--out", str(at), "--forget"],
+                           capture_output=True, text=True, errors="replace")
+        check("鎖の中でも --forget は走る", "作り直されます" in r.stdout,
+              (r.stdout + r.stderr)[:160])
         check("鎖の中でも --list は断られない", "前の回がまだ走っています" not in r.stderr,
               r.stderr[:160])
         # 書く回は、これまでどおり断る。
@@ -1618,7 +1658,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_structure, t_table, t_inline, t_created,
-                   t_log, t_cp932, t_two_views, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
+                   t_log, t_cp932, t_two_views, t_forget, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
                    t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):
             fn(tmp)

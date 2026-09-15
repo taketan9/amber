@@ -333,6 +333,42 @@ def _thirty_two_bit_here():
     return None
 
 
+def forget():
+    """makepy の作り置きを捨てる。
+
+    **「`%LOCALAPPDATA%\\Temp\\gen_py` を消す」と書いてあっても、そこに無い。**
+    こちらは書ける場所へ逃がしている（`%TEMP%\\amber-gen_py-3.x`・依頼 567）ので、
+    人に探させると二つのフォルダを行き来させることになる ── 機械が両方消す。
+
+    捨てても困らない。**次に繋いだとき、作り直される。**
+    """
+    import shutil
+    gone = []
+    where = [os.path.join(tempfile.gettempdir(),
+                          f"amber-gen_py-{sys.version_info[0]}.{sys.version_info[1]}")]
+    try:
+        import win32com
+        got = getattr(win32com, "__gen_path__", "")
+        if got:
+            where.append(got)
+    except ImportError:
+        pass
+    for at in where:
+        if not os.path.isdir(at):
+            continue
+        try:
+            shutil.rmtree(at)
+            gone.append(at)
+        except OSError as e:
+            print(f"消せない {at}: {e}")
+    for at in gone:
+        print(f"捨てた: {at}")
+    if not gone:
+        print("作り置きはありませんでした（探した先: " + " / ".join(where) + "）")
+    print("次に繋いだときに作り直されます。")
+    return 0
+
+
 def _office_platform():
     """Office がどちらの bit で入っているか（`x64` / `x86`）。読めなければ None。"""
     try:
@@ -1051,12 +1087,19 @@ def _interface_note(troubles):
         # **取り次ぎ側は生きている版を指している。それでも呼ぶと落ちる。**
         # こちら側でできることは、もう無い ── 名前を引くのも、呼びを受けるのも
         # OneNote がやる。そこが自分の型ライブラリを読めていない。
+        me = os.path.basename(__file__)
         out += [f"**その版（{ver}）は生きている ── 取り次ぎ側は壊れていない。**",
                 "こちらの束ね方で直せるところは、もう無い。",
                 "名前を引くのも呼びを受けるのも OneNote 自身なので、",
                 "**落ちているのは OneNote の側** ── 自分の型ライブラリを読めていない。",
-                "Office の登録を焼き直す:"]
-        out.extend("  " + l for l in _repair_lines())
+                "残っている手を、安いほうから:",
+                "  1. 作り置きを捨ててもう一度（捨てても困らない・作り直される）:",
+                "     scripts" + chr(92) + me + " --forget",
+                "  2. Office の登録を焼き直す:"]
+        out.extend("     " + l for l in _repair_lines())
+        out += ["  3. それでも同じなら `--probe`（29 行・写真で構わない）── ",
+                "     そこにだけ出るものが三つある: 版ごとの実体、**生きている相手が",
+                "     名乗る型ライブラリ**、そして呼び方を四通り試した結果。"]
     return out
 
 
@@ -2003,6 +2046,8 @@ def build_parser():
                     help="このセクションだけ写す。`ノートブック/グループ/セクション` の道に部分一致（複数指定可）")
     ap.add_argument("--skip", action="append", metavar="道",
                     help="このセクションは写さない。--only より強い（複数指定可）")
+    ap.add_argument("--forget", action="store_true",
+                    help="makepy の作り置きを捨てる（次に繋いだときに作り直す）")
     ap.add_argument("--check", action="store_true",
                     help="繋がるかを数行で言う（繋がらないなら、次の一手も）。手で打ち直して渡せる長さ")
     ap.add_argument("--probe", action="store_true",
@@ -2058,7 +2103,7 @@ def main():
         fh = logging.FileHandler(args.log, encoding="utf-8")
         fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
         logging.getLogger().addHandler(fh)
-    if not (args.check or args.probe):
+    if not (args.check or args.probe or args.forget):
         # **読むだけの回に、見出しは要らない。** 画面の字をそのまま人が
         # 打ち直して渡すので、一行でも短いほうがいい。
         log.info("=== onenote2md 開始 %s", datetime.now().isoformat(timespec="seconds"))
@@ -2067,7 +2112,7 @@ def main():
     try:
         # **読むだけの回は、鎖を取らない。** 固まっている回を調べるための
         # `--probe` が、その固まっている回のせいで断られるのでは道具にならない。
-        if args.probe or args.check or args.list or args.dry_run:
+        if args.probe or args.check or args.forget or args.list or args.dry_run:
             return run(args, out_root)
         with only_one(out_root):
             return run(args, out_root)
@@ -2088,6 +2133,8 @@ def main():
 def run(args, out_root: Path):
     if args.probe:
         return probe()
+    if args.forget:
+        return forget()
     if args.check:
         return check()
     if not args.out:

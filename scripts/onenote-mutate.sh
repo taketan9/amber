@@ -258,7 +258,7 @@ mutate "思わぬ落ち方を黙って捨てる" "落ちたわけが、記録に
 mutate "画面の字を cp932 のままにする" "cp932 に向けても、最後まで出る" \
     'stream.reconfigure(encoding="utf-8", errors="replace")' 'pass' 
 mutate "読むだけの回も鎖を取る" "鎖の中でも --probe は走る" \
-    'if args.probe or args.check or args.list or args.dry_run:
+    'if args.probe or args.check or args.forget or args.list or args.dry_run:
             return run(args, out_root)' \
     'if False:
             return run(args, out_root)'
@@ -301,8 +301,8 @@ mutate "読めなくてもストア版の話をする" "読めないときは、
         # **入っていること自体は困らない。**' 'if store is not False:
         # **入っていること自体は困らない。**'
 mutate "--check も鎖を取る" "鎖の中でも --check は走る" \
-    'if args.probe or args.check or args.list or args.dry_run:' \
-    'if args.probe or args.list or args.dry_run:'
+    'if args.probe or args.check or args.forget or args.list or args.dry_run:' \
+    'if args.probe or args.forget or args.list or args.dry_run:'
 mutate "枝を版ごとに見ず、束ねる" "読みにいく版で判じる" \
     'arches = tree.get(ver)
         if arches is None:
@@ -474,6 +474,22 @@ mutate "網の要る修復を先に勧める" "網の要らない修復を先に
 mutate "網が要らないことを言わない" "クイック修復は網が要らないと言う" \
     '"**クイック修復は網が要らない**（手元のファイルから登録を焼き直す）。",' \
     '"クイック修復もある。",'
+mutate "逃がした先を捨てない" "逃がした先の作り置きを捨てる" \
+    'where = [os.path.join(tempfile.gettempdir(),' 'where = [] or [os.path.join("/nowhere",'
+mutate "捨てたものを言わない" "捨てたものを言う" \
+    'for at in gone:
+        print(f"捨てた: {at}")' 'pass'
+mutate "無いときに探した先を言わない" "無ければ、探した先を言う" \
+    'print("作り置きはありませんでした（探した先: " + " / ".join(where) + "）")' \
+    'print("作り置きはありませんでした")'
+mutate "--forget も鎖を取る" "鎖の中でも --forget は走る" \
+    'if args.probe or args.check or args.forget or args.list or args.dry_run:' \
+    'if args.probe or args.check or args.list or args.dry_run:'
+mutate "高いほうを先に勧める" "残っている手を、安いほうから並べる" \
+    '"  1. 作り置きを捨ててもう一度（捨てても困らない・作り直される）:",
+                "     scripts" + chr(92) + me + " --forget",
+                "  2. Office の登録を焼き直す:"]' \
+    '"  2. Office の登録を焼き直す:"]'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

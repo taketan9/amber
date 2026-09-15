@@ -280,6 +280,16 @@ py -3 scripts\onenote2md.py --probe > "%USERPROFILE%\Desktop\probe.txt" 2>&1
 cp932 に無いので、失敗した行を書こうとしてそこで止まっていた。**いちばん
 知りたい行で。**）
 
+### 作り置きを捨てる
+
+```bat
+py -3-32 scripts\onenote2md.py --forget
+```
+
+**捨てても困らない**（次に繋いだときに作り直される）。docs の言う
+`%LOCALAPPDATA%\Temp\gen_py` と、こちらが逃がした先（`%TEMP%\amber-gen_py-3.x`・
+依頼 567）は別なので、**人に二つのフォルダを行き来させず、機械が両方消す。**
+
 ### Office の登録を焼き直す ── **網の要らないほうから**
 
 設定 →「アプリ」→ Microsoft 365 →「変更」→ **クイック修復**。
