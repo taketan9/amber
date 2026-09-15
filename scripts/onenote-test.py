@@ -1689,6 +1689,74 @@ def t_peek(tmp):
     check("ファイル一本でも数える", "1 本" in out, out)
 
 
+def t_from_files(tmp):
+    print("書き出したファイルから写す ──")
+    import io, contextlib, importlib.util as iu
+    spec = iu.spec_from_file_location("onestore", ROOT / "onestore.py")
+    ost = iu.module_from_spec(spec)
+    spec.loader.exec_module(ost)
+    sys.modules["onestore"] = ost
+
+    src = tmp / "書き出し"
+    src.mkdir(exist_ok=True)
+    (src / "議事録.one").write_bytes(b"\x00" * 8)     # 中身は偽物に読ませる
+    out = tmp / "fromfiles"
+    keep = ost.pages
+    try:
+        # **同じ題が二枚。** 上書きすると字が消えるので、ずらす。
+        ost.pages = lambda d: [
+            {"title": "9月の定例", "level": 1,
+             "lines": [{"text": "決めたこと", "indent": 0},
+                       {"text": "宿題", "indent": 1}]},
+            {"title": "9月の定例", "level": 1, "lines": [{"text": "別の一枚", "indent": 0}]},
+            {"title": "補足", "level": 2, "lines": [{"text": "サブページ", "indent": 0}]},
+        ]
+        args = _parse(["--out", str(out), str(src)])
+        code = o2m.run(args, out)
+        check("エラー無しなら 0 を返す", code == 0, code)
+        got = sorted(str(q.relative_to(out)) for q in out.rglob("*.md"))
+        check("セクション＝フォルダ、ページ＝.md",
+              "書き出し/議事録/9月の定例.md" in got, got)
+        check("同じ題は上書きせず、ずらす",
+              "書き出し/議事録/9月の定例 (2).md" in got, got)
+        # **サブページは親ページ名のフォルダ**（COM の道と同じ形）。
+        check("サブページは親の下へ",
+              "書き出し/議事録/9月の定例/補足.md" in got
+              or "書き出し/議事録/9月の定例 (2)/補足.md" in got, got)
+        body = (out / "書き出し" / "議事録" / "9月の定例.md").read_bytes()
+        check("改行は LF", b"\r\n" not in body)
+        text = body.decode("utf-8")
+        check("前書きに題", 'title: "9月の定例"' in text, text[:120])
+        check("本文が入る", "決めたこと" in text and "宿題" in text, text)
+        # 絞りも効く（COM の道と同じ `--only`）。
+        out2 = tmp / "fromfiles2"
+        code = o2m.run(_parse(["--out", str(out2), str(src), "--only", "そんな名前は無い"]), out2)
+        check("--only で外れたら書かない", not list(out2.rglob("*.md")) if out2.exists() else True)
+        # 読めないファイルは、落ちずに数える。
+        ost.pages = lambda d: (_ for _ in ()).throw(ValueError("壊れている"))
+        out3 = tmp / "fromfiles3"
+        # **落ちるのも「黙る」の一種**（依頼 569）── 受け止めて NG にする。
+        try:
+            code = o2m.run(_parse(["--out", str(out3), str(src)]), out3)
+        except Exception as e:  # noqa
+            code = f"落ちた: {type(e).__name__}"
+        check("読めないファイルは、落ちずにエラーと数える", code == 1, code)
+
+        # **いまの版を選ぶ規則**は、偽物を挟まずに直に試す ── `pages` を丸ごと
+        # 差し替えていると、そこが壊れても走査は気づかない。
+        check("いまの版は、最後の改訂",
+              ost.current({1: ["古い"], 2: ["途中"], 3: ["いま"]}) == ["いま"],
+              ost.current({1: ["古い"], 3: ["いま"]}))
+        # 落ちるのも「黙る」の一種 ── 受け止めて NG にする（依頼 569）。
+        try:
+            empty = ost.current({})
+        except Exception as e:  # noqa
+            empty = f"落ちた: {type(e).__name__}"
+        check("改訂が無ければ、空", empty == [], empty)
+    finally:
+        ost.pages = keep
+
+
 def t_launcher(tmp):
     print("ランチャーに訊く（py -0p）──")
     # **本物で叩く。** この機械に `py` は無い ── 診断の道具は壊れた機械の
@@ -1794,7 +1862,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_amber_shape, t_structure, t_table, t_inline, t_created,
-                   t_log, t_cp932, t_two_views, t_peek, t_forget, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
+                   t_log, t_cp932, t_two_views, t_from_files, t_peek, t_forget, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
                    t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):
             fn(tmp)

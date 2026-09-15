@@ -9,11 +9,14 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-TARGET=scripts/onenote2md.py
-keep=$(mktemp)
-cp "$TARGET" "$keep"
-restore() { cp "$keep" "$TARGET"; }
-trap 'restore; rm -f "$keep"' EXIT
+# **壊す先は二枚ある。** 本体と、`.one` を読む一枚（依頼 594）。
+# どちらに当たるかは `mutate` が自分で探す ── 呼ぶ側に書かせると、
+# 足した日にどちらかだけ壊し忘れる。
+TARGETS=(scripts/onenote2md.py scripts/onestore.py)
+keep=$(mktemp -d)
+for t in "${TARGETS[@]}"; do cp "$t" "$keep/$(basename "$t")"; done
+restore() { for t in "${TARGETS[@]}"; do cp "$keep/$(basename "$t")" "$t"; done; }
+trap 'restore; rm -rf "$keep"' EXIT
 
 restore
 if ! python3 scripts/onenote-test.py >/dev/null 2>&1; then
@@ -31,9 +34,11 @@ mutate() {  # 名前 / 鳴ってほしい検査 / 何を / 何に
     # どれか一行が元からあれば通る ── 一文字も置換されていないのに
     # 「壊した」と言い、続く「鳴らなかった」が検査のせいに見えた。
     local was
-    was=$(shasum "$TARGET" | cut -d" " -f1)
-    FROM="$from" TO="$to" perl -0pi -e 's/\Q$ENV{FROM}\E/$ENV{TO}/g' "$TARGET"
-    if [ "$was" = "$(shasum "$TARGET" | cut -d" " -f1)" ]; then
+    was=$(shasum "${TARGETS[@]}" | cut -d" " -f1 | tr -d "\n")
+    for t in "${TARGETS[@]}"; do
+        FROM="$from" TO="$to" perl -0pi -e 's/\Q$ENV{FROM}\E/$ENV{TO}/g' "$t"
+    done
+    if [ "$was" = "$(shasum "${TARGETS[@]}" | cut -d" " -f1 | tr -d "\n")" ]; then
         echo "★置換できず $name ── その文字列がそのままでは無い"
         silent=$((silent + 1))
         return
@@ -539,6 +544,26 @@ mutate "古い画像で番号の形を見ない" "名前が似ているだけの
     'if not ours.match(old.name):
                     continue' 'if False:
                     continue'
+mutate "同じ題を上書きする" "同じ題は上書きせず、ずらす" \
+    'if md_path.resolve() not in written:
+                    break' 'break'
+mutate "サブページを親の下に置かない" "サブページは親の下へ" \
+    'parent = levels.get(level - 1, sec_dir) if level > 1 else sec_dir' 'parent = sec_dir'
+mutate "ファイルの道でも絞りを見ない" "--only で外れたら書かない" \
+    'if not chosen(f"{nb}/{sec}", args):' 'if False:'
+mutate "読めないファイルで落ちる" "読めないファイルは、落ちずにエラーと数える" \
+    'except Exception as e:  # noqa
+            log.error("読めない %s: %s", at.name, e)' 'except ZeroDivisionError as e:
+            log.error("読めない %s: %s", at.name, e)'
+mutate "ファイルの道で CRLF にする" "改行は LF" \
+    'with open(md_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write("\n".join(head)' \
+    'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:
+                f.write("\n".join(head)'
+mutate "最後の改訂でなく最初を採る" "いまの版は、最後の改訂" \
+    'return revs[max(revs)] if revs else []' 'return revs[min(revs)] if revs else []'
+mutate "改訂が無いときに落ちる" "改訂が無ければ、空" \
+    'return revs[max(revs)] if revs else []' 'return revs[max(revs)]'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

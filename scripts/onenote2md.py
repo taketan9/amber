@@ -422,6 +422,100 @@ def unpack_onepkg(at, into):
     return into, None
 
 
+def from_files(where, args, out_root):
+    """**書き出したファイルから写す。** COM を通らない道（依頼 594）。
+
+    受け取るのは `.onepkg`（入れ物）か `.one`（セクション一本）か、その両方が
+    入ったフォルダ。`.onepkg` は `expand` で開いてから中の `.one` を読む。
+
+    フォルダの形は COM の道と同じ ── **セクション＝フォルダ、ページ＝`.md`、
+    画像はノートの隣の `attachments/`**。下流（前書き・差分・`--prune`）も同じ。
+    """
+    import onestore
+
+    root = Path(where)
+    if not root.exists():
+        sys.exit(f"ありません: {root}")
+    kinds = (".one", ".onepkg")
+    if root.is_file():
+        found = [root]
+    elif root.is_dir():
+        found = sorted(q for q in root.rglob("*")
+                       if q.is_file() and q.suffix.lower() in kinds)
+    else:
+        found = []
+    sections = []
+    for q in found:
+        if q.suffix.lower() == ".onepkg":
+            into = Path(tempfile.gettempdir()) / f"amber-onepkg-{os.getpid()}-{q.stem[:20]}"
+            at, why = unpack_onepkg(q, into)
+            if at is None:
+                log.error("開けない %s: %s", q.name, why)
+                continue
+            sections += [(q.stem, r) for r in sorted(Path(at).rglob("*.one"))]
+        else:
+            sections.append((q.parent.name, q))
+    if not sections:
+        sys.exit(f"{root} の下に .one がありません。")
+
+    stats = {"pages": 0, "written": 0, "skipped_pages": 0, "images": 0, "errors": 0,
+             "skipped_sections": 0, "filtered_sections": 0, "pruned": 0, "pruned_images": 0}
+    written: set = set()
+    for book, at in sections:
+        nb, sec = sanitize(book), sanitize(at.stem)
+        if not chosen(f"{nb}/{sec}", args):
+            stats["filtered_sections"] += 1
+            log.debug("絞りで外した: %s/%s", nb, sec)
+            continue
+        try:
+            got = onestore.pages(at.read_bytes())
+        except Exception as e:  # noqa
+            log.error("読めない %s: %s", at.name, e)
+            stats["errors"] += 1
+            continue
+        log.info("セクション: %s / %s（%d ページ）", nb, sec, len(got))
+        sec_dir = out_root / nb / sec
+        levels = {1: sec_dir}
+        for pg in got:
+            stats["pages"] += 1
+            title = (pg["title"] or "").strip() or "Untitled"
+            level = max(1, pg["level"])
+            parent = levels.get(level - 1, sec_dir) if level > 1 else sec_dir
+            # **同じ題のページが二枚あると、上書きで字が消える。**
+            # COM の道の `place_for` と同じ考えで、`名前 (2).md` にずらす。
+            base = sanitize(title)
+            n = 1
+            while True:
+                md_path = shorten(parent / (f"{base}.md" if n == 1 else f"{base} ({n}).md"))
+                if md_path.resolve() not in written:
+                    break
+                n += 1
+            levels[level] = parent / md_path.stem
+            for k in [k for k in levels if k > level]:
+                del levels[k]
+            if args.dry_run:
+                print("  " * level + f"- {title}")
+                continue
+            lines = []
+            for ln in pg["lines"]:
+                body = ln["text"].strip()
+                if not body:
+                    continue
+                lines.append("  " * min(ln["indent"], 6) + body if ln["indent"] else body)
+            md_path.parent.mkdir(parents=True, exist_ok=True)
+            head = ["---", f'title: "{title.replace(chr(34), chr(39))}"',
+                    f"created: {datetime.now().strftime('%Y-%m-%d')}",
+                    f'onenote_path: "{nb} / {sec}"', "---", ""]
+            with open(md_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write("\n".join(head) + f"# {title}\n\n" + "\n\n".join(lines) + "\n")
+            written.add(md_path.resolve())
+            stats["written"] += 1
+    log.info("完了: ページ %d（書いた %d）/ セクション %d / 絞りで外した %d / エラー %d",
+             stats["pages"], stats["written"], len(sections),
+             stats["filtered_sections"], stats["errors"])
+    return 1 if stats["errors"] else 0
+
+
 def peek(where):
     """`.one` を探して、**どちらの形式かだけ**数える。
 
@@ -2214,6 +2308,9 @@ def build_parser():
                     help="このセクションだけ写す。`ノートブック/グループ/セクション` の道に部分一致（複数指定可）")
     ap.add_argument("--skip", action="append", metavar="道",
                     help="このセクションは写さない。--only より強い（複数指定可）")
+    ap.add_argument("files", nargs="?", metavar="ファイル",
+                    help=".onepkg / .one / それが入ったフォルダ。"
+                         "**COM を通らずに写す**（書き出したものを読む）")
     ap.add_argument("--peek", metavar="道",
                     help=".one を探して、どちらの形式かだけ数える（中身は読まない）")
     ap.add_argument("--forget", action="store_true",
@@ -2309,6 +2406,10 @@ def run(args, out_root: Path):
         return forget()
     if args.check:
         return check()
+    if args.files:
+        if not args.out:
+            sys.exit("--out が要ります（出力先フォルダ）。")
+        return from_files(args.files, args, out_root)
     if not args.out:
         sys.exit("--out が要ります（出力先フォルダ）。")
     # 繋ぐときに一度は訊いている（そうでないと「繋がった」と言えない）ので、
