@@ -1691,11 +1691,36 @@ def t_peek(tmp):
 
 def t_from_files(tmp):
     print("書き出したファイルから写す ──")
-    import io, contextlib, importlib.util as iu
-    spec = iu.spec_from_file_location("onestore", ROOT / "onestore.py")
-    ost = iu.module_from_spec(spec)
-    spec.loader.exec_module(ost)
-    sys.modules["onestore"] = ost
+    # **走らせる場所を変えても読めるか。** `import onestore` に頼ると、
+    # `sys.path` に `scripts/` が入らない場所で落ちる。
+    import subprocess
+    here = tmp / "よそ"
+    here.mkdir(exist_ok=True)
+    r = subprocess.run([sys.executable, str(ROOT / "onenote2md.py"),
+                        "--out", str(tmp / "どこか"), str(here)],
+                       capture_output=True, text=True, cwd=str(here), errors="replace")
+    # **読み込みを抜けたことを見る。** 「落ちなかった」ではなく「先へ進んだ」 ──
+    # 空のフォルダなので、抜けていれば「.one がありません」まで行く。
+    # 字の無いことだけ見ていた版は、別の落ち方（道が違う・ファイルが無い）を
+    # 素通りさせた。
+    check("よその場所から走らせても、隣の一枚を読める",
+          "の下に .one がありません" in (r.stdout + r.stderr), (r.stdout + r.stderr)[-200:])
+    # **隣に居ないときは、そう言う。** 取り込みが半端なまま走らせた人に
+    # `FileNotFoundError` の追跡を見せても、何をすればいいか分からない。
+    alone = tmp / "ひとりぼっち"
+    alone.mkdir(exist_ok=True)
+    shutil.copy(ROOT / "onenote2md.py", alone / "onenote2md.py")
+    r = subprocess.run([sys.executable, str(alone / "onenote2md.py"),
+                        "--out", str(tmp / "どこか2"), str(here)],
+                       capture_output=True, text=True, errors="replace")
+    both = r.stdout + r.stderr
+    check("隣に居なければ、そう言う（追跡ではなく）",
+          "onestore.py がありません" in both and "Traceback" not in both, both[-200:])
+    import io, contextlib
+    # **本物の読み込みを通す。** `sys.modules` に偽物を差し込んでいた版は、
+    # 本体が隣のファイルをどう読むかを一度も試していなかった ── 現場で
+    # `ModuleNotFoundError` になって初めて分かった（偽物が本物より甘い、六度目）。
+    ost = o2m.load_onestore()
 
     src = tmp / "書き出し"
     src.mkdir(exist_ok=True)

@@ -564,6 +564,11 @@ mutate "最後の改訂でなく最初を採る" "いまの版は、最後の改
     'return revs[max(revs)] if revs else []' 'return revs[min(revs)] if revs else []'
 mutate "改訂が無いときに落ちる" "改訂が無ければ、空" \
     'return revs[max(revs)] if revs else []' 'return revs[max(revs)]'
+mutate "隣の一枚を import で頼る" "よその場所から走らせても、隣の一枚を読める" \
+    'at = Path(__file__).resolve().parent / "onestore.py"' 'at = Path("onestore.py")'
+mutate "無いときに黙って進む" "隣に居なければ、そう言う（追跡ではなく）" \
+    'if not at.is_file():
+        sys.exit(f"{at} がありません（`git pull` は済んでいますか）。")' 'pass'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

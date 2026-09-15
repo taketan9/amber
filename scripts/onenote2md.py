@@ -422,6 +422,28 @@ def unpack_onepkg(at, into):
     return into, None
 
 
+def load_onestore():
+    """隣の `onestore.py` を読む。**道を名指しする。**
+
+    `import onestore` に頼ると、**走らせる場所によって通らない**（`sys.path` に
+    `scripts/` が入るとは限らない）── 現場で `ModuleNotFoundError` になった。
+    走査が偽物を `sys.modules` に差し込んでいたので、**本物の読み込みを一度も
+    試していなかった**のが見逃した理由。偽物が本物より甘いと検査は嘘をつく。
+    """
+    import importlib.util
+    got = sys.modules.get("onestore")
+    if got is not None:
+        return got                       # 一度読んだものを使い回す
+    at = Path(__file__).resolve().parent / "onestore.py"
+    if not at.is_file():
+        sys.exit(f"{at} がありません（`git pull` は済んでいますか）。")
+    spec = importlib.util.spec_from_file_location("onestore", at)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["onestore"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def from_files(where, args, out_root):
     """**書き出したファイルから写す。** COM を通らない道（依頼 594）。
 
@@ -431,7 +453,7 @@ def from_files(where, args, out_root):
     フォルダの形は COM の道と同じ ── **セクション＝フォルダ、ページ＝`.md`、
     画像はノートの隣の `attachments/`**。下流（前書き・差分・`--prune`）も同じ。
     """
-    import onestore
+    onestore = load_onestore()
 
     root = Path(where)
     if not root.exists():
