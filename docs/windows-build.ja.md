@@ -13,6 +13,28 @@
 
 git も gh も Node も要らない。ノートは「ドキュメント\amber」に置かれる。
 
+### 二枚ある ── どちらを落とすか
+
+| 資材 | 中身 |
+|---|---|
+| `amber-win-x64-<版>.zip` | ふつうの一枚 |
+| **`amber-win-x64-office-<版>.zip`** | **会社向け** ── 外へ運ぶものが入っていない |
+
+**会社向けの一枚には、同期が無い**（依頼 602）。Google Drive の同期、
+iCal の購読（＝カレンダーの同期）、グループでの共有 ── 献立にも
+⌘⇧P にも出ないし、**訊きにも行かない**（サインインの有無を訊くこと自体が、
+外の鍵入れを開けにいくこと）。
+
+**カレンダーの面と、チームの CSV は残っている** ── あれは会社の Outlook が
+書き出した一枚を読むだけで、外へは何も出さない（[team-csv.ja.md](team-csv.ja.md)）。
+
+中身の違いは `gui\edition.json` 一枚だけ。手元で見え方を比べるなら、
+環境変数のほうが早い:
+
+```bash
+AMBER_EDITION=office ./gui/run.sh
+```
+
 **この一枚は GitHub の上で組んでいる** ── `gui/vendor/` が git に入って
 いないのと、exe の絵が Windows でしか焼けないため。手元で組むのと同じ
 `scripts/pack.js` を通っている。
@@ -67,6 +89,10 @@ node scripts\pack.js --out dist --platform win32 ^
 ```
 
 `dist\amber-win-x64\amber.exe` ができる。`--zip` を付けると配れる一枚も出る。
+
+**会社向けの一枚を組むなら** `--edition office` を足す ── 行き先が
+`dist\amber-win-x64-office\` に変わる（名前を分けないと、どちらを配って
+いるのか手元で見分けられない）。
 
 **cian と同じ綴りで打てる。** `--platform win32` は `--win` と、`--engine` は
 `--server` と同じものを指す ── 手が憶えているほうが正しい。

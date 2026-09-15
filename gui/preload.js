@@ -83,6 +83,10 @@ contextBridge.exposeInMainWorld('amber', {
     /// まるごと消える（実際に消えた）。
     appVersion: () => ipcRenderer.invoke('amber:appVersion'),
 
+    /// どの版か（`'full'` / `'office'`）。会社向けの一枚では、外の網に
+    /// 触るもの（同期・カレンダー）を画面ごと出さない。
+    edition: () => ipcRenderer.invoke('amber:edition'),
+
     /// ノートのフォルダを見張ってもらう／動いたら教えてもらう。
     watch: (root) => ipcRenderer.invoke('amber:watch', root),
     /// 見本のノートを、言われた場所へ置いてもらう。

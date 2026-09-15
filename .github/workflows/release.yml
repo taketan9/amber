@@ -111,6 +111,7 @@ jobs:
         run: |
           node scripts/win-test.js
           node scripts/diagram-test.js
+          node scripts/office-test.js
 
       # **「表示」の面が、打っても字を失わないか。**
       #
@@ -132,6 +133,7 @@ jobs:
           node scripts/agree-test.js
           node scripts/paint-test.js
           node scripts/words-test.js
+          node scripts/office-test.js
 
       # **Windows でも core の試験を回す。**
       #
@@ -384,6 +386,48 @@ jobs:
         with:
           name: amber-win-x64.zip
           path: dist/amber-win-x64-*.zip
+          if-no-files-found: error
+
+      # **会社向けの一枚**（依頼 602・本人「会社でビルドする際には、同期に
+      # 関する機能や表示はすべてクローズにしたい」「Asset にアップしてもらう
+      # 資材には見えないまたは機能を削ぎ落としたものにしてほしい」）。
+      #
+      # 中身は上と同じ ── 違うのは `gui/edition.json` が一枚入ることだけで、
+      # 画面がそれを見て、外の網に触るもの（Google Drive の同期・iCal の
+      # 購読・グループ共有）を出さないし走らせない。
+      #
+      # **名前もフォルダも分ける。** リリースの資材は一つの籠に平らに
+      # 並ぶので、同じ名前なら片方が片方を黙って上書きする（落とした人には
+      # どちらを手にしたのか分からない）。`pack.js` が名前に `-office` を
+      # 入れ、ここは別のフォルダへ出す ── 上の `amber-win-x64-*.zip` が
+      # 会社向けのほうまで掴まないように。
+      - name: 会社向けにもう一枚
+        run: >
+          node scripts/pack.js --out dist-office --platform win32
+          --edition office
+          --electron electron-dist
+          --engine engine/amber-server-win-x64.exe
+          --rcedit rcedit-x64.exe
+          --zip
+
+      - name: 会社向けの一枚に、版の札が入ったか
+        shell: pwsh
+        run: |
+          $at = 'dist-office/amber-win-x64-office/resources/app/gui/edition.json'
+          if (-not (Test-Path $at)) { throw "版の札がありません: $at" }
+          $got = (Get-Content $at | ConvertFrom-Json).edition
+          Write-Host "edition: $got"
+          if ($got -ne 'office') { throw "版が office ではありません: $got" }
+          # **ふつうの一枚には入っていないこと**も見る ── 両方に入って
+          # いたら、配る一枚ぜんぶから同期が消える。
+          if (Test-Path 'dist/amber-win-x64/resources/app/gui/edition.json') {
+            throw "ふつうの一枚にも版の札が入っています"
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amber-win-x64-office.zip
+          path: dist-office/amber-win-x64-office-*.zip
           if-no-files-found: error
 
   # **札を押したときだけ出す。** 手で走らせた回は資材だけ残る。

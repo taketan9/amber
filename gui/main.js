@@ -365,6 +365,32 @@ const eyes = new Map();
 ///
 /// `roots` は一つでも並びでもよい。**並びに無くなったものは閉じる**（外した
 /// 保存ディレクトリを、いつまでも見張らない）。返すのは、張れなかった最初の理由。
+/// **どの版か**（依頼 602・本人「会社でビルドする際には、同期に関する
+/// 機能や表示はすべてクローズにしたい」）。
+///
+/// `'office'` なら、外の網に触るもの（Google Drive の同期・Google
+/// カレンダー・グループ共有）を**画面ごと出さない。** 会社の端末は網に
+/// 出られず、出られたとしても会社のノートを外へ上げる話は別の決裁が要る
+/// ── 押せない道具が並んでいるより、無いほうがいい。
+///
+/// 決まるところは二つ。**焼き込み**（隣の `edition.json` ──
+/// `scripts/pack.js` が `--edition office` のときだけ書く）と、**環境変数**
+/// （`AMBER_EDITION`。手元で見比べるため）。環境変数が勝つ。
+///
+/// `package.json` に混ぜないのは、**main.js から見た `./package.json` が
+/// 配った一枚の中では `gui/package.json`**（手元の開発用の写し）になるから
+/// ── そこに書いても読まれない。専用の一枚なら、在るか無いかで決まる。
+function edition() {
+    const want = String(process.env.AMBER_EDITION || '').trim();
+    if (want) return want;
+    try {
+        const got = JSON.parse(fs.readFileSync(path.join(__dirname, 'edition.json'), 'utf8'));
+        return String(got.edition || 'full');
+    } catch {
+        return 'full';                        // 置いていない ＝ ふつうの一枚
+    }
+}
+
 function watch(roots) {
     const want = (Array.isArray(roots) ? roots : [roots]).filter(Boolean);
     for (const [dir, w] of eyes) {
@@ -422,6 +448,7 @@ app.whenReady().then(() => {
     ipcMain.handle('amber:call', async (_e, method, params) => engine.call(method, params));
     ipcMain.handle('amber:recall', () => ({ root: firstRoot(), ...recall() }));
     ipcMain.handle('amber:appVersion', () => app.getVersion());
+    ipcMain.handle('amber:edition', () => edition());
     // 描く側が置き場所を決めたら、そこを見張る（一つでも並びでも）。
     ipcMain.handle('amber:watch', (_e, roots) => watch(roots));
     /// 見本のノートを、言われた場所へ。**上書きはしない。**

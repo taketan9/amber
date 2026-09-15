@@ -54,6 +54,23 @@ const has = (name) => process.argv.includes('--' + name);
 /** エンジンの在り処。**`--server` でも `--engine` でも同じ**（依頼 550）。 */
 const engineArg = () => arg('server') || arg('engine');
 
+/// **どの版を組むか**（依頼 602・本人「会社でビルドする際には、同期に関する
+/// 機能や表示はすべてクローズにしたい」）。
+///
+/// `--edition office` を渡すと、配る一枚の中に `gui/edition.json` を置く
+/// ── 画面はそれを見て、外の網に触るもの（Google Drive の同期・iCal の
+/// 購読・グループ共有）を**出さないし、走らせない。**
+/// 渡さなければ、その一枚は置かない ＝ ふつうの版。
+const edition = (() => {
+    const want = String(arg('edition', '') || '').trim();
+    if (!want || want === 'full') return 'full';
+    if (want !== 'office') {
+        console.error('知らない版です: ' + want + '（full か office）');
+        process.exit(1);
+    }
+    return want;
+})();
+
 const version = (() => {
     const m = fs.readFileSync(path.join(ROOT, 'Cargo.toml'), 'utf8').match(/^version = "(.+?)"/m);
     return m ? m[1] : '0.0.0';
@@ -114,6 +131,11 @@ function fillApp(appDir, serverExe, exeName, calBin) {
     }
     copy(path.join(ROOT, 'packaging', 'welcome'), path.join(appDir, 'packaging', 'welcome'));
     copy(path.join(ROOT, 'packaging', 'templates'), path.join(appDir, 'packaging', 'templates'));
+    // **会社向けの一枚だけ、版の札を置く**（依頼 602）。無ければふつうの版。
+    if (edition !== 'full') {
+        fs.writeFileSync(path.join(appDir, 'gui', 'edition.json'),
+            JSON.stringify({ edition }, null, 2));
+    }
     // エンジン ── engine.js は gui/ の隣（`__dirname`）を最初に見る。
     copy(serverExe, path.join(appDir, 'gui', exeName));
     if (calBin && fs.existsSync(calBin)) copy(calBin, path.join(appDir, 'gui', 'amber-cal'));
@@ -213,7 +235,9 @@ function win(out) {
         console.error('Windows のエンジンがありません。Release の amber-server-win-x64.exe を --engine（--server でも可）で指してください（gh release download --pattern amber-server-win-x64.exe）');
         process.exit(1);
     }
-    const dir = path.join(out, 'amber-win-x64');
+    // **名前で見分けられるようにする**（依頼 602）── リリースの資材は
+    // 一つの籠に平らに並ぶので、同じ名前だと片方が片方を上書きする。
+    const dir = path.join(out, 'amber-win-x64' + (edition === 'full' ? '' : '-' + edition));
     fs.rmSync(dir, { recursive: true, force: true });
     copy(electron, dir);
     fs.renameSync(path.join(dir, 'electron.exe'), path.join(dir, 'amber.exe'));
@@ -240,7 +264,7 @@ function win(out) {
     ].join('\r\n'));
     console.log('できました: ' + dir + '  (ambər ' + version + '・' + sizeOf(dir) + ')');
     if (has('zip')) {
-        const zip = path.join(out, `amber-win-x64-${version}.zip`);
+        const zip = path.join(out, path.basename(dir) + '-' + version + '.zip');
         fs.rmSync(zip, { force: true });
         // **組むのは自前**（`scripts/zip.js`・依頼 550）── 前は `python3` を
         // 呼んでいたが、**組む場所は会社の Windows でもある**。あそこに

@@ -141,5 +141,95 @@ console.log('鍵盤の右の Enter も、Enter として受けるか');
         fileURL(dir + 'attachments/01_rag_start.png'));
 }
 
+// **道を短く見せるところも、Windows の道で切れているか**（依頼 603）。
+// `leafOf` で同じ取りこぼしを踏んでいる（依頼 596）── `/` でしか割らない
+// 関数は、Windows の道を**一つも切らずにまるごと**返す。画面の上では
+// 「やけに横に長い一行」として出るので、見ただけでは道の話だと分からない。
+console.log('道を、一行に収まる形にできるか');
+{
+    const cut = src.indexOf('function shortPath(at)');
+    const end = src.indexOf('\n}', cut) + 2;
+    if (cut < 0 || end < 2) {
+        console.error('gui/renderer.js から shortPath を切り出せません');
+        process.exit(2);
+    }
+    const make = (root) => (0, eval)(
+        '(function (state) {\n' + src.slice(cut, end) + '\nreturn shortPath;\n})'
+    )({ root });
+
+    const winHome = make('C:\\Users\\t502960\\Documents\\amber');
+    ok(winHome('C:\\Users\\t502960\\Documents\\OneNote') === '~\\Documents\\OneNote',
+        'Windows の家の下は ~ に畳む', winHome('C:\\Users\\t502960\\Documents\\OneNote'));
+    const deep = winHome('C:\\Users\\t502960\\Documents\\a\\b\\c\\d\\OneNote');
+    ok(deep.includes('…') && deep.endsWith('d\\OneNote'),
+        '深い Windows の道は、中を … にする', deep);
+    ok(!deep.includes('/'), '区切りは、その道が使っているほうのまま', deep);
+
+    const macHome = make('/Users/taketan/Documents/amber');
+    ok(macHome('/Users/taketan/Documents/OneNote') === '~/Documents/OneNote',
+        'mac の家の下も ~ に畳む', macHome('/Users/taketan/Documents/OneNote'));
+    const deepMac = macHome('/Users/taketan/a/b/c/d/e/f');
+    ok(deepMac.includes('…') && !deepMac.includes('\\'),
+        '深い mac の道も … にする（円記号は混ぜない）', deepMac);
+    // **家の外の道は、そのまま。** 勝手に `~` を付けると別の場所に見える。
+    ok(winHome('D:\\share\\notes') === 'D:\\share\\notes',
+        '家の外は、そのまま', winHome('D:\\share\\notes'));
+}
+
+// **F5 は、Windows の人が反射で押す鍵**（依頼 604・本人「保存ディレクトリの
+// 中身をごっそり削除したときなど、表示がなかなかアンバー側に伝わらない。
+// F5 で更新するとかの機能はほしいね」）。
+//
+// 見張り（`fs.watch`）は、見張っているフォルダそのものが消えると落ちる ──
+// そのとき画面だけが古いまま残る。押せば必ず読み直す道が要る。
+//
+// **どこを打っていても効くこと**を見る ── エディタの中に居るときこそ
+// 押される鍵で、そこで素通りすると「効かない」として出る。
+console.log('F5 で読み直せるか');
+{
+    // **受け口は一つではない。** `keydown` を聞く場所は三つあり、
+    // 最初に見つかったものは ⌘S のほう ── 頭から探すと別の関数を切り出す。
+    const head = src.indexOf("const inField = e.target === el('find');");
+    const stop = src.indexOf("if (e.code === 'Escape')", head);
+    if (head < 0 || stop < 0) {
+        console.error('gui/renderer.js から keydown の頭を切り出せません');
+        process.exit(2);
+    }
+    const body = src.slice(head, stop);
+    let asked = 0;
+    let zenned = 0;
+    const box = {
+        el: () => ({ contains: () => false }),
+        cmdRefresh: () => { asked++; },
+        setZen: () => { zenned++; },
+        zen: false,
+    };
+    // eslint-disable-next-line no-eval
+    const press = (0, eval)('(function (box) { with (box) { return function (e) {\n'
+        + body + '\n}; } })')(box);
+    const ev = (code, more) => {
+        let stopped = 0;
+        press({ code, target: {}, preventDefault: () => { stopped++; },
+                metaKey: false, ctrlKey: false, shiftKey: false, ...(more || {}) });
+        return stopped;
+    };
+
+    asked = 0;
+    ok(ev('F5') === 1 && asked === 1, 'F5 で読み直す', asked);
+    asked = 0;
+    ok(ev('KeyR', { ctrlKey: true }) === 1 && asked === 1, 'Ctrl+R でも読み直す', asked);
+    asked = 0;
+    ok(ev('KeyR', { metaKey: true }) === 1 && asked === 1, '⌘R でも読み直す', asked);
+    // **⇧ を足したものは別の鍵。** 掴んでしまうと、そちらが効かなくなる。
+    asked = 0;
+    ok(ev('KeyR', { ctrlKey: true, shiftKey: true }) === 0 && asked === 0,
+        'Ctrl+⇧+R は掴まない', asked);
+    asked = 0;
+    ok(ev('KeyR') === 0 && asked === 0, '素の R は字のまま', asked);
+    // 隣の鍵を巻き込んでいないか。
+    asked = 0; zenned = 0;
+    ok(ev('F12') === 1 && zenned === 1 && asked === 0, 'F12 は今までどおり', [zenned, asked]);
+}
+
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');
 process.exit(bad ? 1 : 0);

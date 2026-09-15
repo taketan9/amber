@@ -504,7 +504,7 @@ const RAIL_MARKS = {
 function placeRow(p, isOn) {
     const n = state.notes.filter((x) => x.root === p.dir).length;
     const lost = state.placeTrouble[p.dir];
-    const badge = p.sync === 'drive' ? '<span class="sy">Drive</span>' : '';
+    const badge = (p.sync === 'drive' && !OFFICE) ? '<span class="sy">Drive</span>' : '';
     return '<div class="dest' + (isOn ? ' on' : '') + (lost ? ' lost' : '') + '" data-kind="place"'
         + ' data-what="' + escapeAttr(p.dir) + '" data-depth="0"'
         + (lost ? ' title="' + escapeAttr(lost) + '"' : '') + '>'
@@ -7390,6 +7390,11 @@ document.addEventListener('keydown', (e) => {
     // なるのだから、エディタの中でこそ効かないと意味がない ── だから
     // 「打っている場所では素の一文字は文字」の線より手前に置く。
     if (e.code === 'F12') { e.preventDefault(); setZen(!zen); return; }
+    // **F5 は、どこを打っていても効く。** 外でフォルダごと消えたときに
+    // 押すものなので、エディタの中に居るからといって効かないと意味がない。
+    if (e.code === 'F5' || ((e.metaKey || e.ctrlKey) && e.code === 'KeyR' && !e.shiftKey)) {
+        e.preventDefault(); cmdRefresh(); return;
+    }
     if (e.code === 'Escape') {
         // **手前にあるものから閉じる。** 小窓が開いているのに大きい画面が
         // 戻ると、閉じたつもりのものが残る。
@@ -9278,6 +9283,8 @@ el('cal').addEventListener('contextmenu', async (e) => {
 ///
 /// **訊くのは一度だけ。** 断った人に毎回訊かない。
 async function findGroupCal() {
+    // 会社向けの一枚には、グループという話そのものが無い（依頼 602）。
+    if (OFFICE) return;
     if (groupCal || groupAsked || !hereOn) return;
     let names = [];
     try {
@@ -9463,6 +9470,27 @@ async function hereFor(y, m) {
 /// しまわないため ── ここは「打とうと思った人だけ」が通る道。
 const TEAM_WORD = 'csv';
 
+/// **会社向けの一枚では、外の網に触るものを出さない**（依頼 602・本人
+/// 「会社でビルドする際には、『同期』に関する機能や表示はすべてクローズに
+/// したい」「カレンダーもフォルダも同期っていう概念は会社のビルドに不要だ」）。
+///
+/// 閉じるのは**外へ運ぶもの**だけ ── Google Drive の同期、iCal の購読
+/// （＝カレンダーの同期）、グループでの共有。**カレンダーの面そのものと、
+/// チームの CSV は残す** ── あれは会社の Outlook のための道で、外へは
+/// 何も出さない（読むだけ）。
+///
+/// 出さないだけでなく**走らせない** ── 押せない道具が並ぶより、無いほうがいい。
+let OFFICE = false;
+const officeReady = (async () => {
+    try {
+        OFFICE = (await window.amber.edition()) === 'office';
+    } catch {
+        OFFICE = false;                       // 版を訊けない机では、ふつうの一枚
+    }
+    if (OFFICE) document.body.classList.add('office');
+    return OFFICE;
+})();
+
 const CMDS = [
     { id: 'new', name: '新しいノート', key: '⌘N', run: () => cmdNewNote() },
     { id: 'tmpl', name: 'テンプレートから新しいノート', sub: '「' + TEMPLATES + '」フォルダの中身',
@@ -9487,8 +9515,8 @@ const CMDS = [
     // **⚙ には出さない**（本人・2026-09-11）── 左の列にカレンダーが居る。表には残す。
     { id: 'cal', name: 'カレンダー', sub: '予定と、その日のノートを一枚で', run: cmdCalendar },
     { id: 'sub', name: 'カレンダー設定追加', sub: 'Google カレンダーなどの iCal の URL を読みます',
-      app: true, run: cmdSubscribe },
-    { id: 'unsub', name: 'カレンダー設定解除', app: true, run: cmdUnsubscribe },
+      app: true, net: true, run: cmdSubscribe },
+    { id: 'unsub', name: 'カレンダー設定解除', app: true, net: true, run: cmdUnsubscribe },
     { id: 'calset', name: 'カレンダー表示設定', sub: 'どの予定表を出すか・土日を出すか', app: true, run: cmdCalSettings },
     // **合言葉を打つまで、どこにも出ない**（依頼 473）。
     //
@@ -9509,7 +9537,7 @@ const CMDS = [
     { id: 'star', name: 'ブックマークに登録する', key: '⌘D', need: 'note', menu: true, run: cmdStar },
     { id: 'tags', name: 'タグ設定', need: 'note', menu: true, run: cmdTags },
     { id: 'move', name: 'フォルダへ移動', need: 'note', menu: true, run: cmdMove },
-    { id: 'toshare', name: 'グループと共有する', need: 'note', menu: true, run: cmdToShare },
+    { id: 'toshare', name: 'グループと共有する', need: 'note', menu: true, net: true, run: cmdToShare },
     // **献立には出さない。** 上の帯にベルが居て、押せば同じ小窓が出る
     // ── 同じことを頼む道が二つあると、片方を直した日にもう片方が
     // 古いまま残る。表には残す（⌘⇧P から名前で探せる）。
@@ -9554,8 +9582,9 @@ const CMDS = [
     { id: 'places', name: '保存ディレクトリの追加・変更・削除', app: true, run: cmdPlaces },
     // **作る道があるなら、やめる道もある**（依頼 535）。押す場所は ⚙ ──
     // 一生に一度で、戻せない操作なので、毎日押すものの隣には置かない。
-    { id: 'groupdrop', name: 'グループカレンダーを削除する', app: true, need: 'group', run: cmdDropGroup },
-    { id: 'sync', name: '同期', app: true, sub: '同期していません', run: cmdSync },
+    { id: 'groupdrop', name: 'グループカレンダーを削除する', app: true, need: 'group', net: true, run: cmdDropGroup },
+    { id: 'sync', name: '同期', app: true, net: true, sub: '同期していません', run: cmdSync },
+    { id: 'refresh', name: '読み直す', key: 'F5', app: true, sub: 'フォルダをもう一度読みます', run: cmdRefresh },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'ambər について', app: true, run: cmdAbout },
     { id: 'history', name: '過去バージョン', need: 'note', menu: true, run: () => cmdHistory() },
@@ -9626,7 +9655,10 @@ async function cmdKeys() {
 const canRun = (c) => (c.need !== 'note' || !!state.open)
     // グループを持っていない人に「消す」を出さない（依頼 535）。
     // 「削除」は持ち主だけ ── 招待された側は消せない（消すのは持ち主の仕事）。
-    && (c.need !== 'group' || !!(groupCal && groupCal.id));
+    && (c.need !== 'group' || !!(groupCal && groupCal.id))
+    // **会社向けの一枚では、外へ運ぶものを一つも出さない。**
+    // 表（⌘⇧P）からも消える ── 名前で探せてしまうなら、閉じたことにならない。
+    && !(OFFICE && c.net);
 
 /// 命令のパレット（⌘⇧P）。**名前で探せれば、覚えなくていい。**
 ///
@@ -10171,11 +10203,26 @@ let guestBack = null;
 
 /// 道を、読める長さに。**真ん中を落とす** ── 頭（どこの家か）と
 /// 末尾（何というファイルか）が、どちらも効く。
+/// 道を、一行に収まる形に。
+///
+/// **Windows の道も切る**（依頼 603・本人「保存ディレクトリの見た目が
+/// 横に長くなりすぎない？」）── 前は `/` でしか割っていなかったので、
+/// `C:\\Users\\t502960\\Documents\\OneNote` は**一つも切れずにまるごと**出ていた。
+/// 同じ取りこぼしを `leafOf` でも踏んでいる（依頼 596）── Windows の道を
+/// 見るところは、`/` と `\\` の両方で割る。
+///
+/// 家の下なら頭を `~` に畳む（mac は `/Users/誰か`、Windows は
+/// `C:\\Users\\誰か`）。それでも深いものは、頭二つと末尾二つを残して中を `…` に。
 function shortPath(at) {
-    const home = (state.root || '').match(/^(\/Users\/[^/]+)/);
+    const sep = /[\\/]/;
+    const home = (state.root || '').match(/^(\/Users\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)/i);
     let t = home && at.startsWith(home[1]) ? '~' + at.slice(home[1].length) : at;
-    const part = t.split('/');
-    if (part.length > 5) t = part.slice(0, 2).join('/') + '/…/' + part.slice(-2).join('/');
+    const part = t.split(sep);
+    // 区切りは、その道が使っているほうに合わせて戻す（混ぜると別の道に見える）。
+    const mark = t.includes('\\') ? '\\' : '/';
+    if (part.length > 5) {
+        t = part.slice(0, 2).join(mark) + mark + '…' + mark + part.slice(-2).join(mark);
+    }
     return t;
 }
 
@@ -11351,7 +11398,9 @@ async function loadSync() {
     drawSyncState();
 }
 // 開いた直後に一度 ── 献立の脇の「いま」は、押す前から正しくあること。
-loadSync();
+// **会社向けの一枚では、訊きにも行かない**（依頼 602）── サインインの
+// 有無を訊くこと自体が、外の鍵入れを開けにいくこと。
+officeReady.then(() => { if (!OFFICE) loadSync(); });
 
 /* ── ファイル名は題に合わせる（依頼 492） ──
  *
@@ -11699,6 +11748,11 @@ function syncTroubleFace(t) {
 function drawSyncState() {
     const box = el('syncsay');
     const mark = el('syncmark');
+    // 会社向けの一枚では、この二つごと出さない（依頼 602）。
+    if (OFFICE) {
+        for (const x of [box, mark]) { if (x) { x.hidden = true; x.innerHTML = ''; } }
+        return;
+    }
     const hhmm = (t) => new Date(t).toTimeString().slice(0, 5);
     const hide = (x) => { x.hidden = true; x.innerHTML = ''; };
     if (state.guest || !state.places.length) { hide(box); hide(mark); return; }
@@ -11850,10 +11904,17 @@ const SYNC_WORDS = { none: '同期しない', drive: 'Google Drive' };
 /// 同期の入れる切るも、ここ（保存ディレクトリごとに同期先を持つ、という作り）。
 async function cmdPlaces() {
     for (;;) {
+        // **道は一行に収める**（依頼 603・本人「保存ディレクトリの見た目が
+        // 横に長くなりすぎない？」）── 深いところに置いた人の道は 80 字を
+        // 越える。三つ四つ並ぶと、名前より道のほうが目立つ。
+        // 同期先は、いまの言葉が**「同期しない」でないときだけ**添える
+        // ── 何も繋いでいない人の一覧に、同じ字が四本並ぶ意味は無い。
         const items = state.places.map((p, i) => ({
             name: p.name,
-            sub: shortPath(p.dir) + ' ・ ' + SYNC_WORDS[p.sync]
-                + (state.placeTrouble[p.dir] ? ' ・ 見つかりません' : ''),
+            sub: [shortPath(p.dir),
+                  (!OFFICE && p.sync !== 'none') ? SYNC_WORDS[p.sync] : '',
+                  state.placeTrouble[p.dir] ? '見つかりません' : '']
+                .filter(Boolean).join(' ・ '),
             value: i,
         }));
         items.push({ name: '＋ 保存ディレクトリを追加', sub: 'フォルダを一つ選びます。中の .md がノートになります', value: ' add' });
@@ -11870,8 +11931,9 @@ async function cmdPlaces() {
 /// 一つの保存ディレクトリの小窓（二段目）。
 async function placeSheet(p) {
     const go = await askPick(p.name, [
-        { name: '同期先', sub: SYNC_WORDS[p.sync]
-            + (p.sync === 'drive' && !syncAccount.signedIn ? '（まだサインインしていません）' : ''), value: 'sync' },
+        // 会社向けの一枚には、同期先そのものが無い（依頼 602）。
+        ...(OFFICE ? [] : [{ name: '同期先', sub: SYNC_WORDS[p.sync]
+            + (p.sync === 'drive' && !syncAccount.signedIn ? '（まだサインインしていません）' : ''), value: 'sync' }]),
         { name: '名前を変える', sub: '一覧での呼び名だけ。フォルダの名前は変わりません', value: 'name' },
         { name: '場所を変える…', sub: 'いままでのノートも一緒に移せます', value: 'dir' },
         { name: '外す', sub: 'ambər の一覧から外します。フォルダとノートはそのまま', value: 'drop' },
@@ -12069,15 +12131,50 @@ async function cmdAbout() {
     await askPick('', [
         { name: '画面', sub: 'ambər ' + (await window.amber.appVersion() || '?'), value: null },
         { name: 'エンジン', sub: engine, value: null },
-        { name: '保存ディレクトリ', sub: state.places.length ? state.places.map((p) => p.dir).join('・') : '（まだ決めていません）', value: null },
-    // **`bare` は渡さない。** `false` を渡すと `bare ?? few` の `??` が
-    // それを素通しし（`??` が拾うのは null と undefined だけ）、三つしか
-    // 無い一覧に「絞り込む」の欄が出る ── 三つを絞り込む人はいない。
-    ], '不具合を伝えるときは、この三つを添えてください', undefined,
+        // **一つずつ、一行ずつ**（依頼 603）。前は道を `・` で
+        // 繋いだ一本の行だったので、二つ三つと増えるほど横に伸びて
+        // 小窓からはみ出していた ── 不具合を伝えるときに添える三つの
+        // うち、いちばん読めない一つになっていた。
+        ...(state.places.length
+            ? state.places.map((p, i) => ({
+                name: i === 0 ? '保存ディレクトリ' : '', sub: shortPath(p.dir), value: null }))
+            : [{ name: '保存ディレクトリ', sub: '（まだ決めていません）', value: null }]),
+    // **`bare` は真を渡す。** 前は渡さず `bare ?? few`（三つ以下なら隠す）に
+    // 任せていたが、保存ディレクトリを一行ずつにした日に**行が四つを越えて
+    // 絞り込みの欄が生えた** ── ここは読むだけの紙で、絞る相手がいない。
+    // `false` は渡せない（`??` が拾うのは null と undefined だけなので、
+    // 偽を渡すと素通りして同じことが起きる）。
+    ], '不具合を伝えるときは、この三つを添えてください', true,
        'Advanced Markdown Browser & Editor for Readability');
 }
 
 /* ── 前の姿 ── */
+
+/// **読み直す**（F5・⌘R ── 依頼 604・本人「保存ディレクトリの中身をごっそり削除した
+/// ときなど、表示がなかなかアンバー側に伝わらない」）。
+///
+/// 見張り（`fs.watch`）は、**見張っているフォルダそのものが消えると落ちる**
+/// ── そのとき `eyes` から外れるだけで、張り直しはしていない。外で
+/// まとめて消した・別の端末の同期が下ろした・ネットワーク越しのフォルダが
+/// 一度切れた、のどれでも「画面だけが古いまま」になる。
+///
+/// **押せば必ず読み直す。** 見張りを張り直してから数え直し、開いている
+/// ノートが消えていれば閉じる（無いノートを見せ続けると、次の保存で
+/// 作り直してしまう）。
+///
+/// **打ちかけは触らない。** 読み直しで消えていいのは、まだ書いていない字
+/// ではない ── 打っている最中に押しても、その一本は開いたまま残す。
+async function cmdRefresh() {
+    say('読み直しています…');
+    await rewatch();
+    const at = state.open ? state.open.path : null;
+    await reload({});
+    if (at && !state.dirty && !state.notes.some((n) => n.path === at)) {
+        state.open = null;
+        applyView();
+    }
+    say('読み直しました ・ ノート ' + state.notes.length + ' 本');
+}
 
 /// 見本のノートを、いまの保存場所に置く。
 ///
@@ -12379,6 +12476,9 @@ const escapeAttr = escapeHtml;
         }
     }
     el('blankmark').innerHTML = mark(54);
+    // **どの版かを、何かを描く前に決める**（依頼 602）── あとで決めると、
+    // 会社向けの一枚でも最初の一瞬だけ Drive の札が出る。
+    await officeReady;
     const saved = await window.amber.recall();
     // 保存ディレクトリ（依頼 511）。**前の `root` 一つから引き継ぐ** ── 憶えが
     // `places` になっていない机では、いままでの場所が一つ目になる（同期は
