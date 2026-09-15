@@ -426,6 +426,23 @@ mutate "読めないのに結論を出す" "読めないのに「無い」と結
 #   * COM サーバーを pywintypes 経由で引く（pywin32 の無い Python で見失う）
 #   * Office の bit を 32bit の見え方で読む（32 bit の処理から見えない枝）
 # 黙る壊し方を並べると「鳴らないのが普通」になる。
+mutate "ファイルから読む段を外す" "在る道だけ読みにいく" \
+    '("ファイルから型ライブラリを読む", by_file),' ''
+mutate "無い道まで読みにいく" "在る道だけ読みにいく" \
+    'if not (real and os.path.exists(real)):
+                continue' 'if False:
+                continue'
+mutate "道ごとの言い分を捨てる" "道ごとの言い分を持ち帰る" \
+    'raise RuntimeError("ファイルから読めない ── " + " / ".join(trouble or ["道が無い"]))' \
+    'raise RuntimeError("ファイルから読めない")'
+mutate "32 bit でも 32 bit を勧める" "32 bit なら、bit の話ではないと言う" \
+    'if me == 64:
+        got = _thirty_two_note()' 'if True:
+        got = _thirty_two_note()'
+mutate "64 bit でも bit の話をやめる" "64 bit なら、32 bit を試させる" \
+    'if me == 64:
+        got = _thirty_two_note()' 'if False:
+        got = _thirty_two_note()'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

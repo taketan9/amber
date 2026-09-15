@@ -617,7 +617,8 @@ class NoTypeInfo:
         raise AttributeError(f"OneNote.Application.{name}")
 
 
-def _fake_win32com(ensure_module=None, ensure_dispatch=None, dispatch=None, gen_path=None):
+def _fake_win32com(ensure_module=None, ensure_dispatch=None, dispatch=None, gen_path=None,
+                   load_typelib=None, generate=None):
     """`import win32com.client` と `from win32com.client import gencache` を通す。"""
     pkg = types.ModuleType("win32com")
     pkg.__gen_path__ = gen_path or ""
@@ -638,16 +639,25 @@ def _fake_win32com(ensure_module=None, ensure_dispatch=None, dispatch=None, gen_
     gencache.EnsureModule = ensure_module or boom("EnsureModule")
     gencache.EnsureDispatch = ensure_dispatch or boom("EnsureDispatch")
     client.Dispatch = dispatch or boom("Dispatch")
+    # **ファイルから型ライブラリを読む段**（依頼 587）。本物と同じ形で
+    # 置かないと、その段は `ImportError` で素通りして、何を試したのか
+    # 分からないまま次へ落ちる ── 偽物が甘いと検査は嘘をつく。
+    makepy = types.ModuleType("win32com.client.makepy")
+    makepy.GenerateFromTypeLibSpec = generate or (lambda *a, **k: None)
+    pythoncom = types.ModuleType("pythoncom")
+    pythoncom.LoadTypeLib = load_typelib or boom("LoadTypeLib")
+    client.makepy = makepy
     client.gencache = gencache
     pkg.client = client
     return {"win32com": pkg, "win32com.gen_py": gen_py,
-            "win32com.client": client, "win32com.client.gencache": gencache}
+            "win32com.client": client, "win32com.client.gencache": gencache,
+            "win32com.client.makepy": makepy, "pythoncom": pythoncom}
 
 
 def _connect_with(**mods):
     saved = {k: sys.modules.get(k) for k in
              ("win32com", "win32com.gen_py", "win32com.client",
-              "win32com.client.gencache")}
+              "win32com.client.gencache", "win32com.client.makepy", "pythoncom")}
     sys.modules.update(_fake_win32com(**mods))
     try:
         return ORIG_CONNECT()
@@ -984,6 +994,38 @@ def t_connect(tmp):
     got, _ = _connect_with(ensure_module=lambda *a: None, dispatch=dispatch)
     check("GetHierarchy が見えない相手は採らない", got is good, f"{type(got).__name__}")
 
+    # ── ファイルから型ライブラリを読む（依頼 587）──
+    #
+    # 登録は白く、指す先のファイルも在るのに読めない端末がある。
+    # `LoadRegTypeLib` が転ぶのと、**その資源に型ライブラリが入っていない**
+    # のは別のことなので、道を名指しして読んでみる。
+    keep_vals, keep_exists = o2m._typelib_values, o2m.os.path.exists
+    A = "C:" + chr(92) + "在る.exe" + chr(92) + "3"
+    B = "C:" + chr(92) + "無い.exe" + chr(92) + "3"
+    try:
+        o2m._typelib_values = lambda: [("1.0", "win32", B, ""), ("1.1", "win32", A, "")]
+        o2m.os.path.exists = lambda p: "無い" not in p
+        read = []
+        got, _ = _connect_with(dispatch=lambda *a: good,
+                               load_typelib=lambda path: read.append(path))
+        check("ファイルから読めれば、それで繋ぐ", got is good, f"{type(got).__name__}")
+        check("在る道だけ読みにいく", read == [A], read)
+
+        # 読めなければ、**道ごとの言い分**を持ち帰る ── そこで初めて
+        # 「資源に型ライブラリが入っていない」と分かる。
+        def cant(path):
+            raise RuntimeError("資源が無い")
+
+        try:
+            _connect_with(load_typelib=cant)
+            check("全部駄目なら止まる（ファイルの段）", False, "止まらなかった")
+        except SystemExit as e:
+            check("ファイルの段も、梯子に並ぶ", "ファイルから型ライブラリを読む" in str(e.code), e.code)
+            check("道ごとの言い分を持ち帰る", "在る.exe" in str(e.code) and "資源が無い" in str(e.code),
+                  e.code)
+    finally:
+        o2m._typelib_values, o2m.os.path.exists = keep_vals, keep_exists
+
     try:
         _connect_with()
         check("全部駄目なら、わけを並べて止まる", False, "通ってしまった")
@@ -1315,6 +1357,16 @@ def t_check(tmp):
                      tree=lambda: {"1.1": {"win32", "win64"}},
                      connect=blew(troubles=["  素の Dispatch: 知らない何か"]))
         check("見て無ければ、そう言う", "入れ直すか、修復する" in out, out)
+
+        # **走っている側で、言うことが変わる。** 32 bit で叩いて同じ答えなら、
+        # そこで「32 bit を使え」と言い続けるのは、一度通った道へまた送ること。
+        n64 = " ".join(o2m._cant_load_next(64))
+        n32 = " ".join(o2m._cant_load_next(32))
+        check("64 bit なら、32 bit を試させる",
+              "32 bit" in n64 and "bit の話ではない" not in n64, n64)
+        check("32 bit なら、bit の話ではないと言う",
+              "bit の話ではない" in n32 and "32 bit の Python を使う" not in n32, n32)
+        check("32 bit なら、ファイルから読む段へ導く", "ファイルから型ライブラリを読む" in n32, n32)
 
         # 知らない答えなら、決めつけない。
         _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},

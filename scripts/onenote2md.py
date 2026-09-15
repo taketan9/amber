@@ -826,7 +826,7 @@ def _next_move(me, office, tree, server_here, troubles=()):
         if code == "-2147312566":
             # **読めないと言われた道を、その場で出す。** ここで `--probe` へ
             # 送ると、29 行を手で打ち直させることになる。
-            said = said + _lib_paths_note() + _thirty_two_note()
+            said = said + _lib_paths_note() + _cant_load_next(me)
         return said
     want = "win64" if me == 64 else "win32"
     # **見るのは、こちらが読みにいく版。** 1.1 → 1.0 の順に試すので、
@@ -876,10 +876,7 @@ _ANSWERS = [
                      "枝は有っても、指す先が読めていない ── 版の取り違えか、",
                      "実体が 32 bit のものしか無い。--probe の「版ごとの実体」を見る。"]),
     ("-2147312566", ["型ライブラリ／DLL の読み込みエラー（TYPE_E_CANTLOADLIBRARY）。",
-                     "枝は足りているが、その先が今の bit からは読めない。",
-                     "32 bit の Python を使う（out-of-process なので OneNote は 64 bit のままでよい）。",
-                     "オフラインなら持ち込むのは二つ ── 32 bit の Python の installer と、",
-                     "その版に合う pywin32 の wheel（docs の「32 bit の Python を入れる」）。"]),
+                     "登録は白いのに、指す先が読めていない。"]),
     ("-2146959355", ["権限のずれ（0x80080005・サーバーの実行に失敗しました）。",
                      "管理者の窓からは、昇格していない OneNote に繋げない。普通の窓で叩く。",
                      "タスク スケジューラなら「最上位の特権で実行する」も外す。"]),
@@ -964,6 +961,26 @@ def _gone_note():
         out.append("**デスクトップ版 OneNote が入っていない**（ストア版は COM を持たない）。")
         out.append("Microsoft 365 から OneNote を入れる。")
     return out
+
+
+def _cant_load_next(me):
+    """`TYPE_E_CANTLOADLIBRARY` のとき、**走っている側で言うことが変わる。**
+
+    64 bit なら、まず 32 bit で試す価値がある。**だが 32 bit でも同じ答えが
+    返ったなら、bit の話ではない** ── そこで「32 bit を使え」と言い続けるのは、
+    一度通った道へまた送ること。会社の端末で実際にそうなった。
+    """
+    if me == 64:
+        got = _thirty_two_note()
+        if got:
+            return got
+        return ["32 bit の Python でも試す（out-of-process なので OneNote は 64 bit のままでよい）。",
+                "オフラインなら持ち込むのは二つ ── installer と pywin32 の wheel",
+                "（docs の「32 bit の Python を、この道具のためだけに」）。"]
+    return ["**32 bit でも同じ答えなら、bit の話ではない。**",
+            "ファイルは在るのに、その資源に型ライブラリが入っていないか、読めない。",
+            "`ファイルから型ライブラリを読む` の行に、道ごとの言い分が出ている ──",
+            "それも駄目なら Office の「修復」（オンライン修復）で焼き直す。"]
 
 
 def _thirty_two_note():
@@ -1096,6 +1113,39 @@ def connect_onenote():
             return _wrap_with_generated(mod, raw) or raw
         return make
 
+    def by_file():
+        """**登録を通さず、ファイルから型ライブラリを読む。**
+
+        登録は白く、指す先のファイルも在るのに `TYPE_E_CANTLOADLIBRARY` が
+        返る端末がある（会社の端末・2026-09-15。32 bit でも 64 bit でも同じ
+        答えだったので、bit の話ではない）。`LoadRegTypeLib` が転ぶのと、
+        **その資源に型ライブラリが入っていない**のは別のことなので、
+        道を名指しして読んでみる ── `gencache` が言う「makepy を手で
+        走らせろ」を、こちらで走らせるのがこれ。
+
+        読めたら、その型から皮を作って包む。読めなければ、どの道で
+        どう転んだかを言う ── **そこで初めて「資源が無い」と分かる。**
+        """
+        import pythoncom
+        from win32com.client import makepy
+        trouble = []
+        for ver, _arch, path, _view in _typelib_values():
+            real = _strip_resource_index(path)
+            if not (real and os.path.exists(real)):
+                continue
+            try:
+                pythoncom.LoadTypeLib(path)
+            except Exception as e:  # noqa
+                trouble.append(f"{ver} {path}: {e}")
+                continue
+            makepy.GenerateFromTypeLibSpec(path)
+            raw = win32com.client.Dispatch("OneNote.Application")
+            if hasattr(raw, "GetHierarchy"):
+                return raw
+            mod = gencache.EnsureModule(ONENOTE_TYPELIB, 0, 1, 1)
+            return _wrap_with_generated(mod, raw) or raw
+        raise RuntimeError("ファイルから読めない ── " + " / ".join(trouble or ["道が無い"]))
+
     def by_gencache():
         return gencache.EnsureDispatch("OneNote.Application")
 
@@ -1118,6 +1168,7 @@ def connect_onenote():
     # 指していない）ので、**両方試して、実際に答えが返ったほうを採る。**
     for how, make in (("型ライブラリ 1.1 を名指し", by_typelib(1, 1)),
                       ("型ライブラリ 1.0 を名指し", by_typelib(1, 0)),
+                      ("ファイルから型ライブラリを読む", by_file),
                       ("gencache に任せる", by_gencache),
                       ("素の Dispatch（遅い束ね）", by_dispatch)):
         try:
