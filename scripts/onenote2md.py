@@ -301,6 +301,38 @@ def wheel_hint(bits=None):
             f'  {launcher} -m pip install --no-index --no-deps "<その .whl>"']
 
 
+def _other_pythons():
+    """この機械に入っている Python を、ランチャーに訊く（`py -0p`）。
+
+    返すのは `[(名札, 道)]`。**32 bit を入れたあとの一手を、こちらで言う
+    ため。** 入れた人は 64 bit の癖でもう一度同じことを叩く ── そこで
+    同じ答えが返るのでは、入れた意味が伝わらない。
+    """
+    try:
+        import subprocess
+    except ImportError:
+        return []
+    try:
+        got = subprocess.run(["py", "-0p"], capture_output=True, text=True,
+                             timeout=10, errors="replace")
+    except Exception:  # noqa
+        return []
+    out = []
+    for line in (got.stdout or "").splitlines():
+        m = re.match(r"\s*-(?:V:)?(\S+)\s+\*?\s*(\S.*\.exe)\s*$", line)
+        if m:
+            out.append((m.group(1), m.group(2).strip()))
+    return out
+
+
+def _thirty_two_bit_here():
+    """32 bit の Python が、この機械に居るか。居れば名札を返す。"""
+    for tag, _path in _other_pythons():
+        if tag.endswith("-32"):
+            return tag
+    return None
+
+
 def _office_platform():
     """Office がどちらの bit で入っているか（`x64` / `x86`）。読めなければ None。"""
     try:
@@ -805,6 +837,14 @@ def _lib_paths_note():
     if len(got) == 2 and got["win32"] == got["win64"]:
         out.append("win32 と win64 が**同じ道**を指している ── 片方は写し。")
         out.append("その実体が 32 bit のものなら、64 bit からは読めない（足しても直らない）。")
+    # **入れたあとの一手を、こちらで言う。** 32 bit を入れた人は、64 bit の
+    # 癖でもう一度同じことを叩く ── そこで同じ答えが返るのでは、入れた
+    # 意味が伝わらない。
+    tag = _thirty_two_bit_here()
+    if tag and sys.maxsize > 2 ** 32:
+        here = os.path.basename(__file__)
+        out.append(f"**32 bit の Python がこの機械に居る（{tag}）。そちらで叩き直す:**")
+        out.append(f"  py -{tag} scripts" + chr(92) + here + " --check")
     return out
 
 

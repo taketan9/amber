@@ -356,6 +356,21 @@ mutate "両方あることを責める" "両方あることを、責めずに言
 mutate "どちらで開くかを言わない" "一冊も無いとき、どちらで開くかを言う" \
     '"そちらで開いていても写せない ── 写したいものは 365 側でも開いておく。")' \
     '"そちらで開いていても写せない。")'
+mutate "入れたあとの一手を言わない" "32 bit が居れば、そちらで叩き直す一行を出す" \
+    'tag = _thirty_two_bit_here()
+    if tag and sys.maxsize > 2 ** 32:' 'tag = None
+    if tag and sys.maxsize > 2 ** 32:'
+mutate "居なくても言い立てる" "居なければ、その話はしない" \
+    'if tag.endswith("-32"):
+            return tag' 'if True:
+            return tag'
+mutate "ランチャーの並びを読み違える" "並びを読める（新しい形も古い形も）" \
+    'm = re.match(r"\s*-(?:V:)?(\S+)\s+\*?\s*(\S.*\.exe)\s*$", line)' \
+    'm = re.match(r"\s*-V:(\S+)\s+\*?\s*(\S.*\.exe)\s*$", line)'
+mutate "訊けないときに落ちる" "ランチャーが居なくても、落ちない" \
+    'except Exception:  # noqa
+        return []' 'except ZeroDivisionError:
+        return []'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

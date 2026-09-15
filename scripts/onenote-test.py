@@ -1220,6 +1220,23 @@ def t_check(tmp):
                      tl=lambda want: ("1.1", "0", EXE + ("64" if want == "win64" else "")),
                      connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
         check("違う道を指していれば、写しだとは言わない", "同じ道" not in out, out)
+
+        # **入れたあとの一手を、こちらで言う。** 32 bit を入れた人は 64 bit の
+        # 癖でもう一度同じことを叩く ── そこで同じ答えが返るのでは、入れた
+        # 意味が伝わらない。
+        keep_py = o2m._other_pythons
+        try:
+            o2m._other_pythons = lambda: [("3.9", "C:x"), ("3.9-32", "C:y")]
+            _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                         connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
+            check("32 bit が居れば、そちらで叩き直す一行を出す",
+                  "py -3.9-32" in out and "--check" in out, out)
+            o2m._other_pythons = lambda: [("3.9", "C:x")]
+            _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
+                         connect=blew(troubles=["  素の Dispatch: (-2147312566, '読み込みエラー')"]))
+            check("居なければ、その話はしない", "叩き直す" not in out, out)
+        finally:
+            o2m._other_pythons = keep_py
         # ほかの番号のときは、道の話はしない（要らないことを言わない）。
         _, out = say(tree=lambda: {"1.1": {"win32", "win64"}},
                      connect=blew(troubles=["  素の Dispatch: (-2146959355, '権限')"]))
@@ -1289,6 +1306,46 @@ def t_offline(tmp):
           (r.stdout + r.stderr)[-200:])
 
 
+def t_launcher(tmp):
+    print("ランチャーに訊く（py -0p）──")
+    # **本物で叩く。** この機械に `py` は無い ── 診断の道具は壊れた機械の
+    # 上で使うものなので、**訊けないことで落ちてはいけない。**
+    try:
+        real = o2m._other_pythons()
+        ok = isinstance(real, list)
+        why = ""
+    except Exception as e:  # noqa
+        ok, why = False, f"落ちた: {type(e).__name__}"
+    check("ランチャーが居なくても、落ちない", ok, why)
+    lines = [" -V:3.12 *        C:" + chr(92) + "P312" + chr(92) + "python.exe",
+             " -V:3.9-32        C:" + chr(92) + "P39-32" + chr(92) + "python.exe",
+             " -3.9-32          C:" + chr(92) + "old" + chr(92) + "python.exe",
+             "これは行ではない"]
+
+    class Got:
+        stdout = "\n".join(lines)
+
+    import subprocess
+    keep = subprocess.run
+    try:
+        subprocess.run = lambda *a, **k: Got()
+        got = o2m._other_pythons()
+        check("並びを読める（新しい形も古い形も）", len(got) == 3, got)
+        check("道も拾う", all(g[1].endswith("python.exe") for g in got), got)
+        check("名札から 32 bit を見つける", o2m._thirty_two_bit_here() == "3.9-32",
+              o2m._thirty_two_bit_here())
+        subprocess.run = lambda *a, **k: (_ for _ in ()).throw(OSError("py が無い"))
+        # **ランチャーの無い機械もある。** 分からないときは黙る ── 落ちるのも
+        # 「黙る」の一種なので、受け止めて NG にする（依頼 569 で踏んだ形）。
+        try:
+            quiet = o2m._other_pythons() == [] and o2m._thirty_two_bit_here() is None
+        except Exception as e:  # noqa
+            quiet, e = False, f"落ちた: {type(e).__name__}"
+        check("訊けなければ黙る", quiet, e if quiet is False else "")
+    finally:
+        subprocess.run = keep
+
+
 def t_two_onenotes(tmp):
     print("365 とストア版、両方を使う ──")
     import io, contextlib
@@ -1349,7 +1406,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_structure, t_table, t_inline, t_created,
-                   t_log, t_cp932, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
+                   t_log, t_cp932, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
                    t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):
             fn(tmp)
