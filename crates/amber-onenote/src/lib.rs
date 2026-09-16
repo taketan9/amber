@@ -22,7 +22,7 @@ use onenote_parser::page::{Page, PageContent};
 use onenote_parser::section::{Section, SectionEntry};
 use onenote_parser::Parser;
 use std::path::Path;
-use typed_path::TypedPath;
+use typed_path::{PathType, TypedPath};
 
 /// 画像の置き場所の印。本文の中で `PIC_OPEN` 番号 `PIC_CLOSE` と書いておき、
 /// 名前が決まってから [`fill`] で差し替える（名前は `amber-core` が決める）。
@@ -85,7 +85,7 @@ pub struct Attached {
 pub fn open(path: &Path) -> Result<Opened> {
     let p = Parser::new();
     let s = path.to_string_lossy().to_string();
-    let typed = TypedPath::derive(&s);
+    let typed = native(&s);
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
@@ -121,6 +121,17 @@ pub fn open(path: &Path) -> Result<Opened> {
         _ if path.is_dir() => open_dir(path),
         _ => anyhow::bail!("OneNote のファイルではありません: {}", path.display()),
     }
+}
+
+/// 道を、**この機械の形として**部品に渡す。
+///
+/// `TypedPath::derive` は `\\` で始まらない道を Unix の形と見なすので、
+/// `C:\Users\…` は Unix の道の中に `C:` が埋まったものになり、部品が
+/// Windows の道に直すところで「path contains unexpected prefix」と断る
+/// ── **会社の Windows では一冊も開けなかった**（リリースの試験で踏んだ。
+/// Mac では決して起きない）。
+fn native(s: &str) -> TypedPath<'_> {
+    TypedPath::new(s, if cfg!(windows) { PathType::Windows } else { PathType::Unix })
 }
 
 /// フォルダ。**目次（`.onetoc2`）があればそれで読む** ── セクショングループの
