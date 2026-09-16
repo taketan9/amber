@@ -312,17 +312,18 @@ console.log('コードの枠');
     ok(body.includes('\\u00a0'), '色付けの &nbsp; を空白に戻す（元の字が無いとき）');
 }
 
-// **囲み（``` ）を入れる札**（依頼 618）。
+// **コードブロック（``` ）を入れる札**（依頼 618）。
 //
 // 名前は「囲み」── 帯のすぐ上に「コード」という面の札があるので、
 // 同じ字を二つ置くと、押す前にどちらの話か分からない。
-console.log('囲みを入れる札');
+console.log('コードブロックを入れる札');
 {
-    ok(/\['囲み', '',/.test(src), '帯に「囲み」がある');
+    ok(/\['コードブロック', '',/.test(src), '帯に「コードブロック」がある');
     // 注記の右（本人が場所を決めた）。
     const band = src.slice(src.indexOf('const MARKS = ['), src.indexOf('/// いま打っているのは読む面か'));
-    ok(band.indexOf("['注記'") < band.indexOf("['囲み'"), '注記の右に並ぶ', '');
-    ok(!/\['コード', '',/.test(band), '帯に「コード」は置かない（面の札とぶつかる）', '');
+    ok(band.indexOf("['注記'") < band.indexOf("['コードブロック'"), '注記の右に並ぶ', '');
+    // **素の「コード」は置かない** ── 面の札と同じ字になる。
+    ok(!/\['コード', '',/.test(band), '帯に素の「コード」は置かない（面の札とぶつかる）', '');
 
     const at = src.indexOf('function putFence()');
     ok(at > 0, '入れる一本がある');
@@ -332,7 +333,7 @@ console.log('囲みを入れる札');
     ok(/getLineContent/.test(body), '打っている行に字があるかを見る', body.slice(0, 200));
     ok(/before\.trim\(\) \? '\\n' : ''/.test(body), '字があるときだけ、先に行を改める', body.slice(0, 200));
     // caret は囲みの中へ（`head.length + 4` ── ``` と改行のぶん）。
-    ok(/head\.length \+ 4/.test(body), 'caret は囲みの中へ', body.slice(0, 250));
+    ok(/head\.length \+ 4/.test(body), 'caret は枠の中へ', body.slice(0, 250));
 }
 
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');

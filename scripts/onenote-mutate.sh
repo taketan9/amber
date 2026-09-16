@@ -113,12 +113,12 @@ mutate "無いときに SharePoint の線を黙る" "一つも無ければ、Sha
 mutate "無いのに 0 を返す" "無い回は 0 を返さない" \
     'print("ノートブックが SharePoint にしか無いのかもしれません（手元は別の形）。")
         return 1' 'return 0'
-mutate "入れ物の中を見ない" "入れ物の中まで数える" \
+mutate "入れ物の中を見ない" "入れ物を開いて、中の形式まで数える" \
     'found += opened' 'found += []'
-mutate "開けなくても黙る" "開けなければ、わけを言う" \
-    'print(f"開けない {q.name}: {why}")' 'pass'
-mutate "CAB でなくても開きにいく" "CAB でなければ、そう言う" \
-    'if sig != b"MSCF":' 'if False:'
+mutate "中の道を出さない" "中の道をそのまま出す" \
+    'print(f"  {name}")' 'pass'
+mutate "圧縮の種類を黙る" "圧縮の種類を言う" \
+    'COMP_NAMES = {0: "無圧縮", 1: "MSZIP", 2: "Quantum", 3: "LZX"}' 'COMP_NAMES = {}'
 mutate "幹を 60 字で切らない" "幹は 60 字で切る" \
     'if len(out) >= 60:' 'if len(out) >= 120:'
 mutate "ページの幹を 120 字のままにする" "ページの名前も 60 字で切る" \
@@ -152,7 +152,7 @@ mutate "最後の改訂でなく最初を採る" "いまの版は、最後の改
 mutate "改訂が無いときに落ちる" "改訂が無ければ、空" \
     'return revs[max(revs)] if revs else []' 'return revs[max(revs)]'
 mutate "隣の一枚を import で頼る" "よその場所から走らせても、隣の一枚を読める" \
-    'at = Path(__file__).resolve().parent / "onestore.py"' 'at = Path("onestore.py")'
+    'at = Path(__file__).resolve().parent / f"{name}.py"' 'at = Path(f"{name}.py")'
 mutate "無いときに黙って進む" "隣に居なければ、そう言う（追跡ではなく）" \
     'if not at.is_file():
         sys.exit(f"{at} がありません（`git pull` は済んでいますか）。")' 'pass'
@@ -180,17 +180,33 @@ mutate "空の行も残す" "空の行は落とす" \
         return None'
 mutate "ページの上の順に並べない" "並びは上から下・左から右" \
     'lines.sort(key=lambda l: (l["y"], l["x"]))' 'pass'
-mutate "CAB の目録を読まない" "目録を読む（cp932）" \
+# ── CAB を自分でほどく（依頼 617）──
+mutate "CAB でなくても読みにいく" "CAB でなければ、わけを言う" \
     'if len(d) < 36 or d[:4] != b"MSCF":
-        return []' 'return []'
-mutate "CAB でなくても読みにいく" "CAB でなければ、空を返す（決めつけない）" \
-    'or d[:4] != b"MSCF":' ':'
-mutate "名前の符号の旗を見ない" "目録を読む（cp932）" \
-    'for enc in (("utf-8",) if attribs & 0x80 else ("cp932", "cp1252", "utf-8")):' \
-    'for enc in ("utf-8",):'
-mutate "入れ物の中のフォルダを捨てる" "目録を読む（cp932）" \
-    'out.append((name.replace(chr(92), "/"), cb))' \
-    'out.append((name.split(chr(92))[-1], cb))'
+        return None, "CAB ではない"' 'if False:
+        return None, "CAB ではない"'
+mutate "ファイルの数をフォルダの数と取り違える" "フォルダの数ではなくファイルの数を読む" \
+    'n_folders, n_files, flags = struct.unpack("<HHH", d[26:32])' \
+    'n_files, n_folders, flags = struct.unpack("<HHH", d[26:32])'
+mutate "名前を cp932 から読む（現場で化けた顔）" "目録の名前を読む（旗なしの UTF-8（OneNote はこれ））" \
+    'for enc in (("utf-8",) if attribs & _A_NAME_IS_UTF else ("utf-8", "cp932", "cp1252")):' \
+    'for enc in (("utf-8",) if attribs & _A_NAME_IS_UTF else ("cp932", "cp1252", "utf-8")):'
+mutate "入れ物の中のフォルダを捨てる" "セクショングループはフォルダのまま（無圧縮）" \
+    'files.append({"name": cab_name(raw, attribs).replace(chr(92), "/"),' \
+    'files.append({"name": cab_name(raw, attribs).split(chr(92))[-1],'
+mutate "MSZIP で前の塊を辞書に使わない" "塊をまたいでも中身が合う（MSZIP）" \
+    'z = zlib.decompressobj(-15, zdict=history)' 'z = zlib.decompressobj(-15)'
+mutate "MSZIP の塊を繋がない" "塊をまたいでも中身が合う（MSZIP）" \
+    'history = (history + out)[-32768:]' 'history = b""'
+mutate "入れ物の言う道をそのまま信じる" "上の階へ出さない（.. は落とす）" \
+    'if not x or x in (".", ".."):' 'if not x:'
+mutate "セクショングループを畳む" "ノートブック・グループ・セクションに分かれる" \
+    'out.append((pkg.stem, parts[:-1], Path(at), Path(parts[-1]).stem))' \
+    'out.append((pkg.stem, [], Path(at), Path(parts[-1]).stem))'
+mutate "目次まで写しにいく" ".one だけを拾う（目次は写さない）" \
+    'if not name.lower().endswith(".one"):
+            continue' 'if False:
+            continue'
 mutate "升の中の改行を捨てる（最後だけ残す）" "升の中の改行は、空白で繋ぐ" \
     't["rows"] = [[" ".join(c) for c in r] for r in t["rows"] if r]' \
     't["rows"] = [[(c[-1] if c else "") for c in r] for r in t["rows"] if r]'
@@ -204,9 +220,38 @@ mutate "表の中の字を本文にも出す" "表の中の字は、本文に二
     'skip.add(id(o))' \
     'pass'
 mutate "Page の無い空間もページにする" "Page の無い空間は、ページにしない（空のノートを作らない）" \
-    'if not any(o["jcid"] == JC_PAGE for o in last):
+    'if not any(o["jcid"] == JC_PAGE for o in whole):
             continue' 'if False:
             continue'
+# ── 改訂を重ねる（依頼 617）──
+mutate "最後の改訂だけで Page を探す" "最後の改訂に Page が無くても、取りこぼさない" \
+    'if not any(o["jcid"] == JC_PAGE for o in whole):' \
+    'if not any(o["jcid"] == JC_PAGE for o in current(revs)):'
+mutate "古い版を新しい版より優先する" "同じ OID は新しいほうを採る" \
+    'got[o["oid"]] = o' 'got.setdefault(o["oid"], o)'
+mutate "改訂を新しい順に重ねる" "同じ OID は新しいほうを採る" \
+    'for n in sorted(revs):' 'for n in sorted(revs, reverse=True):'
+mutate "本文が空でも拾い直さない" "前の改訂の本文を拾う" \
+    'if not _has_body(pg):' 'if False:'
+mutate "題を本文の代わりに数える" "前の改訂の本文を拾う" \
+    'return bool(pg["lines"] or pg["tables"] or pg["images"])' \
+    'return bool(pg["lines"] or pg["tables"] or pg["images"] or pg["title"])'
+mutate "前書きを古いほうから採る" "題はいちばん新しいものを採る" \
+    'meta = None
+    for o in objs:
+        if o["jcid"] == JC_PAGEMETA:
+            meta = o' \
+    'meta = next((o for o in objs if o["jcid"] == JC_PAGEMETA), None)
+    if False:
+        pass'
+mutate "同じ行を二度並べる" "同じ場所の同じ字は一つにまとめる" \
+    'if key in seen:
+            continue' 'if False:
+            continue'
+# ── 進み具合（依頼 617）──
+mutate "何本目かを言わない" "いま何本目かを数で言う" \
+    'log.info("[%d/%d] %s ── %d ページ", n, len(sections),' \
+    'log.info("%d/%d %s ── %d ページ", n, len(sections),'
 mutate "0 ページを黙って通す" "1 ページも取れなかったら、形式のわけを言う" \
     'log.warning("%s は 1 ページも取れなかった ── %s", sec, what)' 'pass'
 mutate "指し先の並びを読み飛ばす" "参照は、頭の並びから指し先を受け取る" \

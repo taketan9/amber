@@ -265,6 +265,26 @@ def current(revs):
     return revs[max(revs)] if revs else []
 
 
+def merged(revs):
+    """改訂を**古い順に重ね**、OID ごとに新しいほうを採る。
+
+    **最後の改訂だけでは足りないことがある**（依頼 617）。改訂は「変えた
+    ところ」しか持たないことがあり、直していない本文も、ページそのものの
+    札（`Page`）も、前の改訂に置きっぱなしになる ── そうなると
+    `current` は**題も本文も無いページ**を返し、写しても中身が入らない。
+
+    かといって素直に全部並べると、同じ題が何度も出る（前にそれで転んだ）。
+    だから **OID で重ねる** ── 同じものの新しい版が、古い版の居た場所に
+    座る。Python の dict は入れた順を覚えていて、入れ直しても順は動かない
+    ので、**文書の上の順はいちばん古い版のまま**になる。
+    """
+    got = {}
+    for n in sorted(revs):
+        for o in revs[n]:
+            got[o["oid"]] = o
+    return list(got.values())
+
+
 def _str(p, pid, enc="utf-16-le"):
     v = p.get(pid)
     if not isinstance(v, bytes) or not v:
@@ -469,51 +489,92 @@ def table_markdown(t):
     return out
 
 
+def _content(d, objs):
+    """オブジェクトの並びから、**一枚ぶんの中身**を組む。"""
+    # **表の中の字は、本文に二度出さない。** 升をたどるときに拾うので、
+    # ここで拾うと同じ字が表の外にも並ぶ。
+    look = by_oid(objs)
+    in_table, skip = False, set()
+    for o in objs:
+        if o["jcid"] == JC_TABLE:
+            in_table = True
+        elif o["jcid"] in (JC_OUTLINE, JC_PAGE) and in_table:
+            in_table = False
+        elif in_table and o["jcid"] == JC_TEXT:
+            skip.add(id(o))
+    lines = []
+    for o in objs:
+        if o["jcid"] != JC_TEXT or id(o) in skip:
+            continue
+        pr = read_props(d, o)
+        one = line_of(pr, style_of(d, look, pr))
+        if one:
+            lines.append(one)
+    # **ページの上にある順に並べる。** OneNote は箱をどこにでも置けるので、
+    # 出てきた順は書いた順ではない ── 上から下、同じ高さなら左から右
+    # （COM の道と同じ潰し方）。
+    lines.sort(key=lambda l: (l["y"], l["x"]))
+    # **同じ場所の同じ字は一つ。** 改訂を重ねて拾ったときに、同じ行が
+    # 二つ並ぶことがある（依頼 617）。位置まで同じなら、それは同じ行。
+    seen, uniq = set(), []
+    for l in lines:
+        key = (l["text"], l["y"], l["x"])
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(l)
+    # **前書きは、いちばん新しいものを採る。** 題は書き換わるので、
+    # 古い改訂のほうを拾うと前の題で書き出される。
+    meta = None
+    for o in objs:
+        if o["jcid"] == JC_PAGEMETA:
+            meta = o
+    title, level, created = None, 1, None
+    if meta:
+        mp = read_props(d, meta)
+        title = _str(mp, P_TITLE)
+        level = _num(mp, P_LEVEL) or 1
+        created = _num(mp, P_CREATED)
+    return {"title": title, "level": level, "created": created, "lines": uniq,
+            "images": pictures(d, objs), "tables": tables(d, objs)}
+
+
+def _has_body(pg):
+    """**中身があるか。** 題は数えない ── 前書きだけのノートは、空と同じ。"""
+    return bool(pg["lines"] or pg["tables"] or pg["images"])
+
+
+def _empty(pg):
+    """**空っぽの一枚か。** 題も本文も表も絵も無ければ、写しても何も残らない。"""
+    return not (_has_body(pg) or (pg["title"] or "").strip())
+
+
 def pages(d):
     """`.one` の、**いまのページ**だけを返す。"""
     got = []
     for _os, revs in spaces(d):
         if not revs:
             continue
-        last = current(revs)
         # **空間がぜんぶページとは限らない。** セクションそのものの空間が
         # 頭に一つある（題は持つが本文が無い）── そのまま出すと、
         # **中身のないノートがセクションごとに一本できる。**
         # ページの空間には `Page`（0x0B）が入っている。
-        if not any(o["jcid"] == JC_PAGE for o in last):
+        #
+        # **その札が最後の改訂にあるとは限らない**（依頼 617）── 直していない
+        # ものは前の改訂に置きっぱなしになるので、最後だけを見ていると
+        # **ページまるごと取りこぼす。** 見分けは改訂ぜんぶを重ねたほうで。
+        whole = merged(revs)
+        if not any(o["jcid"] == JC_PAGE for o in whole):
             continue
-        meta = next((o for o in last if o["jcid"] == JC_PAGEMETA), None)
-        # **表の中の字は、本文に二度出さない。** 升をたどるときに拾うので、
-        # ここで拾うと同じ字が表の外にも並ぶ。
-        look = by_oid(last)
-        in_table, skip = False, set()
-        for o in last:
-            if o["jcid"] == JC_TABLE:
-                in_table = True
-            elif o["jcid"] in (JC_OUTLINE, JC_PAGE) and in_table:
-                in_table = False
-            elif in_table and o["jcid"] == JC_TEXT:
-                skip.add(id(o))
-        lines = []
-        for o in last:
-            if o["jcid"] != JC_TEXT or id(o) in skip:
-                continue
-            pr = read_props(d, o)
-            one = line_of(pr, style_of(d, look, pr))
-            if one:
-                lines.append(one)
-        # **ページの上にある順に並べる。** OneNote は箱をどこにでも置けるので、
-        # 出てきた順は書いた順ではない ── 上から下、同じ高さなら左から右
-        # （COM の道と同じ潰し方）。
-        lines.sort(key=lambda l: (l["y"], l["x"]))
-        title, level, created = None, 1, None
-        if meta:
-            mp = read_props(d, meta)
-            title = _str(mp, P_TITLE)
-            level = _num(mp, P_LEVEL) or 1
-            created = _num(mp, P_CREATED)
-        if title or lines:
-            got.append({"title": title, "level": level, "created": created,
-                        "lines": lines, "images": pictures(d, last),
-                        "tables": tables(d, last)})
+        pg = _content(d, current(revs))
+        if not _has_body(pg):
+            # **最後の改訂は「変えたところ」しか持っていなかった。** 本文を
+            # 直していなければ、字は前の改訂に置きっぱなしになる ── 題だけが
+            # 新しい改訂にあると、**題しか入っていないノート**が出来上がる
+            # （現場で「中身もほぼほぼ入っていない」と出た顔）。重ねて拾い直す。
+            deep = _content(d, whole)
+            if _has_body(deep):
+                pg = deep
+        if not _empty(pg):
+            got.append(pg)
     return got

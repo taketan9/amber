@@ -72,6 +72,7 @@ import re
 import struct
 import sys
 import tempfile
+import zlib
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -156,127 +157,319 @@ def one_format(path):
     return got, name
 
 
+# ---------------------------------------------------------------------------
+# CAB ── `.onepkg` の中身。**`expand` に渡さず、自分でほどく。**
+# ---------------------------------------------------------------------------
+#
+# 前の版は Windows の `expand` に開かせて、名前だけ CAB の目録から読んでいた。
+# 二つ壊れていた ──
+#
+#   * **ファイルの数を読む場所が一つずれていた。** CAB の頭は 26 バイト目が
+#     `cFolders`、28 バイト目が `cFiles`。26 を数えていたので、目録は
+#     **フォルダの数だけ**しか読まれず、セクションが数本しか出てこない。
+#     走査は同じずれで偽物の CAB を組んでいたので、**検査も一緒に間違えていた**
+#     （偽物が本物より甘い、七度目 ── 依頼 617）。
+#   * **`expand` は日本語の名前を壊す。** 出したファイルを大きさで目録と
+#     突き合わせていたが、同じ大きさが二つあれば取り違える。
+#
+# いまは頭から目録から中身まで全部こちらで読む。**名前は目録のまま**、
+# フォルダの区切り（`\`）もそのまま活かすので、セクショングループが潰れない。
+# mac でも Linux でも開ける ── だから走査で本物の CAB を組んで確かめられる。
+
+_A_NAME_IS_UTF = 0x80            # CFFILE.attribs ── 名前が UTF-8
+_HDR_PREV, _HDR_NEXT, _HDR_RESERVE = 0x0001, 0x0002, 0x0004
+COMP_NAMES = {0: "無圧縮", 1: "MSZIP", 2: "Quantum", 3: "LZX"}
+
+
+class CabUnsupported(Exception):
+    """ほどき方を知らない圧縮（Quantum / LZX）。**`expand` に回す合図。**"""
+
+
+def _cstr(d, i):
+    """NUL で終わる並びを一つ取る ── `(中身, 次の位置)`。"""
+    j = d.find(b"\0", i)
+    if j < 0:
+        return b"", len(d)
+    return d[i:j], j + 1
+
+
+def cab_name(raw, attribs):
+    """目録の名前を字にする。**UTF-8 を先に試す。**
+
+    仕様は「`_A_NAME_IS_UTF`（0x80）が立っていれば UTF-8、でなければ機械の
+    符号」だが、**OneNote は旗を立てずに UTF-8 で書く**（本人の端末で出た ──
+    セクションの名前だけが読めない漢字に化け、数字はそのまま出ていた。これは
+    UTF-8 の並びを cp932 で読んだときの顔）。
+
+    だから旗に頼らず、**UTF-8 で読めるなら UTF-8** とする。UTF-8 は自分で
+    自分の正しさを言える符号で、cp932 の日本語（`打` = 91 C5 のように、
+    継続バイトから始まる並び）はまず通らない ── 取り違えない。
+    """
+    for enc in (("utf-8",) if attribs & _A_NAME_IS_UTF else ("utf-8", "cp932", "cp1252")):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1")
+
+
+def cab_read(d):
+    """CAB の頭・フォルダ・目録を読む ── `(中身, わけ)`。
+
+    返す `files` の `name` は**入れ物の中の道**（`400_打合せ/水曜日打合せ.one`）。
+    """
+    if len(d) < 36 or d[:4] != b"MSCF":
+        return None, "CAB ではない"
+    coff_files = struct.unpack("<I", d[16:20])[0]
+    # **26 は `cFolders`、28 が `cFiles`。** ここを取り違えると、
+    # 目録がフォルダの数だけで切れる（依頼 617 で踏んだ）。
+    n_folders, n_files, flags = struct.unpack("<HHH", d[26:32])
+    i, cb_folder, cb_data = 36, 0, 0
+    if flags & _HDR_RESERVE:
+        if len(d) < 40:
+            return None, "頭が短い"
+        cb_header, cb_folder, cb_data = struct.unpack("<HBB", d[36:40])
+        i = 40 + cb_header
+    for flag in (_HDR_PREV, _HDR_NEXT):
+        if flags & flag:
+            _, i = _cstr(d, i)
+            _, i = _cstr(d, i)
+    folders = []
+    for _ in range(n_folders):
+        if i + 8 > len(d):
+            break
+        off, blocks, comp = struct.unpack("<IHH", d[i:i + 8])
+        i += 8 + cb_folder
+        folders.append({"off": off, "blocks": blocks,
+                        "comp": comp & 0x000F, "window": (comp >> 8) & 0x1F})
+    files, j = [], coff_files
+    for _ in range(n_files):
+        if j + 16 > len(d):
+            break
+        size, off, folder, _da, _ti, attribs = struct.unpack("<IIHHHH", d[j:j + 16])
+        raw, j = _cstr(d, j + 16)
+        if not raw:
+            break
+        files.append({"name": cab_name(raw, attribs).replace(chr(92), "/"),
+                      "size": size, "off": off, "folder": folder})
+    return {"folders": folders, "files": files, "cb_data": cb_data}, None
+
+
 def cab_names(at):
-    """CAB の**目録**を読む ── `[(名前, 大きさ)]`（入っている順）。
+    """CAB の**目録**を読む ── `[(道, 大きさ)]`（入っている順）。
 
-    **`expand` は日本語の名前を壊す。** 本文は無事なのに、セクションの名前
-    （＝ファイル名）だけが化けるのはこれ（現場で出た・依頼 597）。
-    中身は `expand` に開かせて、**名前はこちらで読む。**
-
-    名前の符号は旗で決まる ── `_A_NAME_IS_UTF`（0x80）が立っていれば UTF-8、
-    立っていなければ機械の符号（日本語 Windows なら cp932）。
-    **名前に `\\` が入っていれば、それはフォルダ** ── セクショングループが
-    そこに入っている。
-
-    読めなければ空を返す。**分からないことを分かったように言わない。**
+    中身は開かない。**名前と大きさだけ**（`--peek` と突き合わせに使う）。
+    読めなければ空を返す ── **分からないことを分かったように言わない。**
     """
     try:
         d = at.read_bytes() if hasattr(at, "read_bytes") else open(at, "rb").read()
     except OSError:
         return []
-    if len(d) < 36 or d[:4] != b"MSCF":
+    got, _why = cab_read(d)
+    if got is None:
         return []
-    coff_files, n_files, flags = (struct.unpack("<I", d[16:20])[0],
-                                  struct.unpack("<H", d[26:28])[0],
-                                  struct.unpack("<H", d[30:32])[0])
-    i = coff_files
-    out = []
-    for _ in range(n_files):
-        if i + 16 > len(d):
-            break
-        cb = struct.unpack("<I", d[i:i + 4])[0]
-        attribs = struct.unpack("<H", d[i + 14:i + 16])[0]
-        j = d.find(b"\0", i + 16)
-        if j < 0:
-            break
-        raw = d[i + 16:j]
-        for enc in (("utf-8",) if attribs & 0x80 else ("cp932", "cp1252", "utf-8")):
-            try:
-                name = raw.decode(enc)
-                break
-            except UnicodeDecodeError:
-                continue
+    return [(f["name"], f["size"]) for f in got["files"]]
+
+
+def _folder_stream(d, folder, cb_data, sink):
+    """フォルダ一つぶんの中身を、ほどいて `sink` に流す。
+
+    **MSZIP は塊ごとの deflate**（頭に `CK`）で、**前の塊の末尾 32KB を辞書に
+    使う** ── 塊ごとに独立に開くと、二つ目から化ける。
+    """
+    comp = folder["comp"]
+    if comp not in (0, 1):
+        raise CabUnsupported(COMP_NAMES.get(comp, str(comp)))
+    i, history = folder["off"], b""
+    for _ in range(folder["blocks"]):
+        if i + 8 > len(d):
+            raise ValueError("塊が途中で切れている")
+        cb, cbu = struct.unpack("<HH", d[i + 4:i + 8])
+        i += 8 + cb_data
+        blob = d[i:i + cb]
+        i += cb
+        if comp == 0:
+            out = blob
         else:
-            name = raw.decode("latin-1")
-        out.append((name.replace(chr(92), "/"), cb))
-        i = j + 1
-    return out
+            if blob[:2] != b"CK":
+                raise ValueError("MSZIP の印（CK）が無い")
+            z = zlib.decompressobj(-15, zdict=history)
+            out = z.decompress(blob[2:]) + z.flush()
+        if cbu and len(out) != cbu:
+            raise ValueError(f"ほどいた大きさが合わない（{len(out)} ≠ {cbu}）")
+        sink(out)
+        history = (history + out)[-32768:]
 
 
-def unpack_onepkg(at, into):
-    """`.onepkg` を開く。**中身は CAB**（Windows 標準の `expand` で開ける）。
+def _safe_parts(name):
+    """入れ物の中の道を、**外へ出られない形**に。
 
-    OneNote が「ノートブック全体は `.pdf` `.xps` `.onepkg` だけ」と言うので、
-    まとめて出すとこの形になる。中に入っているのは `.one` なので、
-    **開けば形式が分かる** ── 書き出した `.one` が公開仕様なら、話が変わる。
+    `..` と絶対の道は落とす ── 入れ物が作った道をそのまま信じて書くと、
+    出力先の外に書ける（`..\\..\\` を入れた CAB を渡されたとき）。
+    """
+    parts = []
+    for x in name.replace(chr(92), "/").split("/"):
+        x = x.strip()
+        if not x or x in (".", ".."):
+            continue
+        if len(x) > 1 and x[1] == ":":        # C:\... は道ではなく名前として扱う
+            x = x.replace(":", "_")
+        parts.append(x)
+    return parts
+
+
+def _expand_fallback(at, into, listed):
+    """ほどき方を知らない圧縮は、**Windows の `expand` に回す。**
+
+    `expand` は日本語の名前を壊すので、出てきたものは**大きさで目録と
+    突き合わせて**、正しい名前に置き直す（同じ大きさが複数あれば、出てきた
+    順に配る ── それでも名前が化けたままよりはよい）。
     """
     import subprocess
-    os.makedirs(into, exist_ok=True)
-    with open(at, "rb") as f:
-        sig = f.read(4)
-    if sig != b"MSCF":
-        return None, f"CAB ではない（先頭は {sig.hex()}）"
+    raw = Path(into) / "_expand"
+    raw.mkdir(parents=True, exist_ok=True)
     try:
-        got = subprocess.run(["expand", "-F:*", str(at), str(into)],
-                             capture_output=True, timeout=600)
+        got = subprocess.run(["expand", "-F:*", str(at), str(raw)],
+                             capture_output=True, timeout=1800)
     except FileNotFoundError:
-        return None, "expand が無い（Windows の外では開けない）"
+        return None, "この圧縮はこちらでほどけず、expand も居ません（Windows で実行してください）"
     except subprocess.TimeoutExpired:
         return None, "expand が返ってこない"
     if got.returncode != 0:
         return None, f"expand が転んだ（{got.returncode}）"
-    return into, None
+    on_disk = sorted(raw.rglob("*"), key=lambda q: (q.stat().st_size if q.is_file() else 0))
+    left = [q for q in on_disk if q.is_file()]
+    out = []
+    for f in listed:
+        hit = next((q for q in left if q.stat().st_size == f["size"]), None)
+        if hit is None:
+            continue
+        left.remove(hit)
+        parts = _safe_parts(f["name"])
+        if not parts:
+            continue
+        dest = Path(into).joinpath(*parts)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        hit.replace(dest)
+        out.append((f["name"], dest))
+    return out, None
 
 
-def load_onestore():
-    """隣の `onestore.py` を読む。**道を名指しする。**
+def unpack_onepkg(at, into):
+    """`.onepkg` を開く ── `([(入れ物の中の道, 出したファイル), …], わけ)`。
 
-    `import onestore` に頼ると、**走らせる場所によって通らない**（`sys.path` に
+    OneNote が「ノートブック全体は `.pdf` `.xps` `.onepkg` だけ」と言うので、
+    まとめて出すとこの形になる。中身は CAB。
+    """
+    at = Path(at)
+    into = Path(into)
+    into.mkdir(parents=True, exist_ok=True)
+    try:
+        d = at.read_bytes()
+    except OSError as e:
+        return None, f"読めない（{e.strerror or e}）"
+    got, why = cab_read(d)
+    if got is None:
+        return None, why
+    if not got["files"]:
+        return None, "目録が空（壊れているか、CAB ではない）"
+    comps = sorted({f["comp"] for f in got["folders"]})
+    log.debug("CAB: フォルダ %d / ファイル %d / 圧縮 %s", len(got["folders"]),
+              len(got["files"]), "・".join(COMP_NAMES.get(c, str(c)) for c in comps))
+    # **フォルダごとにほどいて、ほどいた端から切り出す。**
+    #
+    # ファイルは「フォルダの中の位置」で置かれているので、まず一続きに戻す。
+    # ノートブック一冊で数百 MB になるから**丸ごと持たない** ── 一時ファイルへ
+    # 流して、その中を seek で切り出し、**そのフォルダを配り終えたら捨てる。**
+    # 全部ほどいてから配ると、置き場所が一時と出力先で二重に要る。
+    out = []
+    by_folder = {}
+    for k, f in enumerate(got["files"]):
+        by_folder.setdefault(f["folder"], []).append((k, f))
+    tmp = into / "_stream.bin"
+    try:
+        for n, folder in enumerate(got["folders"]):
+            mine = by_folder.get(n)
+            if not mine:
+                continue
+            with open(tmp, "wb") as w:
+                _folder_stream(d, folder, got["cb_data"], w.write)
+            with open(tmp, "rb") as src:
+                for k, f in mine:
+                    parts = _safe_parts(f["name"])
+                    if not parts:
+                        continue
+                    dest = into.joinpath(*parts)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    src.seek(f["off"])
+                    left = f["size"]
+                    with open(dest, "wb") as w:
+                        while left > 0:
+                            chunk = src.read(min(left, 1 << 20))
+                            if not chunk:
+                                break
+                            w.write(chunk)
+                            left -= len(chunk)
+                    out.append((k, f["name"], dest))
+            tmp.unlink(missing_ok=True)
+    except CabUnsupported as e:
+        log.info("%s は %s で圧縮されています ── expand に回します", at.name, e)
+        return _expand_fallback(at, into, got["files"])
+    except (ValueError, zlib.error, OSError) as e:
+        return None, f"ほどけない（{e}）"
+    finally:
+        tmp.unlink(missing_ok=True)
+    # **目録の順のまま返す。** フォルダごとに配ったので、番号で並べ直す。
+    out.sort(key=lambda kv: kv[0])
+    return [(name, dest) for _k, name, dest in out], None
+
+
+def load_beside(name):
+    """隣の `<name>.py` を読む。**道を名指しする。**
+
+    `import` に頼ると、**走らせる場所によって通らない**（`sys.path` に
     `scripts/` が入るとは限らない）── 現場で `ModuleNotFoundError` になった。
     走査が偽物を `sys.modules` に差し込んでいたので、**本物の読み込みを一度も
     試していなかった**のが見逃した理由。偽物が本物より甘いと検査は嘘をつく。
     """
     import importlib.util
-    got = sys.modules.get("onestore")
+    got = sys.modules.get(name)
     if got is not None:
         return got                       # 一度読んだものを使い回す
-    at = Path(__file__).resolve().parent / "onestore.py"
+    at = Path(__file__).resolve().parent / f"{name}.py"
     if not at.is_file():
         sys.exit(f"{at} がありません（`git pull` は済んでいますか）。")
-    spec = importlib.util.spec_from_file_location("onestore", at)
+    spec = importlib.util.spec_from_file_location(name, at)
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["onestore"] = mod
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
 
 
-def opened_sections(pkg, at):
+def load_onestore():
+    """`.one` を読む隣の一枚。**道を名指しで読む**（`load_beside`）。"""
+    return load_beside("onestore")
+
+
+def opened_sections(pkg, entries):
     """開いた `.onepkg` の中身を、**入れ物の中の道ごと**返す。
 
-    `[(ノートブック, 道の並び, ファイル)]` ── 道の並びはセクショングループ。
-    前の版は `rglob` で `.one` を集めるだけで**どのフォルダに居たかを捨てて
-    いた**ので、`400_打合せ/月_定例` のような多層が一段に潰れ、**取りこぼして
-    いるように見えた**（現場で気づかれた・依頼 597）。
+    `[(ノートブック, 道の並び, ファイル, セクション名)]` ── 道の並びが
+    セクショングループ。前の版は `rglob` で `.one` を集めるだけで**どの
+    フォルダに居たかを捨てていた**ので、`400_打合せ/水曜日打合せ` のような
+    多層が一段に潰れ、取りこぼしに見えた（現場で気づかれた・依頼 597）。
 
-    名前は CAB の目録から取る（`expand` は日本語を壊す）。目録と実物は
-    **大きさで突き合わせる** ── 名前が化けている以上、名前では繋げない。
+    いまは CAB の目録に書いてある道をそのまま使う ── 名前も階層も、
+    `expand` の手に渡さないので壊れない（依頼 617）。
     """
-    listed = [(n, cb) for n, cb in cab_names(pkg) if n.lower().endswith(".one")]
-    on_disk = sorted(Path(at).rglob("*.one"), key=lambda q: q.stat().st_size)
-    left = list(on_disk)
     out = []
-    for name, cb in listed:
-        got = next((q for q in left if q.stat().st_size == cb), None)
-        if got is None:
+    for name, at in entries:
+        if not name.lower().endswith(".one"):
             continue
-        left.remove(got)
-        parts = [x for x in name.split("/") if x and x not in (".", "..")]
-        out.append((pkg.stem, parts[:-1], got, Path(parts[-1]).stem))
-    if not out:
-        # 目録が読めなかった（CAB でない・壊れている）── 名前は化けたままだが、
-        # **黙って何も出さないよりはよい。**
-        out = [(pkg.stem, list(q.relative_to(at).parts[:-1]), q, q.stem)
-               for q in sorted(on_disk)]
+        parts = _safe_parts(name)
+        if not parts:
+            continue
+        out.append((pkg.stem, parts[:-1], Path(at), Path(parts[-1]).stem))
     return out
 
 
@@ -284,7 +477,7 @@ def from_files(where, args, out_root):
     """**書き出したファイルから写す。** COM を通らない道（依頼 594）。
 
     受け取るのは `.onepkg`（入れ物）か `.one`（セクション一本）か、その両方が
-    入ったフォルダ。`.onepkg` は `expand` で開いてから中の `.one` を読む。
+    入ったフォルダ。`.onepkg` は**こちらでほどいて**から中の `.one` を読む。
 
     フォルダの形は COM の道と同じ ── **セクション＝フォルダ、ページ＝`.md`、
     画像はノートの隣の `attachments/`**。下流（前書き・差分・`--prune`）も同じ。
@@ -306,11 +499,11 @@ def from_files(where, args, out_root):
     for q in found:
         if q.suffix.lower() == ".onepkg":
             into = Path(tempfile.gettempdir()) / f"amber-onepkg-{os.getpid()}-{q.stem[:20]}"
-            at, why = unpack_onepkg(q, into)
-            if at is None:
+            entries, why = unpack_onepkg(q, into)
+            if entries is None:
                 log.error("開けない %s: %s", q.name, why)
                 continue
-            sections += opened_sections(q, Path(at))
+            sections += opened_sections(q, entries)
         else:
             sections.append((q.parent.name, [], q, q.stem))
     if not sections:
@@ -319,7 +512,10 @@ def from_files(where, args, out_root):
     stats = {"pages": 0, "written": 0, "skipped_pages": 0, "images": 0, "errors": 0,
              "skipped_sections": 0, "filtered_sections": 0, "pruned": 0, "pruned_images": 0}
     written: set = set()
-    for book, groups, at, name in sections:
+    # **どこまで進んだかを数で言う。** 窓には回っているだけの棒が出ていたが、
+    # あれは何も測っていなかった（本人「ローディングバーは全く動かなかった」）。
+    # 動かない棒より、`[3/12]` のほうが正直で、役に立つ（依頼 617）。
+    for n, (book, groups, at, name) in enumerate(sections, 1):
         nb = sanitize(book)
         # **セクショングループは、フォルダのまま。** ここを潰すと
         # `400_打合せ/月_定例` が一段になり、取りこぼしに見える。
@@ -335,7 +531,8 @@ def from_files(where, args, out_root):
             log.error("読めない %s: %s", at.name, e)
             stats["errors"] += 1
             continue
-        log.info("セクション: %s（%d ページ）", "/".join([nb] + gs + [sec]), len(got))
+        log.info("[%d/%d] %s ── %d ページ", n, len(sections),
+                 "/".join([nb] + gs + [sec]), len(got))
         if not got:
             # **0 ページを黙って通さない。** たいていは形式のほう
             # （`638DE92F…` は読めない ── 依頼 591）。わけを言う。
@@ -425,17 +622,29 @@ def peek(where):
         found = [q for q in root.rglob("*")
                  if q.is_file() and q.suffix.lower() in kinds]
     # **`.onepkg` は入れ物。** 中を見ないと、形式は分からない。
+    # **開いたら、中の道をそのまま出す。** 階層が合っているかは、人が見れば
+    # 一目で分かる ── 数だけ出しても、どこが潰れたのかは分からない。
     opened = []
     for q in [q for q in found if q.suffix.lower() == ".onepkg"]:
-        into = Path(tempfile.gettempdir()) / f"amber-onepkg-{os.getpid()}-{q.stem[:20]}"
-        at, why = unpack_onepkg(q, into)
-        if at is None:
-            print(f"開けない {q.name}: {why}")
+        raw = q.read_bytes()
+        head, why = cab_read(raw)
+        if head is None:
+            print(f"読めない {q.name}: {why}")
             continue
-        inner = [r for r in Path(at).rglob("*")
-                 if r.is_file() and r.suffix.lower() in kinds]
-        print(f"開いた {q.name} → 中に {len(inner)} 本")
-        opened += inner
+        comps = "・".join(sorted({COMP_NAMES.get(f["comp"], str(f["comp"]))
+                                  for f in head["folders"]})) or "？"
+        print(f"{q.name}: フォルダ {len(head['folders'])} / "
+              f"ファイル {len(head['files'])} / 圧縮 {comps}")
+        into = Path(tempfile.gettempdir()) / f"amber-onepkg-{os.getpid()}-{q.stem[:20]}"
+        entries, why = unpack_onepkg(q, into)
+        if entries is None:
+            print(f"  開けない: {why}")
+            continue
+        for name, at in entries:
+            if Path(name).suffix.lower() in kinds:
+                print(f"  {name}")
+        opened += [Path(at) for name, at in entries
+                   if Path(name).suffix.lower() in kinds]
     found += opened
     for q in found:
         kinds[q.suffix.lower()].append(q)
@@ -743,8 +952,11 @@ def main():
     # **何も渡されなければ、窓を出す。** バッチをダブルクリックした人は
     # 引数を渡せない ── そこで使い方を出して終わるのは、道具ではない。
     if args.ui or not (args.files or args.peek):
-        from onenote_ui import ask_and_run
-        return ask_and_run(args)
+        # **隣の一枚は、道を名指しして読む**（`load_onestore` と同じ理由）──
+        # `import` に頼ると、走らせる場所によって `sys.path` に `scripts/` が
+        # 入らず `ModuleNotFoundError` になる。窓が出ないのが「落ちた」と
+        # 見分けられない形で出る。
+        return load_beside("onenote_ui").ask_and_run(args)
 
     if not args.peek:
         log.info("=== onenote2md 開始 %s", datetime.now().isoformat(timespec="seconds"))

@@ -243,24 +243,19 @@ def t_peek(tmp):
     #
     # **中を見ないと形式は分からない。** ノートブックをまとめて出すと
     # この形にしかならない（OneNote が「.pdf .xps .onepkg だけ」と言う）。
+    # **偽物では試さない** ── 本物の CAB を組んで、本当に開けるか見る。
     pkg = tmp / "pkg"
     pkg.mkdir(exist_ok=True)
-    (pkg / "まとめ.onepkg").write_bytes(b"MSCF" + b"\x00" * 60)
-    keep_un = o2m.unpack_onepkg
-    try:
-        inside = tmp / "inside"
-        inside.mkdir(exist_ok=True)
-        _one(inside / "中身.one", "109ADD3F-911B-49F5-A5D0-1791EDC8AED8")
-        o2m.unpack_onepkg = lambda at, into: (str(inside), None)
-        _, out = run(pkg)
-        check("入れ物の中まで数える", "中に 1 本" in out and "109add3f" in out, out)
-        # 開けなかったら、そう言う ── 黙って 0 本と数えない。
-        o2m.unpack_onepkg = lambda at, into: (None, "expand が無い")
-        _, out = run(pkg)
-        check("開けなければ、わけを言う", "開けない" in out and "expand が無い" in out, out)
-        check("開けなくても、数だけは出す", ".onepkg" in out and "1 本" in out, out)
-    finally:
-        o2m.unpack_onepkg = keep_un
+    body = (b"\x00" * 48
+            + __import__("uuid").UUID("109ADD3F-911B-49F5-A5D0-1791EDC8AED8").bytes_le
+            + b"\x00" * 16)
+    (pkg / "まとめ.onepkg").write_bytes(
+        _cab([("400_打合せ/水曜日打合せ.one", body)], compress=True))
+    _, out = run(pkg)
+    check("入れ物を開いて、中の形式まで数える", "109add3f" in out, out)
+    check("中の道をそのまま出す",
+          "  400_打合せ/水曜日打合せ.one" in out.splitlines(), out)
+    check("圧縮の種類を言う", "MSZIP" in out, out)
 
     # CAB でなければ、開かずに断る。
     notcab = tmp / "notcab"
@@ -338,6 +333,21 @@ def t_from_files(tmp):
         text = body.decode("utf-8")
         check("前書きに題", 'title: "9月の定例"' in text, text[:120])
         check("本文が入る", "決めたこと" in text and "宿題" in text, text)
+        # **何本目かを数で言う**（依頼 617）。窓はこの行を読んで上に出す ──
+        # 回っているだけの棒は、何も測っていなかった。
+        import logging as _lg, io as _io
+        buf = _io.StringIO()
+        h = _lg.StreamHandler(buf)
+        o2m.log.addHandler(h)
+        was = o2m.log.level
+        o2m.log.setLevel(_lg.INFO)
+        try:
+            o2m.run(_parse(["--out", str(tmp / "fromfiles-progress"), str(src)]),
+                    tmp / "fromfiles-progress")
+        finally:
+            o2m.log.removeHandler(h)
+            o2m.log.setLevel(was)
+        check("いま何本目かを数で言う", "[1/1]" in buf.getvalue(), buf.getvalue()[:200])
         # 絞りも効く（COM の道と同じ `--only`）。
         out2 = tmp / "fromfiles2"
         code = o2m.run(_parse(["--out", str(out2), str(src), "--only", "そんな名前は無い"]), out2)
@@ -628,40 +638,187 @@ def t_empty_space(tmp):
     finally:
         ost.spaces, ost.read_props = keep_sp, keep_rp
 
+def t_revisions(tmp):
+    print("改訂を重ねる ──")
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("onestore", ROOT / "onestore.py")
+    ost = iu.module_from_spec(spec)
+    spec.loader.exec_module(ost)
+
+    def obj(oid, jc):
+        return {"oid": oid, "jcid": jc, "stp": 0, "cb": 0}
+
+    # **OID で重ねる。** 同じものの新しい版が、古い版の居た場所に座る ──
+    # 順は動かない（文書の上の並びが崩れると、本文が入れ替わって出る）。
+    old_t = obj(7, ost.JC_TEXT)
+    new_t = obj(7, ost.JC_TEXT)
+    got = ost.merged({1: [obj(1, ost.JC_PAGE), old_t], 2: [new_t]})
+    check("同じ OID は新しいほうを採る", got[1] is new_t, got)
+    check("古い版の居た場所のまま", [o["oid"] for o in got] == [1, 7], got)
+    check("改訂が無ければ、空", ost.merged({}) == [], ost.merged({}))
+
+    keep_sp, keep_rp = ost.spaces, ost.read_props
+    try:
+        # **最後の改訂は「変えたところ」しか持っていないことがある。**
+        # `Page` の札も本文も前の改訂に置きっぱなしで、最後だけを見ると
+        # **ページまるごと取りこぼす**（現場で「中身がほぼ入っていない」）。
+        first = [obj(1, ost.JC_PAGE), obj(2, ost.JC_PAGEMETA), obj(3, ost.JC_TEXT)]
+        later = [obj(4, ost.JC_PAGEMETA)]
+        body = {3: "本文だ"}
+        titles = {2: "むかしの題", 4: "いまの題"}
+
+        def props(d, o):
+            if o["oid"] in titles:
+                return {ost.P_TITLE: titles[o["oid"]].encode("utf-16-le")}
+            if o["oid"] in body:
+                return {ost.P_UNICODE: body[o["oid"]].encode("utf-16-le")}
+            return {}
+
+        ost.spaces = lambda d: [("a", {1: first, 2: later})]
+        ost.read_props = props
+        got = ost.pages(b"")
+        check("最後の改訂に Page が無くても、取りこぼさない", len(got) == 1, got)
+        if got:
+            check("前の改訂の本文を拾う",
+                  [l["text"] for l in got[0]["lines"]] == ["本文だ"], got[0]["lines"])
+            check("題はいちばん新しいものを採る", got[0]["title"] == "いまの題", got[0])
+
+        # **同じ場所の同じ字は一つ。** 重ねて拾うと同じ行が二つ並ぶことがある。
+        ost.spaces = lambda d: [("a", {1: [obj(1, ost.JC_PAGE), obj(3, ost.JC_TEXT),
+                                           obj(5, ost.JC_TEXT)]})]
+        ost.read_props = lambda d, o: ({ost.P_UNICODE: "おなじ".encode("utf-16-le")}
+                                       if o["jcid"] == ost.JC_TEXT else {})
+        got = ost.pages(b"")
+        check("同じ場所の同じ字は一つにまとめる",
+              got and [l["text"] for l in got[0]["lines"]] == ["おなじ"], got)
+
+        # **本文も題も無い空間は、ノートにしない。**
+        ost.spaces = lambda d: [("a", {1: [obj(1, ost.JC_PAGE)]})]
+        ost.read_props = lambda d, o: {}
+        check("題も本文も無ければ、ノートを作らない", ost.pages(b"") == [], ost.pages(b""))
+    finally:
+        ost.spaces, ost.read_props = keep_sp, keep_rp
+
+
+def _cab(entries, *, utf8_flag=False, encoding="utf-8", compress=False, block=32768):
+    """**本物の CAB を組む。**（無圧縮 / MSZIP）
+
+    `entries` は `[(入れ物の中の道, 中身)]`。前の走査は偽物を組んでいて、
+    **ファイルの数を 26 バイト目に書いていた** ── 本体の読み方と同じずれ。
+    偽物が本物より甘いと、検査は間違いを一緒に抱いて黙る（七度目・依頼 617）。
+    ここは実際の CAB と同じ並びで組むので、頭のずれはそのまま NG になる。
+    """
+    import struct as st
+    import zlib
+
+    blob = b"".join(body for _, body in entries)
+    blocks, hist = [], b""
+    for k in range(0, max(len(blob), 1), block):
+        chunk = blob[k:k + block]
+        if compress:
+            co = (zlib.compressobj(9, zlib.DEFLATED, -15, zdict=hist) if hist
+                  else zlib.compressobj(9, zlib.DEFLATED, -15))
+            data = b"CK" + co.compress(chunk) + co.flush()
+        else:
+            data = chunk
+        blocks.append((data, len(chunk)))
+        hist = (hist + chunk)[-32768:]
+
+    files, at = b"", 0
+    for name, body in entries:
+        attribs = 0x20 | (0x80 if utf8_flag else 0)
+        raw = name.replace("/", chr(92)).encode(encoding)
+        files += st.pack("<IIHHHH", len(body), at, 0, 0, 0, attribs) + raw + b"\0"
+        at += len(body)
+
+    coff_files = 36 + 8
+    data_off = coff_files + len(files)
+    folder = st.pack("<IHH", data_off, len(blocks), 1 if compress else 0)
+    data = b"".join(st.pack("<IHH", 0, len(d), cbu) + d for d, cbu in blocks)
+    total = data_off + len(data)
+    head = st.pack("<4sIIIIIBBHHHHH", b"MSCF", 0, total, 0, coff_files, 0, 3, 1,
+                   1, len(entries), 0, 0, 0)
+    assert len(head) == 36, len(head)
+    return head + folder + files + data
+
 
 def t_cab(tmp):
-    print("CAB の目録（日本語の名前）──")
-    import struct as st
+    print("CAB を自分でほどく ──")
+    want = [("400_打合せ/水曜日打合せ.one", b"A" * 111),
+            ("400_打合せ/金曜日打合せ.one", b"B" * 222),
+            ("表紙.onetoc2", b"C" * 333)]
+    names = [n for n, _ in want]
 
-    def cab(entries, utf8=False):
-        files = b""
-        for name, size in entries:
-            raw = name.replace("/", chr(92)).encode("utf-8" if utf8 else "cp932")
-            files += st.pack("<IIHHHH", size, 0, 0, 0, 0, 0x80 if utf8 else 0) + raw + b"\0"
-        head = bytearray(36)
-        head[0:4] = b"MSCF"
-        st.pack_into("<I", head, 16, 36)
-        st.pack_into("<H", head, 26, len(entries))
-        return bytes(head) + files
-
-    at = tmp / "t.cab"
-    want = [("400_打合せ/月_定例.one", 111), ("400_打合せ/金_定例.one", 222), ("表紙.one", 333)]
-    # **`expand` は日本語の名前を壊す。** 中身は開かせて、名前はこちらで読む。
-    for label, utf8 in (("cp932", False), ("UTF-8 の旗つき", True)):
-        at.write_bytes(cab(want, utf8))
+    at = tmp / "t.onepkg"
+    # **名前の符号は三通り試す。** 現場で化けたのは「UTF-8 なのに旗が立って
+    # いない」形 ── 数字はそのまま出て、漢字だけが読めなくなる。
+    for label, kw in (("UTF-8 の旗つき", dict(utf8_flag=True, encoding="utf-8")),
+                      ("旗なしの UTF-8（OneNote はこれ）", dict(encoding="utf-8")),
+                      ("旗なしの cp932", dict(encoding="cp932"))):
+        at.write_bytes(_cab(want, **kw))
         got = o2m.cab_names(at)
-        check(f"目録を読む（{label}）", got == want, got)
-    # **フォルダはそのまま。** ここを潰すと多層が一段になり、取りこぼしに見える。
-    check("名前の中の \\ は、フォルダの区切り",
-          all("/" in n for n, _ in o2m.cab_names(at) if "打合せ" in n),
+        check(f"目録の名前を読む（{label}）", [n for n, _ in got] == names, got)
+        check(f"大きさも読む（{label}）",
+              [cb for _, cb in got] == [len(b) for _, b in want], got)
+
+    # **ファイルの数は 28 バイト目。** 26（フォルダの数）を読むと、
+    # 目録が 1 本で切れる ── 現場で「セクションが 3 つしかできない」と出た顔。
+    at.write_bytes(_cab(want))
+    check("フォルダの数ではなくファイルの数を読む", len(o2m.cab_names(at)) == 3,
           o2m.cab_names(at))
-    # **CAB の形をしていても、頭が MSCF でなければ読まない。** 中身が全部ゼロの
-    # 偽物では足りない ── 読みにいっても空が返るので、検査が黙る。
-    fake = bytearray(cab(want, utf8))
-    fake[:4] = b"PK\x03\x04"
-    at.write_bytes(bytes(fake))
-    check("CAB でなければ、空を返す（決めつけない）", o2m.cab_names(at) == [],
-          o2m.cab_names(at))
+
+    # **ほどいて、中身も名前も階層も合っているか。**
+    for label, comp in (("無圧縮", False), ("MSZIP", True)):
+        at.write_bytes(_cab(want, compress=comp))
+        into = tmp / f"opened-{label}"
+        entries, why = o2m.unpack_onepkg(at, into)
+        check(f"開ける（{label}）", entries is not None, why)
+        if entries is None:
+            continue
+        check(f"目録の道のまま出す（{label}）", [n for n, _ in entries] == names, entries)
+        for (name, q), (_n, body) in zip(entries, want):
+            check(f"中身が合う（{label}・{name}）", q.read_bytes() == body,
+                  f"{len(q.read_bytes())} ≠ {len(body)}")
+        # **セクショングループはフォルダのまま。** ここが潰れると多層が
+        # 一段になり、取りこぼしに見える（依頼 597）。
+        check(f"セクショングループはフォルダのまま（{label}）",
+              (into / "400_打合せ" / "水曜日打合せ.one").is_file(),
+              sorted(str(q.relative_to(into)) for q in into.rglob("*")))
+
+    # **MSZIP は塊をまたぐ。** 一塊に収まる見本では、前の塊を辞書に使う道が
+    # 一度も通らない ── 32KB を超える中身で確かめる。
+    big = [("長い/中身.one", bytes(range(256)) * 400)]     # 102,400 バイト
+    at.write_bytes(_cab(big, compress=True, block=32768))
+    entries, why = o2m.unpack_onepkg(at, tmp / "opened-big")
+    check("塊をまたいでも中身が合う（MSZIP）",
+          entries is not None and entries[0][1].read_bytes() == big[0][1], why)
+
+    # **入れ物の言う道を、そのまま信じない。** `..` を入れた CAB を渡されたら、
+    # 出力先の外に書ける。
+    evil = [("../../逃げる.one", b"X" * 9)]
+    at.write_bytes(_cab(evil))
+    into = tmp / "opened-evil"
+    entries, _why = o2m.unpack_onepkg(at, into)
+    check("上の階へ出さない（.. は落とす）",
+          entries and entries[0][1] == into / "逃げる.one", entries)
+
+    # **セクションの道は、目録から組む。**
+    at.write_bytes(_cab(want))
+    entries, _ = o2m.unpack_onepkg(at, tmp / "opened-sec")
+    secs = o2m.opened_sections(tmp / "みそそ.onepkg", entries)
+    check(".one だけを拾う（目次は写さない）", len(secs) == 2, secs)
+    check("ノートブック・グループ・セクションに分かれる",
+          [(b, g, n) for b, g, _q, n in secs]
+          == [("みそそ", ["400_打合せ"], "水曜日打合せ"),
+              ("みそそ", ["400_打合せ"], "金曜日打合せ")], secs)
+
+    # **CAB でなければ、決めつけない。**
+    at.write_bytes(b"PK\x03\x04" + b"\x00" * 60)
+    check("CAB でなければ、空を返す", o2m.cab_names(at) == [], o2m.cab_names(at))
+    got, why = o2m.unpack_onepkg(at, tmp / "opened-not")
+    # **わけはそのまま言う。** 「目録が空」と言い換えると、頭を見ずに
+    # 中身を読みにいってたまたま空だった回と見分けがつかない。
+    check("CAB でなければ、わけを言う", got is None and why == "CAB ではない", why)
 
 
 def t_ui(tmp):
@@ -699,6 +856,13 @@ def t_ui(tmp):
     check("Tk が無ければ、代わりの打ち方を出して 1 を返す",
           r.returncode == 1 and "onenote2md.py --out" in both, both[-200:])
 
+    # **回っているだけの棒は置かない**（依頼 617）。本人の端末で一度も動かず、
+    # 「止まっている」ようにしか見えなかった ── 測っていないものを、
+    # 測っている顔で見せない。
+    check("回っているだけの棒を置かない", "Progressbar" not in src, "")
+    check("本体の [n/m] を読んで、上の一行に出す",
+          "(\\d+)/(\\d+)" in src and "写しています" in src, "")
+
     # **バッチは、押しただけでも放り込まれても動く。**
     bat = (ROOT / "onenote2md.bat").read_text(encoding="utf-8", errors="replace")
     check("Python が無ければ、入れ方を言って止まる",
@@ -715,7 +879,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_select, t_cp932, t_offline, t_log, t_lock, t_cab, t_peek, t_from_files, t_ui,
-                   t_onestore_shape, t_style, t_tables, t_empty_space):
+                   t_onestore_shape, t_style, t_tables, t_empty_space, t_revisions):
             fn(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

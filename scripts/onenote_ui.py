@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -129,11 +130,11 @@ def ask_and_run(args) -> int:
     frm.rowconfigure(3, weight=1)
     seen.configure(state="disabled")
 
-    bar = ttk.Progressbar(frm, mode="indeterminate")
-    bar.grid(row=4, column=0, columnspan=3, sticky="ew", padx=12)
-
+    # **回っているだけの棒は置かない**（依頼 617）。本人の端末では一度も
+    # 動かず、「止まっている」ようにしか見えなかった ── 測っていないものを
+    # 測っている顔で見せるくらいなら、**何本目を写しているかを字で出す。**
     foot = ttk.Frame(frm)
-    foot.grid(row=5, column=0, columnspan=3, sticky="e", **pad)
+    foot.grid(row=4, column=0, columnspan=3, sticky="e", **pad)
     go = ttk.Button(foot, text="取り込む")
     go.pack(side="left")
     opener = ttk.Button(foot, text="出力先を開く", state="disabled")
@@ -172,8 +173,13 @@ def ask_and_run(args) -> int:
                 kind, what = box.get_nowait()
                 if kind == "行":
                     put(what)
+                    # **いま何本目かは、本体が `[3/12]` と言う。** そこだけ
+                    # 取り出して上の一行に出す ── 箱の字は流れて消える。
+                    got = re.search(r"\[(\d+)/(\d+)\]\s*(.*)", what)
+                    if got:
+                        say.set(f"写しています（{got.group(1)}/{got.group(2)}）… "
+                                f"{got.group(3)[:60]}")
                 else:
-                    bar.stop()
                     go.configure(state="normal")
                     ok = what == "0"
                     say.set("取り込みました。ambər の ⚙ →「保存ディレクトリの追加・変更・削除」で"
@@ -200,7 +206,6 @@ def ask_and_run(args) -> int:
         go.configure(state="disabled")
         opener.configure(state="disabled")
         say.set("取り込んでいます… 本数が多いと数分かかります。")
-        bar.start(12)
         threading.Thread(target=work, args=(where, out), daemon=True).start()
         win.after(120, drain)
 
