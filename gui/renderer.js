@@ -4977,7 +4977,7 @@ function applyView() {
     // **帯はいつも出す。** 設定（⚙）はノートを開いていなくても要る ──
     // 「保存場所を変える」はノートが一本も無いときにこそ押したい。
     el('top').hidden = false;
-    for (const id of ['title', 'views', 'count2', 'state', 'dots', 'tocbtn']) el(id).hidden = !open;
+    for (const id of ['title', 'views', 'fontbtns', 'count2', 'state', 'dots', 'tocbtn']) el(id).hidden = !open;
     el('blank').hidden = open || calOn;
     el('work').hidden = !open;
     if (calOn) el('strip').hidden = true;
@@ -5112,15 +5112,47 @@ function setLineNo(on) {
 
 let fontStep = 0;
 const FONT_BASE = 15;
+const FONT_MIN = -4;
+const FONT_MAX = 8;
 
 function setFont(step, quiet) {
-    fontStep = Math.max(-4, Math.min(8, step));
-    window.amber.remember({ fontStep });
+    fontStep = Math.max(FONT_MIN, Math.min(FONT_MAX, step));
+    // 端まで来たら、その向きのボタンを薄くする ── 押しても変わらないのに
+    // 押せる顔をしていると、効いていないように見える。
+    el('fontdown').disabled = fontStep <= FONT_MIN;
+    el('fontup').disabled = fontStep >= FONT_MAX;
+    // **戻すだけのとき（`quiet`）は書かない** ── 開いただけで設定が書き換わる。
+    if (!quiet) window.amber.remember({ fontStep });
     const px = FONT_BASE + fontStep;
     if (editor) editor.updateOptions({ fontSize: px });
     el('read').style.fontSize = (px - 0.5) + 'px';
     // 起動して戻すときは黙る ── 開いた瞬間に札が出る理由は無い。
     if (!quiet && fontStep !== 0) say('文字の大きさ ' + px + 'px（' + keyText('⌘0') + ' で戻る）');
+}
+
+// 帯の「A−」「A＋」（依頼 623）。鍵と同じ一本の道（`setFont`）を通す。
+el('fontdown').onclick = () => setFont(fontStep - 1);
+el('fontup').onclick = () => setFont(fontStep + 1);
+el('fontdown').title = '文字を小さく（' + keyText('⌘−') + '）';
+el('fontup').title = '文字を大きく（' + keyText('⌘+') + '）';
+
+/// カレンダーの字の大きさ（依頼 623）。**ノートとは別の段** ── 升の中の字は
+/// ぜんぶ `em` なので、表の土台の大きさを一つ変えれば揃って動く。帯のボタンは
+/// 大きくしない（大きくするたびに帯が折れて、押したボタンが逃げる）。
+let calFontStep = 0;
+const CAL_FONT_BASE = 14;
+const CAL_FONT_MIN = -3;
+const CAL_FONT_MAX = 6;
+function setCalFont(step, quiet) {
+    calFontStep = Math.max(CAL_FONT_MIN, Math.min(CAL_FONT_MAX, step));
+    const box = el('calbox');
+    const px = CAL_FONT_BASE + calFontStep;
+    for (const part of box.querySelectorAll('.body, .calnone')) part.style.fontSize = px + 'px';
+    box.querySelector('.fdown').disabled = calFontStep <= CAL_FONT_MIN;
+    box.querySelector('.fup').disabled = calFontStep >= CAL_FONT_MAX;
+    if (quiet) return;
+    window.amber.remember({ calFontStep });
+    say('カレンダーの文字 ' + px + 'px');
 }
 
 function toggleRead() { setView(view === 'read' ? 'write' : 'read'); }
@@ -7672,14 +7704,17 @@ document.addEventListener('keydown', (e) => {
     // だけを見ていて、それは JIS では「＾ へ」のキー ── Ctrl＋「＋」と刻印どおりに
     // 押しても大きくならなかった（本人・2026-09-16）。ブラウザも JIS では
     // Ctrl＋; で拡大する。`Equal` も残す（US 配列の `=` `+`、JIS で＾を押す人）。
+    // **カレンダーを見ているときは、カレンダーの字を**（依頼 623）── 見えていない
+    // ノートの字が変わっても、押した人には何も起きていないのと同じ。
+    const calUp = !el('cal').hidden;
     if ((e.metaKey || e.ctrlKey) && (e.code === 'Equal' || e.code === 'Semicolon' || e.code === 'NumpadAdd')) {
-        e.preventDefault(); setFont(fontStep + 1); return;
+        e.preventDefault(); if (calUp) setCalFont(calFontStep + 1); else setFont(fontStep + 1); return;
     }
     if ((e.metaKey || e.ctrlKey) && (e.code === 'Minus' || e.code === 'NumpadSubtract')) {
-        e.preventDefault(); setFont(fontStep - 1); return;
+        e.preventDefault(); if (calUp) setCalFont(calFontStep - 1); else setFont(fontStep - 1); return;
     }
     if ((e.metaKey || e.ctrlKey) && e.code === 'Digit0') {
-        e.preventDefault(); setFont(0); return;
+        e.preventDefault(); if (calUp) setCalFont(0); else setFont(0); return;
     }
     // 書く道具。**帯のボタンと同じ一本の道を通す** ── 押した形と打った形で
     // 結果が違うと、どちらかが嘘になる。
@@ -9287,6 +9322,10 @@ el('cal').addEventListener('click', async (e) => {
     // **地を押しても閉じない**（依頼 478）── 小窓ではなく面になったので、
     // 何もないところを押すのは「閉じる」ではない。
     if (e.target.closest('.x')) { calShut(); return; }
+    // 字の大きさ（依頼 623）。**`.seg button` より先に** ── 同じ形の枠に入れて
+    // あるので、後に置くと「日・週・月」の受け口が拾って何も起きない（踏んだ）。
+    if (e.target.closest('.fdown')) { setCalFont(calFontStep - 1); return; }
+    if (e.target.closest('.fup')) { setCalFont(calFontStep + 1); return; }
     // **動く幅は、見方に合わせる** ── 週を見ている人の「次」は次の週。
     const step = (n) => {
         if (calView === 'month') {
@@ -13018,6 +13057,9 @@ const escapeAttr = escapeHtml;
     if (saved.autoSave === false) autoSave = false;
     if (Array.isArray(saved.faces)) usedFaces = saved.faces.slice(0, 24);
     if (typeof saved.fontStep === 'number') fontStep = saved.fontStep;
+    // ボタンの薄さは開いた時点で合わせる（エディタができる前から帯は見える）。
+    setFont(fontStep, true);
+    setCalFont(typeof saved.calFontStep === 'number' ? saved.calFontStep : 0, true);
     if (saved.order) order = saved.order;
     if (saved.tocOn) tocOn = true;
     if (saved.theme) setTheme(knownTheme(saved.theme));

@@ -664,6 +664,18 @@ body.mac #top { padding-top: 30px; }
   white-space: nowrap;
 }
 #views button:hover { background: var(--hover); }
+/* 文字の大きさ。**書く・読む・並べるの枠と同じ形** ── 帯に違う形の箱を増やさない。 */
+#fontbtns {
+  display: flex; gap: 2px; flex: none; padding: 2px; border-radius: 8px;
+  background: var(--rail); border: 1px solid var(--line-2);
+  -webkit-app-region: no-drag;
+}
+#fontbtns button {
+  padding: 3px 7px; border-radius: 6px; font-size: 11.5px; color: var(--ink-2);
+  white-space: nowrap;
+}
+#fontbtns button:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+#fontbtns button:disabled { opacity: .35; }
 #views button.on { background: var(--paper); color: var(--ink); font-weight: 700;
   box-shadow: 0 1px 2px rgba(0,0,0,.06); }
 /* 書く面と読む面。**同じ場所に重ねず、横に並べる** ── 重ねると
@@ -1831,6 +1843,12 @@ body.dropping::after {
         <button data-view="split" title="並べて表示（⌘P）">並べて表示</button>
         <button data-view="write" title="コード ── Markdown そのもの（⌘E）">コード</button>
       </div>
+      <!-- **文字の大きさを、押して変える**（依頼 623・本人「文字サイズを大きくするボタン、
+           小さくするボタンを設けてもらえないかな」）。Ctrl＋「＋」「ー」を知らない人にも。 -->
+      <div id="fontbtns">
+        <button id="fontdown" title="文字を小さく">A−</button>
+        <button id="fontup" title="文字を大きく">A＋</button>
+      </div>
       <!-- **目次はボタンで出す。** 一度、帯の幅を空けるために献立へ引っ込めた
            ことがある（依頼 297）── 献立の中では見つからず、「消えた」と
            言われた。幅は `#meta` を固定してから空いている。 -->
@@ -1906,6 +1924,12 @@ body.dropping::after {
       <!-- **日を替えても読み直さない**（依頼 476）── 読むのは、ここを
            押したときと、毎時十分。 -->
       <button class="teamnow" title="いま読みにいきます" hidden>更新</button>
+      <!-- カレンダーの字の大きさ（依頼 623）。**ノートの大きさとは別に憶える** ──
+           月の升は狭く、ノートと同じだけ大きくすると予定が升からはみ出す。 -->
+      <span class="seg fontseg">
+        <button class="fdown" title="カレンダーの文字を小さく">A−</button>
+        <button class="fup" title="カレンダーの文字を大きく">A＋</button>
+      </span>
       <button class="x">閉じる</button>
     </div>
     <!-- **空のときだけ、表の真ん中で言う**（依頼 528・案ア）── 件数は帯から
