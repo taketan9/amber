@@ -83,7 +83,7 @@ pub struct Attached {
 /// 開く。**道の形で読み方を選ぶ** ── `.onepkg` / `.one` / `.onetoc2` /
 /// それが入ったフォルダ。
 pub fn open(path: &Path) -> Result<Opened> {
-    let p = Parser::new();
+    let p = Parser::new_with_fs(StdFs);
     let s = path.to_string_lossy().to_string();
     let typed = native(&s);
     let ext = path
@@ -123,15 +123,72 @@ pub fn open(path: &Path) -> Result<Opened> {
     }
 }
 
-/// 道を、**この機械の形として**部品に渡す。
-///
-/// `TypedPath::derive` は `\\` で始まらない道を Unix の形と見なすので、
-/// `C:\Users\…` は Unix の道の中に `C:` が埋まったものになり、部品が
-/// Windows の道に直すところで「path contains unexpected prefix」と断る
-/// ── **会社の Windows では一冊も開けなかった**（リリースの試験で踏んだ。
-/// Mac では決して起きない）。
+/// 道を、**この機械の形として**部品に渡す（`derive` は `C:\\…` を Unix の道と見なす）。
 fn native(s: &str) -> TypedPath<'_> {
     TypedPath::new(s, if cfg!(windows) { PathType::Windows } else { PathType::Unix })
+}
+
+/// 部品にファイルを読ませる口。**部品の `NativeFs` は使わない。**
+///
+/// `NativeFs` は道を一つずつ `push_checked` で組み直し、そこで**ドライブ名
+/// （`C:`）を「思わぬ前置き」として断る** ── Windows では、どの `.onepkg` も
+/// 開けなかった（3.1.3 のリリースの試験で踏んだ。Mac では決して起きない）。
+/// こちらは標準の `std::fs` にそのまま渡す。
+///
+/// 目次（`.onetoc2`）に書かれた名前は部品が先に消毒する（`..` や絶対の道を断る）
+/// ので、ここに来るのは一冊のフォルダの中の道だけ。**`COM1` のような機器の
+/// 名前**は、Windows では `\\?\` を付けて字どおりのファイルとして開く。
+#[derive(Clone, Copy)]
+struct StdFs;
+
+#[cfg(windows)]
+fn host(p: TypedPath) -> std::path::PathBuf {
+    let s = p.to_string_lossy().into_owned();
+    let abs = std::path::absolute(&s).map(|a| a.to_string_lossy().replace('/', "\\")).unwrap_or(s);
+    if abs.starts_with(r"\\?\") {
+        abs.into()
+    } else if let Some(unc) = abs.strip_prefix(r"\\") {
+        format!(r"\\?\UNC\{unc}").into()
+    } else {
+        format!(r"\\?\{abs}").into()
+    }
+}
+
+#[cfg(not(windows))]
+fn host(p: TypedPath) -> std::path::PathBuf {
+    p.to_string_lossy().into_owned().into()
+}
+
+fn typed(p: &Path) -> typed_path::TypedPathBuf {
+    native(&p.to_string_lossy()).to_path_buf()
+}
+
+impl onenote_parser::FileSystem for StdFs {
+    fn is_directory(&self, path: TypedPath) -> std::io::Result<bool> {
+        Ok(host(path).is_dir())
+    }
+    fn read_dir(&self, path: TypedPath) -> std::io::Result<Vec<typed_path::TypedPathBuf>> {
+        std::fs::read_dir(host(path))?.map(|e| e.map(|e| typed(&e.path()))).collect()
+    }
+    fn read_file(&self, path: TypedPath) -> std::io::Result<Vec<u8>> {
+        std::fs::read(host(path))
+    }
+    // **書かない。** 読み手が書く道は、取り込みには要らない。
+    fn write_file(&self, _: TypedPath, _: &[u8]) -> std::io::Result<()> {
+        Err(std::io::Error::other("書き込みはしません"))
+    }
+    fn stream_to_file(&self, _: TypedPath, _: &mut dyn std::io::Read) -> std::io::Result<()> {
+        Err(std::io::Error::other("書き込みはしません"))
+    }
+    fn make_dir(&self, _: TypedPath) -> std::io::Result<()> {
+        Err(std::io::Error::other("書き込みはしません"))
+    }
+    fn canonicalize(&self, path: TypedPath) -> std::io::Result<typed_path::TypedPathBuf> {
+        Ok(typed(&std::fs::canonicalize(host(path))?))
+    }
+    fn exists(&self, path: TypedPath) -> std::io::Result<bool> {
+        std::fs::exists(host(path))
+    }
 }
 
 /// フォルダ。**目次（`.onetoc2`）があればそれで読む** ── セクショングループの
