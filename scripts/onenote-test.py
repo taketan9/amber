@@ -539,6 +539,165 @@ def t_style(tmp):
         ost.read_props = keep
 
 
+def t_pictures(tmp):
+    print("絵は、指し先から取る ──")
+    import importlib.util as iu, struct as st
+    spec = iu.spec_from_file_location("onestore", ROOT / "onestore.py")
+    ost = iu.module_from_spec(spec)
+    spec.loader.exec_module(ost)
+
+    PNG = b"\x89PNG\r\n\x1a\n" + "ちいさな絵".encode() + b"\x00" * 8
+    JPG = b"\xff\xd8\xff\xe0" + b"jfif" + b"\x00" * 12
+
+    check("頭から種類が分かる（png）", ost.kind_of(PNG) == "png")
+    check("頭から種類が分かる（jpg）", ost.kind_of(JPG) == "jpg")
+    check("絵でなければ None", ost.kind_of(b"<?xml version=") is None)
+    check("空でも落ちない", ost.kind_of(b"") is None and ost.kind_of(None) is None)
+    # RIFF は 8 バイト目まで見ないと WebP と言えない。
+    check("RIFF だけでは webp と言わない", ost.kind_of(b"RIFF" + b"\x00" * 8) is None)
+    check("WEBP まで見て webp", ost.kind_of(b"RIFF" + b"\x00" * 4 + b"WEBP") == "webp")
+
+    # **指し先から取る。** 前は画像オブジェクト自身のバイト列を出していて、
+    # 出てくる .png は property set の生バイトだった（一枚も開けない）。
+    keep = ost.read_props
+    try:
+        img = {"oid": 1, "jcid": ost.JC_IMAGE, "stp": 0, "cb": 0}
+        blob = {"oid": 9, "jcid": 0x0000, "stp": 0, "cb": len(PNG)}
+        props = {1: {ost.P_PICTURE: ("ref", 9),
+                     ost.P_IMG_NAME: "猫.png".encode("utf-16-le")},
+                 9: {}}
+        ost.read_props = lambda d, o: props[o["oid"]]
+        got = ost.pictures(PNG, [img, blob])
+        check("指し先の中身を取る", len(got) == 1 and got[0]["bytes"] == PNG, got)
+        check("種類も持って帰る", got and got[0]["kind"] == "png", got)
+        check("名前も取る", got and got[0]["name"] == "猫.png", got)
+
+        # **指し先が居なければ、出さない。**
+        props[1] = {ost.P_PICTURE: ("ref", 999)}
+        check("指し先が居なければ出さない", ost.pictures(PNG, [img, blob]) == [])
+        # **参照を持たないものは、絵ではない。**
+        props[1] = {ost.P_IMG_NAME: "猫.png".encode("utf-16-le")}
+        check("参照が無ければ出さない", ost.pictures(PNG, [img, blob]) == [])
+
+        # **`FileDataStoreObject` の頭（36 バイト）を外す。**
+        head = b"\x01" * 16 + st.pack("<Q", len(PNG)) + b"\x00" * 4 + b"\x00" * 8
+        wrapped = head + PNG + b"\x00" * 4
+        blob2 = {"oid": 9, "jcid": 0x0000, "stp": 0, "cb": len(wrapped)}
+        props[1] = {ost.P_PICTURE: ("ref", 9)}
+        got = ost.pictures(wrapped, [img, blob2])
+        check("頭を被せてあっても、絵だけ取り出す",
+              len(got) == 1 and got[0]["bytes"] == PNG, got and got[0]["bytes"][:12])
+
+        # **外側が既に絵なら、頭を外しにいかない。**
+        #
+        # 中の 16〜24 バイト目がたまたま長さらしい数になっていると、
+        # 「頭が被さっている」と読み違えて**絵の途中から切り出す** ──
+        # 名乗っているほうを信じる。
+        inner = b"\x89PNG\r\n\x1a\n" + "なかみ".encode()
+        tricky = (b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+                  + st.pack("<Q", len(inner)) + b"\x00" * 12 + inner)
+        blob3 = {"oid": 9, "jcid": 0x0000, "stp": 0, "cb": len(tricky)}
+        props[1] = {ost.P_PICTURE: ("ref", 9)}
+        got = ost.pictures(tricky, [img, blob3])
+        check("外側が絵なら、そのまま出す",
+              len(got) == 1 and got[0]["bytes"] == tricky, got and got[0]["bytes"][:12])
+
+        # 埋め込みファイルも同じ道（`EmbeddedFileContainer`）。
+        props[1] = {ost.P_FILE_BLOB: ("ref", 9), ost.P_FILE_NAME: "図.png".encode("utf-16-le")}
+        got = ost.pictures(wrapped, [img, blob2])
+        check("埋め込みファイルも同じ道", len(got) == 1 and got[0]["name"] == "図.png", got)
+    finally:
+        ost.read_props = keep
+
+
+def t_table_refs(tmp):
+    print("表は、指し先でたどる ──")
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("onestore", ROOT / "onestore.py")
+    ost = iu.module_from_spec(spec)
+    spec.loader.exec_module(ost)
+    keep = ost.read_props
+    try:
+        objs, props = [], {}
+
+        def add(jc, *, kids=None, text=None):
+            o = {"oid": len(objs) + 1, "jcid": jc, "stp": 0, "cb": 0}
+            objs.append(o)
+            pr = {}
+            if kids is not None:
+                pr[ost.P_KIDS] = ("refs", list(kids))
+            if text is not None:
+                if text.isascii():
+                    pr[ost.P_ASCII] = text.encode("latin-1")
+                else:
+                    pr[ost.P_UNICODE] = text.encode("utf-16-le")
+            props[o["oid"]] = pr
+            return o["oid"]
+
+        # **升の中は、升 → アウトライン要素 → 本文 と下がる。**
+        t11 = add(ost.JC_TEXT, text="name")
+        t12 = add(ost.JC_TEXT, text="value")
+        t21 = add(ost.JC_TEXT, text="apple")
+        t22 = add(ost.JC_TEXT, text="120")
+        o11 = add(ost.JC_OE, kids=[t11]); o12 = add(ost.JC_OE, kids=[t12])
+        o21 = add(ost.JC_OE, kids=[t21]); o22 = add(ost.JC_OE, kids=[t22])
+        c11 = add(ost.JC_CELL, kids=[o11]); c12 = add(ost.JC_CELL, kids=[o12])
+        c21 = add(ost.JC_CELL, kids=[o21]); c22 = add(ost.JC_CELL, kids=[o22])
+        r1 = add(ost.JC_ROW, kids=[c11, c12])
+        r2 = add(ost.JC_ROW, kids=[c21, c22])
+        add(ost.JC_TABLE, kids=[r1, r2])
+        そと = add(ost.JC_TEXT, text="そとの字")
+
+        ost.read_props = lambda d, o: props[o["oid"]]
+        got = ost.tables(b"", objs)
+        check("指し先で表を組む", got and got[0]["rows"] == [["name", "value"], ["apple", "120"]],
+              got)
+
+        # **並び順を入れ替えても、同じ表になる。** ここが本題 ── 本物は
+        # 改訂をまたぐと順が入れ替わる（現場で「表もぐちゃぐちゃ」と出た）。
+        shuffled = list(reversed(objs))
+        check("並びが入れ替わっても、同じ表",
+              ost.tables(b"", shuffled) and
+              ost.tables(b"", shuffled)[0]["rows"] == [["name", "value"], ["apple", "120"]],
+              ost.tables(b"", shuffled))
+
+        # 表の中の字は、本文に二度出さない（指し先でたどって数える）。
+        inside = ost.table_texts(b"", objs)
+        check("表の中の字を数える", len(inside) >= 4, len(inside))
+        check("表の外の字は数えない",
+              id(objs[[o["oid"] for o in objs].index(そと)]) not in inside)
+
+        # **本文に二度出さない** ── `_content` を通して、外の字だけが残ること。
+        keep_sp = ost.spaces
+        try:
+            ost.spaces = lambda d: [("os", {1: list(objs) + [
+                {"oid": 999, "jcid": ost.JC_PAGE, "stp": 0, "cb": 0}]})]
+            props[999] = {}
+            pg = ost.pages(b"")[0]
+            body = [l["text"] for l in pg["lines"]]
+            check("表の中の字は、本文に二度出さない", body == ["そとの字"], body)
+            check("表はちゃんと組める", pg["tables"] and
+                  pg["tables"][0]["rows"] == [["name", "value"], ["apple", "120"]], pg["tables"])
+        finally:
+            ost.spaces = keep_sp
+
+        # **行でないものを行として数えない。** 表の下にアウトラインが
+        # ぶら下がっていることがあり、それを行に混ぜると升がずれる。
+        # **升を抱えた別物**を混ぜる ── 中身が空だと、行として数えても
+        # 結果が変わらず、検査が黙る（一度そうなった）。
+        tx = add(ost.JC_TEXT, text="まぎれ")
+        oe = add(ost.JC_OE, kids=[tx])
+        cx = add(ost.JC_CELL, kids=[oe])
+        まぎれ = add(ost.JC_OE, kids=[cx])
+        tbl = next(o for o in objs if o["jcid"] == ost.JC_TABLE)
+        props[tbl["oid"]] = {ost.P_KIDS: ("refs", [r1, まぎれ, r2])}
+        got2 = ost.tables(b"", objs)
+        check("行でないものは行にしない",
+              got2 and got2[0]["rows"] == [["name", "value"], ["apple", "120"]], got2)
+    finally:
+        ost.read_props = keep
+
+
 def t_tables(tmp):
     print("表 ──")
     import importlib.util as iu
@@ -879,7 +1038,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_select, t_cp932, t_offline, t_log, t_lock, t_cab, t_peek, t_from_files, t_ui,
-                   t_onestore_shape, t_style, t_tables, t_empty_space, t_revisions):
+                   t_onestore_shape, t_style, t_pictures, t_table_refs, t_tables, t_empty_space, t_revisions):
             fn(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

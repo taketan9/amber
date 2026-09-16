@@ -173,6 +173,12 @@ P_UNDER, P_STRIKE    = 0x1C06, 0x1C07
 P_LIST_NODES = 0x1C26                    # ListNodes（参照の列 ── 在れば箇条書き）
 P_NUM_FORMAT = 0x1C1A                    # NumberListFormat（在れば番号）
 P_COL_WIDTHS = 0x1D66                    # TableColumnWidths
+# **表は参照でたどる**（依頼 620）。表 → 行 → 升 → 中身は、どれも
+# `ElementChildNodes`（参照の列）で繋がっている ── 正本は Tika の
+# `OneNotePropertyEnum`（`ElementChildNodesOfTable(0x24001C20)`・型 9）。
+P_KIDS       = 0x1C20                    # ElementChildNodes（参照の列）
+P_ROW_COUNT  = 0x1D57                    # RowCount
+P_COL_COUNT  = 0x1D58                    # ColumnCount
 # **色とリンク**（依頼 608）。表は Apache Tika の `OneNotePropertyEnum.java` から。
 P_COLOR      = 0x1C0C                    # FontColor
 P_HIGHLIGHT  = 0x1C0D                    # Highlight（蛍光ペン）
@@ -180,6 +186,7 @@ P_LINK       = 0x1E14                    # Hyperlink（旗）
 P_LINK_URL   = 0x1E20                    # WzHyperlinkUrl
 P_ROWS, P_COLS = 0x1D57, 0x1D58
 P_PICTURE    = 0x1C3F                    # PictureContainer（参照）
+P_FILE_BLOB  = 0x1D9B                    # EmbeddedFileContainer（参照）
 P_IMG_NAME   = 0x1DD7                    # ImageFilename
 P_IMG_ALT    = 0x1E58                    # ImageAltText
 P_FILE_NAME  = 0x1D9C                    # EmbeddedFileName
@@ -420,16 +427,81 @@ def as_markdown(line):
     return f"{pad}{body}" if pad else body
 
 
+# 画像の頭の数バイト（**拡張子は、名前ではなく中身で決める**）。
+MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"\xff\xd8\xff", "jpg"),
+    (b"GIF87a", "gif"), (b"GIF89a", "gif"),
+    (b"BM", "bmp"),
+    (b"II*\x00", "tif"), (b"MM\x00*", "tif"),
+    (b"RIFF", "webp"),                       # 実際は 8 バイト目から WEBP
+)
+
+
+def kind_of(raw):
+    """バイト列の頭から、絵の種類。分からなければ `None`。"""
+    if not raw:
+        return None
+    for head, ext in MAGIC:
+        if raw.startswith(head):
+            if ext == "webp" and raw[8:12] != b"WEBP":
+                continue
+            return ext
+    return None
+
+
+def _blob(d, o):
+    """`FileDataStoreObject` の中身を取り出す（依頼 620）。
+
+    **実体には頭が付いていることがある** ── MS-ONESTORE の
+    `FileDataStoreObject` は `GUID(16) + 長さ(8) + 未使用(4) + 予備(8)` の
+    36 バイトを被せてから中身を置く（Apache Tika の
+    `deserializeFileDataStoreObject` と同じ形）。被せたまま書き出すと、
+    **PNG のつもりのファイルが 36 バイトずれて開けない。**
+
+    どちらの形でも通るように、**中身が絵として名乗るほうを採る。**
+    """
+    raw = d[o["stp"]:o["stp"] + o["cb"]]
+    if kind_of(raw):
+        return raw
+    if len(raw) > 36:
+        try:
+            ln = struct.unpack("<Q", raw[16:24])[0]
+        except struct.error:
+            ln = 0
+        if 0 < ln <= len(raw) - 36:
+            inner = raw[36:36 + ln]
+            if kind_of(inner):
+                return inner
+    return raw
+
+
 def pictures(d, objs):
-    """画像の実体（`[(名前, バイト列)]`）。**中身はオブジェクトの blob。**"""
+    """画像の実体（`[{名前, バイト列}]`）。
+
+    **中身は、指し先のオブジェクトにある**（依頼 620）。`PictureContainer`
+    も `EmbeddedFileContainer` も**参照**（型 8）── 正本は Tika の
+    `OneNotePropertyEnum`（`PictureContainer(0x20001C3F)`）。
+    前はここで**画像オブジェクト自身のバイト列**を書き出していたので、
+    出てくる `.png` はプロパティ集合の生バイトで、**一枚も開けなかった**
+    （現場で「絵や図が出力されていない」と出た顔）。
+    """
+    look = by_oid(objs)
     out = []
     for o in objs:
         p = read_props(d, o)
-        if P_PICTURE not in p and P_IMG_NAME not in p and P_FILE_NAME not in p:
+        ref = p.get(P_PICTURE) or p.get(P_FILE_BLOB)
+        if not (isinstance(ref, tuple) and ref[0] == "ref" and ref[1]):
             continue
-        name = _str(p, P_IMG_NAME) or _str(p, P_FILE_NAME)
-        raw = d[o["stp"]:o["stp"] + o["cb"]]
-        out.append({"name": name, "alt": _str(p, P_IMG_ALT), "bytes": raw, "oid": o["oid"]})
+        blob = look.get(ref[1])
+        if blob is None:
+            continue
+        raw = _blob(d, blob)
+        if not raw:
+            continue
+        out.append({"name": _str(p, P_IMG_NAME) or _str(p, P_FILE_NAME),
+                    "alt": _str(p, P_IMG_ALT), "bytes": raw,
+                    "kind": kind_of(raw), "oid": o["oid"]})
     return out
 
 
@@ -438,24 +510,116 @@ def by_oid(objs):
     return {o["oid"]: o for o in objs}
 
 
+def kids_of(p):
+    """`ElementChildNodes` の指し先（無ければ空）。"""
+    v = p.get(P_KIDS)
+    if isinstance(v, tuple) and v[0] == "refs" and isinstance(v[1], list):
+        return [x for x in v[1] if x]
+    return []
+
+
+def _under(d, look, oid, seen):
+    """そのオブジェクトの下にある**本文の字**を、順に集める。
+
+    升の中は `升 → アウトライン要素 → 本文` と下がるので、**字に当たるまで
+    降りる。** 輪になっている指し先で回らないように、通った先は憶える。
+    """
+    o = look.get(oid)
+    if o is None or id(o) in seen:
+        return []
+    seen.add(id(o))
+    p = read_props(d, o)
+    if o["jcid"] == JC_TEXT:
+        one = line_of(p, style_of(d, look, p))
+        return [one["text"].strip()] if one and one["text"].strip() else []
+    got = []
+    for k in kids_of(p):
+        got += _under(d, look, k, seen)
+    return got
+
+
+def table_texts(d, objs):
+    """**表の中に居る本文**の集まり（`id()` で持つ）。
+
+    本文に二度出さないための一枚 ── 升をたどるときに拾うので、ここで
+    拾うと同じ字が表の外にも並ぶ。
+    """
+    look = by_oid(objs)
+    inside = set()
+
+    def walk(oid, seen):
+        o = look.get(oid)
+        if o is None or id(o) in seen:
+            return
+        seen.add(id(o))
+        inside.add(id(o))
+        for k in kids_of(read_props(d, o)):
+            walk(k, seen)
+
+    for o in objs:
+        if o["jcid"] != JC_TABLE:
+            continue
+        for k in kids_of(read_props(d, o)):
+            walk(k, set())
+    return inside
+
+
 def tables(d, objs):
     """表を組む ── `[{"rows": [[升の字, …], …], "y": 上からの位置}]`。
 
-    **升の中身は、升の下にぶら下がる本文。** 表・行・升は入れ子で並ぶので、
-    出てきた順に「表が始まった／行が始まった」と数えていけば組める ──
-    参照をたどらずに済む（`ObjectGroup` は木の順に並ぶ）。
+    **指し先でたどる**（依頼 620）。表 → 行 → 升 → 中身は
+    `ElementChildNodes`（参照の列）で繋がっている ── 正本は Tika の
+    `OneNotePropertyEnum`（`ElementChildNodesOfTable(0x24001C20)`）。
+
+    前は**並んでいる順**で「表が始まった／行が始まった」と数えていた。
+    作り物の見本では通るが、**本物は改訂をまたぐと順が入れ替わる** ──
+    現場で「表もぐちゃぐちゃ」と出た顔がこれ。
 
     Markdown の表に改行は入らないので、**升の中の複数行は空白で繋ぐ**
-    （COM の道と同じ潰し方 ── `<br>` は ambər の画面に字として出る）。
+    （`<br>` は ambər の画面に字として出る）。
+
+    **指し先の無い表は、並び順で拾い直す** ── 古い OneNote が書いた
+    `.one` でそうなることがある。出ないよりは、順で組んだほうがまし。
     """
-    out, table, row = [], None, None
     look = by_oid(objs)
+    out = []
+    for o in objs:
+        if o["jcid"] != JC_TABLE:
+            continue
+        p = read_props(d, o)
+        rows = []
+        for r_oid in kids_of(p):
+            r = look.get(r_oid)
+            if r is None or r["jcid"] != JC_ROW:
+                continue
+            cells = []
+            for c_oid in kids_of(read_props(d, r)):
+                c = look.get(c_oid)
+                if c is None or c["jcid"] != JC_CELL:
+                    continue
+                got = []
+                for k in kids_of(read_props(d, c)):
+                    got += _under(d, look, k, set())
+                cells.append(" ".join(got))
+            if cells:
+                rows.append(cells)
+        out.append({"rows": rows, "y": _num(p, P_Y) or 0, "x": _num(p, P_X) or 0,
+                    "cols": _num(p, P_COL_COUNT) or _num(p, P_COLS) or 0})
+    if any(t["rows"] for t in out):
+        return [t for t in out if t["rows"]]
+    return _tables_in_order(d, objs) or [t for t in out if t["rows"]]
+
+
+def _tables_in_order(d, objs):
+    """指し先の無い表を、**並んでいる順**で組む（古い形の逃げ道）。"""
+    look = by_oid(objs)
+    out, table, row = [], None, None
     for o in objs:
         jc = o["jcid"]
         if jc == JC_TABLE:
             p = read_props(d, o)
             table = {"rows": [], "y": _num(p, P_Y) or 0, "x": _num(p, P_X) or 0,
-                     "cols": _num(p, P_COLS) or 0}
+                     "cols": _num(p, P_COL_COUNT) or _num(p, P_COLS) or 0}
             out.append(table)
             row = None
         elif jc == JC_ROW and table is not None:
@@ -493,15 +657,22 @@ def _content(d, objs):
     """オブジェクトの並びから、**一枚ぶんの中身**を組む。"""
     # **表の中の字は、本文に二度出さない。** 升をたどるときに拾うので、
     # ここで拾うと同じ字が表の外にも並ぶ。
+    #
+    # **どれが表の中かは、指し先でたどる**（依頼 620）── 前は「表が出たら
+    # 次のアウトラインまで」と並び順で数えていたので、順が入れ替わると
+    # 表の外の字まで消したり、表の字が二度出たりした。
     look = by_oid(objs)
-    in_table, skip = False, set()
-    for o in objs:
-        if o["jcid"] == JC_TABLE:
-            in_table = True
-        elif o["jcid"] in (JC_OUTLINE, JC_PAGE) and in_table:
-            in_table = False
-        elif in_table and o["jcid"] == JC_TEXT:
-            skip.add(id(o))
+    skip = table_texts(d, objs)
+    if not skip:
+        # 指し先の無い表（古い形）── そのときだけ、並び順で数える。
+        in_table = False
+        for o in objs:
+            if o["jcid"] == JC_TABLE:
+                in_table = True
+            elif o["jcid"] in (JC_OUTLINE, JC_PAGE) and in_table:
+                in_table = False
+            elif in_table and o["jcid"] == JC_TEXT:
+                skip.add(id(o))
     lines = []
     for o in objs:
         if o["jcid"] != JC_TEXT or id(o) in skip:

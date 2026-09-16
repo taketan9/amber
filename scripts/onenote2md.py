@@ -570,12 +570,26 @@ def from_files(where, args, out_root):
             shots = []
             if not args.no_images:
                 for i, im in enumerate(pg.get("images") or [], 1):
-                    ext = (Path(im.get("name") or "").suffix or ".png").lstrip(".").lower()
-                    kind = ext if ext in ("png", "jpg", "jpeg", "gif", "bmp", "webp") else "png"
+                    raw = im.get("bytes") or b""
+                    # **拡張子は、中身から決める**（依頼 620）。OneNote の
+                    # 画像はたいてい名前を持たない ── 名前だけを見ていると
+                    # 何でも `.png` になり、**JPEG を .png として置く**ことに
+                    # なる（ambər は開けるが、外へ出したときに困る）。
+                    kind = im.get("kind")
+                    if not kind:
+                        ext = (Path(im.get("name") or "").suffix or "").lstrip(".").lower()
+                        kind = ext if ext in ("png", "jpg", "jpeg", "gif", "bmp",
+                                              "webp", "tif") else None
+                    if not kind:
+                        # **絵として名乗らないものは置かない。** 前はここで
+                        # プロパティ集合の生バイトを `.png` として書いていて、
+                        # 一枚も開けない画像がノートごとに並んだ。
+                        log.debug("絵として読めない中身を飛ばした（%d バイト）", len(raw))
+                        stats["skipped_images"] = stats.get("skipped_images", 0) + 1
+                        continue
                     fname = f"{stem}-{i:03d}.{kind}"
                     img_dir.mkdir(parents=True, exist_ok=True)
                     at_img = img_dir / fname
-                    raw = im.get("bytes") or b""
                     if not (at_img.exists() and at_img.stat().st_size == len(raw)
                             and at_img.read_bytes() == raw):
                         at_img.write_bytes(raw)
