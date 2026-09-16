@@ -1,0 +1,22 @@
+[package]
+name = "amber-onenote"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "OneNote が書き出したものを、ambər の読める Markdown に"
+
+# **読むのは借り物**（依頼 621・本人「自前で全部実装するより先人の知恵を
+# 拝借したい」）。自前の読み手（`scripts/onestore.py`）は公開仕様しか読めず、
+# 本物の見本では 0 ページだった ── `onenote_parser` は FSSHTTP 包みも
+# `.onepkg`（CAB）も読む。**書くところだけ自前**（Markdown と ambər の決まり）。
+#
+# 机の上だけで使う（`amber-core` の `desktop` から）── 電話の束ねには入らない。
+[dependencies]
+onenote_parser = { version = "2", default-features = false, features = ["native-fs", "onepkg"] }
+typed-path = "0.12"
+anyhow = { workspace = true }
+
+# 試験で本物の `.onepkg`（CAB）を組む ── 部品が中で使っているのと同じもの。
+[dev-dependencies]
+cab = "0.6"

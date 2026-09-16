@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('amber', {
     /// OS のダイアログ。描く側からは開けない。
     pickFolder: () => ipcRenderer.invoke('amber:pickFolder'),
     clouds: () => ipcRenderer.invoke('amber:clouds'),
+    // OneNote の取り込み（依頼 621）── 取り込み専用のエンジンに訊く。
+    onenote: (method, params) => ipcRenderer.invoke('amber:onenote', method, params),
+    knownDirs: () => ipcRenderer.invoke('amber:knownDirs'),
     reveal: (at) => ipcRenderer.invoke('amber:reveal', at),
     userName: () => ipcRenderer.invoke('amber:userName'),
     pickFile: (filters) => ipcRenderer.invoke('amber:pickFile', filters),

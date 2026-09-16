@@ -9851,6 +9851,9 @@ const CMDS = [
     // 下まで来ない ── 同じ行い（ノートを入れる）は同じ場所に。
     // エクスポートと対の言葉（本人・2026-09-12）。
     { id: 'bring', name: 'インポート', sub: 'ほかの .md をノートに', app: true, sep: true, run: cmdBring },
+    // **OneNote は「インポート」の隣**（依頼 621・本人に見取り図を見せて通った）。
+    // 会社向けの一枚にも出す ── 網に出ず、手元の `.onepkg` を読むだけ。
+    { id: 'onenote', name: 'OneNote を取り込む', sub: 'OneNote が書き出した .onepkg / .one から', app: true, run: cmdOneNote },
     { id: 'welcome', name: '見本のノートを入れる', app: true, run: cmdWelcome },
     { id: 'spare', name: '使われていない画像', app: true,
       sub: 'どのノートも使っていない画像を、選んでゴミ箱へ', run: cmdSpare },
@@ -11638,6 +11641,159 @@ async function cmdBring() {
     }
 }
 
+/* ── OneNote を取り込む（依頼 621）── */
+
+/// いま走っている取り込み。**窓を閉じても（小窓を閉じても）続く** ──
+/// 大きい一冊は数分かかり、その間ずっと小窓を見ていろとは言えない。
+/// もう一度 ⚙ から開くと、進み具合の小窓に戻る。
+let oneRun = null;
+/// 進み具合の小窓がいま出ているか（出ていれば、一つ書くたびに描き直す）。
+let oneOpen = false;
+let oneShown = 0;
+
+/// 取り込む。**読むのも書くのもエンジン**（`amber_core::onenote`）──
+/// ここは選ばせて、進み具合を見せるだけ。
+async function cmdOneNote() {
+    if (oneRun && !oneRun.over) { oneShow(); return; }
+    const known = await window.amber.knownDirs();
+    const from = await pickOneNote(known);
+    if (!from) return;
+    const to = await oneNoteOut(known);
+    if (!to) return;
+    await runOneNote(from, to);
+}
+
+/// どれを取り込むか。**書き出した場所に置いてあることが多い** ので、
+/// ドキュメント・ダウンロード・デスクトップの直下の `.onepkg` を先に並べる。
+async function pickOneNote(known) {
+    const dirs = [known.documents, known.downloads, known.desktop].filter(Boolean);
+    let found = [];
+    try { found = (await window.amber.onenote('onenote_find', { dirs })).found || []; } catch { /* 探せなくても選べる */ }
+    const where = (at) => (at.startsWith(known.documents) ? 'ドキュメント'
+        : at.startsWith(known.downloads) ? 'ダウンロード'
+        : at.startsWith(known.desktop) ? 'デスクトップ' : shortPath(at));
+    const mb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+    const day = (t) => { const d = new Date(t * 1000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+    const items = found.map((f) => ({ name: f.name + '.onepkg', sub: [where(f.path), day(f.modified), mb(f.bytes)].join(' · '), value: f.path }));
+    items.push({ name: 'ファイルを選ぶ…', sub: '.onepkg / .one', value: ' file' });
+    items.push({ name: 'フォルダを選ぶ…', sub: '.one が入ったフォルダ', value: ' dir' });
+    const go = await askPick('OneNote を取り込む', items,
+        '書き出し方: OneNote の ファイル → エクスポート → ノートブック → .onepkg', true);
+    if (go === null) return null;
+    if (go === ' file') return window.amber.pickFile([{ name: 'OneNote', extensions: ['onepkg', 'one', 'onetoc2'] }]);
+    if (go === ' dir') return window.amber.pickFolder();
+    return go;
+}
+
+/// どこへ書き出すか。**一度決めたら憶える**（`onenoteOut`）。
+///
+/// 憶えた場所が**どの保存ディレクトリの中でもなくなっていたら、もう一度訊く**
+/// ── ⚙「保存ディレクトリ」から外した人は、そこに書いてほしくない人。
+/// 書き出したのに左の列に出てこないノートは、無いのと同じ。
+async function oneNoteOut(known) {
+    // **`/` と `\\` の両方で見る**（`placeOf` は `/` だけ ── Windows の道は
+    // 一つも中に入らず、毎回訊くうえに、入れ子の保存ディレクトリを作る）。
+    const inside = (dir) => state.places.some((p) => dir === p.dir
+        || dir.startsWith(p.dir + '/') || dir.startsWith(p.dir + '\\'));
+    const saved = (await window.amber.recall()).onenoteOut;
+    if (typeof saved === 'string' && saved && inside(saved)) return saved;
+    const sep = known.sep || '/';
+    const docs = known.documents ? known.documents + sep + 'OneNote' : '';
+    const here = state.places.length ? rootOf(hereDir()) : '';
+    const items = [];
+    if (docs) items.push({ name: 'ドキュメント／OneNote', sub: '新しい保存ディレクトリとして足します（おすすめ）', value: 'new' });
+    if (here) items.push({ name: '「' + bookName(here) + '」の中の「OneNote」フォルダ', sub: 'いまの保存ディレクトリの下に作ります', value: 'in' });
+    items.push({ name: 'フォルダを選ぶ…', sub: '選んだフォルダを保存ディレクトリとして足します', value: 'pick' });
+    const go = await askPick('どこへ書き出しますか', items,
+        '一度決めたら憶えます。あとで ⚙ →「保存ディレクトリの追加・変更・削除」から外すと、次にまた訊きます', true);
+    if (go === null) return null;
+    let dir = go === 'new' ? docs : go === 'in' ? here + sep + 'OneNote' : await window.amber.pickFolder();
+    if (!dir) return null;
+    try {
+        await ask('place', { dir });
+    } catch (e) {
+        say('作れません: ' + why(e));
+        return null;
+    }
+    // 保存ディレクトリの外なら、足す（中なら、もう左の列に出る）。
+    if (!inside(dir) && !(await putPlace(dir))) return null;
+    window.amber.remember({ onenoteOut: dir });
+    return dir;
+}
+
+async function runOneNote(from, to) {
+    oneRun = { name: leafOf(from), rows: [], over: false, pages: 0, pictures: 0, failed: 0, to };
+    const run = oneRun;
+    run.title = '「' + run.name + '」を読んでいます…';
+    oneShow();
+    let got;
+    try {
+        got = await window.amber.onenote('onenote_open', { path: from });
+    } catch (e) {
+        run.over = true;
+        window.amber.onenote('onenote_close', {}).catch(() => {});
+        if (oneOpen) closeSheet(null);
+        say('取り込めません: ' + why(e));
+        return;
+    }
+    run.rows = (got.units || []).map((u) => ({
+        name: [...(u.groups || []), u.name].join('／'), pages: u.pages, state: 'wait',
+    }));
+    if (!run.rows.length) {
+        run.over = true;
+        window.amber.onenote('onenote_close', { key: got.key }).catch(() => {});
+        if (oneOpen) closeSheet(null);
+        say('「' + run.name + '」には、セクションがありませんでした');
+        return;
+    }
+    run.title = 'OneNote を取り込んでいます';
+    for (let i = 0; i < run.rows.length; i += 1) {
+        const row = run.rows[i];
+        row.state = 'now';
+        if (oneOpen) oneShow();
+        try {
+            const w = await window.amber.onenote('onenote_write', { key: got.key, i, to });
+            row.state = 'done';
+            run.pages += w.pages;
+            run.pictures += w.pictures;
+            run.dir = run.dir || w.dir;
+        } catch (e) {
+            // **一つ書けなくても、残りは書く。** どれが書けなかったかは行に残す。
+            row.state = 'fail';
+            row.why = why(e);
+            run.failed += 1;
+        }
+    }
+    await window.amber.onenote('onenote_close', { key: got.key }).catch(() => {});
+    run.over = true;
+    await reload({});
+    const pics = run.pictures ? '・画像 ' + run.pictures + ' 枚' : '';
+    const bad = run.failed ? '。' + run.failed + ' セクションは書けませんでした' : '';
+    run.title = '取り込みました ── ' + run.pages + ' ページ' + pics + bad;
+    say(run.title + '。左の列の「' + bookName(rootOf(to)) + '」に入っています');
+    if (oneOpen) oneShow();
+}
+
+/// 進み具合の小窓。**閉じても取り込みは止まらない**（そう書いておく）。
+function oneShow() {
+    const run = oneRun;
+    if (!run) return;
+    const mark = { done: '✓ ', now: '▸ ', fail: '✗ ', wait: '　' };
+    const items = run.rows.map((r) => ({
+        name: mark[r.state] + r.name,
+        sub: r.state === 'fail' ? '書けませんでした: ' + r.why : r.pages + ' ページ',
+        value: ' row',
+    }));
+    if (run.over && run.dir) items.push({ name: 'フォルダを開く', sub: shortPath(run.to), value: ' reveal' });
+    const my = ++oneShown;
+    oneOpen = true;
+    sheet({ title: run.title, items, foot: run.over ? '' : '閉じても、裏で続きます', bare: true }).then((v) => {
+        if (my !== oneShown) return;
+        oneOpen = false;
+        if (v === ' reveal') window.amber.reveal(run.dir);
+    });
+}
+
 /// バックアップから戻す。
 ///
 /// **いまあるものは消さない。** 戻すのは「消えたものを取り返す」ためで、
@@ -12303,8 +12459,17 @@ function overlaps(dir, except) {
 async function addPlace() {
     const dir = await pickPlaceDir('');
     if (!dir) return;
-    if (state.places.some((x) => x.dir === dir)) { say('「' + bookName(dir) + '」はもう入っています'); return; }
-    if (overlaps(dir)) { say('そこは、ほかの保存ディレクトリと重なります（入れ子にはできません）'); return; }
+    const name = await putPlace(dir);
+    if (name) say('「' + name + '」を足しました。同期するなら「' + name + '」→ 同期先 から');
+}
+
+/// 保存ディレクトリを一つ足す（名前を返す。足せなければ null）。
+/// **足す道は一つ** ── ⚙ から足すのも、OneNote の書き出し先を足すのも
+/// ここを通る（依頼 621）。二本にすると、Drive の上の置き場所の名前を
+/// 空けるのを片方だけ忘れる。
+async function putPlace(dir) {
+    if (state.places.some((x) => x.dir === dir)) { say('「' + bookName(dir) + '」はもう入っています'); return null; }
+    if (overlaps(dir)) { say('そこは、ほかの保存ディレクトリと重なります（入れ子にはできません）'); return null; }
     const leaf = leafOf(dir) || 'ambər';
     let name = leaf;
     for (let n = 2; state.places.some((x) => x.name === name); n += 1) name = leaf + ' ' + n;
@@ -12322,7 +12487,7 @@ async function addPlace() {
     savePlaces();
     await rewatch();
     await reload({ quiet: true });
-    say('「' + name + '」を足しました。同期するなら「' + name + '」→ 同期先 から');
+    return name;
 }
 
 /// 場所を変える（前の「保存場所」と同じ流れ）。

@@ -80,6 +80,8 @@ const DOCK_ICON = path.join(__dirname, '..', 'packaging', 'amber-dock.png');
 
 let win = null;
 let engine = null;
+/// OneNote を取り込む間だけ居る、二本目のエンジン（依頼 621）。
+let oneEngine = null;
 
 /// この機械の予定表に話しかける道具。**配ったものは窓の隣に居る。**
 /// ソースから走らせるときは `target/mac/` の下。
@@ -575,6 +577,30 @@ app.whenReady().then(() => {
     // を覚えている人はいない。
     ipcMain.handle('amber:clouds', () => clouds());
 
+    // **OneNote の取り込みは、別のエンジンに訊く**（依頼 621）。エンジンは
+    // 一本の糸で順に答えるので、大きい `.onepkg` を読んでいる間、同じ
+    // エンジンに訊いたノートの一覧も保存も、読み終わるまで返らない。
+    // 取り込みの間だけ一本増やし、手放したら（`onenote_close`）止める。
+    ipcMain.handle('amber:onenote', async (_e, method, params) => {
+        if (!oneEngine || oneEngine.gone) oneEngine = new Engine();
+        const mine = oneEngine;
+        try {
+            return await mine.call(method, params);
+        } finally {
+            if (method === 'onenote_close') {
+                mine.stop();
+                if (oneEngine === mine) oneEngine = null;
+            }
+        }
+    });
+    /// この人の「ドキュメント」「ダウンロード」「デスクトップ」。**名前は OS に
+    /// 訊く** ── 会社の Windows では、ドキュメントが OneDrive の下に
+    /// 移されていることがある（`C:\Users\…\OneDrive - 会社\ドキュメント`）。
+    ipcMain.handle('amber:knownDirs', () => {
+        const get = (k) => { try { return app.getPath(k); } catch { return ''; } };
+        return { documents: get('documents'), downloads: get('downloads'), desktop: get('desktop'), sep: path.sep };
+    });
+
     // **「あとはクラウドで分けてください」を、押せる形にする。**
     // フォルダを人に分けるのはクラウドの画面の仕事だが、そこまで人に
     // 探させない ── その場所を開いて、選ばれた状態で見せる。
@@ -845,5 +871,6 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
     if (engine) engine.stop();
+    if (oneEngine) oneEngine.stop();
     if (process.platform !== 'darwin') app.quit();
 });

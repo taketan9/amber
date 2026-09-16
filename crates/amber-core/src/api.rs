@@ -1411,6 +1411,61 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "ok": true }))
         }
 
+        // OneNote を取り込む（依頼 621）。**机の上だけ** ── 電話の束ねには
+        // 読み手が入っていないので、訊かれたら「ここには無い」と答える。
+        // 窓はこれを**別のエンジン**に訊く（大きい一冊を読む間、ノートの
+        // 一覧や保存を待たせない）。
+        #[cfg(feature = "desktop")]
+        "onenote_find" => {
+            let dirs: Vec<std::path::PathBuf> = p["dirs"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|d| d.as_str()).map(Into::into).collect())
+                .unwrap_or_default();
+            let got: Vec<_> = crate::onenote::find(&dirs)
+                .into_iter()
+                .map(|f| serde_json::json!({
+                    "path": f.path.to_string_lossy(),
+                    "name": f.name,
+                    "bytes": f.bytes,
+                    "modified": f.modified,
+                }))
+                .collect();
+            Ok(serde_json::json!({ "found": got }))
+        }
+        #[cfg(feature = "desktop")]
+        "onenote_open" => {
+            let (key, mut sum) = crate::onenote::open(std::path::Path::new(&arg(p, "path")))?;
+            sum["key"] = key.into();
+            Ok(sum)
+        }
+        #[cfg(feature = "desktop")]
+        "onenote_write" => {
+            let key = p["key"].as_u64().ok_or_else(|| anyhow::anyhow!("key がありません"))?;
+            let i = p["i"].as_u64().ok_or_else(|| anyhow::anyhow!("i がありません"))? as usize;
+            let to = arg(p, "to");
+            if to.is_empty() {
+                anyhow::bail!("出力先がありません");
+            }
+            let w = crate::onenote::write(key, i, std::path::Path::new(&to))?;
+            Ok(serde_json::json!({
+                "dir": w.dir.to_string_lossy(),
+                "pages": w.pages,
+                "pictures": w.pictures,
+                "files": w.files,
+            }))
+        }
+        #[cfg(feature = "desktop")]
+        "onenote_close" => {
+            if let Some(key) = p["key"].as_u64() {
+                crate::onenote::close(key);
+            }
+            Ok(serde_json::json!({ "ok": true }))
+        }
+        #[cfg(not(feature = "desktop"))]
+        "onenote_find" | "onenote_open" | "onenote_write" | "onenote_close" => {
+            anyhow::bail!("OneNote の取り込みは、パソコンの ambər だけにあります")
+        }
+
         other => anyhow::bail!("知らない操作: {other}"),
     }
 }

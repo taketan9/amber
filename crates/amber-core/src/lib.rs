@@ -19,6 +19,8 @@ pub mod naming;
 pub mod month;
 pub mod note;
 pub mod notebook;
+#[cfg(feature = "desktop")]
+pub mod onenote;
 pub mod spare;
 pub mod stamp;
 pub mod sync;

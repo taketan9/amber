@@ -17,9 +17,12 @@ license.workspace = true
 # 既定は off ── **amber の生まれ故郷は電話**で、机があるほうが特別。
 # cian-core は逆（既定 on）で、そこが二つのクレートの立ち位置の違い。
 default = []
-desktop = []
+# OneNote の取り込み（依頼 621）も机の上だけ ── 書き出した `.onepkg` は
+# パソコンにあるもので、電話の束ねに CAB と OneNote の読み手を積む理由は無い。
+desktop = ["dep:amber-onenote"]
 
 [dependencies]
+amber-onenote = { path = "../amber-onenote", optional = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
