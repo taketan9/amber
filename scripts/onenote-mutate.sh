@@ -574,9 +574,11 @@ mutate "見出しを段に合わせない" "深い見出しも段に合わせる
 mutate "見出しの段を止めない" "見出しは 6 段まで" \
     'min(int(style[1:]), 6)' 'int(style[1:])'
 mutate "箇条書きの印を太字の中に入れる" "箇条書きの印は、太字の外" \
-    'body = line["text"].strip()
-    if line.get("bold"):' 'body = line["text"].strip()
-    if False:'
+    'body = linked(line["text"].strip(), line)
+    if line.get("bold"):
+        body = f"**{body}**"' 'body = linked(line["text"].strip(), line)
+    if line.get("bold"):
+        body = body'
 mutate "日付の行も本文に混ぜる" "0x1CB5 の行は本文に混ぜない" \
     'if p.get(P_IS_DATE) or p.get(P_IS_TIME) or p.get(P_IS_BOILER):
         return None' 'if False:
@@ -620,6 +622,26 @@ mutate "Page の無い空間もページにする" "Page の無い空間は、�
             continue'
 mutate "0 ページを黙って通す" "1 ページも取れなかったら、形式のわけを言う" \
     'log.warning("%s は 1 ページも取れなかった ── %s", sec, what)' 'pass'
+mutate "指し先の並びを読み飛ばす" "参照は、頭の並びから指し先を受け取る" \
+    'oids = [struct.unpack("<I", b[4 + k * 4:8 + k * 4])[0]
+            for k in range(cnt) if 8 + k * 4 <= len(b)]' 'oids = []'
+mutate "参照に指し先を配らない" "参照は、頭の並びから指し先を受け取る" \
+    'out[pid] = ("ref", oids.pop(0) if oids else None)' 'out[pid] = ("ref", None)'
+mutate "旗を本文からだけ読む" "太字の旗が立つ" \
+    'f = {**p, **(style or {})}' 'f = p'
+mutate "自動の色も色として出す" "自動（最後が 0xFF）は色を付けない" \
+    'if v[3] != 0x00:
+        return None' 'if False:
+        return None'
+mutate "色を青・緑・赤の順に読む" "赤・緑・青の順" \
+    'return "#%02x%02x%02x" % (v[0], v[1], v[2])' 'return "#%02x%02x%02x" % (v[2], v[1], v[0])'
+mutate "リンクを巻かない" "リンクは印の中" \
+    'return f"[{body}]({url})" if url else body' 'return body'
+mutate "色を巻かない" "色は印の外、字は印の中" \
+    "return f'<span style=\"color:{c}\">{body}</span>' if c else body" 'return body'
+mutate "見出しから色とリンクを落とす" "見出しにも色は付く" \
+    'head = colored(linked(line["text"].strip(), line), line)' \
+    'head = line["text"].strip()'
 mutate "CRLF で書く" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:'

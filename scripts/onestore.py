@@ -74,8 +74,15 @@ def objects(d):
 FIXED = {0x1: 0, 0x2: 0, 0x3: 1, 0x4: 2, 0x5: 4, 0x6: 8}
 
 
-def propset(b, i=0):
-    """PropertySet を読む。返すのは `{id: 値}`。"""
+def propset(b, i=0, oids=None):
+    """PropertySet を読む。返すのは `{id: 値}`。
+
+    **参照は、頭の並びから順に配られる**（依頼 608）。`rgData` には
+    「何個ぶん」しか置かれず、指し先（OID）は property set の頭の並びに
+    まとまって入っている ── 前の版はそれを読み飛ばしていたので、
+    参照を持つプロパティは全部 `("ref", 1)` という**中身の無い札**だった。
+    `oids` を渡すと、出てくる順に取り出して指し先そのものを返す。
+    """
     if i + 2 > len(b): return {}, i
     n = struct.unpack("<H", b[i:i + 2])[0]; i += 2
     prids = []
@@ -94,22 +101,23 @@ def propset(b, i=0):
             ln = struct.unpack("<I", b[i:i + 4])[0]; i += 4
             out[pid] = b[i:i + ln]; i += ln
         elif typ in (0x8, 0xA, 0xC):           # 一つ参照する（rgData には置かれない）
-            out[pid] = ("ref", 1)
+            out[pid] = ("ref", oids.pop(0) if oids else None)
         elif typ in (0x9, 0xB, 0xD):           # 列（個数だけ置かれる）
             if i + 4 > len(b): break
             cnt = struct.unpack("<I", b[i:i + 4])[0]; i += 4
-            out[pid] = ("refs", cnt)
+            take = [oids.pop(0) for _ in range(min(cnt, len(oids)))] if oids else []
+            out[pid] = ("refs", take if take else cnt)
         elif typ == 0x10:                      # 値の列
             if i + 8 > len(b): break
             cnt = struct.unpack("<I", b[i:i + 4])[0]; i += 4
             i += 4                             # prid
             kids = []
             for _ in range(cnt):
-                kid, i = propset(b, i)
+                kid, i = propset(b, i, oids)
                 kids.append(kid)
             out[pid] = kids
         elif typ == 0x11:                      # 入れ子
-            kid, i = propset(b, i)
+            kid, i = propset(b, i, oids)
             out[pid] = kid
         else:
             break
@@ -123,6 +131,9 @@ def read_props(d, o):
     h = struct.unpack("<I", b[0:4])[0]
     cnt = h & 0x00FFFFFF
     ext, no_osid = (h >> 30) & 1, (h >> 31) & 1
+    # **指し先の並びは、読み飛ばさずに持っておく**（依頼 608）。
+    oids = [struct.unpack("<I", b[4 + k * 4:8 + k * 4])[0]
+            for k in range(cnt) if 8 + k * 4 <= len(b)]
     i = 4 + cnt * 4
     if not no_osid:                            # OSID の並びが続く
         if i + 4 > len(b): return {}
@@ -133,7 +144,7 @@ def read_props(d, o):
             if i + 4 > len(b): return {}
             c3 = struct.unpack("<I", b[i:i + 4])[0] & 0x00FFFFFF
             i += 4 + c3 * 4
-    got, _ = propset(b, i)
+    got, _ = propset(b, i, oids)
     return got
 
 
@@ -162,6 +173,11 @@ P_UNDER, P_STRIKE    = 0x1C06, 0x1C07
 P_LIST_NODES = 0x1C26                    # ListNodes（参照の列 ── 在れば箇条書き）
 P_NUM_FORMAT = 0x1C1A                    # NumberListFormat（在れば番号）
 P_COL_WIDTHS = 0x1D66                    # TableColumnWidths
+# **色とリンク**（依頼 608）。表は Apache Tika の `OneNotePropertyEnum.java` から。
+P_COLOR      = 0x1C0C                    # FontColor
+P_HIGHLIGHT  = 0x1C0D                    # Highlight（蛍光ペン）
+P_LINK       = 0x1E14                    # Hyperlink（旗）
+P_LINK_URL   = 0x1E20                    # WzHyperlinkUrl
 P_ROWS, P_COLS = 0x1D57, 0x1D58
 P_PICTURE    = 0x1C3F                    # PictureContainer（参照）
 P_IMG_NAME   = 0x1DD7                    # ImageFilename
@@ -266,7 +282,36 @@ def _num(p, pid):
     return None
 
 
-def line_of(p):
+def _color(v):
+    """`COLORREF` を `#rrggbb` に。**自動なら色を付けない。**
+
+    MS-ONE の決まり ── 4 バイトのうち**最後が `0xFF` なら「自動」**（前の
+    三つは `0x00`）。「自動」は「黒を指定した」ではなく「指定していない」
+    なので、そこに色を書くと**ノートの全部の行が span に包まれる。**
+    最後が `0x00` のときだけ、前の三つが赤・緑・青。
+    """
+    if not isinstance(v, (bytes, bytearray)) or len(v) < 4:
+        return None
+    if v[3] != 0x00:
+        return None
+    return "#%02x%02x%02x" % (v[0], v[1], v[2])
+
+
+def style_of(d, by_oid, p):
+    """本文の段落 → その書式（`ParagraphStyle`）。**旗はこちらに載っている。**
+
+    太字も斜体も取り消し線も色も、本文のオブジェクトではなく**書式のほう**が
+    持っている（依頼 608 で分かった ── それまで旗を本文から読んでいたので、
+    **装飾は一度も落ちていなかった**）。
+    """
+    ref = p.get(P_STYLE)
+    if not (isinstance(ref, tuple) and ref[0] == "ref" and ref[1]):
+        return {}
+    o = by_oid.get(ref[1])
+    return read_props(d, o) if o else {}
+
+
+def line_of(p, style=None):
     """一つの本文を、**Markdown の一行**に。
 
     かたまりの意味（見出し・引用・コード）は `ParagraphStyleId` が持っていて、
@@ -287,11 +332,18 @@ def line_of(p):
         return None                       # 題は前書きが持つ
     got = {"text": text, "indent": (p.get(P_INDENT) or b"\x00")[0]
            if isinstance(p.get(P_INDENT), bytes) and p.get(P_INDENT) else 0}
-    style = _str(p, P_STYLE_ID, "latin-1") or ""
-    got["style"] = style.strip()
-    got["bold"] = bool(p.get(P_BOLD))
-    got["italic"] = bool(p.get(P_ITALIC))
-    got["strike"] = bool(p.get(P_STRIKE))
+    # **`style` は引数の名前**（書式のプロパティ集合）── ここで上書きしない。
+    # 一度やって、旗が一つも立たないのに検査は通る形を作った。
+    sid = _str(p, P_STYLE_ID, "latin-1") or ""
+    got["style"] = sid.strip()
+    # **旗は書式のほうが持っている**（依頼 608）。本文側も見るのは、
+    # 走査が本文だけを渡してくる形を残すため。
+    f = {**p, **(style or {})}
+    got["bold"] = bool(f.get(P_BOLD))
+    got["italic"] = bool(f.get(P_ITALIC))
+    got["strike"] = bool(f.get(P_STRIKE))
+    got["color"] = _color(f.get(P_COLOR))
+    got["link"] = _str(f, P_LINK_URL)
     got["list"] = "number" if p.get(P_NUM_FORMAT) is not None else (
         "bullet" if p.get(P_LIST_NODES) is not None else None)
     tag = p.get(P_TAG_SHAPE)
@@ -301,15 +353,34 @@ def line_of(p):
     return got
 
 
+def linked(body, line):
+    """リンクを巻く。**いちばん内側**（依頼 608）── `**[字](url)**` の順。
+
+    外に出すと `[**字**](url)` になり、太字の印がリンクの中に入る。
+    """
+    url = line.get("link")
+    return f"[{body}]({url})" if url else body
+
+
+def colored(body, line):
+    """色を巻く。**いちばん外側**（ambər の書き方 ── `note::first_color`）。
+
+    印の中に入れると `**<span…>字</span>**` になり、色の札が印に挟まれる。
+    """
+    c = line.get("color")
+    return f'<span style="color:{c}">{body}</span>' if c else body
+
+
 def as_markdown(line):
     """一行を Markdown に。**印は外側から。**"""
-    body = line["text"].strip()
+    body = linked(line["text"].strip(), line)
     if line.get("bold"):
         body = f"**{body}**"
     if line.get("italic"):
         body = f"*{body}*"
     if line.get("strike"):
         body = f"~~{body}~~"
+    body = colored(body, line)
     style = line.get("style") or ""
     pad = "  " * min(line.get("indent", 0), 6)
     if line.get("todo"):
@@ -319,7 +390,9 @@ def as_markdown(line):
     if line.get("list") == "bullet":
         return f"{pad}- {body}"
     if style.startswith("h") and style[1:].isdigit():
-        return "#" * min(int(style[1:]), 6) + f" {line['text'].strip()}"
+        # 見出しは印を重ねない（`# **字**` は二重）が、色とリンクは残す。
+        head = colored(linked(line["text"].strip(), line), line)
+        return "#" * min(int(style[1:]), 6) + f" {head}"
     if style == "cite":
         return f"> {body}"
     if style == "code":
@@ -340,6 +413,11 @@ def pictures(d, objs):
     return out
 
 
+def by_oid(objs):
+    """OID から実体を引く一枚（参照をたどるのに要る・依頼 608）。"""
+    return {o["oid"]: o for o in objs}
+
+
 def tables(d, objs):
     """表を組む ── `[{"rows": [[升の字, …], …], "y": 上からの位置}]`。
 
@@ -351,6 +429,7 @@ def tables(d, objs):
     （COM の道と同じ潰し方 ── `<br>` は ambər の画面に字として出る）。
     """
     out, table, row = [], None, None
+    look = by_oid(objs)
     for o in objs:
         jc = o["jcid"]
         if jc == JC_TABLE:
@@ -365,7 +444,8 @@ def tables(d, objs):
         elif jc == JC_CELL and row is not None:
             row.append([])
         elif jc == JC_TEXT and row and row[-1] is not None:
-            got = line_of(read_props(d, o))
+            pr = read_props(d, o)
+            got = line_of(pr, style_of(d, look, pr))
             if got:
                 row[-1].append(got["text"].strip())
     for t in out:
@@ -405,6 +485,7 @@ def pages(d):
         meta = next((o for o in last if o["jcid"] == JC_PAGEMETA), None)
         # **表の中の字は、本文に二度出さない。** 升をたどるときに拾うので、
         # ここで拾うと同じ字が表の外にも並ぶ。
+        look = by_oid(last)
         in_table, skip = False, set()
         for o in last:
             if o["jcid"] == JC_TABLE:
@@ -417,7 +498,8 @@ def pages(d):
         for o in last:
             if o["jcid"] != JC_TEXT or id(o) in skip:
                 continue
-            one = line_of(read_props(d, o))
+            pr = read_props(d, o)
+            one = line_of(pr, style_of(d, look, pr))
             if one:
                 lines.append(one)
         # **ページの上にある順に並べる。** OneNote は箱をどこにでも置けるので、

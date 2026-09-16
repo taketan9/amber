@@ -1867,6 +1867,83 @@ def t_onestore_shape(tmp):
         ost.spaces, ost.read_props = keep_sp, keep_rp
 
 
+def t_style(tmp):
+    print("装飾は、書式のほうに載っている ──")
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("onestore", ROOT / "onestore.py")
+    ost = iu.module_from_spec(spec)
+    spec.loader.exec_module(ost)
+
+    # **色の決まり**（MS-ONE の COLORREF）── 最後が 0x00 のときだけ色。
+    check("自動（最後が 0xFF）は色を付けない", ost._color(b"\x00\x00\x00\xff") is None)
+    check("最後が 0x00 なら、前の三つが色", ost._color(b"\x76\x76\x76\x00") == "#767676")
+    check("赤・緑・青の順", ost._color(b"\x12\x34\x56\x00") == "#123456")
+    check("短すぎる・欄が無いときは色なし",
+          ost._color(b"\x01\x02") is None and ost._color(None) is None)
+
+    # **本物の `read_props` に、本物のバイト列を渡す。**
+    #
+    # 下の段は `read_props` を偽物に差し替えるので、**参照をどう読むかは
+    # 一度も試していない** ── 偽物が本物より甘い、七度目（依頼 595 と同じ形）。
+    # property set を手で組んで、指し先が本当に配られるかを見る。
+    import struct as st2
+    oid = 0x0000ABCD
+    props = st2.pack("<H", 2)                          # プロパティ二つ
+    props += st2.pack("<I", (0x8 << 26) | ost.P_STYLE)  # 一つ参照する
+    props += st2.pack("<I", (0x3 << 26) | ost.P_BOLD)   # 1 バイトの値
+    props += b"\x01"                                    # ↑ の中身
+    head = st2.pack("<I", 1 | (1 << 31))                # 指し先 1 個・OSID 無し
+    head += st2.pack("<I", oid)                        # ← 読み飛ばしていた並び
+    raw = head + props
+    got = ost.read_props(raw, {"oid": 0, "jcid": ost.JC_TEXT, "stp": 0, "cb": len(raw)})
+    check("参照は、頭の並びから指し先を受け取る",
+          got.get(ost.P_STYLE) == ("ref", oid), got)
+    check("参照のあとの値も、ずれずに読める", got.get(ost.P_BOLD) == b"\x01", got)
+
+    # **旗は本文ではなく書式が持つ。** ここを本文から読んでいたので、
+    # 太字も斜体も取り消し線も**一度も落ちていなかった**（依頼 608）。
+    keep = ost.read_props
+    try:
+        text = {"oid": 1, "jcid": ost.JC_TEXT, "stp": 0, "cb": 0}
+        style = {"oid": 7, "jcid": 0x004D, "stp": 0, "cb": 0}
+        props = {
+            1: {ost.P_ASCII: b"important", ost.P_STYLE: ("ref", 7)},
+            7: {ost.P_BOLD: 1, ost.P_COLOR: b"\x12\x34\x56\x00"},
+        }
+        ost.read_props = lambda d, o: props[o["oid"]]
+        look = ost.by_oid([text, style])
+        st = ost.style_of(b"", look, props[1])
+        check("本文から書式をたどれる", st.get(ost.P_BOLD) == 1, st)
+        got = ost.line_of(props[1], st)
+        check("太字の旗が立つ", got["bold"] is True, got)
+        check("色が取れる", got["color"] == "#123456", got)
+        md = ost.as_markdown(got)
+        check("色は印の外、字は印の中",
+              md == '<span style="color:#123456">**important**</span>', md)
+
+        # 指し先が無い・壊れているときは、黙って素の字に戻る。
+        check("たどれなければ書式なし", ost.style_of(b"", look, {}) == {})
+        check("指し先が居なければ書式なし",
+              ost.style_of(b"", look, {ost.P_STYLE: ("ref", 999)}) == {})
+
+        # **リンクはいちばん内側。** 外に出すと印がリンクの中に入る。
+        props[7] = {ost.P_BOLD: 1, ost.P_LINK_URL: "https://x/a".encode("utf-16-le")}
+        got = ost.line_of(props[1], ost.style_of(b"", look, props[1]))
+        check("リンクの行き先が取れる", got["link"] == "https://x/a", got)
+        check("リンクは印の中", ost.as_markdown(got) == "**[important](https://x/a)**",
+              ost.as_markdown(got))
+
+        # 見出しは印を重ねないが、色とリンクは残す。
+        props[7] = {ost.P_COLOR: b"\x12\x34\x56\x00"}
+        h = ost.line_of(props[1], ost.style_of(b"", look, props[1]))
+        h["style"] = "h2"
+        check("見出しにも色は付く",
+              ost.as_markdown(h) == '## <span style="color:#123456">important</span>',
+              ost.as_markdown(h))
+    finally:
+        ost.read_props = keep
+
+
 def t_tables(tmp):
     print("表 ──")
     import importlib.util as iu
@@ -2107,7 +2184,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="onenote-test-"))
     try:
         for fn in (t_names, t_amber_shape, t_structure, t_table, t_inline, t_created,
-                   t_log, t_cp932, t_two_views, t_onestore_shape, t_tables, t_empty_space, t_cab, t_from_files, t_peek, t_forget, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
+                   t_log, t_cp932, t_two_views, t_onestore_shape, t_style, t_tables, t_empty_space, t_cab, t_from_files, t_peek, t_forget, t_launcher, t_check, t_offline, t_two_onenotes, t_readonly_no_lock, t_incremental, t_same_file,
                    t_prune_scope, t_prune_error, t_stale_images, t_sync, t_lock,
                    t_select, t_select_flatten, t_select_prune, t_list, t_binding, t_gen_py, t_wrap, t_probe, t_verify, t_arch, t_arch_hint, t_resource_index, t_connect):
             fn(tmp)
