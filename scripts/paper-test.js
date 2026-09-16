@@ -27,7 +27,9 @@ try {
 }
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'gui', 'renderer.js'), 'utf8');
-const from = src.indexOf('function richBlock(');
+// **`oneCell` から** ── 貼られたものを均すところ（`webClean`）まで、
+// 一続きで切り出す。Excel の升をどう扱うかも、この面の判断のうち。
+const from = src.indexOf('function oneCell(');
 const to = src.indexOf('/// この窓の「表示」の面を、上の切り出しに繋ぐ薄い包み。');
 if (from < 0 || to < 0 || to < from) {
     console.error('gui/renderer.js から「表示」の面を切り出せません'
@@ -39,10 +41,17 @@ const dom = new JSDOM('<!doctype html><body><div id="paper"></div></body>');
 global.window = dom.window;
 global.document = dom.window.document;
 global.Node = dom.window.Node;
+// よそから来た HTML を掃除するところ（`webClean`）も見る。
+global.DOMParser = dom.window.DOMParser;
 // caret の居場所を見る道具も渡す ── 升の行の改行はここを見て決める。
 global.getSelection = () => dom.window.getSelection();
 // eslint-disable-next-line no-eval
 (0, eval)(src.slice(from, to));
+// **貼られたものが絵そのものか**を見る一本は、面の外（受け口の隣）に居る。
+// eslint-disable-next-line no-eval
+(0, eval)(src.slice(src.indexOf('function justAPicture(data)'),
+                    src.indexOf("document.addEventListener('paste'",
+                                src.indexOf('function justAPicture(data)'))));
 
 let bad = 0;
 const ok = (yes, what, got) => {
@@ -272,6 +281,73 @@ console.log('図の「元の字」は、行番号がずれても作り直さな�
     armPaper(box, now, true);
     ok(box.firstElementChild.dataset.md === first,
        'ずれても、持っている字は変わらない', box.firstElementChild.dataset.md);
+}
+
+/* **よそから来た飾りは、持ち込まない**（依頼 616・本人「やや白いハイライト
+ * というかマーカーがついた文字で入力される」）。
+ *
+ * Excel は升に `style="background:white;color:black"` を付けて寄こす ──
+ * 琥珀の紙の上では、その白がマーカーを引いたように見える。
+ */
+{
+    const one = '<html xmlns:x="urn:schemas-microsoft-com:office:excel"><body><table>'
+        + '<tr><td style="background:white;color:black" x:str>売上</td></tr></table></body></html>';
+    const many = '<html><body><table>'
+        + '<tr><td style="background:white">名前</td><td style="background:white">値</td></tr>'
+        + '<tr><td style="background:white">ＣＰＵ</td><td style="background:white">8</td></tr>'
+        + '</table></body></html>';
+    const cleanOne = webClean(one, '');
+    const cleanMany = webClean(many, '');
+    ok(!/style=/.test(cleanMany.innerHTML), 'Excel の飾りを落とす', cleanMany.innerHTML.slice(0, 120));
+    ok(!/background/i.test(cleanMany.innerHTML), '白いマーカーを持ち込まない');
+    ok(/<td>名前<\/td>/.test(cleanMany.innerHTML), '升の字は残る', cleanMany.innerHTML.slice(0, 120));
+    // **色だけは残す** ── ambər の記法（`note::first_color` が読む形）。
+    const colored = webClean('<p><span style="color:#D9822B;background:white">橙</span></p>', '');
+    ok(/style="color:#D9822B"/i.test(colored.innerHTML), '色は残す', colored.innerHTML);
+    ok(!/background/i.test(colored.innerHTML), '色以外は落とす', colored.innerHTML);
+    // **黒は色ではない。** 既定の字に付いてくるので、残すとノートじゅうが span になる。
+    const black = webClean('<p><span style="color:black">ふつう</span></p>', '');
+    ok(!/style=/.test(black.innerHTML), '黒は色として残さない', black.innerHTML);
+    const black6 = webClean('<p><span style="color:#000000">ふつう</span></p>', '');
+    ok(!/style=/.test(black6.innerHTML), '#000000 も残さない', black6.innerHTML);
+    // **行き先と画像は残す** ── 落とすとリンクが字になる。
+    const link = webClean('<p><a href="https://x/a" target="_blank" class="u">字</a></p>', '');
+    ok(/href="https:\/\/x\/a"/.test(link.innerHTML), '行き先は残す', link.innerHTML);
+    ok(!/target=|class=/.test(link.innerHTML), 'それ以外は落とす', link.innerHTML);
+    // **枠の言語は飾りではない** ── 落とすと、貼った枠から言語が消える。
+    const code = webClean('<pre><code class="hljs language-rust">fn main() {}</code></pre>', '');
+    ok(/class="language-rust"/.test(code.innerHTML), '枠の言語は残す', code.innerHTML);
+    ok(!/hljs/.test(code.innerHTML), 'ほかの class は落とす', code.innerHTML);
+
+    // **升ひとつは、表ではない**（本人「不思議なところで改行する」）。
+    ok(oneCell(cleanOne) === '売上', '升ひとつは字だけにする', oneCell(cleanOne));
+    ok(oneCell(cleanMany) === null, '升が二つ以上なら、表のまま', oneCell(cleanMany));
+    ok(oneCell(webClean('<p>ただの段</p>', '')) === null, '表でなければ、触らない');
+
+    // **Excel は絵も一緒に載せてくる**（本人「絵の扱いになっている」）。
+    // 見分けるのは字の有無 ── 画面を撮った回だけが、字を一つも載せない。
+    const clip = (html, plain) => ({ getData: (t) => (t === 'text/html' ? html : (t === 'text/plain' ? plain : '')) });
+    ok(justAPicture(clip('', '')) === true, '画面写真は絵のまま');
+    ok(justAPicture(clip('<img src="https://x/a.png">', '')) === true,
+       'ウェブの画像も絵のまま（字が無い）');
+    ok(justAPicture(clip(many, '名前\t値\nＣＰＵ\t8\n')) === false,
+       'Excel の範囲は絵ではない（字が載っている）');
+    ok(justAPicture(clip(one, '売上\n')) === false, '升ひとつも絵ではない');
+    ok(justAPicture(clip('<p>字のある HTML</p>', '')) === false,
+       '字のある HTML は絵ではない（字だけ別の欄に載らない道具もある）');
+    // **字だけ載せてくる道具もある**（HTML を作らない表計算・端末から写した字）。
+    // そこを見ないと、絵と一緒に来た字がぜんぶ画面写真になる。
+    ok(justAPicture(clip('', 'ただの字')) === false, '字だけでも絵ではない');
+
+    // **枠の中の字は、元の字から**（依頼 614）── 画面の枠は色が付いたあとの
+    // 姿で、改行が `<br>`、空白が `&nbsp;` になっている。
+    const pre = document.createElement('pre');
+    pre.dataset.md = '```python\ndef 短い():\n    return 1\n```';
+    pre.innerHTML = '<code>def&nbsp;短い():<br>&nbsp;&nbsp;&nbsp;&nbsp;return 1</code>';
+    ok(codeOf(pre) === 'def 短い():\n    return 1', '囲みを外して、改行のまま返す', codeOf(pre));
+    const pasted = document.createElement('pre');
+    pasted.innerHTML = '<code>a\u00a0b\n</code>';
+    ok(codeOf(pasted) === 'a b', '元の字が無ければ、字から拾って &nbsp; を戻す', codeOf(pasted));
 }
 
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');

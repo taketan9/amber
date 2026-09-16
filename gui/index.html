@@ -798,10 +798,29 @@ body.split #read { border-left: 1px solid var(--line-2); }
   background: var(--rail); border: 1px solid var(--line-2);
   border-radius: 5px; padding: .12em .38em;
 }
+/* **枠は、文の幅に従わない**（依頼 614・本人「横幅にものすごく余裕が
+   あるのに、狭いコード表記になって横スクロールが表示されている」）。
+   34rem は目が一行を追える長さの話で（`#read` の頭に書いた理由）、
+   コードはそもそも文ではない ── 折り返さないので、狭い枠に入れると
+   画面が空いていても横棒が出る。図で同じ判断をしている（`.mermaid`）。 */
 #read pre {
   margin: 1.1em 0; padding: 13px 16px; overflow-x: auto;
   background: var(--rail); border: 1px solid var(--line-2); border-radius: 10px;
+  max-width: 100%; position: relative;
 }
+/* 押すだけで写せる（依頼 614）。**乗せるまで出さない** ── いつも出して
+   おくと、読んでいるあいだじゅう字の上に札が浮く。焦点が来ても出す
+   （鍵盤だけの人にも届く）。 */
+#read pre .cp {
+  position: absolute; top: 7px; right: 7px; z-index: 1;
+  font: inherit; font-size: 11.5px; line-height: 1;
+  padding: 4px 9px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink-2);
+  opacity: 0; transition: opacity .12s;
+}
+#read pre:hover .cp, #read pre .cp:focus { opacity: 1; }
+#read pre .cp:hover { background: var(--hover); color: var(--ink); border-color: var(--ink-3); }
+#read pre .cp.done { color: var(--brand-s); border-color: var(--brand-s); opacity: 1; }
 #read pre code { background: none; border: 0; padding: 0; font-size: .86em; }
 /* **枠の中に、琥珀の字**（依頼 437）。` ```amber ` と書いた枠だけ、この色で
    出す ── 初めて開いた人に見せる絵のため。Monaco はこの語彙を知らないので
@@ -842,9 +861,11 @@ body.split #read { border-left: 1px solid var(--line-2); }
   margin-top: .55em; font-size: 12px; color: var(--ink-3); line-height: 1.6;
 }
 
+/* **表も、文の幅に従わない**（依頼 614 と同じ理由）── 升は折り返せるが、
+   升の数は折り返せない。四列あれば 34rem では必ず横棒が出る。 */
 #read table {
   border-collapse: collapse; margin: 1.1em 0; display: block;
-  overflow-x: auto; max-width: 34rem; font-size: .95em;
+  overflow-x: auto; max-width: 100%; font-size: .95em;
 }
 #read th, #read td { border: 1px solid var(--line-2); padding: 6px 12px; }
 #read th { background: var(--rail); font-weight: 700; text-align: left; }

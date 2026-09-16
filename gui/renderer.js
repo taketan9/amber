@@ -2117,10 +2117,22 @@ el('read').addEventListener('blur', () => { clearTimeout(readTimer); syncRead(tr
 /// 画像の貼り付けは別に拾っている。
 el('read').addEventListener('paste', (e) => {
     if (!e.clipboardData) return;
-    if ([...e.clipboardData.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'))) return;
+    // **画像そのもののときだけ、下の受け口に渡す**（依頼 616）── Excel は
+    // 表と一緒に絵も載せてくるので、「絵があれば絵」で帰ると表が写真になる。
+    if ([...e.clipboardData.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'))
+        && justAPicture(e.clipboardData)) return;
     e.preventDefault();
     const html = e.clipboardData.getData('text/html');
     const clean = html && html.trim() ? webClean(html, clipBase(html)) : null;
+    // **升ひとつは、表ではない**（依頼 616・本人「不思議なところで改行する」）。
+    // Excel は升を一つ写しても `<table>` で寄こすので、そのまま入れると
+    // 文の途中に段が割り込んで**そこで行が切れる。** 字だけ入れる。
+    const one = oneCell(clean);
+    if (one !== null) {
+        document.execCommand('insertText', false, one);
+        readChanged();
+        return;
+    }
     // **表のセルには字だけ（改行は空白に）。項目には字だけ（改行ごとに
     // 項目を増やす）。** かたまりのまま入れると、セルでは見出しの字だけが
     // 混ざって一覧が消え、項目では一覧が入れ子になった（網が捕まえた・
@@ -2157,6 +2169,20 @@ el('read').addEventListener('paste', (e) => {
     document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
 });
 
+/// 升ひとつだけの表なら、その字。ちがえば `null`（依頼 616）。
+///
+/// **Excel は升を一つ写しても表で寄こす。** 文の途中に貼ると段が割り込んで
+/// 行が切れ、貼った人には「不思議なところで改行した」としか見えない。
+/// 末尾の改行も落とす ── Excel は `text/plain` にも改行を一つ足してくる。
+function oneCell(clean) {
+    if (!clean) return null;
+    const kids = [...clean.children];
+    if (kids.length !== 1 || kids[0].tagName !== 'TABLE') return null;
+    const cells = kids[0].querySelectorAll('td, th');
+    if (cells.length !== 1) return null;
+    return cells[0].textContent.replace(/\s*\n\s*/g, ' ').trim();
+}
+
 /// 貼られたものを、**書く面に入れる字**にする。
 ///
 /// **字のほうが長ければ、字を採る。** ブラウザによっては `text/html` に
@@ -2166,6 +2192,10 @@ function clipText(data) {
     const plain = data.getData('text/plain');
     const html = data.getData('text/html');
     if (!html || !html.trim()) return plain;
+    // **升ひとつは、表ではない**（依頼 616）── `| 売上 |` と三行に
+    // なるより、`売上` の四文字が入るほうが、写した人の思ったこと。
+    const one = oneCell(webClean(html, clipBase(html)));
+    if (one !== null) return one;
     let md = '';
     try {
         md = webToMd(html, clipBase(html));
@@ -2275,11 +2305,66 @@ function armPaper(box, text, open) {
                 : '押すと、「コード」のその行へ';
         }
     }
+    // **枠には、押すだけで写せる札**（依頼 614・本人「押下するだけで
+    // コピーできるコピーボタンがあるといい」）。
+    //
+    // **中に置いてよい。** 枠は触れないかたまりなので、書き戻すのは
+    // `data-md`（元の字）── 札の「コピー」が字に混ざることはない。
+    // **図の枠には付けない** ── あれは押すと工房が開く場所で、写したい
+    // のは図であって字ではない。
+    for (const pre of box.querySelectorAll('pre')) {
+        if (pre.querySelector(':scope > .cp')) continue;
+        if (pre.classList.contains('mermaid') || pre.querySelector('code.language-mermaid')) continue;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'cp';
+        b.textContent = 'コピー';
+        b.contentEditable = 'false';
+        b.title = 'この枠の中身を写す';
+        // **押しを枠に渡さない。** 枠を押すと「コード」の面へ飛ぶので、
+        // 写したいだけの人が別の面に着く。
+        b.onmousedown = (e) => e.stopPropagation();
+        b.onclick = async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const text = codeOf(pre);
+            try {
+                await navigator.clipboard.writeText(text);
+                b.textContent = '写しました';
+                b.classList.add('done');
+                setTimeout(() => { b.textContent = 'コピー'; b.classList.remove('done'); }, 1400);
+            } catch (err) {
+                say('写せません: ' + why(err));
+            }
+        };
+        pre.appendChild(b);
+    }
     // 升は字ではなく操作 ── 中に caret が入ると、押せるものが打てるものに見える。
     for (const b of box.querySelectorAll('.box')) b.contentEditable = 'false';
     // 注記の種類の札は、中身ではなく `> [!NOTE]` の言い換え ── 打てると
     // 「注意」を「ちゅうい」に直せてしまい、それは記法を壊す。
     for (const h of box.querySelectorAll('.alert-h')) h.contentEditable = 'false';
+}
+
+/// 枠の中の字（依頼 614）。**画面から拾わない。**
+///
+/// 読む面の枠は Monaco が色を付けたあとの姿で、**改行は `<br>`、空白は
+/// `&nbsp;`** になっている ── `textContent` で拾うと、写した字が
+/// 一行に潰れて空白も別の字になる（実際にそうなった）。
+/// 元の字は枠が `data-md` に持っているので、囲みだけ外して返す。
+function codeOf(pre) {
+    const md = pre.dataset ? pre.dataset.md : '';
+    if (md) {
+        const lines = md.split('\n');
+        if (/^\s*(`{3,}|~{3,})/.test(lines[0])) {
+            lines.shift();
+            if (lines.length && /^\s*(`{3,}|~{3,})\s*$/.test(lines[lines.length - 1])) lines.pop();
+        }
+        return lines.join('\n');
+    }
+    // 元の字を持たない枠（よそから貼られたもの）は、字から拾う。
+    const code = pre.querySelector('code');
+    return (code || pre).textContent.replace(/\u00a0/g, ' ').replace(/\n+$/, '');
 }
 
 /// DOM を Markdown に戻す。
@@ -3730,6 +3815,52 @@ function webClean(html, base) {
     // 入れ物をほどく。**内側から**（外から剥ぐと、剥いだ先をもう一度
     // 見に行くことになる）。
     for (const n of [...body.querySelectorAll(WEB_PEEL)].reverse()) peel(n);
+    stripAttrs(body);
+    return body;
+}
+
+/// **よそから来た飾りは、持ち込まない**（依頼 616・本人「やや白いハイライト
+/// というかマーカーがついた文字で入力される」）。
+///
+/// Excel は升に `style="background:white;color:black;mso-pattern:…"` を
+/// 付けて寄こす。琥珀の紙（`#fffdf8`）の上では、その白が**マーカーを
+/// 引いたように見える** ── 実物で確かめた。
+///
+/// **ambər が知っている飾りは一つだけ**（`<span style="color:#rrggbb">`）
+/// なので、それ以外は落とす。残すのは「意味のある属性」だけ ── 行き先
+/// （`href`）、画像（`src` `alt`）、升の繋がり（`colspan` `rowspan`）、
+/// 一覧の始まり（`start`）、そして升の並び（`align`）。
+///
+/// **落とさないと、書き戻しでも消える。** 飾りは `paperToMd` を通らない
+/// ので、貼った直後だけ見えて次の保存で消える ── 「打っていないのに
+/// 見え方が変わった」がいちばん分かりにくい。
+const KEEP_ATTR = new Set(['href', 'src', 'alt', 'colspan', 'rowspan', 'start', 'align']);
+function stripAttrs(body) {
+    for (const n of body.querySelectorAll('*')) {
+        for (const name of [...n.getAttributeNames()]) {
+            if (KEEP_ATTR.has(name)) continue;
+            // **枠の言語は飾りではない。** `class="language-rust"` は
+            // 「これは Rust だ」という中身の話で、落とすと貼った枠から
+            // 言語が消える（走査が捕まえた）。ほかの `class` は落とす。
+            if (name === 'class' && n.tagName === 'CODE') {
+                const lang = /(?:^|\s)(language-[\w+-]+)/.exec(n.getAttribute('class') || '');
+                if (lang) { n.setAttribute('class', lang[1]); continue; }
+            }
+            if (name === 'style') {
+                // 色だけは ambər の記法なので残す（`note::first_color`）。
+                const color = /(?:^|;)\s*color\s*:\s*(#[0-9a-f]{6})\b/i
+                    .exec(n.getAttribute('style') || '');
+                // **黒は色ではない。** Excel も Word も既定の字に
+                // `color:black` を付けて寄こすので、そのまま残すと
+                // ノートじゅうが `<span style="color:#000000">` で埋まる。
+                if (color && color[1].toLowerCase() !== '#000000') {
+                    n.setAttribute('style', 'color:' + color[1]);
+                    continue;
+                }
+            }
+            n.removeAttribute(name);
+        }
+    }
     return body;
 }
 
@@ -4046,7 +4177,9 @@ async function cmdAlert() {
         { name: '重要', sub: '見落とすと困ること', value: 'IMPORTANT' },
         { name: '注意', sub: '気をつけること', value: 'WARNING' },
         { name: '警告', sub: '取り返しがつかないこと', value: 'CAUTION' },
-    ], 'GitHub でも同じ形で出ます');
+    // **絞り込みの欄は出さない**（依頼 615・本人「絞り込みの入力欄は不要」）
+    // ── 五つを絞り込む人はいない。押して選ぶだけの一覧にする。
+    ], 'GitHub でも同じ形で出ます', true);
     if (kind === null) return;
     if (onRead()) {
         // **札だけ入れて、中の打てる行に caret を降ろす**（本人が決めた・2026-09-10）。
@@ -7586,6 +7719,29 @@ function markKey(e) {
 ///
 /// **捕まえるのは画像のときだけ。** 字の貼り付けはエディタの仕事で、
 /// ここが横取りすると Monaco の取り消しが繋がらなくなる。
+/// 貼られたものは、**画像そのものか**（依頼 616・本人「Excel で複数セルを
+/// 範囲指定してコピーしてアンバーに貼り付けすると、絵の扱いになっている」）。
+///
+/// **Excel は、同じ一回のコピーで三つ載せてくる** ── 選んだ範囲の絵
+/// （PNG）、表（`text/html`）、タブ区切りの字（`text/plain`）。前は
+/// 「画像があれば画像」で採っていたので、**表を貼ったつもりが画面写真**に
+/// なっていた。Word も Excel も、ブラウザの表も同じ形。
+///
+/// **見分けるのは字の有無。** 画面を撮って貼る回（⌘⇧4）は、字が一つも
+/// 載っていない ── そこだけが本当に「画像そのもの」。
+///
+/// **ウェブの画像を右押しでコピーした回も、字は載らない**（`text/html` は
+/// `<img>` だけで、`text/plain` は空）ので、いままでどおり絵として入る。
+function justAPicture(data) {
+    if (!data) return true;
+    if ((data.getData('text/plain') || '').trim()) return false;
+    const html = data.getData('text/html') || '';
+    if (!html.trim()) return true;
+    // 字の無い `<img>` だけの HTML は、画像そのもの。
+    const body = new DOMParser().parseFromString(html, 'text/html').body;
+    return !body || !body.textContent.trim();
+}
+
 document.addEventListener('paste', async (e) => {
     // **「表示」の面でも受ける。** 前はここで帰っていたので、読む面に
     // 撮った画面を貼っても何も起きなかった ── 画面を撮って貼るのは、
@@ -7593,7 +7749,7 @@ document.addEventListener('paste', async (e) => {
     if (!state.open || !editor) return;
     const items = [...(e.clipboardData?.items || [])];
     const pic = items.find((i) => i.kind === 'file' && i.type.startsWith('image/'));
-    if (!pic) return;
+    if (!pic || !justAPicture(e.clipboardData)) return;
     e.preventDefault();
     e.stopPropagation();
     const got = await window.amber.clipboardImage();

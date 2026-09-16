@@ -293,5 +293,24 @@ console.log('小窓は、マウスを乗せたら選び目が動くか');
        '印だけ移す（一行ごとに描き直さない）');
 }
 
+// **枠は文の幅に従わない／押すだけで写せる**（依頼 614）。
+console.log('コードの枠');
+{
+    const css = fs.readFileSync(path.join(__dirname, '..', 'gui', 'index.html'), 'utf8');
+    ok(/#read pre \{[^}]*max-width: 100%/s.test(css), '枠は面いっぱいまで使う', '');
+    ok(/#read table \{[^}]*max-width: 100%/s.test(css), '表も面いっぱいまで使う', '');
+    ok(/#read pre \.cp \{/.test(css), '写す札の置き場所がある');
+    ok(/#read pre:hover \.cp/.test(css), '乗せたときだけ出す');
+
+    const at = src.indexOf('function codeOf(pre)');
+    ok(at > 0, '枠の中の字を返す一本がある');
+    const body = src.slice(at, src.indexOf('\n}', at));
+    // **画面から拾わない。** 読む面の枠は色が付いたあとの姿で、改行は
+    // `<br>`、空白は `&nbsp;` になっている（実物で確かめた）。
+    ok(body.includes('dataset.md'), '元の字（data-md）から返す', body.slice(0, 200));
+    ok(/`\{3,\}/.test(body), '囲みの ``` は外す');
+    ok(body.includes('\\u00a0'), '色付けの &nbsp; を空白に戻す（元の字が無いとき）');
+}
+
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');
 process.exit(bad ? 1 : 0);
