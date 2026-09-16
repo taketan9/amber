@@ -216,6 +216,20 @@ const ONE = {
     // **裸の URL は、押せるようになっても字が変わらない**（依頼 606）。
     // ここで戻り値が `[https://x](https://x)` になれば、打っていない記号が
     // ファイルに増えたということ ── 同期していれば、それが全部むこうへ飛ぶ。
+    // **折りたたみ**（依頼 619）── 畳んだ中身を書き戻しで失わない。
+    // 閉じたまま保存しただけで中が書き換わる、がいちばん怖い。
+    //
+    // **「段落のすぐ下」は置いていない。** 空行を挟まずに置いたかたまりは
+    // 保存で空行が一つ増えるが、それは**表も枠も引用も同じ**（数えた）──
+    // 畳みの話ではなく、この面の元からの均し方。
+    '折りたたみ': '<details>\n<summary>見出し</summary>\n\n中身\n\n</details>',
+    '折りたたみ 中に枠': '<details>\n<summary>ながいコード</summary>\n\n```js\nconst a = 1;\n```\n\n</details>',
+    '折りたたみ 中に表': '<details>\n<summary>表</summary>\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n</details>',
+    '折りたたみ 見出しに飾り': '<details>\n<summary>ながい **コード**</summary>\n\n中身\n\n</details>',
+    '折りたたみ 見出し無し': '<details>\n\n中身\n\n</details>',
+    '折りたたみ はじめから開く': '<details open>\n<summary>見出し</summary>\n\n中身\n\n</details>',
+    '折りたたみ 入れ子': '<details>\n<summary>そと</summary>\n\n<details>\n<summary>なか</summary>\n\nおく\n\n</details>\n\n</details>',
+    '折りたたみ 前後に段': 'まえ。\n\n<details>\n<summary>見出し</summary>\n\n中身\n\n</details>\n\nあと。',
     '裸の URL': '見て https://example.com/a',
     '裸の URL 文の途中': '見て https://example.com/a 。つぎ',
     '裸の URL と句点': 'ここ https://example.com/a。',

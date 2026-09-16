@@ -133,6 +133,17 @@ struct Paper: UIViewRepresentable {
       #paper blockquote{margin:.9em 0;padding-left:.9em;
         border-left:3px solid var(--line);color:var(--ink-2)}
       #paper hr{border:0;border-top:1px solid var(--line);margin:1.6em 0}
+      /* 折りたたみ（依頼 619）── **窓と同じ姿**。指で押して開け閉めする。 */
+      #paper details{margin:1.1em 0;border:1px solid var(--line-2);border-radius:10px;
+        background:var(--rail)}
+      #paper details>summary{cursor:pointer;padding:9px 14px;font-weight:600;
+        color:var(--ink);list-style:none;border-radius:10px}
+      #paper details>summary::-webkit-details-marker{display:none}
+      #paper details>summary::before{content:'▸';display:inline-block;width:1.1em;
+        color:var(--ink-3);transition:transform .12s}
+      #paper details[open]>summary::before{transform:rotate(90deg)}
+      #paper details>:not(summary){margin:.8em 14px}
+      #paper details>:not(summary):last-child{margin-bottom:12px}
       #paper code{font:.88em ui-monospace,Menlo,monospace;background:var(--rail);
         padding:.1em .35em;border-radius:5px}
       #paper pre{background:var(--rail);padding:11px 13px;border-radius:9px;

@@ -758,6 +758,14 @@ fn stamps(raw: &str, total: usize) -> String {
 /// `> [!NOTE]` の一行を、注記の種類に。**GitHub が読める五つだけ。**
 ///
 /// 増やすと、ここでだけ見える記法になり、同じノートが GitHub で壊れる。
+/// その行は `<details>` の始まりか。**行ぜんたいがその札のときだけ。**
+///
+/// `open` を書いてあれば、初めから開いた姿で出す（`<details open>`）。
+pub fn is_details_open(t: &str) -> bool {
+    let t = t.trim();
+    t == "<details>" || (t.starts_with("<details ") && t.ends_with('>'))
+}
+
 pub fn alert_kind(t: &str) -> Option<String> {
     let rest = t.strip_prefix('>')?.trim_start();
     let inner = rest.strip_prefix("[!")?.strip_suffix(']')?;
@@ -965,6 +973,70 @@ fn render(lines: &[String], stamp: bool) -> String {
             continue;
         }
 
+        // **折りたたみ**（依頼 619・本人「`<summary>` をつかって文書を
+        // 折りたたむことができるよね？ コードがめちゃくちゃ長くて見にくい」）。
+        //
+        // **記法は増やさない。** `<details>` は GitHub がそのまま畳む形で、
+        // メモ帳で開いた人にも「畳んであるもの」と読める ── ambər だけの
+        // 記号を作ると、同じノートがよそで壊れる。
+        //
+        // **行ぜんたいが札のときだけ。** 本文の途中に `<details>` と書いた
+        // だけで畳みはじめると、山括弧を書いた行が消える（注記と同じ筋）。
+        //
+        // 中身はふつうに組み直す（`render`）ので、畳んだ中に枠も表も図も
+        // 入る ── 畳みたいのは、たいてい長い枠。
+        if is_details_open(t) {
+            close_all_lists(&mut out, &mut open_lists, &mut li_open);
+            let open = t.contains(" open");
+            i += 1;
+            // 見出しは次の一行（`<summary>…</summary>`）。無くてもよい。
+            let mut title = String::new();
+            if i < lines.len() {
+                let head = lines[i].trim();
+                if let Some(rest) = head.strip_prefix("<summary>") {
+                    if let Some(inner) = rest.strip_suffix("</summary>") {
+                        title = inner.to_string();
+                        i += 1;
+                    }
+                }
+            }
+            // **入れ子も数える。** 中の `</details>` で外が閉じると、
+            // そこから下がぜんぶ畳みの外へ出る。
+            let mut body = Vec::new();
+            let mut depth = 1usize;
+            while i < lines.len() {
+                let q = lines[i].trim();
+                if q == "</details>" {
+                    depth -= 1;
+                    i += 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    body.push(lines[i - 1].clone());
+                    continue;
+                }
+                if is_details_open(q) {
+                    depth += 1;
+                }
+                body.push(lines[i].clone());
+                i += 1;
+            }
+            // **押すところが無い畳みは作らない。** 見出しを書かなかった人にも
+            // 三角だけでなく字を出す ── 何が畳んであるのか、閉じた姿で分かる。
+            let head = if title.trim().is_empty() {
+                "詳しく".to_string()
+            } else {
+                inline_html(&title)
+            };
+            out.push_str(&format!(
+                "<details{}><summary>{head}</summary>\n",
+                if open { " open" } else { "" }
+            ));
+            out.push_str(&render(&body, false));
+            out.push_str("</details>\n");
+            continue;
+        }
+
         // GitHub 風の注記。`> [!NOTE]` に続く引用を、色の付いた枠にする。
         //
         // **引用の中の一行目でしか始まらない。** 本文に `[!NOTE]` と書いた
@@ -1118,6 +1190,12 @@ fn render(lines: &[String], stamp: bool) -> String {
                 || list_item(p).is_some()
                 || pt.starts_with('|')
                 || pt.starts_with('>')
+                // **折りたたみの札で段落を切る**（依頼 619）。切らないと
+                // `もとの一行。` の次の行に `<details>` と書いただけで
+                // 段落に飲み込まれ、山括弧が字として出る（実機で出た）。
+                // 囲み（``` ）が `fence_lang` で切れているのと同じ筋。
+                || is_details_open(pt)
+                || pt == "</details>"
             {
                 break;
             }
@@ -1428,6 +1506,51 @@ mod tests {
         // `javascript:` は通さない（`safe_url` の約束はそのまま）。
         let bad = inline("javascript:alert(1)");
         assert!(!bad.iter().any(|i| matches!(i, Inline::Bare(_))), "{bad:?}");
+    }
+
+    /// **折りたたみ**（依頼 619・本人「`<summary>` をつかって文書を
+    /// 折りたたむことができるよね？ コードがめちゃくちゃ長くて見にくい」）。
+    ///
+    /// 記法は `<details>` ── GitHub がそのまま畳む形で、メモ帳で開いた人にも
+    /// 「畳んであるもの」と読める。**ambər だけの記号は作らない。**
+    #[test]
+    fn 折りたたみは_details_で出す() {
+        let md = "<details>\n<summary>ながい **コード**</summary>\n\n                  ```js\nconst a = 1;\n```\n\n</details>\n";
+        let got = to_html(&lines(md));
+        assert!(got.contains("<details"), "畳みにならない: {got}");
+        assert!(got.contains("<summary>ながい <strong>コード</strong></summary>"),
+                "見出しの飾りが出ない: {got}");
+        // **中はふつうに組み直す** ── 畳みたいのは、たいてい長い枠。
+        assert!(got.contains("<pre") && got.contains("const a = 1;"), "中の枠が出ない: {got}");
+        // 山括弧が字として出ていないこと（前は `&lt;details&gt;` と出ていた）。
+        assert!(!got.contains("&lt;details"), "字のまま出ている: {got}");
+
+        // 見出しを書かなかった人にも、押すところがあること。
+        let bare = to_html(&lines("<details>\n\n中身\n\n</details>\n"));
+        assert!(bare.contains("<summary>詳しく</summary>"), "{bare}");
+
+        // `open` と書いてあれば、初めから開いた姿で。
+        let open = to_html(&lines("<details open>\n\n中身\n\n</details>\n"));
+        assert!(open.contains("<details open"), "{open}");
+
+        // **入れ子も数える。** 中の `</details>` で外が閉じると、
+        // そこから下がぜんぶ畳みの外へ出る。
+        let nest = to_html(&lines(
+            "<details>\n<summary>そと</summary>\n\n<details>\n<summary>なか</summary>\n\n             おく\n\n</details>\n\n</details>\n\nそと側の段\n",
+        ));
+        assert_eq!(nest.matches("<details").count(), 2, "{nest}");
+        assert!(nest.contains("<p data-line") || nest.contains("そと側の段"), "{nest}");
+        // 外の畳みの中に、内の畳みが入っていること。
+        let outer = &nest[nest.find("<details").unwrap()..];
+        assert!(outer.find("なか").unwrap() < outer.find("</details>").unwrap(), "{nest}");
+
+        // **行ぜんたいが札のときだけ。** 本文の途中に書いた山括弧は字のまま。
+        let mid = to_html(&lines("これは <details> という札です\n"));
+        assert!(mid.contains("&lt;details&gt;"), "字のまま出ない: {mid}");
+
+        // **段落の次の行でも畳みになる**（段落に飲み込まれない）。
+        let after = to_html(&lines("まえの段。\n<details>\n\n中身\n\n</details>\n"));
+        assert!(after.contains("<p") && after.contains("<details"), "飲み込まれた: {after}");
     }
 
     #[test]

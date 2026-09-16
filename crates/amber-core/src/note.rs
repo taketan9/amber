@@ -407,6 +407,17 @@ fn excerpt(body: &[String]) -> String {
         if t.starts_with('|') {
             continue;
         }
+        // **折りたたみの札も、文ではない**（依頼 619）。`<details>` と
+        // `</details>` は「ここから畳んである」という形の話で、一覧の
+        // 二行目に山括弧が並ぶ（実機で出た）。**見出し（`<summary>`）は
+        // 残す** ── あれは畳んだ中身に人が付けた名前で、文として読める。
+        if crate::markdown::is_details_open(t) || t == "</details>" {
+            continue;
+        }
+        let t = match t.strip_prefix("<summary>").and_then(|r| r.strip_suffix("</summary>")) {
+            Some(inner) => inner,
+            None => t,
+        };
         // A picture is not a sentence. `![](attachments/note-1788450324680.jpg)`
         // is forty characters of filename in a line meant to remind you what
         // the note is about, and a note that opens with a screenshot showed
@@ -485,7 +496,11 @@ fn findable(body: &[String]) -> String {
         if fenced {
             continue;
         }
-        if let Some(rest) = t.strip_prefix('#') {
+        // **畳みの見出しも探せる**（依頼 619）── 畳んだ中身に人が付けた
+        // 名前なので、見出しと同じ扱い。
+        if let Some(inner) = t.strip_prefix("<summary>").and_then(|r| r.strip_suffix("</summary>")) {
+            put(inner.trim());
+        } else if let Some(rest) = t.strip_prefix('#') {
             put(rest.trim_start_matches('#').trim());
         } else if t.starts_with('|') {
             // 区切りの行（`| --- | :--: |`）は形であって字ではない。
@@ -1921,6 +1936,28 @@ mod tests {
         assert!(!h.contains("枠の中の見出し"), "コード枠の中の見出しは入れない: {h}");
         assert!(!h.contains("枠の中の升"), "コード枠の中の表も入れない: {h}");
         assert!(!h.contains("**"), "飾りは落とす: {h}");
+    }
+
+    /// **折りたたみの札は、一覧の二行目に出さない**（依頼 619）。
+    ///
+    /// `<details>` と `</details>` は「ここから畳んである」という形の話で、
+    /// 一覧に山括弧が並ぶ（実機で出た）。**見出しは残す** ── あれは
+    /// 畳んだ中身に人が付けた名前で、文として読める。
+    #[test]
+    fn 折りたたみの札は抜粋に出さず_見出しは残す() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = dir.path().join("a.md");
+        std::fs::write(
+            &at,
+            "---\ntitle: 週報\n---\n\n<details>\n<summary>ながいコード</summary>\n\n             書き出しの一行。\n\n</details>\n",
+        )
+        .unwrap();
+        let n = read(&at, 60).unwrap();
+        assert!(!n.excerpt.contains('<'), "山括弧が並んでいる: {:?}", n.excerpt);
+        assert!(n.excerpt.contains("書き出しの一行"), "{:?}", n.excerpt);
+        // 見出しは文として読めるので、抜粋にも探し先にも残す。
+        assert!(n.excerpt.contains("ながいコード"), "見出しが落ちた: {:?}", n.excerpt);
+        assert!(haystack(&n).contains("ながいコード"), "探せない: {}", haystack(&n));
     }
 
     /// **表は、文ではない。**

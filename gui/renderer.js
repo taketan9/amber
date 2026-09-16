@@ -2231,6 +2231,12 @@ function richBlock(node) {
     // 枠（コード）と図と画像だけは、戻せないので書く面へ送る。
     if (['PRE', 'FIGURE'].includes(node.tagName)) return true;
     if (node.classList.contains('mermaid')) return true;
+    // **折りたたみは、まるごと元の字で返す**（依頼 619）。
+    //
+    // 中は畳んであるので、そこを字に戻すのは「見えていないものを
+    // 組み直す」こと ── 閉じたまま保存しただけで中身が書き換わる、が
+    // いちばん怖い。押して開け閉めするのは**見え方**の話で、字は触らない。
+    if (node.tagName === 'DETAILS') return true;
     // **中に枠や図を抱えたかたまりも、触らせない。**
     //
     // `> ``` ` のような引用は、外は引用・中は枠。外を触れるままにすると、
@@ -2300,9 +2306,13 @@ function armPaper(box, text, open) {
         }
         if (richBlock(node)) {
             node.contentEditable = 'false';
-            node.title = node.classList.contains('mermaid') || node.querySelector('code.language-mermaid')
-                ? '押すと、図を見ながら直せます'
-                : '押すと、「コード」のその行へ';
+            // **折りたたみは、押しても面を替えない**（依頼 619）── 押すのは
+            // 開け閉めのため。中を直したい人は、開いてから枠を押す。
+            node.title = node.tagName === 'DETAILS'
+                ? '押すと、開いたり閉じたりします'
+                : (node.classList.contains('mermaid') || node.querySelector('code.language-mermaid')
+                    ? '押すと、図を見ながら直せます'
+                    : '押すと、「コード」のその行へ');
         }
     }
     // **枠には、押すだけで写せる札**（依頼 614・本人「押下するだけで
@@ -4495,6 +4505,8 @@ async function cmdSyntax() {
         ['取り消し線', '~~消す文字~~', '前後を ~~ で挟む'],
         ['コード', '`コード`', '前後を ` で挟む'],
         ['コードブロック', '```\nここに何行でも\n```', '``` の行で挟む（帯の「コードブロック」でも入ります）'],
+        ['折りたたみ', '<details>\n<summary>見出し</summary>\n\n中身\n\n</details>',
+         '押すと開いたり閉じたり。GitHub でも同じ形で畳めます'],
         ['リンク', '[リンクの文字](https://)', '角括弧が文字、丸括弧が行き先'],
         ['画像', '![説明](画像の場所)', '頭に ! を付けるとリンクではなく画像'],
         ['引用', '> 引用する文章', '行の頭に > と空白'],
@@ -4565,6 +4577,10 @@ const MARKS = [
         // 枠の中では**消すところから始まる** ── 枠に入れたいのは自分の字で、
         // 言い換えるための見本ではない。
         ['コードブロック', '', () => (onRead() ? readPut('```\n\n```') : putFence())],
+        // **折りたたみ**（依頼 619・本人「コードがめちゃくちゃ長くて見にくい」）。
+        // 記法は `<details>` ── GitHub がそのまま畳む形で、メモ帳で開いた
+        // 人にも「畳んであるもの」と読める。ambər だけの記号は作らない。
+        ['折りたたみ', '', () => (onRead() ? readPut(FOLD.trimEnd()) : putFold())],
     ],
 ];
 
@@ -4870,18 +4886,32 @@ function put(text, caret) {
     editor.focus();
 }
 
-/// コードブロック（`` ``` ``）を入れて、caret を中へ（依頼 618）。
+/// かたまりを入れて、caret を中へ（依頼 618・619）。
 ///
-/// **行の途中では、枠にならない。** `` ``` `` は行の頭に無いとただの字で、
-/// `もとの一行。```` と繋がって入ったときは**枠が開かないまま次の行を
-/// 飲み込み**、「表示」の面に空っぽの枠が出た（実機で出た）。
-/// 打っている行に字があるなら、先に行を改める。
-function putFence() {
+/// **行の途中では、かたまりにならない。** `` ``` `` も `<details>` も行の
+/// 頭に無いとただの字で、`もとの一行。```` と繋がって入ったときは**枠が
+/// 開かないまま次の行を飲み込み**、「表示」の面に空っぽの枠が出た
+/// （実機で出た）。打っている行に字があるなら、先に行を改める。
+function putBlock(text, caret) {
     if (!editor) return;
     const pos = editor.getSelection().getStartPosition();
     const before = editor.getModel().getLineContent(pos.lineNumber).slice(0, pos.column - 1);
     const head = before.trim() ? '\n' : '';
-    put(head + '```\n\n```\n', head.length + 4);
+    put(head + text, head.length + caret);
+}
+
+/// コードブロック（`` ``` ``）── caret は囲みの中へ。
+function putFence() {
+    putBlock('```\n\n```\n', 4);
+}
+
+/// 折りたたみ（`<details>`）── caret は見出しの字の頭へ。
+///
+/// **見本の字を入れる**（表と同じ・依頼 619）── 空で出すと「ここに何を
+/// 書くのか」を思い出すところから始まる。上から順に置き換えるだけにする。
+const FOLD = '<details>\n<summary>見出し</summary>\n\n中身\n\n</details>\n';
+function putFold() {
+    putBlock(FOLD, '<details>\n<summary>'.length);
 }
 
 /// 画像をノートの隣に置いて、リンクを打つ。

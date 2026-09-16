@@ -884,6 +884,30 @@ body.split #read { border-left: 1px solid var(--line-2); }
 /* 描けなかった図は、書いた字のまま残す ── 消すと直しようがない。 */
 #read pre.bad { border-color: #C4564E; }
 
+/* **折りたたみ**（依頼 619）。閉じている姿で「何が畳んであるか」が読める
+   ように、見出しは字として出す（三角だけでは分からない）。
+   **押すところを広く** ── 指でもマウスでも、行のどこを押しても開く。 */
+#read details {
+  margin: 1.1em 0; border: 1px solid var(--line-2); border-radius: 10px;
+  background: color-mix(in srgb, var(--rail) 45%, transparent);
+  max-width: 100%;
+}
+#read details > summary {
+  cursor: pointer; padding: 9px 14px; font-weight: 600; color: var(--ink);
+  list-style: none; border-radius: 10px;
+}
+#read details > summary:hover { background: var(--hover); }
+/* 既定の三角は土台ごとに形が違う ── 自分で出して、開き具合で回す。 */
+#read details > summary::-webkit-details-marker { display: none; }
+#read details > summary::before {
+  content: '▸'; display: inline-block; width: 1.1em; color: var(--ink-3);
+  transition: transform .12s;
+}
+#read details[open] > summary::before { transform: rotate(90deg); }
+/* 中身は枠の内側に。**畳みの中でも、枠は面いっぱい**（依頼 614 と同じ理由）。 */
+#read details > :not(summary) { margin: .8em 14px; }
+#read details > :not(summary):last-child { margin-bottom: 12px; }
+
 /* GitHub 風の注記。**色だけで区別しない** ── 見出しの語を必ず出す。
    色が見えない人にも、白黒で刷ったときにも、種類が残る。 */
 #read .alert {
