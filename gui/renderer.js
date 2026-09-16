@@ -5120,7 +5120,7 @@ function setFont(step, quiet) {
     if (editor) editor.updateOptions({ fontSize: px });
     el('read').style.fontSize = (px - 0.5) + 'px';
     // 起動して戻すときは黙る ── 開いた瞬間に札が出る理由は無い。
-    if (!quiet && fontStep !== 0) say('文字の大きさ ' + px + 'px（⌘0 で戻る）');
+    if (!quiet && fontStep !== 0) say('文字の大きさ ' + px + 'px（' + keyText('⌘0') + ' で戻る）');
 }
 
 function toggleRead() { setView(view === 'read' ? 'write' : 'read'); }
@@ -7666,9 +7666,13 @@ document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.code === 'KeyP') { e.preventDefault(); toggleSplit(); return; }
     if ((e.metaKey || e.ctrlKey) && e.code === 'KeyO') { e.preventDefault(); cmdOpenOutside(); return; }
     if ((e.metaKey || e.ctrlKey) && e.code === 'KeyS') { e.preventDefault(); save(); return; }
-    // 字の大きさ。**`Equal` と `Minus` は位置のキー** ── JIS では `+` は
-    // Shift を要り、`e.key` で当てると刻印どおりに打っても効かない。
-    if ((e.metaKey || e.ctrlKey) && (e.code === 'Equal' || e.code === 'NumpadAdd')) {
+    // 字の大きさ。**`e.code` は位置のキー** ── 刻印ではなく、US 配列での場所を言う。
+    //
+    // **JIS の「＋」は `Semicolon` の位置にある**（`; ＋ れ` のキー）。前は `Equal`
+    // だけを見ていて、それは JIS では「＾ へ」のキー ── Ctrl＋「＋」と刻印どおりに
+    // 押しても大きくならなかった（本人・2026-09-16）。ブラウザも JIS では
+    // Ctrl＋; で拡大する。`Equal` も残す（US 配列の `=` `+`、JIS で＾を押す人）。
+    if ((e.metaKey || e.ctrlKey) && (e.code === 'Equal' || e.code === 'Semicolon' || e.code === 'NumpadAdd')) {
         e.preventDefault(); setFont(fontStep + 1); return;
     }
     if ((e.metaKey || e.ctrlKey) && (e.code === 'Minus' || e.code === 'NumpadSubtract')) {
