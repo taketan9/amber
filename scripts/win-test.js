@@ -231,5 +231,67 @@ console.log('F5 で読み直せるか');
     ok(ev('F12') === 1 && zenned === 1 && asked === 0, 'F12 は今までどおり', [zenned, asked]);
 }
 
+// **消えたノートのタブは残さない**（依頼 612・本人「ゴミ箱にすてたはずの
+// ノートがタブの表示に残り続けてしまう」）。
+//
+// 消す道は四つある（⋯ から一本・選んでまとめて・フォルダごと・同期が
+// 向こうの削除を下ろしたとき）。四か所に同じ一行を足すと、三か所目で忘れる
+// ── 数え直したあとの `reload` で一度だけ見る。
+console.log('消えたノートのタブを残さないか');
+{
+    ok(/dropGoneTabs\(\);/.test(src), '数え直したあとに、一度だけ見る');
+    const at = src.indexOf('function dropGoneTabs()');
+    ok(at > 0, 'その一本がある');
+    const body = src.slice(at, src.indexOf('\n}', at));
+    // **書かずに外す。** `closeTab` は書きかけをファイルへ落とすので、
+    // 消したはずのノートが書き戻って生き返る。
+    ok(!body.includes('closeTab('), '書き戻さずに外す（消したノートを生き返らせない）', body.slice(0, 200));
+    ok(!body.includes('saveTab('), '書きかけをファイルへ落とさない');
+    // **一覧に無い＝消えた、ではない。** 外付けを抜いた回まで閉じない。
+    // **名前が出ているだけでは足りない** ── 読んだ結果で本当に外している
+    // かを見る（数えているのに使っていない、で一度黙った）。
+    ok(/troubled\.some\(/.test(body) && /placeTrouble/.test(body),
+       '困っている保存ディレクトリの下は触らない', body.slice(0, 300));
+    ok(body.includes('state.guest'), '単発で開いている一本は触らない');
+    ok(body.includes('trail'), 'たどった道からも抜く');
+}
+
+// **右押しは、押した場所で変わらない**（依頼 612・本人「どちらも同じ
+// ポップアップにできる？」）。
+//
+// 前は題の右押しだけ手書きの四つで、一覧の行や ⋯ とは別のものが出ていた。
+// 同じノートを右押ししているのに、押した場所で出るものが変わる。
+console.log('右押しの献立が、押した場所で変わらないか');
+{
+    const four = ['タイトルを直す', 'ファイル名を写す', '場所をコピー'];
+    for (const name of four) {
+        ok(new RegExp("name: '" + name + "'[^}]*menu: true").test(src)
+           || new RegExp("name: '" + name + "',[\\s\\S]{0,120}menu: true").test(src),
+           '「' + name + '」は命令の表にある（＝どの右押しからも出る）');
+    }
+    // 題の右押しは、自分で献立を書かない ── 書けば、その日から二つになる。
+    const at = src.indexOf("el('title').addEventListener('contextmenu'");
+    ok(at > 0, '題の右押しがある');
+    const body = src.slice(at, src.indexOf('});', at));
+    ok(body.includes('openMenu('), '題の右押しは、同じ献立を呼ぶ', body.slice(0, 200));
+    ok(!body.includes('popMenu('), '題の右押しは、自分で献立を書かない', body.slice(0, 200));
+}
+
+// **マウスを乗せたら、そこが選び目**（依頼 613・本人「マウスがオンボード
+// されても選択のハイライトが変わらない」）。
+//
+// 「はい」に乗せて押しているのに光っているのは「いいえ」のまま、が
+// いちばん怖い（ゴミ箱の確かめ）。
+console.log('小窓は、マウスを乗せたら選び目が動くか');
+{
+    const at = src.indexOf("row.onclick = () => closeSheet(");
+    ok(at > 0, '小窓の行に押しが付いている');
+    const body = src.slice(at, at + 900);
+    ok(body.includes('row.onmouseenter'), '乗せたときも受ける', body.slice(0, 120));
+    ok(/at = k/.test(body), '乗せた行を選び目にする（鍵盤と同じ場所を動かす）');
+    ok(/classList\.remove\('on'\)/.test(body) && /classList\.add\('on'\)/.test(body),
+       '印だけ移す（一行ごとに描き直さない）');
+}
+
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');
 process.exit(bad ? 1 : 0);

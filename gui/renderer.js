@@ -795,17 +795,16 @@ el('rail').addEventListener('contextmenu', (e) => {
     ], { x: e.clientX, y: e.clientY });
 });
 
-/// 帯の題の右押し。
+/// 帯の題の右押し。**一覧の行を右押ししたときと同じ献立**（依頼 612・本人
+/// 「どちらも同じポップアップにできる？」）。
+///
+/// 前はここだけ手書きの四つで、⋯ とも一覧の行とも違うものが出ていた ──
+/// 同じノートを右押ししているのに、押した場所で出るものが変わる。
+/// 四つは命令の表へ移したので、ここは `openMenu` を呼ぶだけでよくなった。
 el('title').addEventListener('contextmenu', (e) => {
     if (!state.open) return;
     e.preventDefault();
-    const path = state.open.path;
-    popMenu([
-        { name: 'タイトルを直す', run: renameTitle },
-        { name: 'ファイル名を写す', run: () => copyText(baseOf(path), 'ファイル名') },
-        { name: '場所をコピー', run: () => copyText(path, '保存場所') },
-        { name: 'Finder で表示', sep: true, run: () => window.amber.reveal(path) },
-    ], { x: e.clientX, y: e.clientY });
+    openMenu({ x: e.clientX, y: e.clientY });
 });
 
 /// 貼り付けた字から、新しいノートを一本。
@@ -1608,6 +1607,54 @@ async function saveTab(t) {
     try {
         await ask('write', { path: t.path, text: k.head + k.body, stamp: k.stamp });
     } catch { /* 書けなくても、閉じるのは止めない ── 字はファイルに残っている */ }
+}
+
+/// **消えたノートのタブを外す**（依頼 612・本人「ゴミ箱にすてたはずのノートが
+/// タブの表示に残り続けてしまう」）。
+///
+/// **消す道は四つある** ── ⋯ の「ゴミ箱へ入れる」、選んでまとめて、
+/// フォルダごと、同期が向こうの削除を下ろしたとき。どれもタブに触って
+/// いなかったので、**四か所に同じ一行を足す形**になる ── そういうものは
+/// たいてい、三か所目で忘れる。数え直したあとの `reload` で一度だけ見る。
+///
+/// **書かずに外す。** `closeTab` は書きかけをファイルへ落とすので、
+/// **消したはずのノートが書き戻って生き返る。**
+///
+/// **一覧に無い＝消えた、ではない。** 外付けを抜いた・ネットワークの
+/// 保存ディレクトリが一度切れた回も一覧からは消える ── そこを閉じると、
+/// 繋ぎ直したときに机が空になっている。**困っている保存ディレクトリの下は
+/// 触らない。** 単発で開いている一本（`guest`）も、索引の外なので触らない。
+function dropGoneTabs() {
+    if (state.guest || !tabs.length) return;
+    const here = new Set(state.notes.map((n) => n.path));
+    const troubled = Object.keys(state.placeTrouble || {});
+    const gone = tabs.filter((t) => !here.has(t.path)
+        && !troubled.some((d) => t.path.startsWith(d + "/")));
+    if (!gone.length) return;
+    const lost = new Set(gone.map((t) => t.path));
+    const at = tabs.findIndex((t) => t.path === showing);
+    tabs = tabs.filter((t) => !lost.has(t.path));
+    // **たどった道からも抜く。** `trail` は作り替えないで抜く（同じ並びを
+    // 見ている `trailAt` がずれる）── 抜いたぶんだけ後ろへ詰める。
+    for (let i = trail.length - 1; i >= 0; i -= 1) {
+        if (!lost.has(trail[i])) continue;
+        trail.splice(i, 1);
+        if (i <= trailAt) trailAt -= 1;
+    }
+    for (const p of lost) delete incomings[p];
+    rememberTabs();
+    if (!lost.has(showing)) { drawStrip(); return; }
+    // 出していたタブが消えた ── **左の隣へ。** そこから来たので。
+    showing = null;
+    if (!tabs.length) {
+        state.open = null;
+        state.dirty = false;
+        applyView();
+        drawStrip();
+        return;
+    }
+    const next = tabs[Math.min(Math.max(0, at - 1), tabs.length - 1)];
+    openNote(next.path, { keep: true });
 }
 
 /// 開いていたタブを憶える。**次に開いたとき、同じ机に戻る**（電話と同じ）。
@@ -7325,6 +7372,8 @@ async function reload(opts) {
             state.open = state.notes.find((n) => n.path === state.open.path) || state.open;
             drawTitle();
         }
+        // **消えたノートのタブは、残さない**（依頼 612）。
+        dropGoneTabs();
         // **消えたタグやフォルダで絞ったままにしない。** 外から消えた
         // ものを選んだままだと、一覧がずっと空で、理由が帯にしか出ない。
         const tags = new Set(tagsOf(state.notes).map(([t]) => t));
@@ -9555,6 +9604,16 @@ const CMDS = [
     { id: 'totmpl', name: 'このノートをテンプレートにする', sub: '「' + TEMPLATES + '」フォルダへ写します',
       need: 'note', menu: true, run: cmdToTemplate },
     { id: 'export', name: 'エクスポート', need: 'note', menu: true, run: cmdExport },
+    // **題の右押しにしか無かった四つ**（依頼 612・本人「どちらも同じ
+    // ポップアップにできる？」）── ここへ移した。命令の表に置けば、
+    // 一覧の右押しからも ⋯ からも ⌘⇧P からも同じものが出る。
+    { id: 'rename', name: 'タイトルを直す', need: 'note', menu: true, run: renameTitle },
+    { id: 'copyname', name: 'ファイル名を写す', need: 'note', menu: true,
+      run: () => copyText(baseOf(state.open.path), 'ファイル名') },
+    { id: 'copypath', name: '場所をコピー', need: 'note', menu: true,
+      run: () => copyText(state.open.path, '保存場所') },
+    { id: 'reveal', name: MAC ? 'Finder で表示' : 'エクスプローラーで表示',
+      need: 'note', menu: true, run: () => window.amber.reveal(state.open.path) },
     // **名前で出す。** 前は帯に ☰ と ⤢ が並んでいたが、どちらが目次で
     // どちらが拡大かは記号のどこにも書いていない ── 帯の幅を食っていた
     // うえ、押してみるまで分からなかった。
@@ -12395,6 +12454,23 @@ function sheet({ title, value, placeholder, items, foot, bare, brand }) {
                 : '');
         for (const row of list.querySelectorAll('.it')) {
             row.onclick = () => closeSheet(pickable[Number(row.dataset.n)].value);
+            // **マウスを乗せたら、そこが選び目**（依頼 613・本人「マウスが
+            // オンボードされても選択のハイライトが変わらない」）。
+            //
+            // 前は `.on` を鍵盤だけが動かしていたので、「はい」に乗せて
+            // 押しているのに、光っているのは「いいえ」のまま ── 押す直前に
+            // 画面が言っていることと、押して起きることが食い違う。
+            // いちばん怖いのは、まさにここ（ゴミ箱の はい／いいえ）。
+            //
+            // **描き直さずに、印だけ移す。** 一行ごとに組み直すと、
+            // 千行の一覧でマウスを動かすたびに全部を描くことになる。
+            row.onmouseenter = () => {
+                const k = Number(row.dataset.n);
+                if (k === at) return;
+                at = k;
+                list.querySelector('.it.on')?.classList.remove('on');
+                row.classList.add('on');
+            };
         }
         list.querySelector('.it.on')?.scrollIntoView({ block: 'nearest' });
         return hit;

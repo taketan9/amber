@@ -79,5 +79,35 @@ for (const rel of files) {
     console.log(`予定の色: ${kinds.length} 種 × ${places.length} の見方`);
 }
 
+/* **押せるものは、乗せたら応える**（依頼 613・本人「マウスが上に乗っている
+ * 時の挙動を全般的に見直ししてもらえないかな？」）。
+ *
+ * 指の形（`cursor: pointer`）だけ出ていて色が一つも動かないと、押せると
+ * 思ってもらえない ── 実際、カレンダーの予定も「使われていない画像」の升も
+ * 押せるのに、乗せても何も起きなかった。
+ *
+ * **`#sheet .it` はここで数えない** ── あれは鍵盤と同じ選び目を動かすので、
+ * CSS の `:hover` ではなく `onmouseenter` が受ける（`win-test.js` が見る）。
+ */
+{
+    const src = fs.readFileSync(path.join(__dirname, '..', 'gui', 'index.html'), 'utf8');
+    const css = src.slice(src.indexOf('<style>'), src.indexOf('</style>'));
+    // 指の形を出している顔ぶれ（`#sheet .it` は上のとおり別扱い）。
+    const want = ['#band .k', '#read .gadget button', '#sparebox .cell',
+                  '#calbox .blk', '#calbox .crowd .chip', '#calbox .crowd .bar',
+                  '#calbox .allday .ad', '#calbox .crowd .span',
+                  '.row', '.dest', '.tab', '#picked button', '#more button'];
+    for (const sel of want) {
+        // **名前の切れ目まで見る。** `#sparebox .cell` の検査が
+        // `#sparebox .cell.on:hover` に当たって、素の手応えを外しても
+        // 通っていた（変異テストがそこで黙った）。
+        const at = new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':hover');
+        if (at.test(css)) continue;
+        bad += 1;
+        console.log(`✗ ${sel} は押せるのに、乗せても何も起きません`);
+    }
+    console.log(`乗せたら応えるもの: ${want.length} 種`);
+}
+
 console.log(bad ? `\n${bad} 件、色が揃っていません` : '\n呼んでいる色は、ぜんぶ定義されていて、見方ごとに揃っています');
 process.exit(bad ? 1 : 0);

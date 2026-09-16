@@ -714,6 +714,10 @@ body.mac #top { padding-top: 30px; }
   background: var(--paper); color: var(--ink); cursor: pointer;
 }
 #band .k.go { background: var(--amber); border-color: var(--amber); }
+/* **押せるものは、乗せたら応える**（依頼 613）。指の形は出ているのに
+   色が一つも動かないと、押せると思ってもらえない。 */
+#band .k:hover { background: var(--hover); border-color: var(--ink-3); }
+#band .k.go:hover { background: var(--amber-deep); border-color: var(--amber-deep); }
 #band .fld { flex-basis: 100%; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
 #band .fld b { color: var(--amber-deep); }
 /* ぶつかった場所の、その場の選び口。**字ではない**（書き戻さない）。 */
@@ -729,6 +733,8 @@ body.mac #top { padding-top: 30px; }
   background: var(--paper); color: var(--ink); cursor: pointer; font-family: inherit;
 }
 #read .gadget button.go { background: var(--amber); border-color: var(--amber); }
+#read .gadget button:hover { background: var(--hover); border-color: var(--ink-3); }
+#read .gadget button.go:hover { background: var(--amber-deep); border-color: var(--amber-deep); }
 #read .gadget .hint { color: var(--ink-2); }
 /* 来た行。**地色だけ** ── 字も並びも動かさない。 */
 #read .came { background: color-mix(in srgb, var(--amber) 12%, transparent); }
@@ -1384,6 +1390,8 @@ body.dropping::after {
 #sparebox .cell { border: 1px solid var(--line); border-radius: 9px;
   overflow: hidden; cursor: pointer; background: var(--rail); }
 #sparebox .cell.on { border-color: var(--amber); }
+#sparebox .cell:hover { border-color: var(--ink-3); }
+#sparebox .cell.on:hover { border-color: var(--amber-deep); }
 #sparebox .cell .shot { height: 6.5rem; display: flex; align-items: center;
   justify-content: center; background: var(--bg); }
 #sparebox .cell img { max-width: 100%; max-height: 6.5rem; display: block; }
@@ -1565,6 +1573,14 @@ body.dropping::after {
 #calbox .blk { position: absolute; border-radius: 5px;
   padding: 2px 7px; font-size: .92em; line-height: 1.4; overflow: hidden; color: var(--ink);
   border-left: 3px solid var(--amber-deep); background-color: color-mix(in srgb, var(--amber) 30%, var(--paper)); cursor: pointer; }
+/* **予定も押せる**（押すと中身が出る）ので、乗せたら応える（依頼 613）。
+   地の色は予定ごとに違う（自分・グループ・不在…）ので、**塗り替えずに
+   外枠と浮きで言う** ── 色を上書きすると、誰の予定かが読めなくなる。 */
+#calbox .blk:hover, #calbox .crowd .chip:hover, #calbox .crowd .bar:hover,
+#calbox .allday .ad:hover, #calbox .crowd .span:hover {
+  outline: 1.5px solid var(--ink-3); outline-offset: -1px;
+  filter: brightness(1.04);
+}
 #calbox .blk.away { border-left-color: #3b78c9;
   background: color-mix(in srgb, #3b78c9 26%, var(--paper)) }
 #calbox .blk.here { border-left-color: var(--cal-here, #2f8a52);
