@@ -11775,8 +11775,13 @@ async function runOneNote(from, to) {
     } catch (e) {
         run.over = true;
         window.amber.onenote('onenote_close', {}).catch(() => {});
-        if (oneOpen) closeSheet(null);
-        say('取り込めません: ' + why(e));
+        // **読めなかったことは、小窓に残す**（本人・メンバーから「何も出なかった。
+        // 裏で動いているのか？」）。前は小窓を閉じて下の札で言っていた ──
+        // 札は 2 秒で消え、小窓は一瞬しか出ないので、何も起きなかったのと同じ
+        // 顔をしていた。**閉じていても開き直す** ── 結果が失敗なら、それが答え。
+        run.title = '「' + run.name + '」を取り込めませんでした';
+        run.trouble = oneTrouble(why(e));
+        oneShow();
         return;
     }
     run.rows = (got.units || []).map((u) => ({
@@ -11785,8 +11790,9 @@ async function runOneNote(from, to) {
     if (!run.rows.length) {
         run.over = true;
         window.amber.onenote('onenote_close', { key: got.key }).catch(() => {});
-        if (oneOpen) closeSheet(null);
-        say('「' + run.name + '」には、セクションがありませんでした');
+        run.title = '「' + run.name + '」には、セクションがありませんでした';
+        run.trouble = { what: '取り込むページが見つかりませんでした', hint: 'OneNote で ファイル → エクスポート → ノートブック → .onepkg を書き出して、それを選んでください', raw: '' };
+        oneShow();
         return;
     }
     run.title = 'OneNote を取り込んでいます';
@@ -11817,6 +11823,28 @@ async function runOneNote(from, to) {
     if (oneOpen) oneShow();
 }
 
+/// 読めなかった理由を、人の言葉に。**道は落とす**（`C:\\Users\\…\\x.one を開けません:`
+/// が頭に付いていて、小窓の幅では肝心の理由が切れて見えない）。
+function oneTrouble(text) {
+    const raw = String(text || '').replace(/^.*を開けません:\s*/, '');
+    const low = raw.toLowerCase();
+    // Windows の「別のプロセスが使用中」（os error 32）── OneNote が開いている `.one`。
+    if (/os error 32|os error 33|being used by another process|別のプロセス/.test(low)) {
+        return { what: 'OneNote がこのファイルを使っているので、読めません',
+            hint: 'OneNote で ファイル → エクスポート → ノートブック → .onepkg を書き出して、それを選んでください', raw };
+    }
+    if (/unexpected end of file|unknown file format|malformed|not a (toc|section)/.test(low)) {
+        return { what: 'OneNote のファイルとして読めませんでした',
+            hint: '空か途中で切れているか、OneDrive 上にだけあってこのパソコンに落ちていないかもしれません。OneNote から .onepkg を書き出して選ぶのが確実です', raw };
+    }
+    if (/os error 5\b|permission denied|access is denied|アクセスが拒否/.test(low)) {
+        return { what: 'このファイルを読む権限がありません',
+            hint: 'ドキュメントなど自分のフォルダに写してから選んでください', raw };
+    }
+    return { what: '読めませんでした',
+        hint: 'OneNote で ファイル → エクスポート → ノートブック → .onepkg を書き出して、それを選ぶのが確実です', raw };
+}
+
 /// 進み具合の小窓。**閉じても取り込みは止まらない**（そう書いておく）。
 function oneShow() {
     const run = oneRun;
@@ -11827,10 +11855,24 @@ function oneShow() {
         sub: r.state === 'fail' ? '書けませんでした: ' + r.why : r.pages + ' ページ',
         value: ' row',
     }));
+    // **読んでいる間も、行を一つ出す** ── 題だけの小窓は、止まっているのか
+    // 動いているのか分からない（「裏で動いているのか？」と訊かれた）。
+    if (!run.over && !run.rows.length) {
+        items.push({ name: '▸ 読んでいます…', sub: '大きいノートブックは数分かかります', value: ' row' });
+    }
+    // **理由と元の文言は、横に並べず一行ずつ**（添え書きの欄は一行で切れる ──
+    // 肝心の「どうすればいいか」が「…このパソコンに落ち…」で見えなかった）。
+    // どうすればいいかは、切れない下の添え書きへ。
+    if (run.trouble) {
+        items.push({ name: '✗ ' + run.trouble.what, value: ' row' });
+        // 元の文言も残す ── 問い合わせのとき、これを打ってもらえば原因が分かる。
+        if (run.trouble.raw) items.push({ name: '元の文言: ' + run.trouble.raw, value: ' row' });
+    }
     if (run.over && run.dir) items.push({ name: 'フォルダを開く', sub: shortPath(run.to), value: ' reveal' });
     const my = ++oneShown;
     oneOpen = true;
-    sheet({ title: run.title, items, foot: run.over ? '' : '閉じても、裏で続きます', bare: true }).then((v) => {
+    const foot = run.trouble ? run.trouble.hint : (run.over ? '' : '閉じても、裏で続きます');
+    sheet({ title: run.title, items, foot, bare: true }).then((v) => {
         if (my !== oneShown) return;
         oneOpen = false;
         if (v === ' reveal') window.amber.reveal(run.dir);
