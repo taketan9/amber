@@ -1475,13 +1475,10 @@ function drawStrip() {
     // 点かないし、題を直しても帯が変わらない。生のほうを見る。
     const shape = tabs.map((t) => {
         const here = t.path === showing;
-        const row = state.notes.find((x) => x.path === t.path);
-        const name = (here && state.open && state.open.title)
-            || (t.keep && t.keep.open && t.keep.open.title)
-            || (row && row.title) || baseOf(t.path);
-        return { path: t.path, here, name: name || '（タイトルなし）',
+        return { path: t.path, here, name: tabName(t),
                  dirty: here ? state.dirty : !!(t.keep && t.keep.dirty) };
     });
+    el('stripall').textContent = tabs.length + ' 件 ▾';
     const key = JSON.stringify(shape);
     if (key === stripWas) return;
     stripWas = key;
@@ -1527,6 +1524,31 @@ function drawStrip() {
     stripEnds();
 }
 
+/// タブの見せ名。**帯と一覧で同じ名前** ── 帯で「議事録」と見えているものが、
+/// 一覧で別の名前になっていると、どれがどれか分からない。
+function tabName(t) {
+    const here = t.path === showing;
+    const row = state.notes.find((x) => x.path === t.path);
+    const name = (here && state.open && state.open.title)
+        || (t.keep && t.keep.open && t.keep.open.title)
+        || (row && row.title) || baseOf(t.path);
+    return name || '（タイトルなし）';
+}
+
+/// 開いているノートの一覧（依頼 627）。選ぶとそのタブへ。**打てば絞れる**
+/// （5 件を越えると小窓が欄を出す）── 何十枚の中から探すのは、名前を打つのが早い。
+async function cmdTabList() {
+    if (tabs.length < 2) { say('開いているノートは 1 件だけです'); return; }
+    const items = tabs.map((t) => ({
+        name: (t.path === showing ? '● ' : '　') + tabName(t),
+        sub: t.path === showing ? 'いま開いているノート' : shortPath(t.path),
+        value: t.path,
+    }));
+    const go = await askPick('開いているノート（' + tabs.length + ' 件）', items,
+        '選ぶと、そのノートを開きます');
+    if (go) await openNote(go, { keep: true });
+}
+
 /// 端の ‹ › を、溢れているときだけ出す。行けない向きは薄くする。
 function stripEnds() {
     const box = el('strip');
@@ -1552,6 +1574,7 @@ function stripEnds() {
     // 端の ‹ ›。**見えている幅の八割ずつ** ── 一枚ずつだと 50 枚は遠い。
     const page = (dir) => box.scrollBy({ left: dir * box.clientWidth * 0.8, behavior: 'smooth' });
     el('stripleft').onclick = () => page(-1);
+    el('stripall').onclick = () => cmdTabList();
     el('stripright').onclick = () => page(1);
     // **掴んで引っ張る**（スマホのフリックと同じ手つき）。押しただけならタブを開く
     // ── 5px 動いてから引っ張りに変わる。動いたあとの一押しはタブを開かない。
@@ -9983,6 +10006,7 @@ const CMDS = [
     // ── 表には要るが、献立には出さないもの
     { id: 'mkbook', name: '新しいフォルダを作る', run: () => cmdMkBook() },
     { id: 'color', name: 'フォルダに色をつける', sub: 'フォルダを右押しでも', run: () => cmdColor() },
+    { id: 'tablist', name: '開いているノートの一覧', sub: 'タブが多いときに、名前で選ぶ', run: () => cmdTabList() },
     { id: 'bigger', name: '文字を大きく', key: '⌘+', run: () => setFont(fontStep + 1) },
     { id: 'smaller', name: '文字を小さく', key: '⌘−', run: () => setFont(fontStep - 1) },
     { id: 'font0', name: '文字の大きさを戻す', key: '⌘0', run: () => setFont(0) },

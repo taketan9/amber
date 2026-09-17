@@ -917,7 +917,7 @@ struct DeskView: View {
 
     private var strip: some View {
         ScrollViewReader { to in
-            VStack(spacing: 0) {
+            HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(desk.tabs) { tab in
@@ -928,6 +928,7 @@ struct DeskView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
             }
+            tabList
             }
             .background(.bar)
             // Swiping to a tab that is off the end of the strip should bring
@@ -945,6 +946,41 @@ struct DeskView: View {
                 withAnimation { to.scrollTo(desk.showing, anchor: .center) }
             }
         }
+    }
+
+    /// 開いているノートの一覧（依頼 627・本人「実装してほしいぞ」）。
+    ///
+    /// 帯ははじけば動くが、何十枚も開くと探すのが遠い ── **帯の右端に、名前で
+    /// 選べる一覧を。** 窓の「N 件 ▾」と同じ役目。いま出しているものに印。
+    private var tabList: some View {
+        Menu {
+            Section("開いているノート（\(desk.tabs.count) 件）") {
+                ForEach(desk.tabs) { tab in
+                    Button {
+                        desk.showing = tab.id
+                    } label: {
+                        if tab.id == desk.showing {
+                            Label(tab.note.shown, systemImage: "checkmark")
+                        } else {
+                            Text(tab.note.shown)
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 2) {
+                Text("\(desk.tabs.count)").font(.subheadline.monospacedDigit())
+                Image(systemName: "chevron.down").font(.caption)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .foregroundStyle(Color.accentColor)
+        .accessibilityLabel("開いているノートの一覧")
+        // **高さは帯に合わせる** ── 縦に伸ばす指定（`maxHeight: .infinity`）を置いたら、
+        // 帯が画面の半分まで膨らんで本文が消えた（シミュレータで踏んだ）。
+        .overlay(alignment: .leading) { Divider().frame(height: 20) }
     }
 
     private func chip(_ tab: Desk.Tab) -> some View {

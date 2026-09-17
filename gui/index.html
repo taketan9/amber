@@ -516,6 +516,10 @@ body.mac #listhead { padding-top: 30px; }
 #stripwrap .go:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
 #stripwrap .go:disabled { opacity: .25; cursor: default; }
 #stripwrap .go[hidden] { display: none !important; }
+#stripwrap .go.all {
+  width: auto; padding: 0 10px; font-size: 11.5px; white-space: nowrap;
+  border-left: 1px solid var(--line); font-variant-numeric: tabular-nums;
+}
 body.zen #stripwrap { display: none; }
 .tab {
   display: flex; align-items: center; gap: 5px; flex: none;
@@ -1892,6 +1896,9 @@ body.dropping::after {
       <button class="go" id="stripleft" title="左のタブへ" hidden>‹</button>
       <div id="strip"></div>
       <button class="go" id="stripright" title="右のタブへ" hidden>›</button>
+      <!-- **開いているノートの一覧**（依頼 627・本人「実装してほしいぞ。PC版でも一覧は出せるかい？」）。
+           何十枚も開くと、はじいても引っ張っても探すのは遠い ── 名前で選べる一覧を、帯の右端に。 -->
+      <button class="go all" id="stripall" title="開いているノートの一覧"></button>
     </div>
     <div id="work" hidden>
       <!-- **入ってきたものの報せ。** 面の上に置く ── 「並べて」でも
