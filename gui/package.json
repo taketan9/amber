@@ -1,6 +1,6 @@
 {
   "name": "amber-gui",
-  "version": "3.1.4",
+  "version": "3.1.5",
   "private": true,
   "description": "amber ── 憶えておきたいもの、ぜんぶ入るマークダウンの箱",
   "main": "main.js",
