@@ -479,6 +479,8 @@ final class NotesStore: ObservableObject {
     /// そこにある）。見せるのは、いま開いている保存ディレクトリのぶん。
     private var booksBy: [String: [String]] = [:]
     private var colorsBy: [String: [String: String]] = [:]
+    /// 錠のかかったフォルダ（保存ディレクトリからの道・依頼 629）。
+    private var locksBy: [String: [String]] = [:]
     private var cameBy: [String: [String: String]] = [:]
     private var sharesBy: [String: [Shelf]] = [:]
 
@@ -501,6 +503,7 @@ final class NotesStore: ObservableObject {
                 booksBy[url.path] = answer["books"] as? [String] ?? []
                 for st in answer["stars"] as? [String] ?? [] { stars.insert(st) }
                 colorsBy[url.path] = answer["colors"] as? [String: String] ?? [:]
+                locksBy[url.path] = answer["locks"] as? [String] ?? []
                 cameBy[url.path] = answer["came"] as? [String: String] ?? [:]
                 sharesBy[url.path] = (answer["shares"] as? [[String: Any]] ?? []).compactMap {
                     guard let at = $0["at"] as? String else { return nil }
@@ -791,6 +794,17 @@ final class NotesStore: ObservableObject {
     @Published var stars: [String] = []
     /// Folder path → the colour it was given.
     var colors: [String: String] { colorsBy[rootPath] ?? [:] }
+
+    /// 錠のかかったフォルダ（依頼 629）。**上のフォルダの錠も効く** ──
+    /// 目印は上に置いてあっても、下のフォルダは錠。
+    var locks: [String] { locksBy[rootPath] ?? [] }
+    func isLocked(book: String) -> Bool {
+        locks.contains { $0.isEmpty || book == $0 || book.hasPrefix($0 + "/") }
+    }
+    /// その錠の目印があるフォルダ（外すときはここを外す）。
+    func lockRoot(of book: String) -> String? {
+        locks.first { $0.isEmpty || book == $0 || book.hasPrefix($0 + "/") }
+    }
 
     /// The shelves directly inside `shelf`, with how many notes are under each.
     func shelves(in shelf: String) -> [(name: String, path: String, count: Int)] {

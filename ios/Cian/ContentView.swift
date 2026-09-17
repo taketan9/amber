@@ -572,6 +572,17 @@ struct ContentView: View {
         do { try store.share(note, to: book) } catch { store.trouble = error.localizedDescription }
     }
 
+    /// フォルダの錠（依頼 629）。**目印を置いたフォルダごと**かける／やめる。
+    private func setBookLock(_ book: String, on: Bool) {
+        let at = URL(fileURLWithPath: store.rootPath).appendingPathComponent(book).path
+        do {
+            try store.setLock(path: at, on: on)
+            store.reload()
+        } catch {
+            store.trouble = error.localizedDescription
+        }
+    }
+
     /// 共有のフォルダを「ファイル」で開く ── クラウド側でグループに分けるのは、人がやる。
     private func invite(_ book: String) {
         let at = URL(fileURLWithPath: store.rootPath).appendingPathComponent(book).path
@@ -907,7 +918,15 @@ struct ContentView: View {
                     } label: {
                         HStack {
                             Label {
-                                Text(b.name)
+                                HStack(spacing: 5) {
+                                    Text(b.name)
+                                    // 錠のフォルダは、一覧でそう見える（依頼 629）──
+                                    // 長押しするまで分からないのでは、かけたことを忘れる。
+                                    if store.isLocked(book: b.path) {
+                                        Image(systemName: "lock.fill")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
                             } icon: {
                                 Image(systemName: "folder.fill")
                                     .foregroundStyle(store.colors[b.path].flatMap { Color(hex: $0) }
@@ -935,6 +954,19 @@ struct ContentView: View {
                         }
                         Button { colouring = b.path } label: {
                             Label("フォルダに色をつける", systemImage: "paintpalette")
+                        }
+                        // 錠（依頼 629・本人「スマホ版でもロックできるように
+                        // して欲しいぞ」）── **中のノートとサブフォルダぜんぶ。**
+                        if let at = store.lockRoot(of: b.path) {
+                            Button { setBookLock(at, on: false) } label: {
+                                Label(at == b.path ? "このフォルダのロックをやめる"
+                                      : "「\((at as NSString).lastPathComponent)」のロックをやめる",
+                                      systemImage: "lock.open")
+                            }
+                        } else {
+                            Button { setBookLock(b.path, on: true) } label: {
+                                Label("このフォルダをロックする", systemImage: "lock")
+                            }
                         }
                         if store.shares.contains(where: { $0.at == b.path }) {
                             // 分けるのはクラウドの仕事 ── 「ファイル」でそのフォルダを開く。
