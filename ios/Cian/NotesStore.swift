@@ -1293,7 +1293,21 @@ final class NotesStore: ObservableObject {
         return n
     }
 
-    func save(_ note: Note, text: String, stamp: String, force: Bool = false) throws -> Saved {
+    /// 錠（依頼 629）。**答えるのは core** ── 前書きの `locked: true` と、
+    /// 上のフォルダの目印（`.amberlock`）の両方を見た答え。
+    func lock(of path: String) -> (locked: Bool, why: String, dir: String) {
+        guard let a = try? Cian.call("locked", ["path": path]) else { return (false, "", "") }
+        return (a["locked"] as? Bool ?? false, a["why"] as? String ?? "", a["dir"] as? String ?? "")
+    }
+
+    @discardableResult
+    func setLock(path: String, on: Bool) throws -> (locked: Bool, why: String, dir: String) {
+        let a = try Cian.call("lock", ["path": path, "on": on])
+        return (a["locked"] as? Bool ?? false, a["why"] as? String ?? "", a["dir"] as? String ?? "")
+    }
+
+    func save(_ note: Note, text: String, stamp: String, force: Bool = false,
+              unlock: Bool = false) throws -> Saved {
         // **書き込む直前の姿を、履歴に渡す。** 一世代にするかどうかを決める
         // のは core（最後の一区切りから間が空いたときだけ）── 電話と窓で
         // 決まりが違うと、片方で消えたものをもう片方が残っていると思う。
@@ -1302,6 +1316,8 @@ final class NotesStore: ObservableObject {
             "root": rootOf(note.path), "path": note.path, "gap": 300,
         ])
         var params: [String: Any] = ["path": note.path, "text": text, "force": force]
+        // 「今だけ編集する」を押した人のぶんだけ（依頼 629）。
+        if unlock { params["unlock"] = true }
         if !stamp.isEmpty { params["stamp"] = stamp }
         let answer = try Cian.call("write", params)
         if answer["conflict"] as? Bool == true {

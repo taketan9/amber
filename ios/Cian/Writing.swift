@@ -289,6 +289,32 @@ struct NoteView: View {
         return whole
     }
 
+    /// 錠の帯（依頼 629・本人「間違って更新しないように 1 手間」）。**窓と
+    /// 同じ二つの道** ── 今だけ編集する／ロックをやめる。
+    @ViewBuilder private var lockBand: some View {
+        if tab.locked {
+            HStack(spacing: 9) {
+                Image(systemName: tab.freed ? "lock.open" : "lock.fill")
+                    .foregroundStyle(Color("AccentColor"))
+                Text(tab.freed
+                     ? "いまだけ編集しています（閉じると戻ります）"
+                     : (tab.lockWhy == "folder"
+                        ? "「\((tab.lockDir as NSString).lastPathComponent)」はロックされたフォルダです"
+                        : "このノートはロックされています"))
+                    .font(.footnote)
+                Spacer(minLength: 8)
+                if !tab.freed {
+                    Button("今だけ編集する") { desk.freeNow(tab.id) }
+                        .font(.footnote.weight(.semibold))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(Color.secondary.opacity(0.12))
+            Divider()
+        }
+    }
+
     /// 入ってきたものの報せ。**面の上に置く** ── 「表示」でも「コード」でも
     /// 同じことが起きているので、片方の面の中に入れると面を替えたときに
     /// 消えたように見える（窓と同じ形・依頼 354）。
@@ -353,6 +379,7 @@ struct NoteView: View {
                 // なる。SwiftUI で書き直すと書き戻しがもう一組でき、同じ
                 // ノートが端末によって別の字に保存される。
                 VStack(spacing: 0) {
+                    lockBand
                     band
                     Paper(text: $tab.text, folder: folder,
                           dark: chosen.map { !$0.light } ?? (look == .dark || (look == .auto && scheme == .dark)),
@@ -366,7 +393,8 @@ struct NoteView: View {
                               held = t
                               tapped = t
                           },
-                          hand: hand)
+                          hand: hand,
+                          locked: tab.locked && !tab.freed)
                     // **道具の帯は、表示の面にも要る。** 打てる面なのに
                     // 記号の入れ方が無いと、`#` や `- [ ]` を覚えている人に
                     // しか使えない ── 電話の鍵盤にその記号は出ていない。
@@ -430,8 +458,10 @@ struct NoteView: View {
                 }
             } else {
                 VStack(spacing: 0) {
+                    lockBand
                     band
                     Editor(pen: pen, text: $tab.text, pick: $tab.pick, editing: $writing)
+                        .disabled(tab.locked && !tab.freed)
                     // Only while the keyboard is up, which is the only time
                     // it is *above the keyboard* rather than sitting at the
                     // bottom of a page nobody is typing into.

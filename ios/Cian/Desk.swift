@@ -38,6 +38,14 @@ final class Desk: ObservableObject {
         /// The text as saved, to tell "changed" from "opened".
         var saved = ""
         var reading = true
+        /// 錠（依頼 629）。**core が答えたそのまま** ── 前書きの `locked: true` か、
+        /// 上のフォルダの目印。窓と同じ判断を二度書かない。
+        var locked = false
+        /// 錠のわけ（`"note"` / `"folder"`）と、そのフォルダの名前。
+        var lockWhy = ""
+        var lockDir = ""
+        /// **今だけ編集する**を押したか。タブを閉じれば消えるので、錠へ戻る。
+        var freed = false
         var blocks: [Block] = []
         var loaded = false
         /// 一つ戻す道と、やり直す道。**窓と同じ持ち方**（`gui/renderer.js`
@@ -180,10 +188,55 @@ final class Desk: ObservableObject {
         tabs[at].stamp = stamp
         tabs[at].loaded = true
         tabs[at].blocks = (try? store.blocks(of: text)) ?? []
+        // 錠（依頼 629）。**開いた時に一度訊く** ── 打つたびに訊くと、
+        // 一文字ごとにエンジンを呼ぶことになる。
+        let lock = store.lock(of: tabs[at].note.path)
+        tabs[at].locked = lock.locked
+        tabs[at].lockWhy = lock.why
+        tabs[at].lockDir = lock.dir
         // 混ぜるときの土台 ── いまファイルと一致している。
         tabs[at].base = head + body
         // 前に来ていて、まだ確認していないものを思い出す（押すまで残る）。
         recallIncoming(tabs[at].id)
+    }
+
+    /// 錠をかける／やめる（依頼 629）。やめたときは、今だけの許しも捨てる。
+    func lock(_ id: String, on: Bool, _ store: NotesStore) throws {
+        guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let got = try store.setLock(path: tabs[at].note.path, on: on)
+        guard let now = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs[now].locked = got.locked
+        tabs[now].lockWhy = got.why
+        tabs[now].lockDir = got.dir
+        tabs[now].freed = false
+        // 前書きが変わったので、読み直す（`locked: true` の行が増える／減る）。
+        if let (text, stamp) = try? store.open(tabs[now].note) {
+            let (head, body) = (try? store.split(text)) ?? ("", text)
+            tabs[now].head = head
+            tabs[now].text = body
+            tabs[now].saved = body
+            tabs[now].stamp = stamp
+            tabs[now].base = head + body
+        }
+        redraw(id, store)
+    }
+
+    /// 錠を訊き直すだけ（**ノートには触らない**）── フォルダの錠を外した
+    /// あとに呼ぶ。ここでノートを書き直すと、前書きに何も無いノートの
+    /// 更新時刻が動く（同期には「向こうが編集した」に見える）。
+    func relock(_ id: String, _ store: NotesStore) {
+        guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let got = store.lock(of: tabs[at].note.path)
+        tabs[at].locked = got.locked
+        tabs[at].lockWhy = got.why
+        tabs[at].lockDir = got.dir
+        tabs[at].freed = false
+    }
+
+    /// **今だけ編集する。** 錠はそのまま ── タブを閉じれば、また錠。
+    func freeNow(_ id: String) {
+        guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs[at].freed = true
     }
 
     /// Take a whole note back apart — after a sheet has changed a field.
@@ -210,10 +263,14 @@ final class Desk: ObservableObject {
     func save(_ id: String, _ store: NotesStore, force: Bool = false) throws -> String? {
         guard let at = tabs.firstIndex(where: { $0.id == id }), tabs[at].loaded else { return nil }
         guard force || tabs[at].dirty else { return nil }
+        // **錠のノートは書かない**（依頼 629）── 「今だけ編集する」を押した
+        // ぶんだけ、`unlock` を添えて通す。押していなければ core が断る。
+        if tabs[at].locked && !tabs[at].freed { return nil }
         // 書き込む直前の姿を積む ── 書いたあとだと、戻る先が「いまの姿」に
         // なる（窓の `save()` と同じ場所で同じことをしている）。
         keepStep(at)
-        switch try store.save(tabs[at].note, text: tabs[at].whole, stamp: tabs[at].stamp, force: force) {
+        switch try store.save(tabs[at].note, text: tabs[at].whole, stamp: tabs[at].stamp,
+                              force: force, unlock: tabs[at].freed) {
         case .ok(let fresh):
             guard let now = tabs.firstIndex(where: { $0.id == id }) else { return nil }
             tabs[now].stamp = fresh
@@ -231,7 +288,8 @@ final class Desk: ObservableObject {
             // アプリで、それは強すぎる（窓と同じ直し・依頼 354）。
             let got = try store.merge(tabs[at].note, was: tabs[at].base, ours: tabs[at].whole)
             guard case .ok(let fresh) = try store.save(
-                tabs[at].note, text: got.text, stamp: tabs[at].stamp, force: true
+                tabs[at].note, text: got.text, stamp: tabs[at].stamp, force: true,
+                unlock: tabs[at].freed
             ) else { return nil }
             guard let now = tabs.firstIndex(where: { $0.id == id }) else { return nil }
             let (head, body) = (try? store.split(got.text)) ?? (tabs[now].head, got.text)
@@ -792,6 +850,21 @@ struct DeskView: View {
                     Label("いまのバージョンを保護", systemImage: "square.and.arrow.down")
                 }
                 Divider()
+                // 錠（依頼 629）。**開いているノートにすること**なので、
+                // 設定ではなくこの献立に置く（窓の「ノート ▾」と同じ場所）。
+                if let tab = here {
+                    if tab.locked {
+                        Button { setLock(false) } label: {
+                            Label(tab.lockWhy == "folder" ? "フォルダのロックをやめる" : "ロックをやめる",
+                                  systemImage: "lock.open")
+                        }
+                    } else {
+                        Button { setLock(true) } label: {
+                            Label("このノートをロックする", systemImage: "lock")
+                        }
+                    }
+                }
+                Divider()
                 Button(role: .destructive) { dropping = here?.note } label: {
                     Label("ゴミ箱へ入れる", systemImage: "trash")
                 }
@@ -823,6 +896,27 @@ struct DeskView: View {
 
     /// **いまの姿を、一世代として残す。** 自動保存だと世代が打鍵の切れ目で
     /// 決まる ── 「ここは残しておきたい」を人が言える道が要る（窓の ⌘S）。
+
+    /// 錠をかける／やめる（依頼 629）。**フォルダの錠は、そのフォルダごと。**
+    private func setLock(_ on: Bool) {
+        guard let tab = here else { return }
+        do {
+            // フォルダの錠は、目印のあるフォルダを外す ── ノートの前書きを
+            // 触っても、上のフォルダの錠は外れない。
+            let what = (!on && tab.lockWhy == "folder" && !tab.lockDir.isEmpty)
+                ? tab.lockDir : tab.note.path
+            if what == tab.note.path {
+                try desk.lock(tab.id, on: on, store)
+            } else {
+                try store.setLock(path: what, on: on)
+                desk.relock(tab.id, store)
+            }
+            store.reload()
+        } catch {
+            trouble = error.localizedDescription
+        }
+    }
+
     private func keepNow() {
         guard let id = here?.id, let whole = here?.whole else { return }
         do {

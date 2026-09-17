@@ -140,6 +140,8 @@ const state = {
     /// フォルダ。**絶対の道**（保存ディレクトリが複数になってから ── 相対だと
     /// 二つの保存ディレクトリにある同じ名前の「仕事」が見分けられない）。
     books: [],
+    /// 錠のかかったフォルダ（絶対の道・依頼 629）。中のノートとサブフォルダに効く。
+    locks: [],
     stars: [],
     /// 期間の絞り込み（`{ which: 'updated'|'created', from, to }`）。
     /// `from` / `to` は `YYYY-MM-DD` か null（片方だけでもよい ── 「この日
@@ -397,7 +399,10 @@ function drawRail() {
                 // 二度消そうとする（ブックマークを別枠にしたのと同じ理由）。
                 if (state.shares.some((sh) => sh.at !== rootOf(sh.at) && (b === sh.at || b.startsWith(sh.at + '/')))) continue;
                 const n = state.notes.filter((x) => x.book === b || x.book.startsWith(b + '/')).length;
-                rows.push(dest('book', b, b.split('/').pop(), n, on('book', b),
+                // 錠のかかったフォルダには 🔒 を添える（依頼 629）── 右押しの
+                // 献立を開くまで分からないのでは、かけたことを忘れる。
+                const shut = state.locks.some((l) => b === l || b.startsWith(l + '/'));
+                rows.push(dest('book', b, b.split('/').pop() + (shut ? ' 🔒' : ''), n, on('book', b),
                                relOf(b).split('/').length - 1 + base, state.colors[b]));
             }
         }
@@ -1933,6 +1938,13 @@ async function openNote(path, opts) {
 /// 一本を出したあとに、画面を揃える。**読んだときも、タブに戻ったときも
 /// 同じ一組**を通す ── 二か所に並べると、片方にだけ増えた描き直しができる。
 function afterTab() {
+    // **錠はここで見る**（依頼 629）── 一覧から開く道と、机のタブへ戻る道の
+    // 両方がここを通る。タブへ戻る道は途中で返るので、開くところに書いたら
+    // 「今だけ編集する」が別のノートへ持ち越された（本物の窓で踏んだ）。
+    for (const at of [...unlockedNow]) {
+        if (!state.open || at !== state.open.path) unlockedNow.delete(at);
+    }
+    loadLock();
     markSeen();
     drawBand();
     drawTitle();
@@ -3987,7 +3999,9 @@ function peel(node) {
 /// `el('read')` も `state` も見る ── 中に混ぜると、電話の束ねに
 /// 「呼べば落ちる関数」が入る。
 function armRead() {
-    armPaper(el('read'), whole(), !!state.open && view !== 'write');
+    // 錠のノートは、面を入力欄にしない（依頼 629）── 見た目で止めるのでは
+    // なく、打てる場所そのものを開かない。
+    armPaper(el('read'), whole(), !!state.open && view !== 'write' && canEdit());
     // 来た行の地色は、組み直すたびに敷き直す ── 札は組み直しで消えるので。
     paintIncoming();
 }
@@ -4724,6 +4738,9 @@ function drawMarks() {
             // 決める手がかり（選んだところ）が先に消える。
             b.onmousedown = (e) => e.preventDefault();
             b.onclick = () => {
+                // 錠のノートでは入れない（依頼 629）── 面は打てなくして
+                // あるが、帯の札はそこを通らずに字を入れる道。
+                if (!canEdit()) { say('このノートはロックされています（「今だけ編集する」を押すと書けます）'); return; }
                 const found = MARKS.flat().find((m) => m[0] === name);
                 if (found) found[2]();
             };
@@ -7402,8 +7419,96 @@ async function cmdAutoSave() {
     say(autoSave ? '自動保存を入にしました（打てば保存されます）' : '自動保存を切にしました（「保存」を押したときに書きます）');
 }
 
+/* ── 錠（依頼 629）── */
+
+/// いま開いているノートの錠（`{ locked, why, dir }`）。core が答える。
+let lockNow = { locked: false };
+/// **今だけ編集する**を押したノート。**離れたら忘れる** ── 本人が決めた
+/// （2026-09-18）「そのときだけ外す。閉じると自動でロックに戻る」。
+const unlockedNow = new Set();
+
+/// いま打てるか。錠が無いか、今だけ編集するを押したか。
+function canEdit() {
+    if (!state.open) return false;
+    return !lockNow.locked || unlockedNow.has(state.open.path);
+}
+
+/// 書くときに添えるもの。**押した人のぶんだけ** ── 押していないのに
+/// `unlock` を送ることはしない（送れば core の門は開いてしまう）。
+function lockArg() {
+    return state.open && unlockedNow.has(state.open.path) ? { unlock: true } : {};
+}
+
+/// core に訊いて、帯と面を合わせる。
+async function loadLock() {
+    lockNow = { locked: false };
+    if (!state.open) { drawLock(); return; }
+    try {
+        lockNow = await ask('locked', { path: state.open.path });
+    } catch { /* 訊けないときは錠なしとして扱う（読めないより書けるほうがまし） */ }
+    drawLock();
+}
+
+/// 錠の帯と、打てるかどうか。
+function drawLock() {
+    const bar = el('lockbar');
+    const on = !!(state.open && lockNow.locked);
+    bar.hidden = !on;
+    if (on) {
+        const free = unlockedNow.has(state.open.path);
+        const where = lockNow.why === 'folder'
+            ? '「' + leafOf(lockNow.dir || '') + '」はロックされたフォルダです'
+            : 'このノートはロックされています';
+        bar.querySelector('.t').textContent = free
+            ? where + ' ── いまだけ編集しています（閉じると戻ります）'
+            : where;
+        el('lockedit').hidden = free;
+        el('lockoff').textContent = lockNow.why === 'folder' ? 'フォルダのロックをやめる' : 'ロックをやめる';
+    }
+    // **打てなくする。** 見た目だけ止めても、打てば自動保存が走る。
+    if (editor) editor.updateOptions({ readOnly: on && !unlockedNow.has(state.open?.path) });
+    el('read').contentEditable = String(canEdit());
+    document.body.classList.toggle('locked', on && !canEdit());
+}
+
+el('lockedit').onclick = () => {
+    if (!state.open) return;
+    unlockedNow.add(state.open.path);
+    drawLock();
+    if (editor && view !== 'read') editor.focus();
+    say('いまだけ編集できます（閉じると、またロックに戻ります）');
+};
+el('lockoff').onclick = () => cmdLock(false);
+
+/// ロックする／やめる。**ノートでもフォルダでも同じ道**（core が見分ける）。
+async function cmdLock(on, what) {
+    const path = what || (state.open && state.open.path);
+    if (!path) { say('ロックするノートを、先に開いてください'); return; }
+    const isDir = !!what && !path.endsWith('.md');
+    const name = isDir ? '「' + leafOf(path) + '」' : 'このノート';
+    if (!on) {
+        // **やめるのは戻せる操作**だが、一度は訊く ── 錠は押し間違いを
+        // 止めるためのもので、その錠自体が一押しで外れては意味が薄い。
+        const ok = await askYes(name + 'のロックをやめますか');
+        if (!ok) return;
+    }
+    try {
+        await ask('lock', { path, on: !!on });
+    } catch (e) {
+        say('できません: ' + why(e));
+        return;
+    }
+    if (!on) unlockedNow.delete(path);
+    if (state.open) await loadLock();
+    await reload({ quiet: true });
+    say(on ? name + 'をロックしました' : name + 'のロックをやめました');
+}
+
 async function save() {
     if (!state.open || !editor) return;
+    // **錠のノートは書かない。** 面は読み取り専用にしてあるが、貼り付けや
+    // よそからの道（同期の書き戻しなど）でここへ来ることがある。
+    if (!canEdit()) { state.dirty = false; return; }
     const path = state.open.path;
     // 頭を戻してから書く。**ここを忘れると、保存のたびに front matter が
     // 一枚ずつ消える** ── 題もタグも作った日も。
@@ -7424,7 +7529,7 @@ async function save() {
     const ancestor = state.base ?? state.was ?? text;
     state.was = text;
     try {
-        const r = await ask('write', { path, text, stamp: state.stamp });
+        const r = await ask('write', { path, text, stamp: state.stamp, ...lockArg() });
         if (r && r.conflict) {
             // **どちらかを捨てない。混ぜる。**
             //
@@ -7633,6 +7738,7 @@ async function reload(opts) {
         // のは画面の都合）。相対で返ってくる道は、ここで絶対にする。
         const notes = [];
         const books = [];
+        const locks = [];
         const stars = new Set();
         const colors = {};
         const came = {};
@@ -7655,6 +7761,7 @@ async function reload(opts) {
             const abs = (rel) => (rel ? p.dir + '/' + rel : p.dir);
             for (const n of r.notes || []) notes.push({ ...n, root: p.dir, place: p.name, book: abs(n.book) });
             for (const b of r.books || []) books.push(abs(b));
+            for (const l of r.locks || []) locks.push(abs(l));
             for (const s of r.stars || []) stars.add(s);
             for (const [k, v] of Object.entries(r.colors || {})) colors[abs(k)] = v;
             // 共有へ入れたノートが、もといたフォルダ。**献立に「どこへ戻すか」
@@ -7667,6 +7774,7 @@ async function reload(opts) {
         if (places.length && Object.keys(trouble).length === places.length) throw firstErr;
         state.notes = notes;
         state.books = books;
+        state.locks = locks;
         state.stars = [...stars].sort();
         state.colors = colors;
         state.came = came;
@@ -9996,6 +10104,11 @@ const CMDS = [
     { id: 'refresh', name: '読み直す', key: 'F5', app: true, sub: 'フォルダをもう一度読みます', run: cmdRefresh },
     { id: 'all', name: 'コマンド一覧', key: '⌘⇧P', app: true, sep: true, run: () => palette() },
     { id: 'about', name: 'ambər について', app: true, run: cmdAbout },
+    // 錠（依頼 629）。**押す場所はノートの献立** ── 開いているノートに
+    // することなので、⚙（amber についての設定）ではない。
+    { id: 'lock', name: 'このノートをロックする', sub: 'うっかり書き換えないように',
+      need: 'note', menu: true, run: () => cmdLock(true) },
+    { id: 'unlock', name: 'このノートのロックをやめる', need: 'note', menu: true, run: () => cmdLock(false) },
     { id: 'history', name: '過去バージョン', need: 'note', menu: true, run: () => cmdHistory() },
     { id: 'keepnow', name: 'いまのバージョンを保護', key: '⌘S', need: 'note', menu: true, run: cmdKeepNow },
     // **`back` / `fwd` は上の「前に見たノート」で使っている。** 同じ id を
@@ -10429,6 +10542,17 @@ function railMenu(kind, what, at) {
     if (kind === 'book') {
         items.push({ name: 'この中にフォルダを作る', run: () => cmdMkBook(what) });
         items.push({ name: 'フォルダに色をつける', run: () => cmdColor(what) });
+        // 錠（依頼 629）── **中のノートとサブフォルダ全部**に効く。
+        // **この列だけが目印を持つ** ── 上のフォルダの錠は、上で外す。
+        const shut = state.locks.includes(what);
+        const above = state.locks.find((l) => l !== what && what.startsWith(l + '/'));
+        items.push({
+            name: shut ? 'このフォルダのロックをやめる' : 'このフォルダをロックする',
+            sub: above ? '「' + leafOf(above) + '」のロックが効いています'
+                : (shut ? '' : '中のノートとサブフォルダも、まとめて'),
+            dim: !!above && !shut,
+            run: () => cmdLock(!shut, what),
+        });
         const isShare = state.shares.some((sh) => sh.at === what);
         if (isShare) {
             items.push({

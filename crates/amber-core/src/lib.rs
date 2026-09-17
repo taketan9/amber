@@ -13,6 +13,7 @@ pub mod cloud;
 pub mod emoji;
 pub mod history;
 pub mod ics;
+pub mod lock;
 pub mod markdown;
 pub mod merge;
 pub mod naming;

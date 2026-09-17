@@ -58,6 +58,9 @@ struct Paper: UIViewRepresentable {
     var onMenu: ((String, String, Int) -> Void)?
     /// 道具の帯からの合図を受け取る糸。
     var hand: PaperHand?
+    /// 錠（依頼 629）── 真のあいだは面そのものを入力欄にしない。
+    /// **見た目で止めない**: 打てる場所を開かないことで止める。
+    var locked = false
 
     func makeCoordinator() -> Hand { Hand(self) }
 
@@ -105,6 +108,7 @@ struct Paper: UIViewRepresentable {
         // 一度きり渡すと、次に打った瞬間に色が消える。
         let js = "window.paint(\(came),\(both)); true"
         web.evaluateJavaScript(js.replacingOccurrences(of: " ", with: ""))
+        web.evaluateJavaScript("window.setLocked(\(locked)); true")
     }
 
     /// 面そのもの。**窓の見た目に寄せる** ── 同じノートが二つの amber で
@@ -213,6 +217,17 @@ struct Paper: UIViewRepresentable {
     window.onerror = (m, s, l) =>
       window.webkit.messageHandlers.trouble.postMessage(m + ' @' + l);
 
+    /// 錠（依頼 629）。**面そのものを入力欄にしない** ── 帯の札で隠すだけ
+    /// では、指で触れば打ててしまう。組み直しのたびに掛け直す。
+    let locked = false;
+    /// 最後に組んだ字 ── 錠を掛け直すときに、もう一度配るのに要る。
+    let lastText = '';
+    window.setLocked = (on) => {
+      const was = locked;
+      locked = !!on;
+      if (was !== locked) armPaper(box, lastText, !locked);
+    };
+
     /// 配色（依頼 499）── 根に変数を直に差す。空なら琥珀に戻す。
     window.setPalette = (vars) => {
       const r = document.documentElement.style;
@@ -233,7 +248,8 @@ struct Paper: UIViewRepresentable {
         const src = img.getAttribute('src') || '';
         if (!/^[a-z]+:/i.test(src)) img.src = 'amber://note/' + src;
       }
-      armPaper(box, text, true);
+      lastText = text;
+      armPaper(box, text, !locked);
       // 空の注記・引用に、打てる一行を（窓と同じ）。
       fillAlerts(box);
       // **画像は `<figure>` で包む ── 窓の `findPictures` と同じ形にする。**

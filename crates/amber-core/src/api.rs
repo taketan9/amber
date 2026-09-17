@@ -14,6 +14,18 @@ fn arg(p: &serde_json::Value, key: &str) -> String {
     p[key].as_str().unwrap_or("").to_string()
 }
 
+/// 錠がかかっていないか（依頼 629）。**書くところだけで訊く。**
+///
+/// 印を足す・タグを付ける・分ける、といった操作は字を返すだけで、ファイルに
+/// 落ちるのは必ず `write` ── **門は一つでいい**。二つ目の門を作ると、
+/// 片方だけ直した日にそこから書けてしまう。
+///
+/// `unlock: true` は「今だけ編集する」を押した人。押していないのに前端が
+/// 勝手に添えることはない（窓も電話も、押されたときだけ添える）。
+fn keep_out(p: &serde_json::Value, path: &std::path::Path) -> anyhow::Result<()> {
+    crate::lock::keep_out(path, p["unlock"].as_bool().unwrap_or(false))
+}
+
 /// The methods, in Rust terms.
 ///
 /// Separated from the `extern "C"` shell so the tests below run the real
@@ -122,6 +134,13 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .map(|r| r.rel.clone())
                 .collect();
             books.sort();
+            // 錠のかかったフォルダ（依頼 629）。**同じ歩きから拾う** ── 窓が
+            // フォルダごとに訊き直すと、一覧を組むたびに何十回も往復する。
+            // ルート自身も見る（保存ディレクトリまるごとの錠）。
+            let locks: Vec<String> = std::iter::once(String::new())
+                .chain(books.iter().cloned())
+                .filter(|rel| dir.join(rel).join(crate::lock::MARK).exists())
+                .collect();
             // **まだ落ちてきていないノート。** iCloud は中身を消して
             // `.買い物リスト.md.icloud` という札を置くので、名前が違って
             // 一覧に出ない ── 黙っていると「ノートが消えた」にしか
@@ -148,6 +167,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 })).collect::<Vec<_>>(),
                 "waiting": waiting,
                 "books": books,
+                // 錠のかかったフォルダ（ルートからの道。空はルート自身）。
+                "locks": locks,
                 "stars": shelves,
                 "colors": book.colors,
                 // 共有へ入れたノートが、もといたフォルダ。**一覧と一緒に
@@ -192,6 +213,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "write" => {
             let path = std::path::PathBuf::from(arg(p, "path"));
             let text = arg(p, "text");
+            keep_out(p, &path)?;
             let force = p["force"].as_bool().unwrap_or(false);
             if !force {
                 if let Some(expect) = p.get("stamp").and_then(json_stamp) {
@@ -206,6 +228,14 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             // A note that is not there yet is a new note, not a failure:
             // the phone writes one it has only just made.
             let mut f = crate::text::read(&path).unwrap_or_default();
+            // **「今だけ編集する」で錠が落ちない**（依頼 629）── 保存は前書きごと
+            // 書き直すので、`locked: true` の行が消えた字を書くと錠まで外れる。
+            // 外すのは「ロックをやめる」だけ、と本人が決めた（2026-09-18）。
+            let text = if crate::lock::note_locked(&path) {
+                crate::note::set_field(&text, "locked", Some("true"))
+            } else {
+                text
+            };
             f.lines = text.split('\n').map(|l| l.to_string()).collect();
             crate::text::write(&path, &f)?;
             Ok(serde_json::json!({
@@ -217,6 +247,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // A new note, named and shaped by the same rules the window uses.
         "new" => {
             let dir = std::path::PathBuf::from(arg(p, "dir"));
+            keep_out(p, &dir.join("新しいノート.md"))?;
             let at = crate::note::create(
                 &dir,
                 &arg(p, "title"),
@@ -841,6 +872,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // よそから .md を持ってくる。**上書きしない**（`notebook::bring`）。
         "bring" => {
             let to = std::path::PathBuf::from(arg(p, "to"));
+            keep_out(p, &to.join("入れるもの.md"))?;
             let files: Vec<std::path::PathBuf> = p["files"]
                 .as_array()
                 .map(|a| a.iter().filter_map(|v| v.as_str()).map(std::path::PathBuf::from).collect())
@@ -852,6 +884,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "restore" => {
             let zip = std::path::PathBuf::from(arg(p, "zip"));
             let to = std::path::PathBuf::from(arg(p, "to"));
+            keep_out(p, &to.join("戻すもの.md"))?;
             let (put, kept) = crate::notebook::restore(&zip, &to)?;
             Ok(serde_json::json!({ "put": put, "kept": kept }))
         }
@@ -1175,6 +1208,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let at = std::path::PathBuf::from(arg(p, "path"));
             // `dir` を渡されたら、そこへ写す（テンプレートから作る道）。
             let into = p["dir"].as_str().map(std::path::PathBuf::from);
+            keep_out(p, into.as_deref().map(|d| d.join("写し.md")).as_deref().unwrap_or(&at))?;
             let made = crate::note::duplicate(&at, into.as_deref(), &crate::note::today())?;
             Ok(serde_json::json!({ "path": made.display().to_string() }))
         }
@@ -1186,6 +1220,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "move" => {
             let note = std::path::PathBuf::from(arg(p, "path"));
             let dir = std::path::PathBuf::from(arg(p, "dir"));
+            keep_out(p, &note)?;
+            keep_out(p, &dir.join(note.file_name().map(std::ffi::OsString::from).unwrap_or_default()))?;
             let at = crate::note::move_to(&note, &dir)?;
             if let Some(root) = p["root"].as_str().filter(|r| !r.is_empty()) {
                 let root = std::path::PathBuf::from(root);
@@ -1391,6 +1427,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // screenshot is pasted into the editor.
         "image" => {
             let note = std::path::PathBuf::from(arg(p, "note"));
+            keep_out(p, &note)?;
             let bytes = b64(&arg(p, "b64")).ok_or_else(|| anyhow::anyhow!("画像を読めません"))?;
             let link = crate::note::attach(&note, &bytes, &arg(p, "ext"))?;
             Ok(serde_json::json!({ "link": link, "bytes": bytes.len() }))
@@ -1407,6 +1444,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             if !path.is_file() {
                 anyhow::bail!("{} がありません", path.display());
             }
+            keep_out(p, &path)?;
             std::fs::remove_file(&path)?;
             Ok(serde_json::json!({ "ok": true }))
         }
@@ -1465,6 +1503,21 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "onenote_find" | "onenote_open" | "onenote_write" | "onenote_close" => {
             anyhow::bail!("OneNote の取り込みは、パソコンの ambər だけにあります")
         }
+
+        // 錠（依頼 629）。**かける／やめる**はここ、**今だけ外す**は
+        // 書くときに `unlock: true` を添える（錠はそのまま残る）。
+        "lock" => {
+            let path = std::path::PathBuf::from(arg(p, "path"));
+            let on = p["on"].as_bool().unwrap_or(true);
+            if path.is_dir() {
+                crate::lock::set_dir(&path, on)?;
+            } else {
+                crate::lock::set_note(&path, on)?;
+            }
+            Ok(crate::lock::tell(&path))
+        }
+        // いま錠か。**そのノート自身と、上のフォルダぜんぶ**を見た答え。
+        "locked" => Ok(crate::lock::tell(std::path::Path::new(&arg(p, "path")))),
 
         other => anyhow::bail!("知らない操作: {other}"),
     }
@@ -1531,6 +1584,56 @@ mod tests {
         .unwrap();
         std::fs::write(d.path().join("b.txt"), "not a note\n").unwrap();
         d
+    }
+
+    /// 錠（依頼 629）。**門は `write` 側に一つ** ── 印を足す・タグを付けるは
+    /// 字を返すだけなので、そこを通しても錠は破れない。
+    #[test]
+    fn 錠のかかったノートは書けない() {
+        let d = note_dir();
+        let a = d.path().join("a.md");
+        let path = a.to_string_lossy().to_string();
+        // かける（前書きに `locked: true`）。
+        let r = call("lock", &serde_json::json!({ "path": path })).unwrap();
+        assert_eq!(r["locked"], true);
+        assert_eq!(call("locked", &serde_json::json!({ "path": path })).unwrap()["why"], "note");
+
+        let write = |extra: serde_json::Value| {
+            let mut p = serde_json::json!({ "path": path, "text": "書き換えた\n", "force": true });
+            for (k, v) in extra.as_object().unwrap() { p[k] = v.clone(); }
+            call("write", &p)
+        };
+        assert!(write(serde_json::json!({})).is_err(), "錠なのに書けた");
+        assert!(call("delete", &serde_json::json!({ "path": path })).is_err(), "錠なのに消せた");
+        assert!(std::fs::read_to_string(&a).unwrap().contains("本文です。"), "中身が変わった");
+
+        // **今だけ編集する**（`unlock`）── 錠は外れたままにならない。
+        assert!(write(serde_json::json!({ "unlock": true })).is_ok());
+        assert_eq!(call("locked", &serde_json::json!({ "path": path })).unwrap()["locked"], true,
+            "一度書いたら錠が外れてしまった");
+
+        // **錠をやめる。**
+        call("lock", &serde_json::json!({ "path": path, "on": false })).unwrap();
+        assert_eq!(call("locked", &serde_json::json!({ "path": path })).unwrap()["locked"], false);
+        assert!(write(serde_json::json!({})).is_ok());
+    }
+
+    #[test]
+    fn 錠のかかったフォルダには入れられない() {
+        let d = note_dir();
+        let dir = d.path().to_string_lossy().to_string();
+        call("lock", &serde_json::json!({ "path": dir })).unwrap();
+        assert!(call("new", &serde_json::json!({ "dir": dir, "title": "新しい" })).is_err());
+        assert!(call("copy", &serde_json::json!({
+            "path": d.path().join("a.md").to_string_lossy(), "dir": dir,
+        })).is_err());
+        // 中のノートも錠（上のフォルダを見る）。
+        let a = d.path().join("a.md").to_string_lossy().to_string();
+        assert_eq!(call("locked", &serde_json::json!({ "path": a })).unwrap()["why"], "folder");
+        assert!(call("write", &serde_json::json!({ "path": a, "text": "x", "force": true })).is_err());
+        // やめれば、また作れる。
+        call("lock", &serde_json::json!({ "path": dir, "on": false })).unwrap();
+        assert!(call("new", &serde_json::json!({ "dir": dir, "title": "新しい" })).is_ok());
     }
 
     #[test]

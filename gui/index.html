@@ -735,6 +735,23 @@ body.mac #top { padding-top: 30px; }
   border-bottom: 1px solid var(--line-2);
 }
 #band[hidden] { display: none !important; }
+/* 錠の帯（依頼 629）。報せの帯と同じ形で、地の色だけ変える。 */
+#lockbar {
+  display: flex; align-items: center; gap: 9px; flex: none;
+  padding: 9px 15px; font-size: 12.5px; color: var(--ink);
+  background: var(--rail); border-bottom: 1px solid var(--line-2);
+}
+#lockbar[hidden] { display: none !important; }
+#lockbar .k { flex: none; }
+#lockbar .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#lockbar .act {
+  color: var(--brand-s); font-weight: 600; white-space: nowrap; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 7px; padding: 3px 10px; background: var(--paper);
+}
+#lockbar #lockedit { margin-left: auto; }
+#lockbar .act:hover { background: var(--hover); }
+/* 錠のあいだは、書く道具を薄く ── 押せないものが、押せる顔で並ばない。 */
+body.locked #marks { opacity: .5; }
 #band .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand-s); flex: none; }
 #band.eyes .dot { background: #C4564E; }
 #band .act {
@@ -1905,6 +1922,15 @@ body.dropping::after {
            「コード」でも同じことが起きているので、片方の面の中に入れると
            面を替えたときに消えたように見える。 -->
       <div id="band" hidden></div>
+      <!-- **錠**（依頼 629・本人「間違って更新しなくなるように 1 手間いれる
+           ような仕組みを期待しているんだが」）。報せの帯と同じ場所・同じ形で、
+           色だけ変える ── 面を替えても消えない。 -->
+      <div id="lockbar" hidden>
+        <span class="k">🔒</span>
+        <span class="t"></span>
+        <button class="act" id="lockedit">今だけ編集する</button>
+        <button class="act" id="lockoff">ロックをやめる</button>
+      </div>
       <div id="panes">
         <div id="ed"></div>
         <div id="read" hidden></div>
