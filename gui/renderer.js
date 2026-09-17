@@ -1463,12 +1463,13 @@ let stripWas = null;
 
 function drawStrip() {
     const box = el('strip');
-    const was = box.hidden;
-    box.hidden = state.guest || tabs.length < 2;
+    const wrap = el('stripwrap');
+    const was = wrap.hidden;
+    wrap.hidden = state.guest || tabs.length < 2;
     // 出たり引っ込んだりすると、下の面の高さが変わる ── Monaco は自分で
     // 気づかないので、測り直させる（畳む鍵と同じ扱い）。
-    if (was !== box.hidden && editor) setTimeout(() => editor.layout(), 0);
-    if (box.hidden) { box.innerHTML = ''; stripWas = null; return; }
+    if (was !== wrap.hidden && editor) setTimeout(() => editor.layout(), 0);
+    if (wrap.hidden) { box.innerHTML = ''; stripWas = null; return; }
     // **いま出しているタブは、しまってあるものを見ない。** `keep` が書かれる
     // のは離れるときなので、出している間ずっと古い ── 書きかけの点が
     // 点かないし、題を直しても帯が変わらない。生のほうを見る。
@@ -1498,6 +1499,11 @@ function drawStrip() {
             if (e.button !== 0) return;
             if (e.target.closest('.x')) return;      // ✕ は下の `onclick` が受ける
             if (inNote(document.activeElement)) e.preventDefault();
+        };
+        // **開くのは押し離したとき**（依頼 625）── 押した瞬間に開くと、帯を掴んで
+        // 引っ張ろうとしただけでそのタブが開く。引っ張ったあとの click は帯が食べる。
+        d.onclick = (e) => {
+            if (e.target.closest('.x')) return;
             openNote(t.path, { keep: true });
         };
         d.querySelector('.x').onclick = (e) => { e.stopPropagation(); closeTab(t.path); };
@@ -1518,6 +1524,61 @@ function drawStrip() {
     }
     const on = box.querySelector('.tab.on');
     if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    stripEnds();
+}
+
+/// 端の ‹ › を、溢れているときだけ出す。行けない向きは薄くする。
+function stripEnds() {
+    const box = el('strip');
+    const over = box.scrollWidth > box.clientWidth + 1;
+    el('stripleft').hidden = !over;
+    el('stripright').hidden = !over;
+    el('stripleft').disabled = box.scrollLeft <= 0;
+    el('stripright').disabled = box.scrollLeft + box.clientWidth >= box.scrollWidth - 1;
+}
+
+{
+    const box = el('strip');
+    // **ホイールで横に。** ふつうのマウスは縦にしか回らない。トラックパッドの
+    // 横なぞり（`deltaX`）はそのまま効くので、縦の回しだけを横へ回す。
+    box.addEventListener('wheel', (e) => {
+        if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+        if (box.scrollWidth <= box.clientWidth) return;
+        e.preventDefault();
+        box.scrollLeft += e.deltaY;
+    }, { passive: false });
+    box.addEventListener('scroll', stripEnds);
+    window.addEventListener('resize', stripEnds);
+    // 端の ‹ ›。**見えている幅の八割ずつ** ── 一枚ずつだと 50 枚は遠い。
+    const page = (dir) => box.scrollBy({ left: dir * box.clientWidth * 0.8, behavior: 'smooth' });
+    el('stripleft').onclick = () => page(-1);
+    el('stripright').onclick = () => page(1);
+    // **掴んで引っ張る**（スマホのフリックと同じ手つき）。押しただけならタブを開く
+    // ── 5px 動いてから引っ張りに変わる。動いたあとの一押しはタブを開かない。
+    let drag = null;
+    box.addEventListener('mousedown', (e) => {
+        if (e.button !== 0 || e.target.closest('.x')) return;
+        drag = { x: e.clientX, left: box.scrollLeft, moved: false };
+    }, true);
+    window.addEventListener('mousemove', (e) => {
+        if (!drag) return;
+        const dx = e.clientX - drag.x;
+        if (!drag.moved && Math.abs(dx) < 5) return;
+        drag.moved = true;
+        box.classList.add('grab');
+        box.scrollLeft = drag.left - dx;
+    });
+    window.addEventListener('mouseup', () => {
+        if (!drag) return;
+        if (drag.moved) {
+            box.classList.remove('grab');
+            // 引っ張り終わりの click を、タブに届けない。
+            const eat = (e) => { e.stopPropagation(); e.preventDefault(); };
+            box.addEventListener('click', eat, { capture: true, once: true });
+            setTimeout(() => box.removeEventListener('click', eat, { capture: true }), 0);
+        }
+        drag = null;
+    });
 }
 
 /// タブを閉じる。**書きかけは、黙って捨てない。**
@@ -4980,7 +5041,7 @@ function applyView() {
     for (const id of ['title', 'views', 'fontbtns', 'count2', 'state', 'dots', 'tocbtn']) el(id).hidden = !open;
     el('blank').hidden = open || calOn;
     el('work').hidden = !open;
-    if (calOn) el('strip').hidden = true;
+    if (calOn) el('stripwrap').hidden = true;
     el('ed').hidden = !open || view === 'read';
     el('read').hidden = !open || view === 'write';
     el('toc').hidden = !open || !tocOn;

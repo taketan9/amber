@@ -935,6 +935,15 @@ struct DeskView: View {
             .onChange(of: desk.showing) { _, now in
                 withAnimation { to.scrollTo(now, anchor: .center) }
             }
+            // **一覧から開いて戻ってきたときも、いま出しているタブを見える所へ**
+            // （依頼 625・本人「タブが溢れかえっている時、見切れているタブにアクセスできず
+            // 不便だ」）。帯は横にはじけば動くが、開き直すたびに作り直され、そのとき
+            // `showing` は変わっていないので上の `onChange` が鳴らない ── 開いたばかりの
+            // ノートのタブが、右端の外に居た（シミュレータで見た）。
+            .onAppear { to.scrollTo(desk.showing, anchor: .center) }
+            .onChange(of: desk.tabs.count) { _, _ in
+                withAnimation { to.scrollTo(desk.showing, anchor: .center) }
+            }
         }
     }
 

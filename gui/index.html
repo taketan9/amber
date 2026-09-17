@@ -499,6 +499,24 @@ body.mac #listhead { padding-top: 30px; }
   overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
 }
 #strip::-webkit-scrollbar { display: none; }
+/* **見切れたタブへ行く道**（依頼 625・本人「タブが溢れかえっている時、見切れているタブに
+   アクセスできず不便だ。右や左にスクロールまたはフリックして動かせるようにできないかい？」）。
+   帯は前から横に動く作りだったが、**棒を隠していて、ふつうのマウスのホイールは縦にしか回らない**
+   ── Windows のマウスでは、見切れたタブへ行く手段が一つも無かった。三つ足した:
+   ホイールで横に動く・掴んで引っ張る・端の ‹ › を押す（溢れているときだけ出る）。 */
+#stripwrap { display: flex; align-items: stretch; flex: none; min-width: 0;
+  background: var(--list); border-bottom: 1px solid var(--line); }
+#stripwrap[hidden] { display: none !important; }
+#stripwrap #strip { flex: 1; min-width: 0; border-bottom: 0; }
+#stripwrap #strip.grab { cursor: grabbing; }
+#stripwrap .go {
+  flex: none; width: 26px; border: 0; background: var(--list); color: var(--ink-2);
+  font-size: 16px; line-height: 1; cursor: pointer; padding: 0;
+}
+#stripwrap .go:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+#stripwrap .go:disabled { opacity: .25; cursor: default; }
+#stripwrap .go[hidden] { display: none !important; }
+body.zen #stripwrap { display: none; }
 .tab {
   display: flex; align-items: center; gap: 5px; flex: none;
   max-width: 16ch; padding: 3px 6px 3px 9px;
@@ -1870,7 +1888,11 @@ body.dropping::after {
     <!-- **机（タブ）。** 題の帯の下、ノートの上 ── 電話と同じ並び。
          一本しか開いていないときは出ない（ふだんの画面を、タブのために
          一段ぶん狭くしない）。 -->
-    <div id="strip" hidden></div>
+    <div id="stripwrap" hidden>
+      <button class="go" id="stripleft" title="左のタブへ" hidden>‹</button>
+      <div id="strip"></div>
+      <button class="go" id="stripright" title="右のタブへ" hidden>›</button>
+    </div>
     <div id="work" hidden>
       <!-- **入ってきたものの報せ。** 面の上に置く ── 「並べて」でも
            「コード」でも同じことが起きているので、片方の面の中に入れると
