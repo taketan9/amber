@@ -430,6 +430,45 @@ jobs:
           path: dist-office/amber-win-x64-office-*.zip
           if-no-files-found: error
 
+      # **会社へ持ち込む一式**（`amber-src.zip`・依頼 639・本人「資材をもちこむ
+      # だけにして、社内ではビルドするだけにしたい」）。
+      #
+      # 中身は画面（`gui/vendor` ごと ＝ npm が要らない）・印と見本・組む道具・
+      # エンジン一枚（＝ Rust が要らない）。**Electron は入れない** ── 会社には
+      # cian のぶんが既にあり、百メガを毎回配る意味が無い。
+      - name: 持ち込む一式を組む
+        run: node scripts/src-zip.js --engine engine/amber-server-win-x64.exe --out out/amber-src.zip
+
+      # **会社と同じ手順を、ここで一度通す。**
+      #
+      # 一式を配って「あちらで組んだら落ちた」がいちばん高くつく ── 展開して、
+      # 会社で叩くのと同じ一行を叩き、三つ出来たかを数える。Windows の上で
+      # やるのは、あの機械で動くことを見たいから（`Compress-Archive` の
+      # 化けも、道の区切りも、ここでしか出ない）。
+      - name: 一式から、会社と同じ手順で組んでみる
+        shell: pwsh
+        run: |
+          Expand-Archive out/amber-src.zip -DestinationPath try
+          Push-Location try/amber-src
+          node scripts/build-win.js --electron $env:GITHUB_WORKSPACE/electron-dist --out dist
+          Pop-Location
+          $v = (Get-Content gui/package.json | ConvertFrom-Json).version
+          foreach ($f in @('amber-gui.zip', 'amber-server-win-x64.exe.zip', "amber-win-x64-office-$v.zip")) {
+            $at = "try/amber-src/dist/$f"
+            if (-not (Test-Path $at)) { throw "一式から組めていません: $f" }
+            Write-Host ("{0}  {1:N0} KB" -f $f, ((Get-Item $at).Length / 1KB))
+          }
+          # 会社向けの札が入っているか ── 一式から組んだ一枚でも確かめる。
+          Expand-Archive "try/amber-src/dist/amber-win-x64-office-$v.zip" -DestinationPath try/out
+          $at = 'try/out/amber-win-x64-office/resources/app/gui/edition.json'
+          if (-not (Test-Path $at)) { throw "一式から組んだ一枚に、版の札がありません" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amber-src.zip
+          path: out/amber-src.zip
+          if-no-files-found: error
+
   # **札を押したときだけ出す。** 手で走らせた回は資材だけ残る。
   publish:
     needs: [build, screen, windows]

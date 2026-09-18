@@ -68,14 +68,31 @@ function walk(dir, base, out) {
  */
 function zipDir(dir, out) {
     const base = path.dirname(dir);
-    const files = walk(dir, base, []);
+    return zipFiles(walk(dir, base, []), out);
+}
+
+/**
+ * 決めたものだけを一枚にする（依頼 639）。`rows` は `{ at, rel }` ──
+ * `at` は実物の道、`rel` は zip の中での道。
+ *
+ * **フォルダを丸ごと入れられない一枚のために。** 同梱する側へ渡す
+ * `amber-gui.zip` は `gui/**` と `packaging` の一部だけで、間にあるものを
+ * 入れない ── 選ぶのは呼ぶ側の仕事で、ここは詰めるだけ。
+ */
+function zipFiles(rows, out) {
+    // **フォルダの項目も書ける**（`{ rel, dir: true }`）── 素の中身だけだと、
+    // Unix で展開したときに入れないフォルダができることがある
+    // （`packaging/gui_zip.py` の註 ── 同梱する側の CI がそれで止まった）。
+    const files = rows.map((r) => (r.dir
+        ? { rel: r.rel.endsWith('/') ? r.rel : r.rel + '/', dir: true, st: { mtime: new Date(), mode: 0o40755 } }
+        : { at: r.at, rel: r.rel, st: fs.statSync(r.at) }));
     const parts = [];
     const central = [];
     let at = 0;
 
     for (const f of files) {
         const name = Buffer.from(f.rel, 'utf8');
-        const raw = fs.readFileSync(f.at);
+        const raw = f.dir ? Buffer.alloc(0) : fs.readFileSync(f.at);
         const sum = crc32(raw);
         const packed = zlib.deflateRawSync(raw, { level: 9 });
         // **縮まないものは、そのまま入れる。** 既に縮んでいるもの（png・
@@ -116,7 +133,10 @@ function zipDir(dir, out) {
         dir1.writeUInt16LE(0, 36);          // 中身の性質
         // **実行の印を残す。** Windows では意味を持たないが、mac や Linux で
         // 展開したときに `amber-server` が実行できないと、そこで止まる。
-        dir1.writeUInt32LE(((f.st.mode & 0o7777) || 0o644) << 16, 38);
+        // フォルダは MS-DOS の属性も立てる（Windows の道具が見る）。
+        dir1.writeUInt32LE(f.dir
+            ? ((0o40755 << 16) | 0x10) >>> 0
+            : ((f.st.mode & 0o7777) || 0o644) << 16, 38);
         dir1.writeUInt32LE(at, 42);
         central.push(dir1, name);
 
@@ -138,4 +158,4 @@ function zipDir(dir, out) {
     return files.length;
 }
 
-module.exports = { zipDir, crc32 };
+module.exports = { zipDir, zipFiles, crc32 };

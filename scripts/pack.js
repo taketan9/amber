@@ -71,9 +71,21 @@ const edition = (() => {
     return want;
 })();
 
+/// 版。**`Cargo.toml` が本**だが、持ち込む一式には入っていない（依頼 639 の
+/// `amber-src.zip` は画面と道具だけ）ので、無ければ `gui/package.json` を見る
+/// ── 版は四か所で同じ数字なので、どちらを見ても同じものが出る。
 const version = (() => {
-    const m = fs.readFileSync(path.join(ROOT, 'Cargo.toml'), 'utf8').match(/^version = "(.+?)"/m);
-    return m ? m[1] : '0.0.0';
+    const cargo = path.join(ROOT, 'Cargo.toml');
+    if (fs.existsSync(cargo)) {
+        const m = fs.readFileSync(cargo, 'utf8').match(/^version = "(.+?)"/m);
+        if (m) return m[1];
+    }
+    const pkg = path.join(ROOT, 'gui', 'package.json');
+    if (fs.existsSync(pkg)) {
+        const v = JSON.parse(fs.readFileSync(pkg, 'utf8')).version;
+        if (v) return v;
+    }
+    return '0.0.0';
 })();
 
 /** 写す（フォルダは丸ごと・`skip` に当たる名前は飛ばす）。 */

@@ -43,7 +43,52 @@ AMBER_EDITION=office ./gui/run.sh
 
 ---
 
-## 家でやること（一度）
+## いちばん軽い道 ── `amber-src.zip` を持ち込む（依頼 639）
+
+cian や crmaine と同じ形。**持ち込むのは一枚だけ、会社では組むだけ。**
+
+1. Release から **`amber-src.zip`**（10MB ほど）を落として、USB で運ぶ
+2. 会社の端末で展開する（`amber-src\` が一つできる）
+3. その中でコマンドプロンプトを開いて、一行:
+
+```
+node scripts\build-win.js --electron C:\electron-v33.4.11-win32-x64
+```
+
+`dist\` に**三つ**できる:
+
+| | |
+|---|---|
+| `amber-gui.zip` | 同梱する側（crmaine）へ渡す画面一式 |
+| `amber-server-win-x64.exe.zip` | エンジン一枚 |
+| `amber-win-x64-office-<版>.zip` | 会社向けの ambər 本体 |
+
+- **要るのは Node と Electron の一式だけ。** Rust も npm も python も要らない
+  （エンジンと `gui/vendor/` は、一式の中に入っている）
+- **Electron は入っていない**（百メガあり、会社には cian のぶんが既にある）
+- 名前と絵を exe に焼くなら `--rcedit C:\tools\rcedit-x64.exe` を足す
+- ふつうの版（同期入り）も要るなら `--full` を足す
+- **網には一度も出ない**
+
+手元で `amber-src.zip` を組み直すなら:
+
+```bash
+cd gui && npm ci && node vendor.js && cd ..
+gh release download --pattern amber-server-win-x64.exe --dir dist
+node scripts/src-zip.js --engine dist/amber-server-win-x64.exe --out out/amber-src.zip
+```
+
+**CI は、この一式から会社と同じ一行で組んで、三つ出来たかを数えている**
+（`release.yml` の「一式から、会社と同じ手順で組んでみる」）── 配ってから
+「あちらで組んだら落ちた」がいちばん高くつく。
+
+---
+
+## Electron ごと持ち込む道（`offline-kit`）
+
+会社に Electron が無いときは、こちら（300MB ほど）。
+
+### 家でやること（一度）
 
 ```bash
 cd gui && npm install && node vendor.js   # エディタと図の実体（16MB・git には入らない）
@@ -74,7 +119,7 @@ Electron の一式（`electron-v33.4.11-win32-x64`）は、リポジトリの隣
 
 ---
 
-## 会社でやること
+### 会社でやること（`offline-kit` を持ち込んだとき）
 
 要るのは **Node.js だけ**（`node --version` が通ること）。網には一度も出ない。
 
