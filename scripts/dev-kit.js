@@ -26,6 +26,7 @@
  */
 'use strict';
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const { zipFiles } = require('./zip');
 
@@ -49,8 +50,16 @@ const NOT_ON_WINDOWS = [
     'linux-raw-sys',   // Linux の system call の型（18MB）
 ];
 
-/// ソースのうち、持っていかないもの。**組んだものと、取り寄せたもの。**
-const SKIP = new Set(['target', 'node_modules', '.git', 'dist', 'out', '.github']);
+/// ソース一式は **git が知っているものだけ**（依頼 640）。
+///
+/// 前は「この名前は飛ばす」という引き算で選んでいて、**組んだ場所に転がって
+/// いたものまで入った** ── CI では `vendor/`（依存 100MB）と `rustdist/`
+/// （Rust の一枚 358MB）が根に置かれていて、それを二度包み、746MB になった。
+/// 足し算で選べば、知らないものは入りようがない。
+function tracked() {
+    const out = execFileSync('git', ['-C', ROOT, 'ls-files', '-z'], { encoding: 'buffer' });
+    return out.toString('utf8').split('\0').filter(Boolean);
+}
 
 function walk(dir, into, out, skip = () => false) {
     for (const name of fs.readdirSync(dir).sort()) {
@@ -74,8 +83,16 @@ function main() {
     }
 
     const rows = [];
-    // 一、ソース一式（画面も判断の側も、試験も台帳も）。
-    walk(ROOT, 'amber-dev/amber', rows, (n) => SKIP.has(n));
+    // 一、ソース一式（画面も判断の側も、試験も台帳も）。**git が知っている
+    // ものだけ** ── 組んだ場所に転がっているものを巻き込まない。
+    for (const rel of tracked()) {
+        const at = path.join(ROOT, rel);
+        if (fs.existsSync(at) && fs.statSync(at).isFile()) {
+            rows.push({ at, rel: 'amber-dev/amber/' + rel });
+        }
+    }
+    // 画面の部品だけは git に入っていない（`npm` が置いたものの写し）。
+    walk(path.join(ROOT, 'gui', 'vendor'), 'amber-dev/amber/gui/vendor', rows);
     // 二、依存の実体。**Linux 専用は捨てる。**
     const dropped = [];
     walk(vendor, 'amber-dev/amber/vendor', rows, (n) => {
