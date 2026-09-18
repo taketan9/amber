@@ -37,6 +37,8 @@ struct NoteView: View {
     @State private var facing = false
     /// 画像の大きさを訊いているか（依頼 420）。
     @State private var sizing = false
+    /// 原寸で見ている画像（依頼 637）。
+    @State private var peeking: URL?
     /// 表示の面で叩かれた、触れないかたまり・リンク（依頼 403）。
     /// **どの小窓を出すか**を決めるのはこちら（閉じると空になる）。
     @State private var tapped: Tapped?
@@ -433,6 +435,11 @@ struct NoteView: View {
                 }
                 .confirmationDialog("画像", isPresented: showing("img"),
                                     titleVisibility: .visible) {
+                    // **原寸で見る**（依頼 637・本人「実際の画像サイズに拡大して
+                    // ポップアップ表示する、みたいなことはできないかなぁ」）──
+                    // 紙の幅に合わせて描いているので、字の入った画面写真は縮んで
+                    // 読めない。窓と同じ道（押したら原寸）。
+                    Button("原寸で見る") { peeking = picURL(held?.at ?? "") }
                     // **画像の大きさは、押して選べる**（依頼 420）── 記法を
                     // 覚えていない人が、いちばん変えたがるのがこれ。
                     Button("大きさ…") { sizing = true }
@@ -449,6 +456,7 @@ struct NoteView: View {
                     Button("はばいっぱい") { size(nil) }
                     Button("やめる", role: .cancel) {}
                 }
+                .fullScreenCover(item: $peeking) { at in Peeking(at: at) }
                 .confirmationDialog(held?.at ?? "リンク", isPresented: showing("link"),
                                     titleVisibility: .visible) {
                     Button("開く") { open(held?.at ?? "") }
@@ -662,6 +670,59 @@ struct NoteView: View {
 
     private var folder: URL {
         URL(fileURLWithPath: tab.note.path).deletingLastPathComponent()
+    }
+
+    /// `![説明](attachments/x.png)` の道を、開けるファイルに（依頼 637）。
+    /// **外の URL は返さない** ── 原寸で見る窓はファイルを見せるところで、
+    /// 網に出る道ではない。
+    private func picURL(_ md: String) -> URL? {
+        guard let open = md.firstIndex(of: "("), let close = md.lastIndex(of: ")"),
+              open < close else { return nil }
+        var link = String(md[md.index(after: open)..<close])
+        // `![説明 w:200px](…)` の大きさは道ではない ── 空白より前まで。
+        if let sp = link.firstIndex(of: " ") { link = String(link[..<sp]) }
+        link = link.removingPercentEncoding ?? link
+        if link.isEmpty || link.contains("://") { return nil }
+        return folder.appendingPathComponent(link)
+    }
+}
+
+/// 原寸で見る窓（依頼 637）。**縮めない** ── 縮めるなら開く意味が無い。
+/// はみ出したぶんは指で送って見る。「画面に合わせる」で一度だけ縮む。
+struct Peeking: View {
+    let at: URL
+    @Environment(\.dismiss) private var shut
+    @State private var fit = false
+
+    var body: some View {
+        let img = UIImage(contentsOfFile: at.path)
+        return VStack(spacing: 0) {
+            ScrollView([.horizontal, .vertical]) {
+                if let img {
+                    Image(uiImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: fit ? nil : img.size.width,
+                               height: fit ? nil : img.size.height)
+                } else {
+                    Text("画像を開けません").foregroundStyle(.secondary).padding()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black.opacity(0.9))
+            HStack(spacing: 10) {
+                if let img {
+                    Text("\(Int(img.size.width)) × \(Int(img.size.height)) px")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(fit ? "原寸で見る" : "画面に合わせる") { fit.toggle() }.font(.footnote)
+                Button("閉じる") { shut() }.font(.footnote.weight(.semibold))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
+        }
     }
 }
 

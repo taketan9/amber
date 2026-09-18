@@ -6632,12 +6632,13 @@ el('read').addEventListener('click', async (e) => {
         // 触れるようにしたはずの表を押した瞬間に書く面へ飛ぶ（実際に飛んだ）。
         const rich = e.target.closest('pre, figure, .mermaid');
         if (rich && el('read').contains(rich)) {
-            const pic = rich.tagName === 'FIGURE';
+            // **画像は、押したら原寸で開く**（依頼 637）── 紙の幅に
+            // 合わせて描いているので、字の入った画面写真は縮んで読めない。
+            // 前は小窓（大きさ…／消す）を出していたが、その二つは原寸の窓の
+            // 中に置いた ── 押して真っ先にしたいのは「大きく見る」ほう。
+            if (rich.tagName === 'FIGURE') { openLens(rich); return; }
             popMenu([
-                // **画像の大きさは、押して選べる**（依頼 420）── 記法を
-                // 覚えていない人が、いちばん変えたがるのがこれ。
-                pic ? { name: '大きさ…', sub: sizeNow(rich), run: () => askSize(rich) } : null,
-                pic ? null : { name: 'コードで直す', sub: '「コード」のその行へ', run: () => toSource(rich) },
+                { name: 'コードで直す', sub: '「コード」のその行へ', run: () => toSource(rich) },
                 { name: '消す', sep: true, run: () => dropBlock(rich) },
             ], { x: e.clientX, y: e.clientY });
         }
@@ -6684,6 +6685,48 @@ const SIZES = [
 ];
 
 /// いまの大きさを、献立の右に添える一言。
+/// 原寸で見る窓（依頼 637）。**縮めない** ── 縮めるなら開く意味が無い。
+/// はみ出したぶんは転がして見る。「画面に合わせる」で一度だけ縮められる。
+let lensOf = null;
+function openLens(fig) {
+    const img = fig.querySelector('img');
+    if (!img) return;
+    lensOf = fig;
+    const lens = el('lens');
+    const shown = lens.querySelector('img');
+    shown.src = img.currentSrc || img.src;
+    shown.alt = img.getAttribute('alt') || '';
+    lens.classList.remove('fit');
+    lens.hidden = false;
+    // **大きさは、画像が答える。** 読み込み前は 0 なので、載ってから書く。
+    const tell = () => {
+        const w = shown.naturalWidth;
+        const h = shown.naturalHeight;
+        lens.querySelector('.sz').textContent = w
+            ? (img.getAttribute('alt') ? img.getAttribute('alt') + ' ・ ' : '') + w + ' × ' + h + ' px'
+            : '';
+    };
+    if (shown.complete) tell(); else shown.onload = tell;
+}
+
+function closeLens() {
+    el('lens').hidden = true;
+    lensOf = null;
+}
+
+el('lens').onclick = (e) => {
+    const what = e.target.closest('button')?.dataset.do;
+    // **地を押したら閉じる。** 画像そのものを押しても閉じない ── 転がして
+    // 見ている途中の一押しで消えると、探していた場所を見失う。
+    if (!what) { if (!e.target.closest('#lensbox img')) closeLens(); return; }
+    const fig = lensOf;
+    if (what === 'fit') { el('lens').classList.toggle('fit'); return; }
+    closeLens();
+    if (!fig) return;
+    if (what === 'size') askSize(fig);
+    else if (what === 'drop') dropBlock(fig);
+};
+
 function sizeNow(fig) {
     const w = fig.querySelector('img')?.style.width || '';
     return SIZES.find((s) => s.px === w)?.name || (w ? '横 ' + w : '幅いっぱい');
@@ -7892,6 +7935,7 @@ document.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') {
         // **手前にあるものから閉じる。** 小窓が開いているのに大きい画面が
         // 戻ると、閉じたつもりのものが残る。
+        if (!el('lens').hidden) { e.preventDefault(); closeLens(); return; }
         if (!el('emoji').hidden) { e.preventDefault(); closeEmoji(); return; }
         if (!el('more').hidden) { e.preventDefault(); closeMenu(); return; }
         if (!el('veil').hidden) { e.preventDefault(); closeSheet(null); return; }

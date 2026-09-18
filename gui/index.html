@@ -900,6 +900,32 @@ body.split #read { border-left: 1px solid var(--line-2); }
 }
 #read a:hover { text-decoration-color: currentColor; }
 
+/* 原寸で見る窓（依頼 637）。**地を暗くする** ── 紙の上に紙を重ねると、
+   どちらを見ているのか分からない。大きい画像はそのまま置いて、はみ出したぶんは
+   この窓を転がして見る（縮めない ── 縮めるなら開く意味が無い）。 */
+#lens {
+  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
+  background: rgba(20, 16, 10, .82);
+}
+#lens[hidden] { display: none !important; }
+#lensbox { flex: 1; min-height: 0; overflow: auto; display: flex; }
+#lensbox img {
+  margin: auto; padding: 18px; max-width: none; border-radius: 6px;
+  background: var(--paper);
+}
+#lens.fit #lensbox img { max-width: calc(100% - 36px); height: auto; object-fit: contain; }
+#lensbar {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px; background: var(--paper); border-top: 1px solid var(--line);
+  font-size: 12.5px; color: var(--ink-2);
+}
+#lensbar .grow { flex: 1; }
+#lensbar button {
+  padding: 4px 11px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--paper); color: var(--ink); font-size: 12.5px; cursor: pointer;
+}
+#lensbar button:hover { background: var(--hover); }
+
 /* ── 画像 ──
    裸で置かない。**地と同じ色の画像は、どこからが画像か分からない。** */
 #read figure { margin: 1.4em 0; text-align: center; }
@@ -2047,6 +2073,21 @@ body.dropping::after {
     <div class="f"><span>テンプレートから作る</span><div id="nntmpl" class="chips"></div></div>
     <div class="acts"><button id="nncancel">やめる</button><button id="nnok" class="go">作成</button></div>
   </div></div>
+  <!-- **画像を原寸で見る**（依頼 637・本人「OneNote の画像サイズが、
+       インポートするとものすごく縮小されて…画像をクリックしたら、実際の
+       画像サイズに拡大してポップアップ表示する、みたいなことはできないかなぁ」）。
+       紙の幅に合わせて描いているので、字の入った画面写真は縮むと読めない。 -->
+  <div id="lens" hidden>
+    <div id="lensbox"><img alt=""></div>
+    <div id="lensbar">
+      <span class="sz"></span>
+      <span class="grow"></span>
+      <button data-do="fit">画面に合わせる</button>
+      <button data-do="size">大きさ…</button>
+      <button data-do="drop">消す</button>
+      <button data-do="close">閉じる</button>
+    </div>
+  </div>
   <div id="veil" hidden><div id="sheet">
     <div class="brand" hidden></div>
     <div class="hd"></div>
