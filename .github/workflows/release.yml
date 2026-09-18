@@ -469,9 +469,84 @@ jobs:
           path: out/amber-src.zip
           if-no-files-found: error
 
+  # **会社で直して・組んで・試すための一式**（`amber-dev.zip`・依頼 640）。
+  #
+  # 軽いほう（`amber-src.zip`）は組むだけ。こちらは**判断の側（Rust）まで**
+  # 直せる一式で、450MB ほどある ── だから分けてある（本人が決めた）。
+  #
+  # **自己完結版（windows-gnu）を配る。** 会社の端末に Visual Studio が
+  # 入っているか分からないため ── MSVC 版は VS の Build Tools が別に要る。
+  # ここで**その組み方で本当に組めるか**を毎回確かめてから包む。
+  devkit:
+    needs: [version, build]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # 画面の部品（`gui/vendor`）も一式に入る ── あれは git に無い。
+      - name: エディタと図を積む
+        working-directory: gui
+        run: |
+          npm ci --no-audit --no-fund
+          node vendor.js
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: amber-server-win-x64.exe
+          path: engine
+
+      # **自己完結版で本当に組めるか。** ここが通らないなら、358MB を運んで
+      # もらう意味が無い（会社で初めて分かるのがいちばん高くつく）。
+      - name: 自己完結版（gnu）で、エンジンを組んでみる
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          cargo build --release -p amber-server --target x86_64-pc-windows-gnu
+        shell: bash
+
+      - name: 組めたか、動くか
+        shell: pwsh
+        run: |
+          $exe = 'target/x86_64-pc-windows-gnu/release/amber-server.exe'
+          if (-not (Test-Path $exe)) { throw "組めていません: $exe" }
+          $out = '{"id":1,"method":"version","params":{}}' | & $exe
+          Write-Host $out
+          if ($out -notmatch '"ok"') { throw "答えません: $out" }
+
+      # 依存の実体（`cargo vendor`）── 会社では網に出られないので、丸ごと運ぶ。
+      - name: 依存を取り寄せる
+        run: cargo vendor vendor
+        shell: bash
+
+      # Rust 本体（自己完結版）。**許諾は MIT / Apache-2.0** なので、そのまま
+      # 配ってよい（一式の「はじめに読んでください」にもそう書いてある）。
+      - name: Rust の一枚を落とす
+        shell: pwsh
+        run: |
+          $v = (rustc --version).Split(' ')[1]
+          $url = "https://static.rust-lang.org/dist/rust-$v-x86_64-pc-windows-gnu.msi"
+          Write-Host $url
+          New-Item -ItemType Directory -Force -Path rustdist | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile "rustdist/rust-$v-x86_64-pc-windows-gnu.msi"
+
+      - name: 一式を組む
+        shell: bash
+        run: |
+          msi=$(ls rustdist/*.msi | head -1)
+          node scripts/dev-kit.js --rust "$msi" --vendor vendor \
+            --engine engine/amber-server-win-x64.exe --out out/amber-dev.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amber-dev.zip
+          path: out/amber-dev.zip
+          if-no-files-found: error
+
   # **札を押したときだけ出す。** 手で走らせた回は資材だけ残る。
   publish:
-    needs: [build, screen, windows]
+    needs: [build, screen, windows, devkit]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
