@@ -10,4 +10,6 @@
 | `fsshttp/New Section 1.one` | FSSHTTP 包み（MS-ONESTORE 2.8）── SharePoint／OneDrive から落とした形 | [onenote.rs](https://github.com/msiemens/onenote.rs) の試験資材 | MPL-2.0（`fsshttp/LICENSE`） |
 | `notebook/`（目次 `Open Notebook.onetoc2` と 2 セクション） | 同上 ── **目次つきの一冊**。試験の中で CAB に包んで `.onepkg` にする | 同上（`New Section Group/`） | MPL-2.0（`notebook/LICENSE`） |
 
+| `checks/handwriting_recognition.one` | 同上 ── **升（チェックボックス）と手書き**が入っている | 同上 | MPL-2.0（`checks/LICENSE`） |
+
 **AGPL の見本（onenote.rs の `joplin/`）は持ち込まない。**

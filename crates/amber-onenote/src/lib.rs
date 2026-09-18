@@ -371,6 +371,15 @@ impl Writer {
                     if line.trim().is_empty() {
                         continue;
                     }
+                    // **チェックボックスは升で写す**（依頼 635・本人「OneNote で
+                    // チェックボックスにしていたものが、ただの文字列になっていた」）。
+                    // OneNote では升も「ノートタグ」の一つ。
+                    if let Some(done) = ticked(t) {
+                        self.out.push_str(&format!(
+                            "{pad}- [{}] {}\n", if done { "x" } else { " " }, line.trim()));
+                        self.listing = true;
+                        continue;
+                    }
                     if let Some(m) = mark {
                         self.out.push_str(&format!("{pad}{m}{}\n", line.trim()));
                         self.listing = true;
@@ -496,6 +505,21 @@ impl Writer {
     }
 }
 
+/// この段落は升（チェックボックス）か。**済んでいるかも返す。**
+///
+/// OneNote の升は「ノートタグ」の一つで、形の名前に `CheckBox` が入っている
+/// （`GreenCheckBox` / `YellowStarCheckBox` …、八十ほどある）。**名前で見分ける**
+/// ── 八十の枝を書き写すと、部品が形を一つ足した日に、そこだけ升にならない。
+fn ticked(t: &RichText) -> Option<bool> {
+    t.note_tags().iter().find_map(|tag| {
+        let shape = tag.definition()?.shape();
+        if !format!("{shape:?}").contains("CheckBox") {
+            return None;
+        }
+        Some(tag.item_status().completed())
+    })
+}
+
 /// 段落の書式から見出しの段（`h1`〜`h6`）。
 fn heading(t: &RichText) -> Option<usize> {
     let id = t.paragraph_style().style_id()?;
@@ -588,32 +612,55 @@ fn dress(text: &str, s: &onenote_parser::contents::ParagraphStyling) -> String {
     if core.is_empty() {
         return text.to_string();
     }
+    let body = wrap(core, s.bold(), s.italic(), s.strikethrough(), color(s.font_color()).as_deref());
+    format!("{}{}{}", &text[..lead], body, &text[text.len() - tail..])
+}
+
+/// 飾りを巻く順（依頼 633）。**色はいちばん外、印はその中。** 本人が本物の
+/// 見本で踏んだ ── 表の見出し行（濃い地に白い太字）が `**hoge**` と星印ごと
+/// 出て、しかも白くて読めなかった。ambər は色の中の印を読む（`Inline::Colored`）
+/// ので、この順なら太字も色も効く。白に近い色は、そもそも運ばない（[`pale`]）。
+fn wrap(core: &str, bold: bool, italic: bool, strike: bool, hex: Option<&str>) -> String {
     let mut body = core.to_string();
-    if s.strikethrough() {
+    if strike {
         body = format!("~~{body}~~");
     }
-    body = match (s.bold(), s.italic()) {
+    body = match (bold, italic) {
         (true, true) => format!("***{body}***"),
         (true, false) => format!("**{body}**"),
         (false, true) => format!("*{body}*"),
         _ => body,
     };
-    if let Some(hex) = color(s.font_color()) {
-        body = format!("<span style=\"color:{hex}\">{body}</span>");
+    // **色はいちばん外**。中の `**` は ambər が読む（`markdown.rs` の
+    // `Inline::Colored`）── 逆にすると `<span>` が太字の中に入り、生の HTML は
+    // 印として読まれないので `<span …>` の字がそのまま出る。
+    match hex {
+        Some(hex) => format!("<span style=\"color:{hex}\">{body}</span>"),
+        None => body,
     }
-    format!("{}{}{}", &text[..lead], body, &text[text.len() - tail..])
 }
 
 /// 字の色。**自動と黒は色として出さない** ── 出すとノートじゅうが span で
 /// 埋まる（貼り付けと同じ決まり・依頼 616）。
+///
+/// **白に近い色も出さない**（依頼 633・本人「文字色が白色なのでめっちゃ
+/// 読みにくかった」）── OneNote の表の見出し行は「濃い地に白い字」で、
+/// 地の色はこちらへ運べない（Markdown の表に升の地色は無い）。白だけ運ぶと、
+/// ambər の明るい紙の上で**見えない字**になる。色を落とせば、太字は残る。
 fn color(c: Option<onenote_parser::property::common::ColorRef>) -> Option<String> {
     use onenote_parser::property::common::ColorRef;
     match c? {
-        ColorRef::Manual { r, g, b } if (r, g, b) != (0, 0, 0) => {
+        ColorRef::Manual { r, g, b } if (r, g, b) != (0, 0, 0) && !pale(r, g, b) => {
             Some(format!("#{r:02x}{g:02x}{b:02x}"))
         }
         _ => None,
     }
+}
+
+/// 明るすぎて、白い紙の上で読めない色か（明るさは人の目の重みで測る）。
+fn pale(r: u8, g: u8, b: u8) -> bool {
+    let bright = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
+    bright >= 236.0
 }
 
 #[cfg(test)]
@@ -637,6 +684,20 @@ mod tests {
     fn 名前の無い印は空にする() {
         let body = format!("![]({PIC_OPEN}9{PIC_CLOSE})");
         assert_eq!(fill(&body, &[], &[]), "![]()");
+    }
+
+    /// 依頼 633 ── 本物の見本（OneNote の表の見出し行）で踏んだ二つ。
+    #[test]
+    fn 色は太字の内側に置き_白は落とす() {
+        // **色は外、印は中** ── `<span>` を印の中に入れると字のまま出る。
+        assert_eq!(wrap("hoge", true, false, false, Some("#c00000")),
+                   "<span style=\"color:#c00000\">**hoge**</span>");
+        assert_eq!(wrap("hoge", true, false, false, None), "**hoge**");
+        assert_eq!(wrap("x", true, true, true, None), "***~~x~~***");
+        assert!(pale(255, 255, 255));
+        assert!(pale(240, 240, 240));
+        assert!(!pale(127, 127, 127));
+        assert!(!pale(255, 255, 0), "黄色は明るいが、白ではない");
     }
 
     #[test]
@@ -692,6 +753,16 @@ mod tests {
         assert!(p.body.contains("](https://example.com)"), "リンクにならない: {}", p.body);
         // 作った日。
         assert_eq!(p.created.len(), 10, "{}", p.created);
+    }
+
+    /// 升（依頼 635）── **済み・未済のどちらも**。OneNote では升も
+    /// 「ノートタグ」の一つで、形の名前で見分ける。
+    #[test]
+    fn 升は升のまま写す() {
+        let got = open(&sample("checks/handwriting_recognition.one")).expect("開けない");
+        let body: String = got.units[0].pages.iter().map(|p| p.body.clone()).collect();
+        assert!(body.contains("- [ ] "), "未済の升が出ない: {body:.400}");
+        assert!(body.contains("- [x] "), "済みの升が出ない: {body:.400}");
     }
 
     /// **会社の書き出しと同じ形**（公開仕様・MS-ONESTORE 2.3）。

@@ -5231,6 +5231,30 @@ function setFont(step, quiet) {
     if (!quiet && fontStep !== 0) say('文字の大きさ ' + px + 'px（' + keyText('⌘0') + ' で戻る）');
 }
 
+/// **Ctrl＋ホイールで字の大きさ**（依頼 634・本人「無意識に実施したんだけど
+/// 有効じゃなかったので、ちょっと違和感があったんだ」）。
+///
+/// どの窓でもそうなっているので、手が先に動く。`preventDefault` は要る ──
+/// 入れないと Electron が窓ぜんぶを拡大し、ノートだけでなく帯も列も膨らむ。
+///
+/// **溜めてから一段。** トラックパッドの摘みも同じ形（`ctrlKey` 付きの
+/// ホイール）で来るが、一回の摘みで何十も飛んでくるので、そのまま一段ずつ
+/// 数えると端から端まで一瞬で行ってしまう。
+let zoomRoll = 0;
+const ZOOM_NOTCH = 40;
+window.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    zoomRoll += e.deltaY;
+    if (Math.abs(zoomRoll) < ZOOM_NOTCH) return;
+    // **一回で一段。** マウスの一目盛りは 120 ほど来るので、割り算で数えると
+    // 一目盛りで二段も三段も飛ぶ（本物の窓で測った）。溜まりは使い切る。
+    const way = zoomRoll > 0 ? -1 : 1;   // 手前に回す＝小さく
+    zoomRoll = 0;
+    if (el('cal').hidden) setFont(fontStep + way);
+    else setCalFont(calFontStep + way);
+}, { passive: false });
+
 // 帯の「A−」「A＋」（依頼 623）。鍵と同じ一本の道（`setFont`）を通す。
 el('fontdown').onclick = () => setFont(fontStep - 1);
 el('fontup').onclick = () => setFont(fontStep + 1);

@@ -525,10 +525,16 @@ fn inline_html(text: &str) -> String {
             // The colour was validated as six hex digits before it got
             // here, so this is the one place a style attribute is written
             // and it cannot carry anything else.
+            //
+            // **色の中の印は読む**（依頼 633）── 前は中身を字として escape して
+            // いたので、`<span …>**hoge**</span>` が `**hoge**` と出た。OneNote
+            // から来た表の見出し（濃い地に白い太字）がそれで、本人の画面には
+            // 星印がそのまま並んだ。走査は入れ子を読まないが、**ここで一段
+            // 潜る**ぶんには同じ約束が保てる ── 中の字もこの関数が escape する。
             Inline::Colored { text, color } => {
                 out.push_str(&format!(
                     "<span style=\"color:{color}\">{}</span>",
-                    esc(&text)
+                    inline_html(&text)
                 ));
             }
             Inline::Link { text, url } => match safe_url(&url) {

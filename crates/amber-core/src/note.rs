@@ -1274,7 +1274,20 @@ pub fn hits(hay: &str, query: &str) -> bool {
 /// For the places that want a sentence rather than a drawing: the second line
 /// of a row, and what a search matches against.
 pub fn plain(line: &str) -> String {
-    spans(line).into_iter().map(|s| s.text).collect()
+    spans(line)
+        .into_iter()
+        .map(|s| {
+            // 色の中に印があるときは、そこも剥がす（依頼 633）── 抜粋や
+            // 探しものに `**` が出ると、字ではない記号で引っかかる。
+            if s.text.contains('*') || s.text.contains('~') || s.text.contains('`') {
+                let inner: String = spans(&s.text).into_iter().map(|x| x.text).collect();
+                if inner != s.text {
+                    return inner;
+                }
+            }
+            s.text
+        })
+        .collect()
 }
 
 /// Wrap a piece of text in a colour, the way cian writes it.
