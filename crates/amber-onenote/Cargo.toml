@@ -14,7 +14,9 @@ description = "OneNote が書き出したものを、ambər の読める Markdow
 #
 # 机の上だけで使う（`amber-core` の `desktop` から）── 電話の束ねには入らない。
 [dependencies]
-onenote_parser = { version = "2", default-features = false, features = ["onepkg"] }
+# **写しを見る**（依頼 636）── `crates/vendor/onenote_parser`。本家 2.0.0 に
+# 一つだけ直しを当ててある（`PATCHES.ja.md` に何をなぜ直したかを書いてある）。
+onenote_parser = { path = "../vendor/onenote_parser", default-features = false, features = ["onepkg"] }
 # `native-fs` は入れない ── Windows でドライブ名の道を断る（lib.rs の `StdFs`）。
 typed-path = "0.12"
 anyhow = { workspace = true }

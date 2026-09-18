@@ -5,6 +5,8 @@ members = [
     "crates/amber-ffi",
     "crates/amber-onenote",
     "crates/amber-server",
+    # 借り物の写し（依頼 636）── `crates/vendor/onenote_parser/PATCHES.ja.md`。
+    "crates/vendor/onenote_parser",
 ]
 
 [workspace.package]
