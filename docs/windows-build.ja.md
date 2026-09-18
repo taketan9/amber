@@ -84,6 +84,41 @@ node scripts/src-zip.js --engine dist/amber-server-win-x64.exe --out out/amber-s
 
 ---
 
+## 直すところまでやる道 ── `amber-dev.zip`（依頼 640）
+
+**判断の側（Rust）まで会社で直したいとき。** Release の `amber-dev.zip`
+（**377MB**）を持ち込む。
+
+```
+amber-dev\
+  はじめに読んでください.txt
+  rust\rust-<版>-x86_64-pc-windows-gnu.msi   ← Rust 本体（自己完結版）
+  amber\                                     ← ソース一式（試験も台帳も）
+    .cargo\config.toml                       ← 依存は隣の vendor から
+    vendor\                                  ← 依存の実体（cargo vendor）
+    amber-server-win-x64.exe                  ← 出来合いのエンジン
+```
+
+1. `rust\…-windows-gnu.msi` をダブルクリックして入れる（**Visual Studio は
+   要らない** ── この一枚に、組むのに要るものが全部入っている）
+2. `cd amber`
+3. 組む: `cargo build --release -p amber-server --target x86_64-pc-windows-gnu`
+4. 試す: `cargo test --workspace` ／ `python scripts\requests.py`
+
+**回らないもの**:
+
+- jsdom を使う試験（`paper-test` ほか）── npm が要る
+- iPhone 側 ── Mac と Xcode が要る
+
+**なぜ MSVC 版ではないか。** あちらは Visual Studio の Build Tools が別に
+要る（数 GB）。自己完結版（gnu）なら一枚で足りる ── **CI が毎回その組み方で
+エンジンを組み、動かしてから包んでいる**（`release.yml` の「自己完結版（gnu）で、
+エンジンを組んでみる」）。
+
+**端末のディスク**は、Rust 本体で 1.2GB ほど、`target\` が 2〜3GB 育つ。
+
+---
+
 ## Electron ごと持ち込む道（`offline-kit`）
 
 会社に Electron が無いときは、こちら（300MB ほど）。
