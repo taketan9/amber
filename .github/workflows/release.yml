@@ -520,22 +520,44 @@ jobs:
         run: cargo vendor vendor
         shell: bash
 
-      # Rust 本体（自己完結版）。**許諾は MIT / Apache-2.0** なので、そのまま
-      # 配ってよい（一式の「はじめに読んでください」にもそう書いてある）。
-      - name: Rust の一枚を落とす
-        shell: pwsh
+      # **配る URL が本当に在るか、ここで一度叩く。**
+      #
+      # 375MB を包むのをやめた代わりが、案内の URL 一行だけになった。
+      # 会社で「落としたら無かった」と分かるのが、いちばん高くつく ──
+      # 中身は要らないので HEAD だけ投げて、**一枚ぶんの大きさが返るか**を見る
+      # （404 の頁も 200 で返る網があるので、在ることだけでは足りない）。
+      - name: Rust の落とし先が在るか
+        shell: bash
         run: |
-          $v = (rustc --version).Split(' ')[1]
-          $url = "https://static.rust-lang.org/dist/rust-$v-x86_64-pc-windows-gnu.msi"
-          Write-Host $url
-          New-Item -ItemType Directory -Force -Path rustdist | Out-Null
-          Invoke-WebRequest -Uri $url -OutFile "rustdist/rust-$v-x86_64-pc-windows-gnu.msi"
+          v=$(rustc --version | cut -d' ' -f2)
+          url="https://static.rust-lang.org/dist/rust-$v-x86_64-pc-windows-gnu.msi"
+          echo "$url"
+          # **curl を管に通さない。** `curl | awk` だと終わりの合図は awk の
+          # ものになり、404 でも 0 が返る ── `-f` も `set -e` も効かなくなる
+          # （書いた直後に 99.99.99 で試したら、404 の頁の 335 バイトを掴んで
+          # 「在ります」と言った）。先に受け取って、落とせたかを自分で見る。
+          head=$(curl -fsS -I "$url") || { echo "落とせません（404 など）: $url"; exit 1; }
+          n=$(printf '%s' "$head" | tr -d '\r' | awk 'tolower($1) == "content-length:" { print $2 }')
+          case "$n" in ''|*[!0-9]*) echo "大きさが返りません: '$n'"; exit 1;; esac
+          # 404 の頁も大きさは返す ── 一枚ぶん在るかまで見る。
+          [ "$n" -gt 100000000 ] || { echo "一枚ぶんの大きさがありません: $n バイト"; exit 1; }
+          echo "$((n / 1000000)) MB"
 
+      # **Rust 本体（375MB）は包まない**（依頼 641・本人が決めた）。
+      #
+      # あれは amber の版が変わっても 1バイトも変わらないので、版ごとに
+      # 置き直すと同じ 375MB が札の数だけ積み上がる（v3.1.2〜v3.1.7 で実際に
+      # 1.66GB 積んで、消した）。代わりに **版を焼き込んだ URL** を一式の
+      # 「はじめに読んでください」へ書く ── 網の外なのは会社の端末で、
+      # 落とす人の手元は外に出られる。落とすのは一度だけ。
+      #
+      # **版は、ここで組んだ rustc のものをそのまま渡す** ── 上の段で
+      # 「自己完結版で組めた」を見た Rust と、会社に入る Rust が同じになる。
       - name: 一式を組む
         shell: bash
         run: |
-          msi=$(ls rustdist/*.msi | head -1)
-          node scripts/dev-kit.js --rust "$msi" --vendor vendor \
+          v=$(rustc --version | cut -d' ' -f2)
+          node scripts/dev-kit.js --rust-version "$v" --vendor vendor \
             --engine engine/amber-server-win-x64.exe --out out/amber-dev.zip
 
       - uses: actions/upload-artifact@v4
@@ -553,21 +575,35 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dl
-      # **本体は生のまま と zip の両方で並べる。**
+      # **Release に置くのは、その機械で作れないものだけ**（依頼 641）。
       #
-      # 会社の運用端末は、社内の網が `.exe` の直接ダウンロードを止めて
-      # いる ── Release に生の一枚しか無いと、いちばん配りたい相手に
-      # だけ届かない（crmaine の配布先がまさにそれで、落とせなかった）。
-      # zip なら通る。
+      # 会社の端末へ持ち込む道が「`amber-src.zip` を運んで、あちらで
+      # `node scripts\build-win.js --electron <Electron>` を叩く」に決まった
+      # 時点で、Windows の出来合い二枚（`amber-win-x64-<版>.zip` と
+      # `amber-win-x64-office-<版>.zip`・計 252MB）は**あの機械が自分で
+      # 作れるもの**になった。作れるものを置いても、落とす人は居ない。
       #
-      # **生のほうも残す。** いま生を落としている手順を、こちらの都合で
-      # 折らない。同梱する側（crmaine の `gui/pack.js`）は生でも zip でも
-      # 受けるようにしてある。
+      # 外したもの、それぞれの理由:
+      #
+      #   * `amber-win-x64-office-<版>.zip` … 会社で組める（既定がこちら）
+      #   * `amber-win-x64-<版>.zip`        … `--full` で組める。そのうえ本人が
+      #                                       「Windows に同期と Google カレンダーは不要」
+      #   * 裸の `amber-server-*` 三枚      … **zip が通る網は裸も通るが、逆は通らない**
+      #   * mac / Linux のエンジン          … 本人の Mac で `cargo build` すれば出る
+      #   * `amber-cal-mac`                 … `mac/amber-cal.swift` から手元で出る
+      #
+      # **ジョブは何も削っていない。** 資材は今までどおり全部上がるので、
+      # mac のものが要る日は `gh run download` で取れる ── Release に付くのが
+      # 下の四つだけになる。
+      #
+      # zip は今までどおり三枚とも作る（作る段は動かさない ── 動かすと
+      # 「一枚だけ入っているか」の確かめまで触ることになる）。要らないものは
+      # 作ったあとで捨てる。
       #
       # zip の直下に一枚だけ・名前はそのまま（`-j`）── 取り出した人が
       # 名前を直さずに置ける。`-X` は付けない ── mac と Linux の実行の
       # 印（+x）まで落ちて、取り出した人が `chmod` する羽目になる。
-      - name: 一つにまとめて、指紋を書く
+      - name: 一つにまとめる
         run: |
           mkdir -p out
           find dl -type f -exec cp {} out/ \;
@@ -579,6 +615,27 @@ jobs:
             # 入れたつもりで空、を配らない ── 一枚だけ入っているか数える。
             [ "$(unzip -Z1 "$f.zip" | wc -l)" -eq 1 ] || { echo "$f.zip の中身が一枚ではありません"; exit 1; }
             unzip -Z1 "$f.zip" | grep -qx "$f" || { echo "$f.zip の中の名前が違います"; exit 1; }
+          done
+
+      # **足し算で選ぶ。** 「この名前は置かない」の引き算だと、明日 CI が
+      # 増やした資材が黙って Release に混ざる（`amber-dev.zip` を包むときに
+      # 同じ形で踏んだ）。名を挙げたものだけ残す。
+      #
+      # **指紋は、絞ったあとで書く** ── 置かないものの指紋が並んでいたら、
+      # 落とした人は「落とし損ねた」と読む。
+      - name: Release に出すものだけ残して、指紋を書く
+        run: |
+          cd out
+          keep="amber-src.zip amber-gui.zip amber-server-win-x64.exe.zip amber-dev.zip"
+          # 揃っていなければ、札を出さずに止める ── 足りない一枚は
+          # 「落とせない」ではなく「無いことに気づかない」として出る。
+          for f in $keep; do
+            [ -f "$f" ] || { echo "出すはずのものがありません: $f"; exit 1; }
+          done
+          for f in *; do
+            case " $keep " in *" $f "*) continue;; esac
+            echo "置かない: $f"
+            rm -f "$f"
           done
           sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2

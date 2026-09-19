@@ -1,29 +1,24 @@
 # ネットに出られない Windows で使う
 
-## まず、組まずに済ませる
+## Release に置いてあるもの（依頼 641）
 
-**Release の zip が、展開するだけで動く一枚**になっている（依頼 553）。
+**その機械で作れないものだけ**置いてある。四つ:
 
-1. [Releases](https://github.com/taketan9/amber/releases) から
-   **`amber-win-x64-<版>.zip`**（120MB ほど）を落とす
-2. zip を右クリック →「プロパティ」→「セキュリティ: 許可する」に印 → OK
-   （**先に外しておく** ── あとからだと、展開したものに印が残る）
-3. 右クリック →「すべて展開」
-4. `amber.exe` をダブルクリック
+| 資材 | | |
+|---|---|---|
+| `amber-src.zip` | 10MB | **会社へ持ち込む一式。** 組むのに要るものが全部入っている |
+| `amber-dev.zip` | 40MB | 判断の側（Rust）まで直したいとき |
+| `amber-gui.zip` | 4.5MB | 同梱する側（crmaine）が `vendor-amber\` に置く画面一式 |
+| `amber-server-win-x64.exe.zip` | 1.7MB | 同上。エンジン一枚 |
 
-git も gh も Node も要らない。ノートは「ドキュメント\amber」に置かれる。
+**出来合いの `amber-win-x64-<版>.zip` は、もう置いていない**（2026-09-20 に
+本人が決めた）。会社の端末には Node と Electron があり、下の一行で**同じもの
+が作れる**ので、120MB を版ごとに置く意味が無くなった。
 
-### 二枚ある ── どちらを落とすか
-
-| 資材 | 中身 |
-|---|---|
-| `amber-win-x64-<版>.zip` | ふつうの一枚 |
-| **`amber-win-x64-office-<版>.zip`** | **会社向け** ── 外へ運ぶものが入っていない |
-
-**会社向けの一枚には、同期が無い**（依頼 602）。Google Drive の同期、
-iCal の購読（＝カレンダーの同期）、グループでの共有 ── 献立にも
-⌘⇧P にも出ないし、**訊きにも行かない**（サインインの有無を訊くこと自体が、
-外の鍵入れを開けにいくこと）。
+そのとき一緒に決まったこと ── **Windows の ambər に、同期と Google
+カレンダーは要らない。** 下の一行は既定で**会社向け（office）だけ**を組むので、
+そのまま叩けばそうなる（同期・iCal 購読・グループ共有は、献立にも ⌘⇧P にも
+出ないし、訊きにも行かない）。
 
 **カレンダーの面と、チームの CSV は残っている** ── あれは会社の Outlook が
 書き出した一枚を読むだけで、外へは何も出さない（[team-csv.ja.md](team-csv.ja.md)）。
@@ -35,9 +30,11 @@ iCal の購読（＝カレンダーの同期）、グループでの共有 ─�
 AMBER_EDITION=office ./gui/run.sh
 ```
 
-**この一枚は GitHub の上で組んでいる** ── `gui/vendor/` が git に入って
-いないのと、exe の絵が Windows でしか焼けないため。手元で組むのと同じ
-`scripts/pack.js` を通っている。
+mac と Linux のエンジン・`amber-cal-mac` も置いていない ── 手元の Mac に
+Rust と Xcode が揃っているので、そこで組めば出る。**CI は今までどおり全部
+組んでいる**ので、要る日は `gh run download` で取れる。
+
+---
 
 下は、**自分で組みたいとき**の話。
 
@@ -87,20 +84,32 @@ node scripts/src-zip.js --engine dist/amber-server-win-x64.exe --out out/amber-s
 ## 直すところまでやる道 ── `amber-dev.zip`（依頼 640）
 
 **判断の側（Rust）まで会社で直したいとき。** Release の `amber-dev.zip`
-（**377MB**）を持ち込む。
+（**40MB**）と、**Rust 本体を一枚**持ち込む。
 
 ```
 amber-dev\
-  はじめに読んでください.txt
-  rust\rust-<版>-x86_64-pc-windows-gnu.msi   ← Rust 本体（自己完結版）
+  はじめに読んでください.txt                  ← Rust の落とし先が書いてある
   amber\                                     ← ソース一式（試験も台帳も）
     .cargo\config.toml                       ← 依存は隣の vendor から
     vendor\                                  ← 依存の実体（cargo vendor）
     amber-server-win-x64.exe                  ← 出来合いのエンジン
 ```
 
-1. `rust\…-windows-gnu.msi` をダブルクリックして入れる（**Visual Studio は
-   要らない** ── この一枚に、組むのに要るものが全部入っている）
+**Rust 本体（375MB）は、この一式に入っていない**（依頼 641）。amber の版が
+変わっても 1バイトも変わらないので、版ごとに置き直すと同じ 375MB が札の数だけ
+積み上がる（v3.1.2〜v3.1.7 で実際に 1.66GB 積んで、消した）。網の外なのは
+**会社の端末**で、落とす人の手元は外に出られる ── **一度だけ**落として、
+`amber-dev.zip` と一緒に USB へ入れる。次からは同じものを使い回せる。
+
+```
+https://static.rust-lang.org/dist/rust-<版>-x86_64-pc-windows-gnu.msi
+```
+
+版は `はじめに読んでください.txt` に焼き込んである ── **CI がそれで「組めた」
+を見た版**なので、会社で入る Rust と、ここで確かめた Rust が同じものになる。
+
+1. 落とした `rust-<版>-x86_64-pc-windows-gnu.msi` をダブルクリックして入れる
+   （**Visual Studio は要らない** ── この一枚に、組むのに要るものが全部入っている）
 2. `cd amber`
 3. 組む: `cargo build --release -p amber-server --target x86_64-pc-windows-gnu`
 4. 試す: `cargo test --workspace` ／ `python scripts\requests.py`
