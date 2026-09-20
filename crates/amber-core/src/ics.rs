@@ -15,11 +15,11 @@
 //! 画面は「この月の、どの日に、何があるか」しか要らない。同じ形で返すので、
 //! 画面は amber 自身の予定と混ぜて並べるだけでよい。
 //!
-//! # 分からない時間帯は、その機械の時間として読む
+//! # タイムゾーンが分からないときは、端末のローカル時刻として読む
 //!
 //! `TZID=Asia/Tokyo` のような名札は付いているが、**時間帯の表を抱えない**
 //! ── 抱えると、その表が古くなった日に静かに一時間ずれる。
-//! `Z`（世界標準時）だけはその機械の時間へ直し、それ以外は書いてある
+//! `Z`（UTC）だけは端末のローカル時刻へ直し、それ以外は書いてある
 //! とおりの時刻として読む。**自分の予定表を自分の国で見るぶんには合う。**
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
@@ -56,7 +56,7 @@ fn lines(text: &str) -> Vec<String> {
     out
 }
 
-/// `\,` `\;` `\n` `\\` を字に戻す。
+/// `\,` `\;` `\n` `\\` を元の文字に戻す。
 fn unescape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut it = s.chars();
@@ -93,7 +93,7 @@ fn stamp(value: &str, utc: bool) -> Option<(NaiveDate, Option<NaiveTime>)> {
     if !utc {
         return Some((day, Some(time)));
     }
-    // 世界標準時は、その機械の時間へ。
+    // UTC は端末のローカル時刻へ。
     let here = chrono::Utc
         .from_utc_datetime(&NaiveDateTime::new(day, time))
         .with_timezone(&chrono::Local);

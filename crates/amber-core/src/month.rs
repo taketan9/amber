@@ -12,7 +12,7 @@
 //!
 //! # ノートも一緒に返す
 //!
-//! 予定表とノートが別のアプリなら作れない一枚を作るのが、この画面の
+//! 予定表とノートが別のアプリでは作れないものを作るのが、この画面の
 //! 値打ち ── その日に書いたノートが、予定の隣に並ぶ。
 
 use chrono::Datelike;
@@ -68,7 +68,7 @@ fn mark(at: &std::path::Path) -> Option<(u64, u64)> {
 /// なので、同じ刻みのあいだに**同じ長さで**書き替えると、しるしが一字も
 /// 変わらず、直した題が古いまま出続ける（CI の Windows で実際に出た）。
 ///
-/// 見分ける道が無いので、**新しすぎるしるしは初めから信じない** ── git が
+/// 見分ける方法が無いので、**新しすぎるタイムスタンプは初めから信じない** ── git が
 /// 「racily clean」と呼んで同じことをしている。読み直すのは「たったいま
 /// 書かれた数本」だけなので、憶えておく甲斐（二万本で 415ms → 58ms）は残る。
 const GRACE: u64 = 2_000_000_000;
@@ -122,7 +122,7 @@ fn last_of(year: i32, month: u32) -> Option<chrono::NaiveDate> {
     chrono::NaiveDate::from_ymd_opt(y, m, 1)?.pred_opt()
 }
 
-/// 秒を、その機械の日付に。
+/// 秒を、端末のローカル日付に。
 fn local_day(secs: u64) -> Option<chrono::NaiveDate> {
     use chrono::TimeZone;
     chrono::Local.timestamp_opt(secs as i64, 0).single().map(|t| t.date_naive())
@@ -218,7 +218,7 @@ pub fn of(rows: &[crate::survey::Row], year: i32, month: u32) -> Vec<Slot> {
         let title = known.title.clone();
 
         // 書いた日 ── 予定ではないが、その日に何をしていたかが分かる。
-        // **その機械の日付で**（世界標準時ではなく）── 日本の朝に作った
+        // **端末のローカル日付で**（UTC ではなく）── 日本の朝に作った
         // ノートが前の日に並ぶのは、見た人には理由が分からない。
         if let Some(d) = known.created.and_then(local_day) {
             if d >= from && d <= to {
@@ -350,7 +350,7 @@ mod tests {
     /// 憶えたしるしが一字も変わらない。上の試験は mac の細かい時計に
     /// 寄りかかっていて、CI の Windows でだけ落ちた。
     ///
-    /// ここでは**時刻を手で戻して**、その状況をどの機械の上でも作る。
+    /// ここでは**時刻を手で戻して**、その状況をどの環境でも再現する。
     #[test]
     fn a_note_rewritten_under_a_coarse_clock_is_read_again() {
         let d = tempfile::tempdir().unwrap();

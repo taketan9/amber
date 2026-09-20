@@ -2,7 +2,7 @@
 //!
 //! 会社の Outlook は、外から読める形を一つも出してくれない ── ICS も
 //! 出せず、Graph も閉じている。そこで、**別の道具が三十分おきに書き出す
-//! 一枚の CSV** を読む。amber は取りに行かない。置いてあるものを読むだけ。
+//! 1 つの CSV** を読む。amber は取りに行かない。置いてあるものを読むだけ。
 //!
 //! 列の取り決めは `docs/team-csv.ja.md`（書き出す側と交わしたもの）。
 //! ただし**その形だけを読むようには作らない** ── 見出しの名前も日時の
@@ -39,7 +39,7 @@ pub struct Who {
     pub mail: String,
 }
 
-/// 一枚ぶん。
+/// 1 件分。
 #[derive(Debug, Clone, Default)]
 pub struct Team {
     /// **いつ時点のものか。** 三十分おきに置き換わる紙なので、これを
@@ -269,7 +269,7 @@ impl Columns {
         })
     }
 
-    /// 一行から、**日ごとに一枚ずつ**起こす。
+    /// 1 行から、**日ごとに 1 件ずつ**起こす。
     ///
     /// 終日の予定は何日にもまたがることがあり、頭の日にだけ出すと、
     /// 三日の出張が初日しか出ない ── 表の上では「二日目から居る」と
@@ -314,9 +314,9 @@ impl Columns {
         // **名前のない予定にも、何かを出す。** 件名を伏せて書き出す会社が
         // ある ── 空欄の帯は、押せない模様にしか見えない。
         //
-        // 「見せてもらえていない」と「読み取れなかった」は違うので、字も
+        // 「見せてもらえていない」と「読み取れなかった」は違うので、文言も
         // 分ける。**どちらも「空」とは書かない** ── 直前の行で「空き時間」
-        // を落としているので、同じ字を使うと「空いている」と読める。
+        // を落としているので、同じ文言を使うと「空いている」と読める。
         // ここに帯が出ているということは、**予定はある**。
         let title = if !title.is_empty() {
             title.to_string()
@@ -403,9 +403,9 @@ fn clock(t: NaiveTime) -> String {
     t.format("%H:%M").to_string()
 }
 
-/// 日時の字を読む。
+/// 日時の文字列を読む。
 ///
-/// **時差の付いたものは、この機械の時刻に直す。** Graph が返すのは既定で
+/// **タイムゾーン付きのものは、端末のローカル時刻に直す。** Graph が返すのは既定で
 /// 世界時なので、直さないと十時の会議が朝一時に並ぶ ── 一目で分かる
 /// 壊れ方ではなく、「なんだか一日ずれている」という形で出る。
 pub fn moment(text: &str) -> Option<(NaiveDate, Option<NaiveTime>)> {
@@ -419,7 +419,7 @@ fn read(text: &str, float: bool) -> Option<(NaiveDate, Option<NaiveTime>)> {
     if s.is_empty() {
         return None;
     }
-    // 時差の印を切り離す。
+    // タイムゾーン部分を切り離す。
     let (body, shift) = split_shift(s);
     let body = body.trim();
     let (dpart, tpart) = match body.find(['T', 't', ' ']) {
@@ -515,7 +515,7 @@ fn time(s: &str) -> Option<NaiveTime> {
     NaiveTime::from_hms_opt(h, m, sec)
 }
 
-/// CSV を升目に。
+/// CSV を表形式に。
 ///
 /// **括りの中の区切りと改行を、区切りとして読まない。** 件名に読点が入る
 /// のはふつうのことで（「定例、および…」）、そこで列がずれると、その一行
@@ -570,7 +570,7 @@ fn rows(text: &str) -> Vec<Vec<String>> {
 }
 
 /// 区切りを当てる。**タブ区切りで来ることがある** ── Excel で開いて
-/// 保存し直すと、そうなる機械がある。
+/// 保存し直すと、そうなる環境がある。
 fn guess(text: &str) -> char {
     let head = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
     let commas = head.matches(',').count();
@@ -591,16 +591,16 @@ mod tests {
 
     const HEAD: &str = "名前,件名,開始,終了,場所\n";
 
-    /// 取り決め（`docs/team-csv.ja.md`）の見本が、そのまま読めること。
+    /// 取り決め（`docs/team-csv.ja.md`）のサンプルが、そのまま読めること。
     /// **ここが通らなくなったら、書き出す側と話が合っていない。**
     const DEAL: &str = "\u{feff}fetched_at,owner,owner_mail,start,end,all_day,subject,location,show_as,sensitivity,cancelled,organizer,uid\r\n2026-09-10T08:15:00+09:00,山田 武,yamada.takeshi@example.co.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,false,週次定例,会議室A,busy,normal,false,鈴木 一郎,040000008200E00074C5B7101A82E008\r\n2026-09-10T08:15:00+09:00,山田 武,yamada.takeshi@example.co.jp,2026-09-11T00:00:00+09:00,2026-09-12T00:00:00+09:00,true,終日出張,,oof,normal,false,,040000008200E00074C5B7101A82E009\r\n2026-09-10T08:15:00+09:00,鈴木 一郎,suzuki.ichiro@example.co.jp,2026-09-10T14:00:00+09:00,2026-09-10T15:00:00+09:00,false,,,busy,private,false,,040000008200E00074C5B7101A82E00A\r\n";
 
-    /// `+09:00` の一瞬を、**この機械の時刻で**言い直す（依頼 551）。
+    /// `+09:00` の時刻を、**端末のローカル時刻で**言い直す（依頼 551）。
     ///
     /// 「10:00」と書いてしまうと、**東京の机でしか通らない試験**になる ──
-    /// 時刻つきの予定は現地時刻に直す決まり（依頼 471）なので、UTC の機械が
+    /// 時刻つきの予定は現地時刻に直す決まり（依頼 471）なので、UTC の環境が
     /// 読めば 01:00 が正しい。CI は Windows でしか試験を回さず、あそこは
-    /// UTC なので、`team.rs` が入った日から落ちていた（v3.0.0 の札を打つ前の
+    /// UTC なので、`team.rs` が入った日から落ちていた（v3.0.0 のタグを打つ前の
     /// 試し組みで、初めて鳴った）。
     fn 東京の(h: u32, m: u32) -> chrono::DateTime<chrono::Local> {
         use chrono::TimeZone;
@@ -611,9 +611,9 @@ mod tests {
             .with_timezone(&chrono::Local)
     }
 
-    /// **v0.3 の見本が、そのまま読めること**（2026-09-14）。
+    /// **v0.3 のサンプルが、そのまま読めること**（2026-09-14）。
     ///
-    /// `docs/team-csv.ja.md` の見本そのもの。v0.1 から三つ変わった:
+    /// `docs/team-csv.ja.md` のサンプルそのもの。v0.1 から 3 つ変わった:
     /// **`cancelled` の列が消え**、`organizer` は表示名になり、開始と終了は
     /// 最初からローカル時刻になった。列を落とされても落ちないことを、
     /// 上の v0.1 の試験とは**別に**見る ── 片方だけ通る形があるので。
@@ -762,7 +762,7 @@ mod tests {
         assert!(got.plans.iter().any(|p| p.title == "\"引用\""));
     }
 
-    /// **世界時は、この機械の時刻に直す**（Graph の既定がこれ）。
+    /// **UTC は、端末のローカル時刻に直す**（Graph の既定がこれ）。
     #[test]
     fn a_utc_stamp_becomes_local_time() {
         let got = of(&format!("{HEAD}山田,朝会,2026-09-10T01:00:00Z,2026-09-10T02:00:00Z,\n"), 2026, 9);
@@ -857,7 +857,7 @@ mod tests {
         assert_eq!(got.plans[0].title, "定例");
     }
 
-    /// タブ区切り（Excel で開いて保存し直すと、そうなる機械がある）。
+    /// タブ区切り（Excel で開いて保存し直すと、そうなる環境がある）。
     #[test]
     fn it_reads_tabs_too() {
         let csv = "名前\t件名\t開始\t終了\n山田\t定例\t2026-09-10 10:00\t2026-09-10 11:00\n";

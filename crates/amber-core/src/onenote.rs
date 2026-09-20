@@ -1,7 +1,7 @@
 //! OneNote を取り込む（依頼 621）── ⚙「OneNote を取り込む」の中身。
 //!
 //! **読むのは `amber-onenote`、どこに・どういう名前で置くかはここ。**
-//! 名前の決まり（幹は 60 字・使えない字は `-`・同じ名前は `-2`）は
+//! 名前の決まり（本体は 60 文字・使えない文字は `-`・同じ名前は `-2`）は
 //! `note::file_stem` と `note::create` のものをそのまま使う ── 取り込んだ
 //! ノートと手で作ったノートが、同じフォルダで別の決まりの名前を持たない。
 //!
@@ -15,7 +15,7 @@
 //! **一度に全部書かない。** エンジンは一本の糸で順に答えるので、大きい
 //! `.onepkg` を一回の呼び出しで書くと、その間は画面が何を訊いても返らない。
 //! 開く（`open`）で読み終えて手元に持ち、書くのは**セクション一つずつ**
-//! （`write`）── 窓はその合間に「3/12」と言える。
+//! （`write`）── デスクトップ版はその合間に「3/12」と表示できる。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -23,7 +23,7 @@ use std::sync::Mutex;
 
 use amber_onenote::{Opened, PageOut};
 
-/// 開いたものの預かり所。**鍵は数字**（道を鍵にすると、同じ `.onepkg` を
+/// 開いたものの保持場所。**キーは数値**（パスをキーにすると、同じ `.onepkg` を
 /// 二度開いたときに片方の `close` がもう片方を消す）。
 static OPENED: Mutex<Option<(u64, HashMap<u64, Opened>)>> = Mutex::new(None);
 
@@ -78,7 +78,7 @@ pub fn find(dirs: &[PathBuf]) -> Vec<Found> {
 /// 開いて読み終え、預ける。返すのは鍵と、中身の一覧（書く前に見せる用）。
 ///
 /// **読み手の panic をここで止める。** 壊れた `.onepkg` は珍しくなく、
-/// 借り物の読み手が panic すると、エンジンごと落ちて窓の全部が止まる。
+/// 外部クレートのパーサーが panic すると、エンジンごと落ちてアプリ全体が止まる。
 pub fn open(path: &Path) -> anyhow::Result<(u64, serde_json::Value)> {
     let got = std::panic::catch_unwind(|| amber_onenote::open(path))
         .map_err(|_| anyhow::anyhow!("読めない形でした（壊れているかもしれません）"))??;
@@ -129,7 +129,7 @@ pub struct Wrote {
     pub files: usize,
 }
 
-/// セクション一つを書く。`to` は出力先（その下に一冊の名前のフォルダを作る）。
+/// セクション 1 つを書く。`to` は出力先（その下にノートブック名のフォルダを作る）。
 pub fn write(key: u64, i: usize, to: &Path) -> anyhow::Result<Wrote> {
     let slot = OPENED.lock().unwrap_or_else(|e| e.into_inner());
     let Some(o) = slot.as_ref().and_then(|(_, m)| m.get(&key)) else {
@@ -139,7 +139,7 @@ pub fn write(key: u64, i: usize, to: &Path) -> anyhow::Result<Wrote> {
         anyhow::bail!("{} 番目のセクションはありません", i + 1);
     };
     let mut dir = to.to_path_buf();
-    // `.one` 一本（一冊の名前が無い）ときは、セクションを出力先の直下に。
+    // `.one` 単体（ノートブック名が無い）ときは、セクションを出力先の直下に。
     for seg in std::iter::once(&o.book).chain(u.groups.iter()).chain(std::iter::once(&u.name)) {
         let s = crate::note::file_stem(seg);
         if !s.is_empty() {
@@ -157,8 +157,8 @@ pub fn write(key: u64, i: usize, to: &Path) -> anyhow::Result<Wrote> {
     Ok(wrote)
 }
 
-/// ページ一枚。**上書きしない** ── 同じ題は `-2`（手で作るノートと同じ）。
-/// 二度取り込んだら二枚になるが、一枚目を黙って潰すよりいい。
+/// ページ 1 つ。**上書きしない** ── 同じタイトルは `-2`（手で作るノートと同じ）。
+/// 2 度取り込んだら 2 つになるが、1 つ目を黙って潰すよりいい。
 fn page(dir: &Path, p: &PageOut) -> anyhow::Result<(usize, usize)> {
     let stem = match crate::note::file_stem(&p.title) {
         s if s.is_empty() => "無題".to_string(),
@@ -212,16 +212,16 @@ fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Markdown に書く道（`attachments/名前`）。**名前はそのまま** ── 窓は道を
+/// Markdown に書くパス（`attachments/名前`）。**名前はそのまま** ── デスクトップ版はパスを
 /// 自分で URL に直すので、ここで `%20` にすると二重になって絵が出ない
-/// （窓で踏んだ）。代わりに、置く名前から空白と括弧を抜いておく（[`plain`]）。
+/// （デスクトップ版で踏んだ）。代わりに、置く名前から空白と括弧を抜いておく（[`plain`]）。
 fn link(file: &Path) -> String {
     let name = file.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     format!("attachments/{name}")
 }
 
 /// 添付の名前に使う形。**空白と括弧は `-`** ── `![](a b.png)` も
-/// `![](a(1).png)` も、読み手によってはそこで道が切れる。
+/// `![](a(1).png)` も、パーサーによってはそこでパスが切れる。
 fn plain(stem: &str) -> String {
     let mut out = String::new();
     for c in stem.chars() {
@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(sum["units"][0]["name"], "New Section 1");
         assert_eq!(sum["units"][0]["pictures"], 1);
         let w = write(key, 0, t.path()).unwrap();
-        // `.one` 一本は一冊の名前が無い ── 出力先の直下にセクション。
+        // `.one` 単体はノートブック名が無い ── 出力先の直下にセクション。
         assert_eq!(w.dir, t.path().join("New Section 1"));
         assert_eq!((w.pages, w.pictures), (1, 1));
         let md = std::fs::read_to_string(w.dir.join("Test Page.md")).unwrap();

@@ -10,22 +10,22 @@
 //! 2. 名前の元は**一覧に出ている題**（`title:` → 見出し → 一行目）。見出しや
 //!    一行目で決まるノートは、打つたびには改名せず、**そのノートから離れた
 //!    とき**に。題が空なら作った時刻の名前のまま。
-//! 3. 使えない字は**全角に置き換える**。先頭の `.` は外す。長い題は 80 字で切る。
+//! 3. 使えない文字は**全角に置き換える**。先頭の `.` は外す。長いタイトルは 80 文字で切る。
 //! 4. 同じ題は `買い物.2.md` `買い物.3.md`。番号は**加算**（空き番を埋めない）。
-//! 5. 改名に付いてくるもの: 画像（`attachments/<名前>-…`）と本文のリンク・履歴の棚・
+//! 5. 改名に付いてくるもの: 画像（`attachments/<名前>-…`）と本文のリンク・履歴のディレクトリ・
 //!    共有から戻る場所の憶え・同期の憶え。
 //! 6. 同期では「削除＋新規」ではなく**名前が変わった**として運ぶ（`sync::moved`）。
 //! 7. すでにある時刻名のノートは、一度だけ題の名前に揃える（`tidy_names`）。
 //!
-//! ここは**いつ**改名するかを決めない ── それは窓と電話の仕事（欄から出た・
+//! ここは**いつ**改名するかを決めない ── それはデスクトップ版と iPhone の仕事（入力欄から出た・
 //! ノートから離れた）。ここが決めるのは**何という名前にするか**と、改名に
 //! 付いてくるものを一つ残らず連れて行くこと。
 
 use std::path::{Path, PathBuf};
 
-/// 題からファイル名の幹（拡張子なし）。**使えない字は全角に。**
+/// タイトルからファイル名の本体（拡張子なし）。**使えない文字は全角に。**
 ///
-/// `file_stem`（画像の名前に使う）は使えない字を `-` に潰すが、ここは読める
+/// `file_stem`（画像の名前に使う）は使えない文字を `-` に潰すが、ここは読める
 /// ように全角へ置き換える ── 「A/B」の題のノートは `A／B.md`。
 pub fn title_name(title: &str) -> Option<String> {
     let mut out = String::new();
@@ -45,7 +45,7 @@ pub fn title_name(title: &str) -> Option<String> {
         };
         out.push(c);
     }
-    // 空白の連なりは一つに（改行やタブは空白に）。全角の空白は字として残す。
+    // 連続する空白は 1 つに（改行やタブは空白に）。全角の空白は文字として残す。
     let out = out
         .split([' ', '\t', '\n', '\r'])
         .filter(|s| !s.is_empty())
@@ -113,10 +113,10 @@ fn free_name(dir: &Path, wanted: &str, me: &Path) -> String {
     }
 }
 
-/// **題に合わせて改名する。** 改名したら新しい道、しなくてよければ `None`。
+/// **タイトルに合わせて改名する。** 改名したら新しいパス、しなくてよければ `None`。
 ///
 /// 改名しないもの: 題が空・もう合っている（`買い物.2` のように番号付きで
-/// 合っているものも）・クラウドが置いていった控え（名前に印がある）。
+/// 合っているものも）・クラウドが置いていった控え（名前に目印がある）。
 pub fn settle(root: &Path, note: &Path) -> anyhow::Result<Option<(PathBuf, bool)>> {
     let name = note.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     if crate::cloud::shape(&name).is_some() {
@@ -140,7 +140,7 @@ pub fn settle(root: &Path, note: &Path) -> anyhow::Result<Option<(PathBuf, bool)
 
 /// 一本を `to` へ。**付いてくるものを一つ残らず連れて行く。**
 ///
-/// 画像・本文のリンク・履歴の棚・共有から戻る場所・同期の憶え。`record_move`
+/// 画像・本文のリンク・履歴のディレクトリ・共有から戻る場所・同期の記録。`record_move`
 /// なら同期の憶えに「まだ向こうに伝えていない改名」を残す（向こうの改名を
 /// こちらに写すときは残さない ── 向こうはもう知っている）。
 pub fn relocate(root: &Path, from: &Path, to: &Path, record_move: bool) -> anyhow::Result<bool> {
@@ -182,7 +182,7 @@ pub fn relocate(root: &Path, from: &Path, to: &Path, record_move: bool) -> anyho
 ///
 /// ほかのノートも指している画像は、動かさずに写す。動かすと、残ったほうは
 /// 一文字も触られていないのに画像を失う。写せば両方が自分の隣の
-/// `attachments/` を見たままで、`..` の付いた道が一本も生まれない ──
+/// `attachments/` を見たままで、`..` の付いたパスが 1 つも生まれない ──
 /// ノートはいつでも自分と隣の `attachments/` だけで持ち運べる。
 ///
 /// 探すのは移動元のフォルダの中だけでよい。`..` が無い以上、その画像を
@@ -246,7 +246,7 @@ pub(crate) fn bring_pictures(from: &Path, to: &Path) -> anyhow::Result<Option<St
     if renamed.is_empty() {
         return Ok(None);
     }
-    // `%E6%AC%A1` と書かれたリンクは直せない（ここは字のまま探す）。名前が
+    // `%E6%AC%A1` と書かれたリンクは直せない（ここは文字列のまま探す）。名前が
     // ぶつかるのは同じ名前で中身の違う画像が先に居たときだけなので、追って
     // いない ── 直せなかったぶんは、前の版と同じ姿で残る。
     let mut out = text.clone();
@@ -285,7 +285,7 @@ fn is_note(at: &Path) -> bool {
             .unwrap_or(false)
 }
 
-/// ノートの字と、**それが UTF-8 だったか**。偽なら書き戻さない ──
+/// ノートのテキストと、**それが UTF-8 だったか**。偽なら書き戻さない ──
 /// 書き戻すと符号が変わり、頼まれてもいないのにファイルが作り替わる。
 fn note_text(at: &Path) -> Option<(String, bool)> {
     match std::fs::read_to_string(at) {
@@ -316,11 +316,11 @@ fn free_picture_name(dir: &Path, name: &str, taken: &[String]) -> String {
     try_name
 }
 
-/// 道で憶えているものを、新しい道へ連れて行く ── 履歴の棚・共有から戻る場所・
+/// パスで記録しているものを、新しいパスへ移す ── 履歴のディレクトリ・共有から戻る場所・
 /// 同期の憶え。**改名でもフォルダ移動でも同じ一本**（`move` op もここを通る・
 /// 依頼 496）。ノートそのものはもう動いたあとに呼ぶ。
 pub fn carry(root: &Path, from: &Path, to: &Path, record_move: bool) {
-    // ── 履歴の棚（`.amber/history/<道>/`）──
+    // ── 履歴のディレクトリ（`.amber/history/<パス>/`）──
     if let (Some(a), Some(b)) = (crate::history::shelf(root, from), crate::history::shelf(root, to)) {
         if a.is_dir() && !b.exists() {
             if let Some(p) = b.parent() {
@@ -329,7 +329,7 @@ pub fn carry(root: &Path, from: &Path, to: &Path, record_move: bool) {
             let _ = std::fs::rename(&a, &b);
         }
     }
-    // ── 道で憶えているもの ──
+    // ── パスで記録しているもの ──
     if let (Some(fr), Some(tr)) = (rel_of(root, from), rel_of(root, to)) {
         crate::notebook::came_moved(root, &fr, &tr);
         crate::sync::moved(root, &fr, &tr, record_move);
@@ -349,7 +349,7 @@ fn rel_of(root: &Path, p: &Path) -> Option<String> {
 ///
 /// 触るのは amber が付けた時刻の名前（`2026-09-06 19-18-30.md`）だけ。人が
 /// 名づけたファイルは、題と違っていてもここでは触らない ── 開いて離れたときに
-/// 揃う。返すのは改名した (前, 後) の道。
+/// 揃う。返すのは改名した (前, 後) のパス。
 pub fn tidy_names(root: &Path) -> Vec<(PathBuf, PathBuf)> {
     let stop = std::sync::atomic::AtomicBool::new(false);
     let (found, _) = crate::note::list(

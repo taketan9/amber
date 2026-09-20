@@ -2,7 +2,7 @@
 //! 場所は混ぜない ── 両方残して、人に選ばせる。**
 //!
 //! 使う場所は二つ ── クラウド越しに合わせたときの `sync::Step::Clash` と、
-//! 家族と分けている棚で両方が同じノートを書いたとき。どちらも「どちらかを
+//! 家族と共有しているフォルダで両方が同じノートを書いたとき。どちらも「どちらかを
 //! 捨てる」という問いにしない。
 //!
 //! # Git の混ぜ方を、そのまま
@@ -12,19 +12,19 @@
 //!
 //! 1. 前 → こちら、前 → 向こう の**二つの差分**を Myers の算法で取る
 //!    （繋ぎ目探しではなく、差分の重なりで「同じ場所か」を決める）
-//! 2. **前の行の範囲が重なるか触れ合う**変更をひとつの塊にする。塊の中で、
-//!    片方だけが触っていればそちらを採り、両方が同じ字なら一つにし、
+//! 2. **前の行の範囲が重なるか隣接する**変更を 1 つのグループにする。グループの中で、
+//!    片方だけが変更していればそちらを採り、両方が同じ内容なら 1 つにし、
 //!    両方が別々に触っていれば**ぶつかった場所**
 //! 3. ぶつかった場所は、こちらと向こうをもう一度比べて、**同じ行を外に出す**
 //!    （Git の zealous）── 段落まるごとではなく、違う行だけがぶつかる
 //!
-//! 同じ入力を `git merge-file` に食わせたときと、字が一致することを試験で
+//! 同じ入力を `git merge-file` に渡したときと、結果が一致することをテストで
 //! 見張っている（`agrees_with_git_merge_file`）。
 //!
 //! # Git と違えているところ（amber の側で決めたこと）
 //!
 //! **ノートには何も書き足さない。** `<<<<<<<` を本文に入れない ── ノートは
-//! ただの Markdown で、GitHub でも VS Code でも開く。印を入れると、混ぜた日から
+//! ただの Markdown で、GitHub でも VS Code でも開く。マーカーを入れると、マージした時点から
 //! **そのノートは amber でしか読めない形**になる。代わりに「どの行が向こうから
 //! 来たか」「どこがぶつかったか」を**返り値で**言う（`Merged::came` /
 //! `Merged::spots`）── 画面はそれを見て色を差し、三択を出す。
@@ -43,7 +43,7 @@
 //! # 一致は、空白を含めた完全一致
 //!
 //! 行末の空白も改行の有無も、行の一部（本人が決めた・2026-09-11）。丸めると
-//! 人の打った字を書き換えることになる。
+//! 人が書いた内容を書き換えることになる。
 
 /// 混ぜた結果。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -51,7 +51,7 @@ pub struct Merged {
     /// 混ざった本文。
     pub text: String,
     /// **向こうから来た行**（`text` の中の行番号・0 起点）。
-    /// 画面はここに印を付けられる ── 本文には何も書いていない。
+    /// 画面はここに目印を付けられる ── 本文には何も書いていない。
     pub came: Vec<usize>,
     /// ぶつかった場所の、**向こう側の行**（`came` にも入る）。
     pub both: Vec<usize>,
@@ -89,8 +89,8 @@ impl Merged {
 
 /// 分かれる前・こちら・向こう を混ぜる。
 ///
-/// 行で見る。**字の中までは踏み込まない** ── 一行の中で二人が別の語を
-/// 直したとき、字で混ぜると「どちらの文でもない一文」ができる。行ごと
+/// 行単位で見る。**行の中までは踏み込まない** ── 1 行の中で 2 人が別の語を
+/// 直したとき、文字単位でマージすると「どちらの文でもない一文」ができる。行ごと
 /// 両方残せば、読んだ人が選べる。
 pub fn merge(was: &str, ours: &str, theirs: &str) -> Merged {
     // 前書きは鍵ごと ── 三つとも前書きを持っているときだけ。
@@ -273,7 +273,7 @@ fn merge3<'a>(base: &[&'a str], ours: &[&'a str], theirs: &[&'a str]) -> Woven<'
 
     // `xdl_merge` ── 片方が手つかずなら、もう片方をそのまま。
     if s1.is_empty() {
-        // こちらは手つかず ── 向こうをそのまま。**来た行にだけ印**（変更の台本から）。
+        // こちらは未変更 ── 向こうをそのまま。**追加された行にだけ目印**（変更の記録から）。
         w.rows.extend_from_slice(theirs);
         for c in &s2 {
             for k in c.i2..c.i2 + c.chg2 {
@@ -351,7 +351,7 @@ fn merge3<'a>(base: &[&'a str], ours: &[&'a str], theirs: &[&'a str]) -> Woven<'
     simplify(&mut list, ours);
 
     // `xdl_fill_merge_buffer` ── こちらを土台に、向こうだけの区画とぶつかった
-    // 区画を差し込む。印は付けない。
+    // 区間を差し込む。目印は付けない。
     let mut i: isize = 0;
     for m in &list {
         if m.mode == 0 {
@@ -446,7 +446,7 @@ fn simplify(list: &mut Vec<Region>, ours: &[&str]) {
 /* ── 差分の台本（`xdl_do_diff` + `xdl_change_compact` + `xdl_build_script`） ── */
 
 /// `a` → `b` の変更の並び。Myers で揃えたあと、Git と同じに**塊をずらして
-/// 整える**（`xdl_change_compact`）── 同じ字の行（空行など）が並ぶところで、
+/// 整える**（`xdl_change_compact`）── 同じ内容の行（空行など）が並ぶところで、
 /// どの行を消したことにするかが Git と揃う。
 fn script(a: &[&str], b: &[&str]) -> Vec<Change> {
     let pairs = myers(a, b);
@@ -547,7 +547,7 @@ fn slide_up(recs: &[&str], ch: &mut [bool], g: &mut Group) -> bool {
     }
 }
 
-/// `xdl_change_compact`（字下げの目安は使わない ── `git merge-file` の既定と同じ）。
+/// `xdl_change_compact`（インデントによる評価は使わない ── `git merge-file` の既定と同じ）。
 ///
 /// 塊を上へ寄せ、下へ寄せ、ぶつかった塊は繋ぐ。動かせる幅があるなら、
 /// **もう片方の側にも変更がある位置**に揃え、無ければいちばん下に置く。
@@ -617,7 +617,7 @@ fn myers<'a>(a: &[&'a str], b: &[&'a str]) -> Vec<(usize, usize)> {
     out
 }
 
-/// 負の添え字を持つ配列（対角線の番号 `k` で引く）。
+/// 負のインデックスを持つ配列（対角線の番号 `k` で引く）。
 struct V {
     off: isize,
     v: Vec<isize>,
@@ -666,7 +666,7 @@ fn conquer<'a>(
     out.extend(tail);
 }
 
-/// まん中の蛇の頭。前から伸ばす道と後ろから伸ばす道が出会う点。
+/// 中央のスネークの先端。前方から伸ばす経路と後方から伸ばす経路が出会う点。
 #[allow(clippy::too_many_arguments)]
 fn middle(
     a: &[&str], a0: usize, a1: usize,
@@ -778,7 +778,7 @@ mod tests {
 
         let m = merge(&was, &ours, &theirs);
         assert_eq!(m.text, theirs);
-        // **来た行にだけ印が付く。** 触っていない二行には付かない。
+        // **追加された行にだけ目印が付く。** 変更していない 2 行には付かない。
         assert_eq!(m.came, vec![2]);
 
         let m = merge(&was, &theirs, &was);
@@ -820,7 +820,7 @@ mod tests {
         let m = merge("あ\n", "", "い\n");
         assert!(m.text.contains('い'), "消しと書き足しなら、書いたほうを残す");
         assert!(m.needs_eyes());
-        // 空の前から、両方が別の字を書いた ── ぶつかる（Git と同じ）。
+        // 空の状態から、両方が別の内容を書いた ── 競合する（Git と同じ）。
         let m = merge("", "a\n", "b\n");
         assert_eq!(m.text, "a\nb\n");
         assert_eq!(m.spots, vec![Spot { ours: (0, 1), theirs: (1, 1) }]);
@@ -952,10 +952,10 @@ mod tests {
 
     /* ── Git を正解として、機械で突き合わせる ── */
 
-    /// この機械に Git があれば、`git merge-file -p` と同じ字になるかを見る。
-    /// **印の行（`<<<<<<<` `=======` `>>>>>>>`）を落とした Git の出力が、
+    /// 環境に Git があれば、`git merge-file -p` と同じ結果になるかを見る。
+    /// **マーカー行（`<<<<<<<` `=======` `>>>>>>>`）を除いた Git の出力が、
     /// こちらの本文と一字一句同じ**であること ── ぶつかったところも、
-    /// こちら→向こうの順で両方置くので、印を落とせば同じになるはず。
+    /// こちら→向こうの順で両方置くので、マーカーを除けば同じになるはず。
     fn git_says(was: &str, ours: &str, theirs: &str) -> Option<(String, bool)> {
         use std::io::Write;
         let dir = std::env::temp_dir().join(format!("amber-merge-{}-{}", std::process::id(), rand_seed()));
@@ -1003,7 +1003,7 @@ mod tests {
         fn below(&mut self, n: usize) -> usize { (self.next() % n.max(1) as u64) as usize }
     }
 
-    /// ノートらしい前の字（空行の多い Markdown）。
+    /// ノートらしい元の内容（空行の多い Markdown）。
     fn some_note(d: &mut Dice) -> Vec<String> {
         let words = ["牛乳", "パン", "卵", "掃除", "洗濯", "散歩", "会議", "電話", "買い出し", "休み"];
         let n = 3 + d.below(12);
@@ -1040,7 +1040,7 @@ mod tests {
 
     #[test]
     fn agrees_with_git_merge_file() {
-        // Git が無い機械では飛ばす（CI の Windows など）。
+        // Git が無い環境ではスキップする（CI の Windows など）。
         if git_says("a\n", "a\n", "a\n").is_none() {
             eprintln!("git が無いので飛ばします");
             return;
@@ -1088,7 +1088,7 @@ mod tests {
             }
             // 同じ入力なら同じ出力。
             assert_eq!(merge(&was.concat(), &ours.concat(), &theirs.concat()), m);
-            // 印は本文の中を指す。
+            // マーカーは本文の中を指す。
             let n = out.len();
             for &k in m.came.iter().chain(m.both.iter()) {
                 assert!(k < n, "印が本文の外: {k} / {n}");

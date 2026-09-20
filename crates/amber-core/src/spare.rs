@@ -1,13 +1,13 @@
 //! **ノートから使われていない画像。**
 //!
 //! `attachments/` に置かれた画像は、貼ったノートが消えても・その行だけ
-//! 消しても、そこに残る。一枚ずつは小さいが、**消す道がどこにも無い**
+//! 消しても、そこに残る。1 つずつは小さいが、**消す手段がどこにも無い**
 //! ので、使っているうちにフォルダだけが重くなる。
 //!
 //! # 数えるだけ。消さない。
 //!
 //! ここが返すのは「どのノートからも指されていない画像」の一覧で、
-//! 消すのは呼んだ側（窓はゴミ箱へ入れる）。**戻せる形で消す**のは
+//! 消すのは呼び出し側（デスクトップ版はゴミ箱へ入れる）。**戻せる形で消す**のは
 //! ノートと同じ扱いにしたいから ── 見誤って消したときに、取り返しが
 //! つかないのがいちばん悪い。
 //!
@@ -21,11 +21,11 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-/// 使われていない画像、一枚。
+/// 使われていない画像 1 件。
 #[derive(Debug, Clone)]
 pub struct Spare {
     pub path: PathBuf,
-    /// 置き場所からの道（`attachments/段取り-123.png`）。
+    /// 保存ディレクトリからの相対パス（`attachments/段取り-123.png`）。
     pub rel: String,
     pub bytes: u64,
     /// 最後に触られた時刻（秒）。
@@ -44,12 +44,12 @@ pub fn is_picture(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// 一本のノートの字から、**そこが指している行き先**をぜんぶ拾う。
+/// 1 つのノートのテキストから、**そこが参照している先**をすべて拾う。
 ///
-/// `](…)` と `src="…"` の両方 ── 読む面は `<img>` を書き戻すことがあり、
+/// `](…)` と `src="…"` の両方 ── 表示画面は `<img>` を書き戻すことがあり、
 /// 片方しか見ないと、その画像を「使われていない」と数える。
 ///
-/// **枠（コード）の中も拾う。** 出はしないが、人がそこに道を書いている
+/// **コードブロックの中も拾う。** 表示はされないが、人がそこにパスを書いている
 /// なら消していい理由にはならない ── 迷ったら残す。
 fn targets(text: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -91,7 +91,7 @@ fn byte_at(chars: &[char], upto: usize) -> usize {
     chars[..upto].iter().map(|c| c.len_utf8()).sum()
 }
 
-/// このノートが指しているファイル ── 道にして返す。
+/// このノートが参照しているファイル ── パスにして返す。
 ///
 /// **「使われていない画像」と同じ読み方を、ノートの引っ越しでも使う。**
 /// 「どの画像がこの一本のものか」は、「どの画像がどこからも指されていないか」と
@@ -101,7 +101,7 @@ pub(crate) fn points_at(text: &str, here: &Path) -> Vec<PathBuf> {
     targets(text).iter().filter_map(|t| resolve(here, t)).collect()
 }
 
-/// 行き先を、ファイルの道に直す。**よそ行きは数えない。**
+/// 参照先を、ファイルパスに直す。**外部 URL は数えない。**
 fn resolve(from: &Path, target: &str) -> Option<PathBuf> {
     let t = without_title(target);
     if t.is_empty() { return None; }
@@ -127,7 +127,7 @@ fn resolve(from: &Path, target: &str) -> Option<PathBuf> {
 /// `2026-09-06 19-18-30-1.png`）。空白で切ると `attachments/2026-09-06` を
 /// 探しにいって外し、**ノートがちゃんと指している画像を「使われていない」と
 /// 数える** ── 人はそれを見て消す。落とすのは、引用符で囲われた説明だけ。
-/// 空白を含む道の正式な書き方 `<a b.png>` も読む。
+/// 空白を含むパスの正式な書き方 `<a b.png>` も読む。
 fn without_title(target: &str) -> &str {
     let t = target.trim();
     if let Some(inner) = t.strip_prefix('<').and_then(|r| r.strip_suffix('>')) {
@@ -145,7 +145,7 @@ fn without_title(target: &str) -> &str {
     t
 }
 
-/// `%E6%AC%A1` を字に戻す。**戻せなければ、そのまま** ── 半端に戻すより
+/// `%E6%AC%A1` を元の文字に戻す。**戻せなければ、そのまま** ── 半端に戻すより
 /// 当たらないほうがよい（当たらなければ「使っている」側に倒れる）。
 fn percent(s: &str) -> String {
     if !s.contains('%') { return s.to_string(); }
@@ -183,7 +183,7 @@ fn tidy(at: &Path) -> PathBuf {
 /// 使われていない画像と、読めなかったノート。
 pub struct Found {
     pub spare: Vec<Spare>,
-    /// 読めなかったノートの道（あるうちは、数が少なく出ている）。
+    /// 読めなかったノートのパス（あるうちは、件数が少なく出ている）。
     pub unsure: Vec<String>,
 }
 
@@ -284,7 +284,7 @@ mod title_tests {
         for t in ["a.png \"説明\"", "a.png '説明'", "<a.png>"] {
             assert_eq!(resolve(here, t), Some(PathBuf::from("/notes/a.png")), "{t}");
         }
-        // 空白を含む道と説明が、両方あるとき。
+        // 空白を含むパスと説明が、両方あるとき。
         assert_eq!(
             resolve(here, "b c.png \"説明\""),
             Some(PathBuf::from("/notes/b c.png")),
@@ -319,7 +319,7 @@ mod tests {
         pic("段取り-5.png");
 
         put("段取り.md", "# 段取り\n![](attachments/段取り-1.png)\n");
-        // 読む面が書き戻した形も拾う。
+        // 表示画面が書き戻した形も拾う。
         put("写し.md", "<img src=\"attachments/段取り-2.png\">\n");
         // 逃がしてある名前も拾う。
         put("空.md", "![](attachments/%E7%A9%BA%20%E7%99%BD-3.png)\n");
@@ -341,7 +341,7 @@ mod tests {
     }
 
     /// **枠の中に書いてあっても、消さない。** 出はしないが、人がそこに
-    /// 道を書いているなら、消していい理由にはならない。
+    /// パスを書いているなら、消していい理由にはならない。
     #[test]
     fn a_path_written_inside_a_fence_still_counts_as_used() {
         let d = tempfile::tempdir().unwrap();

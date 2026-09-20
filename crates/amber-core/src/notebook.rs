@@ -1,63 +1,61 @@
-//! What a folder of notes knows about itself.
+//! ノートのフォルダが、自分自身について持っている情報。
 //!
-//! Two things do not fit inside a note: what colour a **folder** is (there is
-//! no note to write it on), and the favourite folders that are **empty** (a
-//! folder that exists only in the notes that name it disappears the moment
-//! the last one leaves). Both go in one small JSON file beside the notes, at
-//! `.cian/settings.json`.
+//! ノートの中に書けないものが 2 つある。**フォルダ**の色（書く先のノートが無い）と、
+//! **空の**お気に入りフォルダ（そのフォルダを名前に持つノートだけで存在している
+//! フォルダは、最後の 1 つが出て行った瞬間に消える）。この 2 つだけを、ノートの
+//! 隣に置いた小さな JSON（`.cian/settings.json`）に入れる。
 //!
-//! **Everything else stays in the notes.** Whether a note is a favourite is
-//! written on the note, so losing this file loses only the colours and the
-//! empty folders — never a note's own place. That is the test for whether
-//! something belongs here: if losing it would lose something you wrote, it
-//! does not.
+//! **それ以外はすべてノートの中に残す。** ノートがお気に入りかどうかはノート自身に
+//! 書いてあるので、このファイルを失っても失うのは色と空のフォルダだけで、ノート
+//! 自身の情報は失われない。ここに置いてよいかどうかの判定はそれ ── 失ったときに
+//! 「書いたもの」が失われるなら、ここには置かない。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Book {
-    /// Folder path (relative to the root) → the colour it was given.
+    /// フォルダのパス（ルートからの相対）→ 付けられた色。
     ///
-    /// Free-form, because it is his to choose: the app suggests a palette and
-    /// does not enforce one.
+    /// 値は自由形式。選ぶのは使う人なので、アプリはパレットを提案するだけで
+    /// 強制しない。
     pub colors: BTreeMap<String, String>,
-    /// Favourite folders, including the ones nothing is in yet.
+    /// お気に入りのフォルダ。まだ何も入っていないものも含む。
     pub stars: Vec<String>,
-    /// 共有の棚へ移したノートが、**もといたフォルダ**。ルートからの道 →
+    /// 共有フォルダへ移したノートの、**移動前のフォルダ**。ルートからの相対パス →
     /// フォルダ（ルート直下だったなら空）。
     ///
-    /// **ノートには書かない。** ノートはただの Markdown で、amber の都合を
-    /// 中に書き足す理由が無い ── 家族に渡ったノートに「元は くらし に居た」
-    /// と書いてあっても、相手には何の意味も無い。棚の帳面に一行持つ。
+    /// **ノートには書かない。** ノートはただの Markdown で、amber の都合を中に
+    /// 書き足す理由が無い ── 家族に渡ったノートに「元は くらし にあった」と
+    /// 書いてあっても、相手には何の意味も無い。この設定ファイルに 1 行持つ。
     ///
-    /// 憶えるのは共有へ入れるときだけ。ふつうの「フォルダへ移す」では
-    /// 憶えない ── 人が自分で選んで動かしたものに、戻し先は要らない。
+    /// 記録するのは共有へ入れるときだけ。通常の「フォルダへ移動」では記録しない ──
+    /// 人が自分で選んで動かしたものに、戻し先は要らない。
     pub came: BTreeMap<String, String>,
 }
 
-/// 共有の棚の印。**設定ではなく、フォルダ自身が持つ。**
+/// 共有フォルダであることを示すファイル。**設定ではなく、フォルダ自身が持つ。**
 ///
-/// 初めは `.amber/settings.json` に「どれが共有か」を書いていた。動きはした
-/// が、**相手の amber には何も伝わらない** ── 受け取った人が自分で「これが
-/// 共有です」と教え直す手が要り、機種を替えるたびにもう一度要った。
+/// 最初は `.amber/settings.json` に「どれが共有か」を書いていた。動きはしたが、
+/// **相手の amber には何も伝わらない** ── 受け取った人が自分で「これが共有です」と
+/// 設定し直す必要があり、端末を替えるたびにもう一度必要だった。
 ///
-/// フォルダの中に一枚置けば、**読むだけで分かる**。教える手が、どちらの側
-/// からも消える。しかも**フォルダと一緒に旅をする**ので、置き場所を変えても
-/// 機種を替えてもずれない ── amber がもともと持っていた考え方
+/// フォルダの中にファイルを 1 つ置けば、**読むだけで分かる**。設定する手間が、
+/// どちらの側からも消える。しかも**フォルダと一緒に移動する**ので、置き場所を
+/// 変えても端末を替えてもずれない ── amber がもともと持っていた考え方
 /// （「隠しデータベースを持たない。全部フォルダの中のファイル」）そのもの。
 pub const SHARE_MARK: &str = ".amber-share.json";
 
-/// 印に書いてあること。
+/// そのファイルに書いてある内容。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Shelf {
-    /// 誰が分けはじめたか。空のこともある（名乗らなかった人）。
+    /// 誰が共有を始めたか。空のこともある（名前を入れなかった場合）。
     pub by: String,
     /// いつから。`YYYY-MM-DD`。
     pub since: String,
 }
 
-/// このフォルダは共有の棚か。印を読む。
+/// このフォルダは共有フォルダか。そのファイルを読む。
 pub fn share_mark(dir: &Path) -> Option<Shelf> {
     let text = std::fs::read_to_string(dir.join(SHARE_MARK)).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
@@ -67,8 +65,8 @@ pub fn share_mark(dir: &Path) -> Option<Shelf> {
     })
 }
 
-/// 印を置く。**もうあれば触らない** ── 相手が置いた印の「誰が」を、
-/// こちらの名前で上書きしない（分けはじめたのはあちらなので）。
+/// そのファイルを置く。**既にあれば触らない** ── 相手が置いたファイルの
+/// 「誰が」を、こちらの名前で上書きしない（共有を始めたのは相手なので）。
 pub fn mark_share(dir: &Path, by: &str, today: &str) -> anyhow::Result<()> {
     if share_mark(dir).is_some() {
         return Ok(());
@@ -79,7 +77,7 @@ pub fn mark_share(dir: &Path, by: &str, today: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 印を外す。**中のノートには触らない。**
+/// そのファイルを外す。**中のノートには触らない。**
 pub fn unmark_share(dir: &Path) -> anyhow::Result<()> {
     let at = dir.join(SHARE_MARK);
     if at.exists() {
@@ -90,14 +88,14 @@ pub fn unmark_share(dir: &Path) -> anyhow::Result<()> {
 
 /// フォルダに付けられる十一色。
 ///
-/// **ここが唯一の並び。** 窓の `PALETTE` と電話の `Colouring.palette` に
-/// 同じものを書いていて、「同じ並び」と両方のコメントに書いてあった ──
-/// それでも**十一色のうち六色がずれていた**。電話で付けた青が、Mac では
-/// 少し違う青で出ていた。写しを持てば、いつかずれる。
+/// **定義はここ 1 か所だけ。** 以前はデスクトップ版の `PALETTE` と iPhone の
+/// `Colouring.palette` に同じものを書いていて、「同じ並び」と両方のコメントに
+/// 書いてあった ── それでも**11 色のうち 6 色がずれていた**。iPhone で付けた青が、
+/// Mac では少し違う青で表示されていた。コピーを持てば、いつかずれる。
 ///
-/// 色でしか区別できないノートは grep に映らず、読み上げにも伝わらないので、
-/// 増やさない。名前はカタカナで揃える ── 「みどり青」と「青むらさき」は、
-/// 二つ並べたときにどちらがどちらか言えない。
+/// 色でしか区別できないノートは grep に映らず、読み上げにも伝わらないので、色は
+/// 増やさない。名前はカタカナで揃える ── 「みどり青」と「青むらさき」は、2 つ
+/// 並べたときにどちらがどちらか言えない。
 pub const PALETTE: [(&str, &str); 11] = [
     ("#0E93A8", "シアン"),
     ("#2AA79B", "ターコイズ"),
@@ -108,41 +106,41 @@ pub const PALETTE: [(&str, &str); 11] = [
     ("#C4564E", "カーマイン"),
     ("#D07A2E", "アンバー"),
     ("#B08A2E", "マスタード"),
-    // 前は `#5E8C42`（オリーブ寄り）で、緑というよりくすんだ黄土に見えた。
+    // 以前は `#5E8C42`（オリーブ寄り）で、緑というよりくすんだ黄土色に見えた。
     ("#3FA05C", "グリーン"),
     ("#7A7A7A", "グレー"),
 ];
 
 /// 色とブックマークの置き場所（`<root>/.amber/settings.json`）。
 ///
-/// **隠しフォルダは一つ。** 履歴は `.amber/history/` に置いていたのに、
-/// 色と棚は `.cian/settings.json`、同期の憶えは `.cian/sync.json` に
-/// 置いていた ── 名前を amber に替えたときに、片方だけ替えそこねている。
-/// 人のノートのフォルダに amber のものが**二か所**あって、片方が古い名前で
+/// **隠しフォルダは 1 つだけにする。** 履歴は `.amber/history/` に置いていたのに、
+/// 色とお気に入りは `.cian/settings.json`、同期の記録は `.cian/sync.json` に
+/// 置いていた ── 名前を amber に替えたときに、片方だけ替えそこねていた。
+/// 人のノートのフォルダに amber のものが**2 か所**あって、片方が古い名前で
 /// 残っているのは、いつか片方だけ消される形。
 pub fn file(root: &Path) -> PathBuf {
     root.join(".amber").join("settings.json")
 }
 
-/// 前の置き場所。**まだ移していない棚のために、読むときだけ見る。**
+/// 以前の置き場所。**まだ移行していないフォルダのために、読むときだけ見る。**
 fn old_file(root: &Path) -> PathBuf {
     root.join(".cian").join("settings.json")
 }
 
 /// 前の隠しフォルダ（`.cian`）に残っているものを、`.amber` へ移す。
 ///
-/// **隠しフォルダは一つ。** 履歴は `.amber/history/` に置いていたのに、色と
-/// ブックマークは `.cian/settings.json`、同期の憶えは `.cian/sync.json` に
-/// 置いていた ── 名前を amber に替えたときに、片方だけ替えそこねている。
-/// 人のノートのフォルダに amber のものが二か所あって、片方が古い名前で
-/// 残っているのは、**いつか片方だけ消される**形。
+/// **隠しフォルダは 1 つだけにする。** 履歴は `.amber/history/` に置いていたのに、
+/// 色とブックマークは `.cian/settings.json`、同期の記録は `.cian/sync.json` に
+/// 置いていた ── 名前を amber に替えたときに、片方だけ替えそこねていた。
+/// 人のノートのフォルダに amber のものが 2 か所あって、片方が古い名前で残って
+/// いるのは、**いつか片方だけ消される**形。
 ///
-/// **写してから消す。** `rename` は別のディスクをまたぐと失敗するし、先に
-/// 消すと途中で転んだ回に色も憶えも無くなる。**向こうに同じ名前があるなら
+/// **コピーしてから消す。** `rename` は別のディスクをまたぐと失敗するし、先に
+/// 消すと途中で失敗したときに色も記録も無くなる。**移行先に同じ名前があるなら
 /// 何もしない** ── そちらが新しい。
 ///
-/// 同期の憶え（`sync.json`）もここで一緒に移す。移す場所を二か所に書くと、
-/// 片方だけ直した日に `.cian` が半分だけ残る。
+/// 同期の記録（`sync.json`）もここで一緒に移す。移す処理を 2 か所に書くと、
+/// 片方だけ直したときに `.cian` が半分だけ残る。
 pub fn tidy(root: &Path) {
     let old = root.join(".cian");
     if !old.is_dir() {
@@ -161,21 +159,21 @@ pub fn tidy(root: &Path) {
             let _ = std::fs::remove_file(&from);
         }
     }
-    // 空になったら片付ける。**空でなければ何もしない** ── `remove_dir` は
-    // 中身のあるフォルダを消さないので、知らないものを置いた人のぶんは残る。
+    // 空になったら削除する。**空でなければ何もしない** ── `remove_dir` は中身の
+    // あるフォルダを消さないので、こちらが知らないものを置いた人のぶんは残る。
     let _ = std::fs::remove_dir(&old);
 }
 
-/// What the folder says about itself, or the defaults.
+/// そのフォルダが自身について持っている情報、または既定値。
 ///
-/// **Never an error.** A missing file is a folder that has not been given a
-/// colour yet, and a corrupt one is not a reason to refuse to show the notes
-/// — the notes are the thing, and this is decoration and bookkeeping.
+/// **エラーを返さない。** ファイルが無いのは「まだ色を付けていないフォルダ」で
+/// あり、壊れていることはノートの表示を拒否する理由にならない ── 大事なのは
+/// ノートのほうで、ここにあるのは見た目と付随情報だけ。
 pub fn read(root: &Path) -> Book {
-    // **`.cian` に居るなら、そちらが本物。** 今日まで書いていたのはそこで、
-    // `.amber/settings.json` があるとすれば、名前を替える前のもっと古い版が
-    // 置いていったもの ── 新しいほうを先に読むと、色が何代か巻き戻る。
-    // 次に何か書いた時点で `.amber` へ移り、こちらは消える。
+    // **`.cian` にあるなら、そちらが正。** 今日まで書き込んでいたのはそこで、
+    // `.amber/settings.json` があるとすれば、改名前のもっと古い版が置いていった
+    // もの ── 新しいほうを先に読むと、色が何世代か巻き戻る。次に何か書き込んだ
+    // 時点で `.amber` へ移り、`.cian` は消える。
     let from = if old_file(root).exists() { old_file(root) } else { file(root) };
     let Ok(text) = std::fs::read_to_string(from) else { return Book::default() };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return Book::default() };
@@ -200,8 +198,8 @@ pub fn read(root: &Path) -> Book {
     b
 }
 
-/// Write it back, making `.amber` if it is not there. 前の隠しフォルダに
-/// 残っているものは、書く前に引き取る（[`tidy`]）。
+/// 書き戻す。`.amber` が無ければ作る。以前の隠しフォルダに残っているものは、
+/// 書く前に引き取る（[`tidy`]）。
 pub fn write(root: &Path, b: &Book) -> anyhow::Result<()> {
     tidy(root);
     let at = file(root);
@@ -213,7 +211,7 @@ pub fn write(root: &Path, b: &Book) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 歩いた結果から、印のあるフォルダを拾う（ルートからの道で）。
+/// 走査結果から、共有フォルダを示すファイルがあるものを拾う（ルートからの相対パスで）。
 ///
 /// **教えてもらわなくても分かる。** これが `settings.json` に書いていた頃と
 /// のいちばんの違いで、受け取った人の手が一つ消える。
@@ -235,7 +233,7 @@ pub fn shares(root: &Path, rows: &[crate::survey::Row]) -> Vec<String> {
     out
 }
 
-/// この道は、分けてあるフォルダの中か。
+/// このパスは、共有フォルダの中か。
 ///
 /// フォルダそのものと、その下ぜんぶ。**一つも無ければ何も分けていない** ──
 /// ここで空を「全部が共有」と読むと、決めていない人のノートが全部共有の顔を
@@ -249,7 +247,7 @@ pub fn shared(shares: &[String], book: &str) -> bool {
     })
 }
 
-/// Give a folder a colour, or take it away.
+/// フォルダに色を付ける、または外す。
 pub fn set_color(root: &Path, folder: &str, color: Option<&str>) -> anyhow::Result<()> {
     let mut b = read(root);
     match color {
@@ -259,7 +257,7 @@ pub fn set_color(root: &Path, folder: &str, color: Option<&str>) -> anyhow::Resu
     write(root, &b)
 }
 
-/// Remember a favourite folder, so that an empty one still exists tomorrow.
+/// お気に入りのフォルダを記録する。空のフォルダが明日も残っているようにするため。
 pub fn add_star(root: &Path, folder: &str) -> anyhow::Result<()> {
     let mut b = read(root);
     if folder.is_empty() || b.stars.iter().any(|s| s == folder) {
@@ -270,9 +268,9 @@ pub fn add_star(root: &Path, folder: &str) -> anyhow::Result<()> {
     write(root, &b)
 }
 
-/// 共有の棚へ入れたノートの、もといたフォルダを憶える。
+/// 共有フォルダへ入れたノートの、移動前のフォルダを記録する。
 ///
-/// `rel` は移したあとのルートからの道（`家族/買い物.md`）、`from` はもと
+/// `rel` は移動後のルートからの相対パス（`家族/買い物.md`）、`from` は移動前の
 /// いたフォルダ（ルート直下だったなら空）。
 pub fn came_from(root: &Path, rel: &str, from: &str) -> anyhow::Result<()> {
     let mut b = read(root);
@@ -292,7 +290,7 @@ pub fn came_back(root: &Path, rel: &str) -> Option<String> {
     Some(from)
 }
 
-/// ノートが改名された ── 憶えの鍵を新しい道へ（依頼 492）。憶えが無ければ何もしない。
+/// ノートが改名された ── 記録のキーを新しいパスへ（依頼 492）。記録が無ければ何もしない。
 pub fn came_moved(root: &Path, from: &str, to: &str) {
     let mut b = read(root);
     if let Some(v) = b.came.remove(from) {
@@ -301,7 +299,7 @@ pub fn came_moved(root: &Path, from: &str, to: &str) {
     }
 }
 
-/// Forget one, and everything under it.
+/// 1 件と、その配下すべてを記録から消す。
 pub fn drop_star(root: &Path, folder: &str) -> anyhow::Result<()> {
     let mut b = read(root);
     let under = format!("{folder}/");
@@ -309,21 +307,20 @@ pub fn drop_star(root: &Path, folder: &str) -> anyhow::Result<()> {
     write(root, &b)
 }
 
-/// Everything under `from`, moved to `to`.
+/// `from` の配下すべてを `to` へ移す。
 ///
-/// **Copy, check, then remove — in that order.** Between two cloud providers
-/// this is not a rename: the bytes have to be written on the far side before
-/// anything is taken off this one, and if any of it fails the originals are
-/// still there. A note lost in the middle of moving is the worst thing a
-/// notes app can do.
+/// **コピー → 確認 → 削除の順。** クラウドをまたぐ場合これは rename ではない。
+/// こちら側から何かを取り除く前に、向こう側へ中身が書き終わっている必要があり、
+/// どこかで失敗しても元のファイルは残っている。移動の途中でノートを失うのは、
+/// ノートアプリがやりうる最悪のことだから。
 ///
-/// Nothing is overwritten. A name already taken on the far side stops the
-/// whole move — merging two folders of notes is a decision, and this is not
-/// the moment to make it for somebody.
+/// 上書きは一切しない。移動先に同じ名前が既にあれば、移動全体を中止する ──
+/// 2 つのノートフォルダを統合するかどうかは人が決めることで、ここで勝手に
+/// 決める場面ではない。
 ///
-/// Everything, not only the notes: the pictures live in `attachments/` beside
-/// them and `.cian` holds the colours and the empty shelves. A move that took
-/// the notes and left the pictures would break every note with a picture.
+/// 移すのはノートだけではない。画像はノートの隣の `attachments/` にあり、
+/// `.cian` には色と空のフォルダが入っている。ノートだけ移して画像を置いて
+/// いったら、画像のあるノートが全部壊れる。
 pub fn migrate(from: &Path, to: &Path) -> anyhow::Result<usize> {
     let from = from.canonicalize()?;
     let to = to.canonicalize()?;
@@ -358,7 +355,7 @@ pub fn migrate(from: &Path, to: &Path) -> anyhow::Result<usize> {
         }
         std::fs::copy(src, dest)?;
     }
-    // Only now. Every byte is on the far side.
+    // ここで初めて削除する。すべて移動先に書き終わっている。
     for (src, _) in &jobs {
         let _ = std::fs::remove_file(src);
     }
@@ -397,14 +394,14 @@ pub struct Brought {
 /// `週報.md` が既にあれば `週報-2.md` にする。
 ///
 /// **`週報 2.md`（間が空白）にはしない。** クラウドが作る衝突の控えが
-/// その形で、`cloud::shape` は当てずっぽうで札を貼らないためにその名前を
+/// その形式で、`cloud::shape` は当てずっぽうで印を付けないためにその名前を
 /// 拾わないと決めてある ── 持ってきたノートを、貼られない控えと同じ顔に
 /// しない（依頼 316）。
 ///
 /// **元のファイルは動かさない。** 写すだけ ── 人が選んだのは自分の
 /// フォルダにあるもので、amber がそれを引き取っていい理由は無い。
 ///
-/// 判断（名前の付け直し）がここにあるのは、窓と電話で二組書くと必ず
+/// 判断（名前の付け直し）がここにあるのは、デスクトップ版と iPhone に 2 つ書くと必ず
 /// ずれるから。写す仕事そのものは呼ぶ側にもできるが、**同じノートが
 /// 端末によって別の名前で入る**のは直しようがない。
 pub fn bring(files: &[std::path::PathBuf], to: &Path) -> anyhow::Result<Brought> {
@@ -449,11 +446,11 @@ pub fn bring(files: &[std::path::PathBuf], to: &Path) -> anyhow::Result<Brought>
     Ok(Brought { put, renamed, failed })
 }
 
-/// A backup, put back. Returns (put in, left alone).
+/// バックアップを書き戻す。返すのは (書き戻した数, 手を付けなかった数)。
 ///
-/// **Into the notes folder, never over a note.** A restore that overwrote
-/// would be a restore that could lose today's work to last week's copy.
-/// zip の中の札から、何の範囲のバックアップかを読む。無ければ `None`。
+/// **ノートフォルダの中へ入れるだけで、ノートを上書きすることはない。** 上書き
+/// する復元は、先週のコピーで今日の作業を失わせうる復元になる。
+/// zip の中のラベルから、何の範囲のバックアップかを読む。無ければ `None`。
 fn read_label(zip: &Path) -> Option<String> {
     let mut z = zip::ZipArchive::new(std::fs::File::open(zip).ok()?).ok()?;
     let mut f = z.by_name(crate::zipbox::LABEL).ok()?;
@@ -467,16 +464,15 @@ fn read_label(zip: &Path) -> Option<String> {
 pub fn restore(zip: &Path, to: &Path) -> anyhow::Result<(usize, usize)> {
     std::fs::create_dir_all(to)?;
 
-    // Into a room of its own first, so a half-unpacked archive never stands
-    // among the notes.
+    // まず専用の一時ディレクトリへ展開する。展開途中のアーカイブがノートの
+    // 中に混ざることが決して無いように。
     //
-    // **A room per call, not per process.** Named by the pid alone, two
-    // restores at once unpack into the same room and each counts the other's
-    // files — and the second one's `remove_dir_all` can take the first one's
-    // half-unpacked archive out from under it. Found by a test that restored
-    // twice in one process and was told two files went in when one had.
-    // A leftover room from a run that died also stops being somebody else's
-    // problem this way.
+    // **一時ディレクトリは呼び出しごとに作る。プロセスごとではない。** pid だけで
+    // 名前を付けると、同時に 2 つ復元したときに同じディレクトリへ展開され、互いの
+    // ファイルを数えてしまう ── さらに 2 つ目の `remove_dir_all` が、1 つ目の展開
+    // 途中のアーカイブを足元から消しうる。1 プロセスで 2 回復元するテストが、
+    // 1 件しか入っていないのに 2 件と報告されて見つけた。異常終了した実行が残した
+    // ディレクトリが他人の問題になることも、これで無くなる。
     static ROOM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let nth = ROOM.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let hold = std::env::temp_dir().join(format!(
@@ -487,18 +483,18 @@ pub fn restore(zip: &Path, to: &Path) -> anyhow::Result<(usize, usize)> {
     std::fs::create_dir_all(&hold)?;
 
     let members = crate::zipbox::list(zip)?;
-    // **The folder's own name comes off — but only for a whole notebook.**
+    // **フォルダ自身の名前を取り除く ── ただしノートフォルダ全体のときだけ。**
     //
-    // A backup of the notes folder is a zip *of that folder*, so every member
+    // ノートフォルダのバックアップは*そのフォルダの* zip なので、すべてのエントリ
     // is `ノート/…`; put back as-is it makes a `ノート` inside the notes and
-    // every note in it looks new. A backup of **one folder** has exactly the
+    // 中のノートがすべて新規に見える。**1 つのフォルダ**のバックアップは、まったく
     // same shape (`仕事/…`) and must keep its head — strip it and 週報 comes
     // back to the root instead of to 仕事, which is not "back".
     //
-    // The shape cannot tell them apart, so the zip says which it is
-    // (`zipbox::LABEL`, written when it was made). Archives from before that
-    // label fall back to the old guess — it is right for the whole-notebook
-    // case, which is the one people take most.
+    // 構造からは区別できないので、zip 自身がどちらかを持つ（`zipbox::LABEL`・
+    // 作成時に書き込む）。そのラベルが無かった頃のアーカイブは、従来の推測に
+    // フォールバックする ── ノートフォルダ全体の場合には正しく、そちらのほうが
+    // よく取られるバックアップだから。
     let scope = read_label(zip);
     let top = members
         .iter()
@@ -529,7 +525,7 @@ pub fn restore(zip: &Path, to: &Path) -> anyhow::Result<(usize, usize)> {
                 walk.push(at);
                 std::fs::create_dir_all(&dest)?;
             } else if at.file_name().is_some_and(|n| n == crate::zipbox::LABEL) {
-                // 札はノートではないので、ノート帳には置いていかない。
+                // ラベルはノートではないので、ノートフォルダには展開しない。
             } else if dest.exists() {
                 kept += 1;
             } else {
@@ -624,7 +620,7 @@ mod tests {
 
     #[test]
     fn 前の隠しフォルダに置いた色は_引き継がれて片付く() {
-        // `.cian` に色を置いていた棚を開いても、色は消えない ── そして
+        // `.cian` に色を置いていたフォルダを開いても、色は消えない ── そして
         // 何か書いた時点で `.amber` へ移り、古いほうは残らない。
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".cian")).unwrap();

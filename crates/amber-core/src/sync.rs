@@ -2,7 +2,7 @@
 //!
 //! `amber-core` の規則は「判断だけ。I/O と UI に依存しない」── 通信は I/O
 //! なので、ここには入れない。ここが出すのは**手順書**で、それを実際に
-//! やるのは窓（Node）と電話（URLSession）。
+//! 実際の通信はデスクトップ版（Node）と iPhone（URLSession）が行う。
 //!
 //! そうしてあるのは、**判断を一組にするため**。同じ「どちらが新しいか」を
 //! 二つの土台で書けば、いつか片方だけが違う答えを出す ── 失うのはノートで、
@@ -17,7 +17,7 @@
 /// こちらにある一本。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Here {
-    /// ルートからの道（`家族/買い物リスト.md`）。
+    /// ルートからの相対パス（`家族/買い物リスト.md`）。
     pub rel: String,
     /// 中身の指紋。**時刻では比べない** ── クラウドから降りてきたファイルの
     /// 時刻は、書いた時刻とは限らない。
@@ -89,10 +89,10 @@ impl Step {
     }
 }
 
-/// こちらで改名して、**まだ向こうに伝えていない**もの（いまの道, 向こうがまだ持つ道）。
+/// こちらで改名して、**まだ向こうに伝えていない**もの（現在のパス, 向こうがまだ持つパス）。
 pub type Move = (String, String);
 
-/// 手順を組む。
+/// 手順を組み立てる。
 ///
 /// 見るのは三つ ── いまこちらにあるもの、いま向こうにあるもの、前に合わせた
 /// ときの姿。**時刻はどこにも出てこない**（時刻で比べると、時計のずれた
@@ -101,11 +101,11 @@ pub fn plan(here: &[Here], there: &[There], was: &[Was]) -> Vec<Step> {
     plan_with_moves(here, there, was, &[])
 }
 
-/// 手順を組む ── **改名も込みで**（依頼 492）。
+/// 手順を組み立てる ── **改名も含めて**（依頼 492）。
 ///
 /// 名前で突き合わせる前に、**ID で改名を見つける**。向こうの一本は ID で
 /// 同じままなので、こちらで改名したもの（`moves`）は向こうを改名し、向こうで
-/// 改名されたもの（憶えと違う道に同じ ID がある）はこちらを改名する。両方で
+/// 改名されたもの（記録と違うパスに同じ ID がある）はこちらを改名する。両方で
 /// 別の名前に変えていたら**向こうの名前に従う** ── 題そのものは中身の混ぜで
 /// 決まり、ファイル名は題に合わせて後から揃うので、ここで争わない。
 pub fn plan_with_moves(here: &[Here], there: &[There], was: &[Was], moves: &[Move]) -> Vec<Step> {
@@ -115,7 +115,7 @@ pub fn plan_with_moves(here: &[Here], there: &[There], was: &[Was], moves: &[Mov
     let mut was: Vec<Was> = was.to_vec();
     let mut out = Vec::new();
 
-    // ── こちらの改名（憶えはもう新しい道・向こうはまだ古い道）──
+    // ── こちらの改名（記録はもう新しいパス・向こうはまだ古いパス）──
     for (now, old) in moves {
         let Some(w) = was.iter().find(|w| &w.rel == now) else { continue };
         let id = w.id.clone();
@@ -131,7 +131,7 @@ pub fn plan_with_moves(here: &[Here], there: &[There], was: &[Was], moves: &[Mov
         }
     }
 
-    // ── 向こうの改名（同じ ID が、憶えと違う道にある）──
+    // ── 向こうの改名（同じ ID が、記録と違うパスにある）──
     let mut skip: Vec<String> = Vec::new();
     let mut skip_rels: Vec<String> = Vec::new();
     for w in was.clone() {
@@ -220,7 +220,7 @@ pub fn plan_with_moves(here: &[Here], there: &[There], was: &[Was], moves: &[Mov
     out
 }
 
-/// 手順を組むあいだだけ、こちらの一本と憶えを新しい道で呼ぶ。
+/// 手順を組み立てるあいだだけ、こちらの 1 件と記録を新しいパスで扱う。
 fn rename_local(here: &mut [Here], was: &mut [Was], from: &str, to: &str) {
     for h in here.iter_mut() {
         if h.rel == from {
@@ -236,8 +236,8 @@ fn rename_local(here: &mut [Here], was: &mut [Was], from: &str, to: &str) {
 
 /// **画像も運ぶ**（依頼 497）── `attachments/` の中の画像を、ノートと同じ手順書に乗せる。
 ///
-/// 道は `仕事/attachments/段取り-123.png` のように、ノートと同じルートからの道。
-/// 中身は字ではないので混ぜられない ── 両方が変わったら、こちらを残して向こうの
+/// パスは `仕事/attachments/段取り-123.png` のように、ノートと同じルートからの相対パス。
+/// 中身はテキストではないのでマージできない ── 両方が変わったら、こちらを残して向こうの
 /// ものは `名前.2.png` として隣に置く（失うよりよい）。それは呼ぶ側の仕事。
 pub fn assets(root: &std::path::Path) -> Vec<Here> {
     let mut out = Vec::new();
@@ -274,7 +274,7 @@ pub fn assets(root: &std::path::Path) -> Vec<Here> {
     out
 }
 
-/// 画像の道か（同じ手順書の中で、字として読まないもの）。
+/// 画像のパスか（同じ手順の中で、テキストとして扱わないもの）。
 pub fn is_asset(rel: &str) -> bool {
     rel.rsplit_once('/').map(|(d, _)| d.ends_with("attachments") || d == "attachments").unwrap_or(false)
         && crate::spare::is_picture(rel.rsplit('/').next().unwrap_or(rel))
@@ -372,7 +372,7 @@ pub fn remember(root: &std::path::Path, who: &str, done: &[Was], gone: &[String]
     Ok(())
 }
 
-/// こちらで改名した（依頼 492）── 憶えの鍵を新しい道へ。`record` なら
+/// こちらで改名した（依頼 492）── 記録のキーを新しいパスへ。`record` なら
 /// 「まだ向こうに伝えていない改名」として残す（向こうの改名を写すときは残さない）。
 ///
 /// 相手ごとの憶えぜんぶに効く。憶えに無い一本（まだ一度も合わせていない）は
@@ -403,7 +403,7 @@ pub fn moved(root: &std::path::Path, from: &str, to: &str, record: bool) {
             *m = serde_json::json!({});
         }
         let m = m.as_object_mut().unwrap();
-        // 続けて改名したら、向こうがまだ持つ道は最初のもの。
+        // 続けて改名したら、向こうがまだ持つパスは最初のもの。
         let origin = m
             .remove(from)
             .and_then(|o| o.as_str().map(str::to_string))
@@ -423,7 +423,7 @@ pub fn moved(root: &std::path::Path, from: &str, to: &str, record: bool) {
     }
 }
 
-/// まだ向こうに伝えていない改名（いまの道, 向こうがまだ持つ道）。
+/// まだ向こうに伝えていない改名（現在のパス, 向こうがまだ持つパス）。
 pub fn moves(root: &std::path::Path, who: &str) -> Vec<Move> {
     let Ok(text) = std::fs::read_to_string(ledger_now(root)) else { return Vec::new() };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return Vec::new() };
@@ -515,7 +515,7 @@ mod tests {
         std::fs::create_dir_all(d.path().join(".amber")).unwrap();
         std::fs::write(ledger(d.path()), "{ こわれている").unwrap();
         assert!(recall(d.path(), "drive").is_empty());
-        // 書き直せる（壊れた字を持ち越さない）。
+        // 書き直せる（壊れたテキストを持ち越さない）。
         let one = vec![Was { rel: "a.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }];
         remember(d.path(), "drive", &one, &[]).unwrap();
         assert_eq!(recall(d.path(), "drive"), one);
@@ -523,7 +523,7 @@ mod tests {
 
     #[test]
     fn 前の隠しフォルダの憶えは_引き継がれて片付く() {
-        // `.cian/sync.json` に憶えがある棚でも、次の同期が全部を運び直さない。
+        // `.cian/sync.json` に記録があるフォルダでも、次の同期が全部を転送し直さない。
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join(".cian")).unwrap();
         let one = vec![Was { rel: "a.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }];
@@ -624,7 +624,7 @@ mod tests {
 
     #[test]
     fn こちらで改名したら_向こうも改名する() {
-        // 憶えはもう新しい道、向こうはまだ古い道（`moved` がそうしておく）。
+        // 記録はもう新しいパス、向こうはまだ古いパス（`moved` がそうしておく）。
         let was = vec![Was { rel: "旅.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }];
         let there = vec![There { rel: "old.md".into(), id: "i".into(), tag: "x".into() }];
         let mv = vec![("旅.md".to_string(), "old.md".to_string())];

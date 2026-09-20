@@ -1,24 +1,23 @@
-//! What is actually in a tree, as facts an AI request can be built from.
+//! ディレクトリの中に実際に何があるか。AI への問い合わせを組み立てるための事実。
 //!
-//! The three AI features that read a directory — spot the junk, propose a
-//! structure, find the file I mean — were each sending the model a list of
-//! **names**. Junk was the worst served: it saw one level, so a
-//! `node_modules` two folders down was invisible; and a directory's size came
-//! through blank, so the one question junk exists to answer — *what is taking
-//! the space* — was one the model had no way to reason about. It was being
-//! asked to guess from vocabulary alone, and it guessed like something
-//! guessing from vocabulary alone.
+//! ディレクトリを読む 3 つの AI 機能 ── 不要なものを見つける、構成を提案する、
+//! 目的のファイルを探す ── は、どれもモデルに**名前の一覧**だけを送っていた。
+//! いちばん割を食っていたのは「不要なものを見つける」で、1 階層しか見ないので
+//! 2 つ下の `node_modules` は見えず、ディレクトリのサイズは空のまま届いていた。
+//! つまり、この機能が答えるべきただ 1 つの問い ──*何が容量を食っているか*── を、
+//! モデルは考えようがなかった。語彙だけから推測させられていて、語彙だけから
+//! 推測したとおりの答えを返していた。
 //!
-//! So this gathers evidence and judges nothing. **The junk list lives in the
-//! prompt, not here**: the moment this module starts deciding that `target/`
-//! is disposable, there are two opinions in the program and the model's is the
-//! one nobody can read. What it contributes is what only the filesystem knows
-//! — how big, how old, how deep, how many.
+//! そこでここは事実を集めるだけで、何も判断しない。**不要なものの一覧は
+//! プロンプト側にあって、ここには無い。** このモジュールが「`target/` は捨てて
+//! よい」と決め始めた瞬間、プログラムの中に意見が 2 つできて、しかもモデル側の
+//! 意見は誰にも読めない。ここが持ち寄るのは、ファイルシステムしか知らないこと ──
+//! どれだけ大きいか、いつのものか、どれだけ深いか、いくつあるか。
 //!
-//! Breadth first, like the finder, so a cap takes the deepest things rather
-//! than everything after the first big folder. And a cap is **reported**: a
-//! survey that quietly stopped at row 400 reads to everyone downstream as a
-//! directory with 400 things in it.
+//! 探索は幅優先。上限に当たったときに、最初の大きいフォルダ以降が丸ごと落ちる
+//! のではなく、いちばん深いものから落ちるようにするため。そして上限に当たったら
+//! **そう報告する** ── 400 行目で黙って止まった調査結果は、受け取った側からは
+//! 「400 個入っているディレクトリ」としか読めない。
 
 use std::collections::VecDeque;
 use std::fs;
@@ -26,87 +25,83 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
-/// One entry of a survey.
+/// 調査結果の 1 項目。
 #[derive(Debug, Clone)]
 pub struct Row {
-    /// Where it is, relative to the surveyed root. Always uses `/` so the
-    /// listing reads the same on both platforms — the model is shown one
-    /// convention rather than being asked to cope with two.
+    /// 調査対象のルートから見た位置。区切りは常に `/`。どの OS でも同じ形で
+    /// 読めるようにするため ── モデルに 2 通りの書き方を扱わせず、1 通りだけ見せる。
     pub rel: String,
     pub path: PathBuf,
     pub is_dir: bool,
-    /// Bytes at or below it. **Recursive for a directory**, which is the whole
-    /// reason this is not just a `read_dir`.
+    /// 自身とその配下の合計バイト数。**ディレクトリでは再帰的に集計する。**
+    /// 単なる `read_dir` で済ませていない理由がこれ。
     pub size: u64,
-    /// The size is a floor, not a total: summing this subtree hit
-    /// [`SIZE_ENTRY_CAP`] and stopped. Rendered with a `>`, and it is still
-    /// the answer — "more than two gigabytes" ranks a folder as well as the
-    /// exact figure and gets there in a fraction of the time.
+    /// サイズが合計ではなく下限であることを示す。この配下を集計している途中で
+    /// [`SIZE_ENTRY_CAP`] に達して打ち切った。表示は `>` 付きになるが、それでも
+    /// 答えとしては十分 ── 「2GB 超」でも正確な数値と同じだけ順位付けに使えて、
+    /// しかも桁違いに速い。
     pub size_capped: bool,
-    /// When it last changed. `None` where the filesystem would not say.
+    /// 最終更新時刻。ファイルシステムが返さないときは `None`。
     pub modified: Option<SystemTime>,
-    /// How far below the root, with the root's own children at 1.
+    /// ルートからの深さ。ルート直下の子が 1。
     pub depth: usize,
 }
 
-/// How far to go. Both bounds exist to keep one keystroke from walking a home
-/// directory, and both are reported when they bite.
+/// どこまで探索するか。どちらの上限も、キー 1 つでホームディレクトリ全体を
+/// 歩き回らせないためにある。上限に当たったときは、どちらも報告される。
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
-    /// Levels below the root. 1 is a plain listing.
+    /// ルートからの階層数。1 なら単なる一覧。
     pub depth: usize,
-    /// The most rows to return.
+    /// 返す項目数の上限。
     pub rows: usize,
-    /// Whether to look inside dot-directories. Off for the tidy-up features
-    /// (`.git` is not clutter), on where the person asked for a file by name.
+    /// ドットで始まるディレクトリの中を見るか。整理系の機能では off
+    /// （`.git` は不要物ではない）、名前でファイルを探すときは on。
     pub hidden: bool,
-    /// How many directory entries the *whole* survey may visit while totalling
-    /// subtree sizes.
+    /// 配下のサイズを集計するあいだに、*調査全体*で訪問してよいディレクトリ
+    /// エントリの数。
     ///
-    /// **One budget for the survey, not one per directory.** Capping each
-    /// directory separately still cost four and a half seconds over a Rust
-    /// checkout, because eight hundred rows each spent their own allowance and
-    /// the nested ones walked the same files again. Spent in breadth-first
-    /// order, this gives the accurate figures to the shallow rows — where
-    /// every question this feeds is actually answered — and lets the deep ones
-    /// say "not counted" instead of costing a second each.
+    /// **予算は調査全体で 1 つ。ディレクトリごとではない。** ディレクトリ単位で
+    /// 上限を設けた版は、Rust のチェックアウトに対して 4.5 秒かかった。800 項目が
+    /// それぞれ自分の予算を使い、入れ子のものが同じファイルを何度も歩いたため。
+    /// 幅優先の順に消費すれば、浅い項目 ── この機能が答える問いは、実際にはすべて
+    /// そこで答えが出る ── に正確な数値が渡り、深い項目は 1 件ごとに 1 秒かける
+    /// 代わりに「未集計」と言えるようになる。
     pub size_budget: usize,
 }
 
 impl Default for Limits {
     fn default() -> Self {
-        // Three levels reaches `project/src/module` and the usual homes of
-        // build output, without turning one keypress into a full-disk walk.
+        // 3 階層あれば `project/src/module` や、ビルド成果物が置かれる典型的な
+        // 場所には届く。キー 1 つでディスク全体を歩き回ることにもならない。
         Self { depth: 3, rows: 600, hidden: false, size_budget: 120_000 }
     }
 }
 
-/// A survey, and whether it is the whole truth.
+/// 調査結果と、それが完全かどうか。
 #[derive(Debug, Clone, Default)]
 pub struct Survey {
     pub rows: Vec<Row>,
-    /// The row budget ran out partway through this depth, and nothing deeper
-    /// was looked at.
+    /// この深さの途中で項目数の上限に達し、それより深いところは見ていない。
     ///
-    /// **Said as a depth rather than as a count on purpose.** The first
-    /// version counted what would not fit, and over a Rust checkout it
-    /// reported "42160 entries did not fit" — true, useless, and alarming.
-    /// The walk is breadth first, so what it actually did was list the top two
-    /// levels completely and stop, which is both a far more useful sentence
-    /// and the thing somebody would want to know.
+    /// **件数ではなく深さで言うのは意図的。** 最初の版は入りきらなかった件数を
+    /// 数えていて、Rust のチェックアウトに対して「42160 件が入りませんでした」と
+    /// 報告した ── 正しいが、役に立たず、無用に不安にさせる。探索は幅優先なので、
+    /// 実際にやったのは「上位 2 階層を完全に列挙して止まった」であり、そちらの
+    /// ほうがずっと有用で、読む人が知りたいのもそれ。
     pub stopped_at: Option<usize>,
-    /// Directories not opened because the depth limit stopped there.
+    /// 深さの上限で打ち切られ、開かなかったディレクトリ。
     pub unopened: usize,
 }
 
 impl Survey {
-    /// Whether anything was left out, either way.
+    /// どちらかの理由で、何かが漏れているか。
     pub fn partial(&self) -> bool {
         self.stopped_at.is_some() || self.unopened > 0
     }
 
-    /// The deepest level that is known to be complete. `None` when the walk
-    /// stopped inside the first level, where nothing can be claimed.
+    /// 完全に列挙できたと分かっている、いちばん深い階層。最初の階層の途中で
+    /// 止まった場合は `None`（何も言えないため）。
     pub fn whole_to(&self) -> Option<usize> {
         match self.stopped_at {
             None => self.rows.iter().map(|r| r.depth).max(),
@@ -116,12 +111,11 @@ impl Survey {
     }
 }
 
-/// Walk `root`, breadth first, within `limits`.
+/// `root` を `limits` の範囲で幅優先に探索する。
 ///
-/// Directory sizes are totalled over the *whole* subtree, including the part
-/// below the depth limit: the limit bounds what is listed, not what is
-/// counted. A folder that is only interesting because it is four gigabytes has
-/// to arrive saying so even when its contents are not listed.
+/// ディレクトリのサイズは*配下すべて*で集計する。深さの上限より下の部分も含む ──
+/// 上限が制限するのは列挙する範囲であって、集計する範囲ではない。4GB あることだけが
+/// 重要なフォルダは、中身が列挙されない場合でも、そう伝わる必要がある。
 pub fn survey(root: &Path, limits: Limits, cancel: &AtomicBool) -> Survey {
     let mut out = Survey::default();
     let mut budget = limits.size_budget;
@@ -130,8 +124,7 @@ pub fn survey(root: &Path, limits: Limits, cancel: &AtomicBool) -> Survey {
         if cancel.load(Ordering::Relaxed) {
             return out;
         }
-        // An unreadable directory is normal (permissions); skipping it beats
-        // abandoning the survey.
+        // 読めないディレクトリは普通にある（権限）。調査ごと諦めるより飛ばす。
         let Ok(rd) = fs::read_dir(&dir) else { continue };
         for e in rd.flatten() {
             if cancel.load(Ordering::Relaxed) {
@@ -143,8 +136,8 @@ pub fn survey(root: &Path, limits: Limits, cancel: &AtomicBool) -> Survey {
             }
             let path = e.path();
             let ft = e.file_type();
-            // A symlink is itself, never followed — the same rule `du` uses,
-            // and the reason a survey cannot loop.
+            // シンボリックリンクはそれ自体として扱い、決して辿らない。`du` と
+            // 同じ規則で、調査が無限ループしない理由でもある。
             let link = ft.as_ref().map(|t| t.is_symlink()).unwrap_or(false);
             let is_dir = !link && ft.as_ref().map(|t| t.is_dir()).unwrap_or(false);
             let meta = e.metadata().ok();
@@ -154,12 +147,12 @@ pub fn survey(root: &Path, limits: Limits, cancel: &AtomicBool) -> Survey {
             } else {
                 (meta.as_ref().map(|m| m.len()).unwrap_or(0), false)
             };
-            // **Full: stop, rather than counting what will not fit.** The
-            // walk is breadth first, so the rows already gathered are the
-            // shallowest ones — which for every question this feeds is where
-            // the answer is. `target` matters at depth 1; the ten thousand
-            // object files inside it do not, and enumerating them to say how
-            // many were skipped cost a second and told nobody anything.
+            // **上限に達したら、入りきらない件数を数えずに止める。** 探索は
+            // 幅優先なので、集まっている項目はいちばん浅いものばかり ── この
+            // 機能が答える問いは、すべてそこに答えがある。深さ 1 の `target` は
+            // 重要だが、その中の 1 万個のオブジェクトファイルは重要ではない。
+            // 飛ばした件数を言うためにそれを列挙すると、1 秒かけて誰の役にも
+            // 立たない数字を出すことになる。
             if out.rows.len() >= limits.rows {
                 out.stopped_at = Some(depth + 1);
                 return out;
@@ -184,31 +177,30 @@ pub fn survey(root: &Path, limits: Limits, cancel: &AtomicBool) -> Survey {
     out
 }
 
-/// How many entries one directory's size may cost before the answer becomes a
-/// floor.
+/// 1 つのディレクトリのサイズ集計に、何件まで費やしてよいか。これを超えると
+/// 答えは「下限」になる。
 ///
-/// **This is a latency bound, and it was bought with a regression.** The first
-/// version summed every subtree exactly, which over a Rust checkout meant
-/// walking fourteen gigabytes of build output — six seconds, inside the
-/// request handler, with the whole engine waiting on it. The window would have
-/// looked frozen for the one keystroke whose entire purpose is finding that
-/// directory.
+/// **これは応答時間の上限で、性能劣化と引き換えに決めた値。** 最初の版は配下を
+/// すべて正確に合計していて、Rust のチェックアウトに対しては 14GB のビルド成果物を
+/// 歩くことになった ── リクエストハンドラの中で 6 秒、そのあいだエンジン全体が
+/// 待たされる。そのディレクトリを見つけることだけが目的のキー操作で、画面は
+/// 固まったように見えたはずだった。
 ///
-/// Twenty thousand entries is well past the point where the number changes any
-/// decision: nothing that takes this many files to count is going to turn out
-/// to be small.
+/// 2 万件は、数値が判断を変える境目をとうに超えている。これだけのファイルを
+/// 数えないと分からないものが、結果として小さかった、ということは起こらない。
 pub const SIZE_ENTRY_CAP: usize = 20_000;
 
-/// Every regular file at or below `dir`, in bytes, and whether that is a floor.
-/// Iterative, so a deep tree cannot blow the stack; symlinks are not followed.
+/// `dir` 以下の通常ファイルの合計バイト数と、それが下限かどうか。再帰ではなく
+/// 反復で書いてあるので、深いディレクトリでもスタックを潰さない。シンボリック
+/// リンクは辿らない。
 ///
-/// Spends from `budget`, the survey's shared allowance, as well as its own
-/// [`SIZE_ENTRY_CAP`]: one directory may not eat the whole survey, and the
-/// survey as a whole may not eat the keystroke.
+/// 自分の [`SIZE_ENTRY_CAP`] に加えて、調査全体で共有する `budget` からも消費する。
+/// 1 つのディレクトリが調査全体を食い潰してはいけないし、調査全体がキー操作の
+/// 応答時間を食い潰してもいけない。
 ///
-/// **A capped sum is never presented as a total.** A size that quietly stopped
-/// counting is a wrong number wearing a right number's clothes, and ranking by
-/// it would put the biggest directory in the middle of the list.
+/// **打ち切った合計を、合計として見せることはない。** 黙って数えるのをやめた
+/// サイズは、正しい数値の顔をした誤った数値であり、それで順位付けすると、いちばん
+/// 大きいディレクトリが一覧の真ん中に来る。
 fn subtree_size(dir: &Path, cancel: &AtomicBool, budget: &mut usize) -> (u64, bool) {
     if *budget == 0 {
         return (0, true);
@@ -241,30 +233,29 @@ fn subtree_size(dir: &Path, cancel: &AtomicBool, budget: &mut usize) -> (u64, bo
     (total, false)
 }
 
-/// How many whole days ago, against `now`. `None` where the time is unknown or
-/// in the future (a clock skew, an unpacked archive) — a negative age reads as
-/// a bug in the listing rather than as what it is.
+/// `now` から見て何日前か（丸 1 日単位）。時刻が不明、または未来のときは `None`
+/// （時計のずれ、展開したアーカイブなど）── 負の日数は、実際の状況ではなく
+/// 一覧のバグとして読まれてしまう。
 pub fn age_days(modified: Option<SystemTime>, now: SystemTime) -> Option<u64> {
     let m = modified?;
     now.duration_since(m).ok().map(|d| d.as_secs() / 86_400)
 }
 
-/// Bytes, as a person reads them. Kept here rather than in the caller because
-/// three prompts render the same column and they must not disagree about what
-/// "1.5G" means.
+/// バイト数を人が読む形に。呼び出し側ではなくここに置いてあるのは、3 つの
+/// プロンプトが同じ列を表示するからで、「1.5G」の意味が食い違ってはいけない。
 pub fn brief_size(bytes: u64) -> String {
     const UNITS: [(u64, &str); 4] =
         [(1 << 30, "G"), (1 << 20, "M"), (1 << 10, "K"), (1, "B")];
     for (scale, tag) in UNITS {
         if bytes >= scale {
-            // One decimal below ten, none above: "9.4G" and "512M" are both
-            // as much precision as the number can carry.
+            // 10 未満は小数第 1 位まで、10 以上は整数。「9.4G」も「512M」も、
+            // その数値が持てる精度としてはこれで上限。
             let v = bytes as f64 / scale as f64;
             if v >= 10.0 || scale == 1 {
                 return format!("{}{tag}", v.round() as u64);
             }
-            // …but not a decimal point that says nothing. "4.0G" spends two
-            // characters to tell you it is exactly four, which it is not.
+            // ただし、何も言っていない小数点は付けない。「4.0G」は 2 文字使って
+            // 「ちょうど 4 です」と言うが、実際はちょうど 4 ではない。
             let one = format!("{v:.1}");
             return match one.strip_suffix(".0") {
                 Some(whole) => format!("{whole}{tag}"),
@@ -298,8 +289,8 @@ mod tests {
         s.rows.iter().find(|r| r.rel == rel).unwrap_or_else(|| panic!("no row {rel}: {:?}", s.rows.iter().map(|r| &r.rel).collect::<Vec<_>>()))
     }
 
-    /// A directory arrives with what is *under* it, which is the number the
-    /// whole feature turns on. It used to arrive blank.
+    /// ディレクトリは*配下*の合計を伴って届く。この機能の成否を分ける数値が
+    /// それ。以前は空のまま届いていた。
     #[test]
     fn a_directory_carries_its_subtree() {
         let d = sandbox();
@@ -308,9 +299,9 @@ mod tests {
         assert_eq!(find(&s, "src").size, 600, "200 here and 400 buried");
     }
 
-    /// …including the part below the depth limit. The limit bounds the
-    /// listing, not the arithmetic: a folder that matters only because it is
-    /// huge has to say so even when its contents are not shown.
+    /// …深さの上限より下の部分も含めて。上限が制限するのは列挙であって集計では
+    /// ない。巨大であることだけが重要なフォルダは、中身が表示されない場合でも
+    /// そう伝わる必要がある。
     #[test]
     fn the_depth_limit_does_not_shrink_the_sizes() {
         let d = sandbox();
@@ -324,8 +315,8 @@ mod tests {
         assert!(shallow.unopened >= 2, "and it says which doors it did not open");
     }
 
-    /// Dot-directories are not clutter, and the tidy-up features must not be
-    /// shown `.git` as a candidate.
+    /// ドットで始まるディレクトリは不要物ではない。整理系の機能に `.git` を
+    /// 候補として見せてはいけない。
     #[test]
     fn hidden_is_a_choice() {
         let d = sandbox();
@@ -339,8 +330,8 @@ mod tests {
         assert!(with.rows.iter().any(|r| r.rel == ".git"));
     }
 
-    /// **A cap that is not reported is a lie.** "Nothing found" has to be
-    /// distinguishable from "nothing found in the part I looked at".
+    /// **報告されない上限は嘘である。** 「見つからなかった」と「見た範囲では
+    /// 見つからなかった」は、区別できなければならない。
     #[test]
     fn a_full_survey_says_so() {
         let d = sandbox();
@@ -353,10 +344,10 @@ mod tests {
         assert_eq!(s.stopped_at, Some(1), "it stopped inside the first level");
         assert_eq!(s.whole_to(), None, "so no level is known to be complete");
         assert!(s.partial());
-        // Deep enough to reach the bottom of the sandbox. At the default
-        // depth of 3 this very tree has a door left shut (`src/deep/deeper`),
-        // and `partial()` says so — which is the behaviour, not a flaw in the
-        // fixture.
+        // テスト用ディレクトリのいちばん下まで届く深さ。既定の深さ 3 では、この
+        // ディレクトリ自体に開かれないまま残る場所がある（`src/deep/deeper`）。
+        // `partial()` はそれを報告する ── これは仕様どおりの動作で、テストデータの
+        // 不備ではない。
         let whole = survey(
             d.path(),
             Limits { depth: 6, ..Limits::default() },
@@ -365,15 +356,15 @@ mod tests {
         assert!(!whole.partial(), "reaching the bottom claims nothing extra");
         assert_eq!(whole.whole_to(), Some(4), "and it knows how deep it went");
 
-        // Stopping *after* a level means that level is whole. This is the
-        // sentence the depth form exists to make sayable.
+        // ある階層の*後*で止まったなら、その階層は完全に列挙できている。深さで
+        // 表現しているのは、この一文を言えるようにするため。
         let two = survey(
             d.path(),
             Limits { rows: 6, depth: 6, ..Limits::default() },
             &AtomicBool::new(false),
         );
-        // Six rows is the whole top level (3) and the whole level below it
-        // (3); the seventh would have been the first at depth 3.
+        // 6 件は最上位の階層すべて（3 件）とその 1 つ下すべて（3 件）。7 件目は
+        // 深さ 3 の最初の 1 件になるはずだった。
         assert_eq!(two.stopped_at, Some(3));
         assert_eq!(two.whole_to(), Some(2), "both levels above it are complete");
     }

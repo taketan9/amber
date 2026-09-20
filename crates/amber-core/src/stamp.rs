@@ -1,48 +1,47 @@
-//! "Has this file changed since I read it?"
+//! 「このファイルは、読んだときから変わっているか？」
 //!
-//! **cian's save wrote unconditionally.** It kept the encoding, the BOM and
-//! the line endings the file arrived with — everything about *how* to write —
-//! and never asked whether the thing it was about to write over was still the
-//! thing it had read. Two people editing one note on a shared drive both
-//! saved, and the second one silently erased the first. Nothing on screen
-//! said so, because nothing had looked.
+//! **cian の保存は無条件に書いていた。** 文字コードも BOM も改行コードも
+//! 読み込んだときのまま維持していた ── *どう書くか*は全部気にしていた ──
+//! のに、いま上書きしようとしている中身が、読んだときと同じものかどうかは
+//! 一度も確かめていなかった。共有ドライブ上の 1 つのノートを 2 人で編集して
+//! 両方が保存すると、後の保存が先の保存を黙って消す。画面には何も出ない。
+//! 誰も見ていなかったから。
 //!
-//! That is a hazard on any shared folder — a synced OneDrive library, a
-//! SharePoint mount over WebDAV, an NFS home — and it costs one `metadata`
-//! call to notice.
+//! これは共有フォルダなら必ずある危険で（同期された OneDrive、WebDAV で
+//! マウントした SharePoint、NFS のホーム）、気づくのに必要なのは `metadata`
+//! を 1 回呼ぶことだけ。
 //!
-//! **What this cannot catch**: a change made within the same second that
-//! leaves the file exactly as long. Filesystems keep mtime to a second on
-//! some volumes, so that pair really can repeat. Catching it would mean
-//! hashing the contents on every read, which is a file-sized cost paid on
-//! every open to close a hole this small. The trade is written down rather
-//! than papered over: if the length and the timestamp both match, this says
-//! unchanged, and it can be wrong.
+//! **これで捕まえられないもの**: 同じ 1 秒の中で行われ、長さも変わらない変更。
+//! ボリュームによっては mtime が秒単位までしか保持されないので、その組み合わせは
+//! 実際に起こりうる。捕まえるには読み込みのたびに中身をハッシュすることになり、
+//! この小さな穴を塞ぐために開くたびファイルサイズぶんのコストを払うことになる。
+//! ごまかさずに書いておく ── 長さとタイムスタンプが両方一致したら、ここは
+//! 「変わっていない」と答えるが、それは間違っていることがある。
 
 use std::path::Path;
 use std::time::SystemTime;
 
-/// What a file looked like when it was read.
+/// 読み込んだ時点でのファイルの状態。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stamp {
     pub len: u64,
-    /// `None` where the filesystem would not say — a stamp with no time
-    /// compares on length alone, which is weaker but still catches the
-    /// common case.
+    /// ファイルシステムが時刻を返さないときは `None`。時刻の無いスタンプは
+    /// 長さだけで比較することになり、判定は弱くなるが、よくあるケースは
+    /// それでも捕まえられる。
     pub modified: Option<SystemTime>,
 }
 
-/// Take a file's stamp. `None` when it is not there — which is itself an
-/// answer: a file that has since been created where none was is a change.
+/// ファイルのスタンプを取る。存在しなければ `None` ── それ自体が答えになる。
+/// 何も無かった場所にファイルができていれば、それは変更である。
 pub fn of(path: &Path) -> Option<Stamp> {
     let m = std::fs::metadata(path).ok()?;
     Some(Stamp { len: m.len(), modified: m.modified().ok() })
 }
 
-/// Did the file move under us?
+/// 知らないあいだにファイルが変わったか。
 ///
-/// A file that has *gone* counts as changed: writing would put it back
-/// without anyone asking, and somebody deleted it on purpose.
+/// *消えている*ファイルも変更として扱う。そのまま書くと誰にも断らずに復活させる
+/// ことになるし、消したのは誰かが意図してやったことだから。
 pub fn changed(path: &Path, since: &Stamp) -> bool {
     match of(path) {
         Some(now) => now != *since,
@@ -50,7 +49,7 @@ pub fn changed(path: &Path, since: &Stamp) -> bool {
     }
 }
 
-/// How to say it to a person: what is different, not that something is.
+/// 人に伝えるための文言。「何かが違う」ではなく「何が違うか」を言う。
 pub fn describe(path: &Path, since: &Stamp) -> String {
     let name = path
         .file_name()
@@ -66,27 +65,26 @@ pub fn describe(path: &Path, since: &Stamp) -> String {
     }
 }
 
-/// The stamp as one string, for a caller that has to hand it back later.
+/// スタンプを 1 つの文字列にする。あとで返してもらう必要がある呼び出し側のため。
 ///
-/// **Not seconds.** A phone reads a note, gets the stamp as JSON, and returns
-/// it on save; a stamp rounded to the second on the way out no longer equals
-/// the file it came from, so every save reports a conflict with nobody. That
-/// is not a hypothetical — it is what the first version of the FFI did, and
-/// the round-trip test caught it.
+/// **秒に丸めない。** iPhone はノートを読み、スタンプを JSON で受け取り、保存時に
+/// それを返す。出力時に秒へ丸めたスタンプは、元のファイルと等しくなくなるので、
+/// 保存のたびに相手のいない競合が報告される。これは仮の話ではなく、FFI の最初の
+/// 版が実際にそうなっていて、往復テストが捕まえた。
 ///
-/// Opaque on purpose: the caller stores it and gives it back, and nothing
-/// outside this module needs to know that it is a length and a time.
+/// 意図的に不透明にしてある。呼び出し側は保存して返すだけで、このモジュールの
+/// 外が「長さと時刻である」ことを知る必要はない。
 pub fn token(s: &Stamp) -> String {
     match s.modified.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()) {
         Some(d) => format!("{}:{}.{}", s.len, d.as_secs(), d.subsec_nanos()),
-        // A filesystem that would not say the time. The length alone is
-        // weaker but still catches the common case, and saying so beats
-        // inventing a time that would never match.
+        // 時刻を返さないファイルシステム。長さだけでは判定が弱くなるが、
+        // よくあるケースは捕まえられる。絶対に一致しない時刻をでっち上げるより、
+        // 無いと言うほうがいい。
         None => format!("{}:-", s.len),
     }
 }
 
-/// Read back what [`token`] wrote. Anything else is `None`.
+/// [`token`] が書いたものを読み戻す。それ以外は `None`。
 pub fn from_token(t: &str) -> Option<Stamp> {
     let (len, time) = t.split_once(':')?;
     let len: u64 = len.parse().ok()?;
@@ -117,7 +115,7 @@ mod tests {
         assert!(!changed(&p, &s));
     }
 
-    /// The case this exists for: somebody else wrote to it while it was open.
+    /// これが存在する理由そのもの: 開いているあいだに誰かが書き換えた。
     #[test]
     fn a_different_length_is_a_change() {
         let d = tempfile::tempdir().unwrap();
@@ -129,8 +127,8 @@ mod tests {
         assert!(describe(&p, &s).contains("4 → 8"), "{}", describe(&p, &s));
     }
 
-    /// **A file that has gone is a change.** Saving would put it back, and
-    /// somebody removed it deliberately.
+    /// **消えたファイルは変更である。** 保存すると復活してしまうし、消したのは
+    /// 誰かが意図してやったこと。
     #[test]
     fn a_missing_file_is_a_change() {
         let d = tempfile::tempdir().unwrap();
@@ -148,28 +146,27 @@ mod tests {
         let p = d.path().join("note.md");
         write(&p, "one\n");
         let s = of(&p).unwrap();
-        // Exactly equal, not nearly: `changed` compares for equality, so a
-        // stamp that loses a nanosecond on the trip says the file moved.
+        // 「ほぼ等しい」ではなく完全一致。`changed` は等価比較なので、往復の
+        // 途中で 1 ナノ秒でも落ちたスタンプは「変わった」と言ってしまう。
         assert_eq!(from_token(&token(&s)), Some(s.clone()));
         assert!(!changed(&p, &from_token(&token(&s)).unwrap()));
-        // A filesystem with no time to give still round-trips.
+        // 時刻を返さないファイルシステムでも、往復はできる。
         let no_time = Stamp { len: 12, modified: None };
         assert_eq!(from_token(&token(&no_time)), Some(no_time));
-        // Nonsense is refused rather than guessed at.
+        // 壊れた入力は、推測せずに拒否する。
         assert_eq!(from_token("あ"), None);
         assert_eq!(from_token("12:x.y"), None);
     }
 
-    /// A rewrite of the same length, far enough apart in time to be seen.
-    /// (Within one second it cannot be — that hole is in the module's doc.)
+    /// 同じ長さでの書き換えを、見分けられるだけ時間を空けて行う。
+    /// （1 秒以内では見分けられない ── その穴はモジュールの冒頭に書いてある。）
     #[test]
     fn the_same_length_at_a_different_time_is_a_change() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("note.md");
         write(&p, "one\n");
         let s = of(&p).unwrap();
-        // Set the time back rather than sleeping: a test that waits a second
-        // is a test people start skipping.
+        // sleep せずに時刻を戻す。1 秒待つテストは、そのうち飛ばされるようになる。
         let old = std::fs::metadata(&p).unwrap().modified().unwrap()
             - std::time::Duration::from_secs(120);
         std::fs::OpenOptions::new().write(true).open(&p).unwrap().set_modified(old).unwrap();

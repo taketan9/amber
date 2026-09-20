@@ -2,7 +2,7 @@
 //!
 //! **自動保存のアプリに履歴が要る理由は、自動保存だから。** 打鍵の 0.9 秒後に
 //! 書くので、消してしまったことに気づいたときには、もう消えたほうが保存されて
-//! いる。取り消し（`stepBack`）は窓を閉じれば消えるので、日をまたぐ後悔には
+//! いる。取り消し（`stepBack`）はアプリを閉じれば消えるので、日をまたぐ後悔には
 //! 届かない。
 //!
 //! **一世代は「書いていた一区切り」。** 保存のたびに残すと、十分書けば数十世代
@@ -14,7 +14,7 @@
 //! 始まるので、ノートの一覧にも見張りにも出てこない。
 //!
 //! 消し方も数えて言い切る。**新しい五十、または三十日以内**（大きいほう）を
-//! 残す。人が「残す」と印を付けたものは、数にも日数にも入れない。
+//! 残す。人が「残す」と指定したものは、件数にも日数にも入れない。
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -31,9 +31,9 @@ pub const KEEP_DAYS: u64 = 30;
 pub struct Version {
     /// `2026-09-06T12-30-05`。名前がそのまま順番になる。
     pub stamp: String,
-    /// このノートの、置き場所から見た道。
+    /// このノートの、保存ディレクトリから見た相対パス。
     pub note: String,
-    /// 人が「残す」と印を付けたか。
+    /// 人が「残す」と指定したか。
     pub kept: bool,
     pub bytes: u64,
 }
@@ -43,9 +43,9 @@ pub fn home(root: &Path) -> PathBuf {
     root.join(".amber").join("history")
 }
 
-/// このノートの、前の姿を置く棚。
+/// このノートの、以前の内容を置くディレクトリ。
 ///
-/// ノートの道をそのまま写した形にする ── `仕事/週報.md` なら
+/// ノートのパスをそのまま写した形にする ── `仕事/週報.md` なら
 /// `.amber/history/仕事/週報.md/`。Finder で開いても、どのノートのものか
 /// 名前で分かる（一つの平らなフォルダに符号で並べると、人には読めない）。
 pub fn shelf(root: &Path, note: &Path) -> Option<PathBuf> {
@@ -55,7 +55,7 @@ pub fn shelf(root: &Path, note: &Path) -> Option<PathBuf> {
 
 /// いまの姿を一つ残す。**同じ中身なら残さない。**
 ///
-/// `kept` は人が付ける「消すな」の印。`force` が偽のときは、前の世代から
+/// `kept` は人が付ける「消すな」の指定。`force` が偽のときは、前の世代から
 /// `gap` 秒たっていなければ残さない ── 打つたびに残すと、一回の執筆で
 /// 五十世代が埋まる。
 pub fn keep(
@@ -115,7 +115,7 @@ pub fn list(root: &Path, at: &Path) -> Result<Vec<Version>> {
         anyhow::bail!("ノートの置き場所の外です");
     };
     let mut out = Vec::new();
-    // ノート一つの棚（中に `<stamp>.md` が並ぶ）か、フォルダ（中に棚が
+    // ノート 1 つのディレクトリ（中に `<stamp>.md` が並ぶ）か、フォルダ（中にディレクトリが
     // 並ぶ）か ── どちらも同じ歩き方で集まる。
     if shelf.is_dir() {
         walk(&shelf, &home(root), &mut out, 0);
@@ -142,7 +142,7 @@ fn walk(dir: &Path, home: &Path, out: &mut Vec<Version>, depth: usize) {
     for at in here {
         let Some(name) = at.file_name().and_then(|n| n.to_str()) else { continue };
         let Some(stamp) = stamp_of(name) else { continue };
-        // 棚の名前が、そのノートの道。
+        // ディレクトリの名前が、そのノートのパス。
         let note = dir
             .strip_prefix(home)
             .map(|r| r.to_string_lossy().replace('\\', "/"))
@@ -170,7 +170,7 @@ pub fn read(root: &Path, note: &Path, stamp: &str) -> Result<String> {
     anyhow::bail!("その姿はもうありません（{stamp}）")
 }
 
-/// 「残す」の印を付ける／外す。
+/// 「残す」の指定を付ける／外す。
 pub fn mark(root: &Path, note: &Path, stamp: &str, kept: bool) -> Result<()> {
     let Some(shelf) = shelf(root, note) else {
         anyhow::bail!("ノートの置き場所の外です");
@@ -188,7 +188,7 @@ pub fn mark(root: &Path, note: &Path, stamp: &str, kept: bool) -> Result<()> {
     Ok(())
 }
 
-/// 古いものを落とす。**印の付いたものは、数にも日数にも入れない。**
+/// 古いものを削除する。**「残す」が付いたものは、件数にも日数にも入れない。**
 fn sweep(shelf: &Path) {
     let all = list_shelf(shelf);
     let mut n = 0usize;
@@ -207,7 +207,7 @@ fn sweep(shelf: &Path) {
     }
 }
 
-/// 棚の中の姿を、古い順の名前で。
+/// ディレクトリの中身を、古い順の名前で。
 ///
 /// **並べるのは刻であって、ファイル名ではない。** 名前で並べると
 /// `…01.2.md` が `…01.md` より前に来る（`.` の次が `2` と `m` の比較に
@@ -245,7 +245,7 @@ fn age_secs(at: &Path) -> Option<u64> {
 
 /// いまの刻を、名前にできる形で。
 ///
-/// **その機械の時計で。** 履歴を読むのは書いた人なので、「昨日の夕方」が
+/// **端末のローカル時刻で。** 履歴を読むのは書いた人なので、「昨日の夕方」が
 /// 昨日の夕方に見えないと意味がない ── UTC で並べると、夜に書いたものが
 /// 翌日として並ぶ。
 fn now_stamp() -> String {

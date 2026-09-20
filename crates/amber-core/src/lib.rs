@@ -4,7 +4,7 @@
 //! ここに依存し、昔からの `crate::note::…` が動き続けるように再輸出している。
 //!
 //! `cian-core` と同じ規則: I/O の都合と UI に依存しない純ロジックを置く。
-//! 前端（iPhone の Swift、窓の JS、端末の Rust）は描くだけ。**同じ判断を
+//! フロントエンド（iPhone の Swift、デスクトップ版の JS、端末の Rust）は描くだけ。**同じ判断を
 //! 二か所に書いたら、それは一度の編集で食い違う二つの答えになる。**
 
 pub mod api;
@@ -34,7 +34,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// この版の下に机があるか。**iPhone には無い。**
 ///
-/// ゴミ箱がそう。`trash` は Windows と macOS と Linux 向けで、電話には
+/// ゴミ箱がそう。`trash` は Windows と macOS と Linux 向けで、iPhone には
 /// `NSFileManager trashItemAtURL` が無い。消すなら消すと言うのが答えで、
 /// ゴミ箱へ入れたふりをするのはいちばん悪い。cian-core にも同じ名前の
 /// ものがあるが、あちらは向こうの話 ── **amber は cian を知らない。**
