@@ -1,16 +1,16 @@
-//! A note: a Markdown file that says a little about itself.
+//! ノートとは、自分自身について少しだけ書いてある Markdown ファイルのこと。
 //!
-//! The whole of cian mode rests on one decision — **the notes are plain files
-//! and there is no database.** Everything else follows from it:
+//! ノート機能の全体が 1 つの決定の上に乗っている ── **ノートはただのファイルで、
+//! データベースは無い。** ほかのことはすべてそこから導かれる:
 //!
-//!   * a OneNote migration is a script that writes files, not an import format
-//!   * a SharePoint library, a synced OneDrive folder or a Dropbox folder is a
-//!     notes folder with nothing added
-//!   * crmaine can index them, because they are text on a disk
-//!   * and nothing here is a lock-in: the exit is `ls`
+//!   * OneNote からの移行は、ファイルを書くスクリプトであって、取り込み形式ではない
+//!   * SharePoint のライブラリも、同期した OneDrive のフォルダも、Dropbox の
+//!     フォルダも、何も足さずにそのままノートのフォルダになる
+//!   * crmaine が索引を作れる。ディスク上のテキストだから
+//!   * 囲い込みが無い。出口は `ls`
 //!
-//! What a note knows about itself lives in YAML front matter, the convention
-//! every static-site generator and every notes app already reads:
+//! ノートが自分自身について持っている情報は YAML の front matter に入れる。
+//! 静的サイトジェネレータもノートアプリも、既に読める書き方:
 //!
 //! ```text
 //! ---
@@ -21,31 +21,31 @@
 //! # 移行の段取り
 //! ```
 //!
-//! **This module is in `cian-core` on purpose.** Electron does not run on iOS,
-//! so an iPhone build would be a third front end and the only thing that could
-//! cross is what lives here — pure Rust, no I/O beyond reading a file, no UI.
-//! Putting note logic in a pane or a renderer would be cheap today and
-//! expensive exactly once.
+//! **このモジュールを core に置いているのは意図的。** Electron は iOS で動かないので、
+//! iPhone 版は 3 つ目のフロントエンドになり、共有できるのはここにあるものだけ ──
+//! 純粋な Rust で、ファイルを読む以外の I/O も UI も持たない。ノートの判断を
+//! ペインやレンダラに置くのは今日は安上がりで、ちょうど一度だけ高くつく。
 //!
-//! **The YAML read here is a subset, deliberately.** `key: value`, and lists
-//! written either `[a, b]` or as `- a` lines. Anchors, nested maps, multi-line
-//! scalars and flow maps are not understood — a note that uses them keeps its
-//! front matter as text and simply reports no tags, rather than a parser
-//! written for a fifth of YAML guessing at the other four.
+//!
+//! **ここで読む YAML は意図的に部分集合。** `key: value` と、`[a, b]` または
+//! `- a` の行で書かれたリストだけ。アンカー、入れ子のマップ、複数行のスカラー、
+//! フローマップは解釈しない ── それらを使ったノートは front matter をテキストの
+//! まま残し、タグ無しと答えるだけにする。YAML の 5 分の 1 のために書いた
+//! パーサーが、残りの 5 分の 4 を推測するよりよい。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// A note's front matter, and where the body starts.
+/// ノートの front matter と、本文の開始位置。
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Front {
-    /// `key: value` pairs, in the order YAML happens to give them (sorted, so
-    /// two reads of one file cannot differ).
+    /// `key: value` の組。順序は安定させる（ソートしてあるので、同じファイルを
+    /// 2 回読んで結果が変わることはない）。
     pub fields: BTreeMap<String, String>,
-    /// `tags:` read as a list, whichever of the two spellings was used.
+    /// `tags:` をリストとして読んだもの。2 通りの書き方のどちらでも。
     pub tags: Vec<String>,
-    /// How many lines the block occupied, fences included. `0` when there was
-    /// none — which is the common case and must not be an error.
+    /// そのブロックが占めた行数。区切り行を含む。無ければ `0` ── そちらが
+    /// 普通で、エラーにしてはいけない。
     pub lines: usize,
 }
 
@@ -55,12 +55,12 @@ impl Front {
     }
 }
 
-/// Read the front matter off the top of a file's lines.
+/// ファイルの先頭から front matter を読み取る。
 ///
-/// A block only counts at the very top, and only when it closes. A stray `---`
-/// in the middle of a document is a horizontal rule, and an unclosed one at the
-/// top is a document that happens to start with a rule — treating either as
-/// front matter would silently swallow the beginning of somebody's note.
+/// ブロックとして数えるのは、いちばん先頭にあり、かつ閉じている場合だけ。文書の
+/// 途中にある `---` は水平線であり、先頭にあって閉じていないものは、たまたま
+/// 水平線で始まる文書。どちらかを front matter として扱えば、誰かのノートの
+/// 冒頭を黙って飲み込むことになる。
 pub fn front(lines: &[String]) -> Front {
     let mut out = Front::default();
     if lines.first().map(|l| l.trim_end()) != Some("---") {
@@ -77,7 +77,7 @@ pub fn front(lines: &[String]) -> Front {
     let mut list_key: Option<String> = None;
     for raw in &lines[1..end] {
         let line = raw.trim_end();
-        // `  - value` continues whichever key opened the list.
+        // `  - value` は、そのリストを開始したキーの続き。
         if let Some(item) = line.trim_start().strip_prefix("- ") {
             if let Some(k) = &list_key {
                 if k == "tags" {
@@ -103,7 +103,7 @@ pub fn front(lines: &[String]) -> Front {
     out
 }
 
-/// `[a, b]` or `a, b` → the items. Quotes come off; empties are dropped.
+/// `[a, b]` または `a, b` → その要素。引用符は外し、空は落とす。
 fn split_list(v: &str) -> Vec<String> {
     let inner = v.trim().trim_start_matches('[').trim_end_matches(']');
     inner
@@ -123,54 +123,54 @@ fn unquote(s: &str) -> &str {
     s
 }
 
-/// One note, as a list needs to show it.
+/// 一覧に表示するのに必要な、ノート 1 件ぶんの情報。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
     pub path: PathBuf,
-    /// The front matter's `title`, else the first heading, else the file name
-    /// without its extension. Never empty — a list of blanks is not a list.
+    /// front matter の `title`、無ければ最初の見出し、それも無ければ拡張子を
+    /// 除いたファイル名。空にはしない ── 空白の並びは一覧ではない。
     pub title: String,
-    /// The first few lines of body text, flattened, for the second line of a
-    /// row. Headings, fences and front matter are left out: they say what the
-    /// note is *made of* rather than what it is about.
+    /// 本文の先頭数行を 1 行に均したもの。一覧の 2 行目に使う。見出し・コード
+    /// ブロック・front matter は除く。それらはノートが*何でできているか*を
+    /// 言うもので、何についてのノートかを言うものではない。
     pub excerpt: String,
-    /// **探すためだけの字** ── 見出しと、表の升の中身（依頼 606・本人が決めた）。
+    /// **検索用のテキストだけ** ── 見出しと、表のセルの中身（依頼 606・本人が決めた）。
     ///
     /// `excerpt` には入れない。あれは一覧の二行目に出す**一行の要約**で、
     /// 見出しも表も「何でできているか」であって「何について書いたか」では
     /// ないから外してある ── その判断は変えない。
     ///
     /// **けれど、探せないのは別の話だった。** `## 来期の見通し` と書いた
-    /// 小見出しや、`| ＣＰＵ | ８コア |` の升の中身は、書いた本人にとっては
+    /// 小見出しや、`| ＣＰＵ | ８コア |` のセルの中身は、書いた本人にとっては
     /// まぎれもなく「そのノートに書いたこと」で、探して出てこないほうが驚く。
-    /// 出す字と探す字を分ければ、一行は短いまま探せる。
+    /// 表示するテキストと検索対象のテキストを分ければ、一覧の行は短いまま検索できる。
     pub findable: String,
     pub tags: Vec<String>,
-    /// `updated` from the front matter if it has one, else the file's mtime as
-    /// seconds since the epoch. Formatting belongs to whoever is drawing.
+    /// front matter に `updated` があればそれ、無ければファイルの mtime を
+    /// epoch からの秒数で。書式化は描く側の仕事。
     pub updated: Option<u64>,
-    /// `created` from the front matter if it has one, else the file's own
-    /// birth time. **A different question from `updated`** — "when did I
-    /// start this" and "when did I last touch it" put a note in two
-    /// different places in a list, and both are things people look for.
+    /// front matter に `created` があればそれ、無ければファイル自身の作成時刻。
+    /// **`updated` とは別の問い** ──「いつ始めたか」と「最後にいつ触ったか」は、
+    /// 一覧の中でノートを別の場所に置くし、どちらも人が探す手がかりになる。
+    ///
     pub created: Option<u64>,
     pub bytes: u64,
-    /// A favourite, and **which favourite folder it is in** — `Some("")` is
+    /// お気に入りかどうかと、**どのお気に入りフォルダに入っているか** ── `Some("")` は
     /// the top of the favourites, `Some("買い物/週次")` is a shelf inside it.
     ///
-    /// A favourite is a *second* place a note is, not a move: it stays in the
-    /// folder it was written in, and `star` says where it also appears. That
-    /// is the whole difference between this and filing, and it is why it
-    /// lives on the note rather than in a list somewhere — a note that is
-    /// moved, renamed or synced takes its favourite place with it.
+    /// お気に入りはノートの*2 つ目*の居場所であって、移動ではない。ノートは書かれた
+    /// フォルダに残り、`star` はそれがほかにどこへ出るかを言う。ここが整理との
+    /// 違いのすべてで、この情報がどこかの一覧ではなくノート自身に乗っている
+    /// 理由でもある ── 移動・改名・同期されたノートは、お気に入りの居場所を
+    /// 一緒に持っていく。
     ///
     /// Written as `star: true` or `star: 買い物`. `pinned: true` is still
-    /// read, because notes written before this existed say that.
+    /// として読む。これができる前に書かれたノートがそう書いているため。
     pub star: Option<String>,
 }
 
-/// Read one note. Only the head of the file is looked at — a list of two
-/// hundred notes must not read two hundred whole files to draw itself.
+/// ノートを 1 件読む。見るのはファイルの先頭だけ ── 200 件の一覧を描くのに
+/// 200 個のファイルを丸ごと読んではいけない。
 /// ノートの**頭だけ**読む。
 ///
 /// **最後まで読まない。** 一覧も月の表も見ているのは前書きと数行で、
@@ -178,7 +178,7 @@ pub struct Note {
 /// ほど効いてくる（依頼 470 ── 二万本で測った）。
 ///
 /// UTF-8 でないノートだけ、文字コードを見る側（`text::read`）で読み直す
-/// ── ほとんどのノートは UTF-8 なので、速い道はそのまま（依頼 429）。
+/// ── ほとんどのノートは UTF-8 なので、速い経路はそのまま（依頼 429）。
 pub fn head(path: &Path, head_lines: usize) -> Option<Vec<String>> {
     use std::io::BufRead;
     let want = head_lines.max(8);
@@ -200,7 +200,7 @@ pub fn head(path: &Path, head_lines: usize) -> Option<Vec<String>> {
         }
         Err(_) => crate::text::read(path).ok()?.lines.into_iter().take(want).collect(),
     };
-    // **BOM は字ではない。** 残すと一行目が `\u{feff}---` になり、前書きが
+    // **BOM は本文の文字ではない。** 残すと 1 行目が `\u{feff}---` になり、front matter が
     // 前書きに見えない ── 題も `tags:` も読まれず、前書きぜんぶが本文の
     // 書き出しとして一覧に出る（実際に出た）。
     let mut lines = lines;
@@ -215,7 +215,7 @@ pub fn head(path: &Path, head_lines: usize) -> Option<Vec<String>> {
 pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
     // **UTF-8 でないノートも、一覧に出す**（依頼 429）。
     //
-    // ここは頭だけ読む速い道で、`read_to_string` は UTF-8 でなければ
+    // ここは先頭だけ読む速い経路で、`read_to_string` は UTF-8 でなければ
     // 何も返さない ── そのまま素通りさせていたので、**Shift_JIS で
     // 書かれたノートが amber から丸ごと消えていた**。開けるのに一覧に
     // 無い、という形（`read` op は通る）で、どこから探せばいいのかが
@@ -225,7 +225,7 @@ pub fn read(path: &Path, head_lines: usize) -> Option<Note> {
     from_head(path, &lines)
 }
 
-/// 読んだ頭の行から、一覧に出す形を組む。
+/// 読み取った先頭の行から、一覧に出す形を作る。
 ///
 /// `read` と月の表が同じ行を使い回すために分けてある ── 分けていなかった
 /// 頃は、同じファイルを二度読んでいた（依頼 470）。
@@ -271,9 +271,9 @@ pub fn from_head(path: &Path, lines: &[String]) -> Option<Note> {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs())
         });
-    // `created` on a filesystem that does not keep one falls back to the
-    // mtime rather than to nothing: a note with no date at all drops out of
-    // a list grouped by date, which looks like a lost note.
+    // 作成時刻を持たないファイルシステムでは、何も無しではなく mtime に
+    // フォールバックする。日付がまったく無いノートは、日付でまとめた一覧から
+    // 落ちてしまい、消えたノートのように見える。
     let created = f.get("created").and_then(date_secs).or_else(|| {
         meta.as_ref()
             .and_then(|m| m.created().ok())
@@ -285,7 +285,7 @@ pub fn from_head(path: &Path, lines: &[String]) -> Option<Note> {
         path: path.to_path_buf(),
         title,
         // **題が書き出しの一行から来たなら、その行は二行目に出さない。**
-        // 同じ字が二段に並ぶと、一行のノートが二行に見える。
+        // 同じ文字列が 2 段に並ぶと、1 行のノートが 2 行に見える。
         excerpt: if from_line { excerpt(&body[first_at(body)..]) } else { excerpt(body) },
         findable: findable(body),
         star: star(&f),
@@ -296,11 +296,11 @@ pub fn from_head(path: &Path, lines: &[String]) -> Option<Note> {
     })
 }
 
-/// Where a note sits in the favourites, if it is one.
+/// お気に入りなら、お気に入りの中のどこに置かれているか。
 ///
-/// `true`/`yes`/`1` are the three ways people write yes, because nobody
-/// remembers which one a given app wanted; anything else is the name of a
-/// shelf. `false` is a note that says, in writing, that it is not one.
+/// `true`/`yes`/`1` は「はい」の 3 通りの書き方。どのアプリがどれを求めるか
+/// 誰も覚えていないため。それ以外はフォルダの名前。`false` は「お気に入りでは
+/// ない」と明示的に書いてあるノート。
 fn star(f: &Front) -> Option<String> {
     let raw = f
         .fields
@@ -315,7 +315,7 @@ fn star(f: &Front) -> Option<String> {
     }
 }
 
-/// The first `# heading`, if the note leads with one.
+/// ノートが見出しで始まっているなら、その最初の `# 見出し`。
 fn heading(body: &[String]) -> Option<String> {
     body.iter()
         .map(|l| l.trim())
@@ -330,7 +330,7 @@ fn heading(body: &[String]) -> Option<String> {
 /// そして題を書かなかったノートが**日付で並ぶ**のは、書いた人が一度も
 /// 言っていない名前が一覧を埋めるということ。
 ///
-/// 行頭の印は外す ── `- 牛乳` の題は「牛乳」。強調やコードの印も外す
+/// 行頭の記号は外す ── `- 牛乳` のタイトルは「牛乳」。強調やコードの記号も外す
 /// （題は読むもので、記法ではない）。長い一行は切る ── 段落をそのまま
 /// 題にすると、一覧の一行をそれだけで食い尽くす。
 fn first_line(body: &[String]) -> Option<String> {
@@ -341,7 +341,7 @@ fn first_line(body: &[String]) -> Option<String> {
             fenced = !fenced;
             continue;
         }
-        // 枠の中は書いた人の字ではあるが、題にはならない（`fn main() {`）。
+        // コードブロックの中も人が書いた文字ではあるが、タイトルにはならない（`fn main() {`）。
         if fenced || t.is_empty() || crate::markdown::is_rule(t) {
             continue;
         }
@@ -380,7 +380,7 @@ fn first_at(body: &[String]) -> usize {
     body.len()
 }
 
-/// 長い字を切る。**文字で数える** ── バイトで切ると多バイトの字が割れる。
+/// 長い文字列を切る。**文字数で数える** ── バイト数で切るとマルチバイト文字が割れる。
 fn clip(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         return s.to_string();
@@ -388,7 +388,7 @@ fn clip(s: &str, n: usize) -> String {
     s.chars().take(n).collect::<String>() + "…"
 }
 
-/// A line of body text, flattened.
+/// 本文 1 行を、1 行に均したもの。
 fn excerpt(body: &[String]) -> String {
     let mut out = String::new();
     let mut fenced = false;
@@ -402,12 +402,12 @@ fn excerpt(body: &[String]) -> String {
             continue;
         }
         // A table is not a sentence. `| 名前 | 状態 |` in the one line meant
-        // to remind you what the note is about tells you the note has a
-        // table, which you can see, and nothing about what is in it.
+        // 思い出させるための行に出しても、「表がある」ことしか伝わらない ── それは
+        // 見れば分かるし、中身については何も言っていない。
         if t.starts_with('|') {
             continue;
         }
-        // **折りたたみの札も、文ではない**（依頼 619）。`<details>` と
+        // **折りたたみのタグも、文ではない**（依頼 619）。`<details>` と
         // `</details>` は「ここから畳んである」という形の話で、一覧の
         // 二行目に山括弧が並ぶ（実機で出た）。**見出し（`<summary>`）は
         // 残す** ── あれは畳んだ中身に人が付けた名前で、文として読める。
@@ -418,23 +418,23 @@ fn excerpt(body: &[String]) -> String {
             Some(inner) => inner,
             None => t,
         };
-        // A picture is not a sentence. `![](attachments/note-1788450324680.jpg)`
-        // is forty characters of filename in a line meant to remind you what
-        // the note is about, and a note that opens with a screenshot showed
-        // nothing else at all.
+        // 画像は文ではない。`![](attachments/note-1788450324680.jpg)` は 40 文字の
+        // ファイル名で、何についてのノートかを思い出させるための行がそれで埋まる。
+        // スクリーンショットで始まるノートは、それ以外に何も表示されていなかった。
+        //
         let t = strip_images(t);
-        // A colour is not a sentence either. `<span style="color:#D9822B">`
-        // is thirty characters of notation in the one line meant to remind
-        // you what the note is about — and it is the line the search runs
-        // against, so a coloured word would stop being findable.
+        // 色も文ではない。`<span style="color:#D9822B">` は 30 文字の記法で、
+        // 何についてのノートかを思い出させるための唯一の行がそれで埋まる ── しかも
+        // 検索が走るのはその行なので、色を付けた語が検索に引っかからなくなる。
+        //
         let t = plain(&t);
         // **Nor is the notation.** `**ここにあるのは、ただの Markdown ファイル
         // です。**` puts four asterisks in the one line meant to remind you
         // what the note is about, and `**大事**` stops being findable by
         // searching for 大事. The title already goes through `inline` for
         // exactly this reason (依頼 174); the second line was left behind.
-        // The `>` and the bullet come off too — a quote and a list item are
-        // still sentences, and their marks are drawing, not words.
+        // `>` と箇条書きの記号も外す ── 引用もリスト項目も文であることに変わりは
+        // なく、その記号は表示のためのもので、言葉ではない。
         let t = match crate::markdown::list_item(t.trim()) {
             Some((_, rest, _)) => match crate::markdown::task_item(&rest) {
                 Some((_, r)) => r,
@@ -462,15 +462,15 @@ fn excerpt(body: &[String]) -> String {
     out.chars().take(120).collect()
 }
 
-/// 見出しと、表の升の中身を集める ── **探すためだけに**（依頼 606）。
+/// 見出しと、表のセルの中身を集める ── **検索のためだけに**（依頼 606）。
 ///
 /// `excerpt` が落としているもののうち、**人が書いた言葉**はこの二つ。
-/// 画像の道とコード枠は拾わない ── 前者はファイル名、後者は書いた言葉では
+/// 画像のパスとコードブロックは拾わない ── 前者はファイル名、後者は書いた言葉では
 /// あるが、探し先に入れると `fn` や `const` がどのノートにも当たる。
 ///
 /// **記号は落とす。** `## **来期**の見通し` を探す人は `来期` と打つので、
-/// `inline` を通して飾りを外す（`excerpt` と同じ理由・依頼 174）。
-/// 表の区切り行（`| --- |`）は字ではないので落とす。
+/// `inline` を通して書式を外す（`excerpt` と同じ理由・依頼 174）。
+/// 表の区切り行（`| --- |`）は本文ではないので落とす。
 ///
 /// 読むのは `read` が既に取っている頭の数十行だけ ── ファイルを二度読まない。
 fn findable(body: &[String]) -> String {
@@ -503,7 +503,7 @@ fn findable(body: &[String]) -> String {
         } else if let Some(rest) = t.strip_prefix('#') {
             put(rest.trim_start_matches('#').trim());
         } else if t.starts_with('|') {
-            // 区切りの行（`| --- | :--: |`）は形であって字ではない。
+            // 区切り行（`| --- | :--: |`）は書式であって本文ではない。
             let cells: Vec<&str> = t.trim_matches('|').split('|').map(str::trim).collect();
             if cells.iter().all(|c| {
                 !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' ')
@@ -518,18 +518,18 @@ fn findable(body: &[String]) -> String {
     out
 }
 
-/// Take `![alt](link)` out of a line, keeping the alt text if there is any.
+/// 行から `![alt](link)` を取り除く。代替テキストがあれば残す。
 ///
-/// Only images — a plain `[text](link)` is words somebody wrote and reads
-/// perfectly well in an excerpt.
+/// 対象は画像だけ ── ただの `[テキスト](link)` は人が書いた言葉で、抜粋の
+/// 中でもそのまま読める。
 fn strip_images(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut rest = line;
     while let Some(at) = rest.find("![") {
         out.push_str(&rest[..at]);
         let after = &rest[at + 2..];
-        // `![alt](link)` — both halves have to be there, or it is just text
-        // that happens to start with an exclamation mark.
+        // `![alt](link)` ── 両方揃っている必要がある。そうでなければ、たまたま
+        // 感嘆符で始まるテキストにすぎない。
         let Some(close) = after.find(']') else { break };
         let tail = &after[close + 1..];
         if !tail.starts_with('(') {
@@ -538,8 +538,8 @@ fn strip_images(line: &str) -> String {
             continue;
         }
         let Some(end) = tail.find(')') else { break };
-        // The alt text is what the writer chose to call the picture, so it
-        // belongs in an excerpt; the filename does not.
+        // 代替テキストは書いた人が画像に付けた呼び名なので抜粋に入れる。
+        // ファイル名は入れない。
         out.push_str(&after[..close]);
         rest = &tail[end + 1..];
     }
@@ -547,11 +547,11 @@ fn strip_images(line: &str) -> String {
     out
 }
 
-/// `2026-09-02` or `2026-09-02T10:00:00` → seconds since the epoch.
+/// `2026-09-02` または `2026-09-02T10:00:00` → epoch からの秒数。
 ///
-/// Days from the civil calendar, no time zone. A note's `updated` is a date
-/// somebody typed; pretending to know which hour of it they meant, or in whose
-/// zone, would be inventing precision.
+/// タイムゾーンを使わず、暦の日数から計算する。ノートの `updated` は人が
+/// 打った日付であり、その何時のことか、誰のタイムゾーンかを知っているふりを
+/// するのは、ありもしない精度をでっち上げることになる。
 fn date_secs(s: &str) -> Option<u64> {
     let d = s.trim();
     let d = d.split(['T', ' ']).next()?;
@@ -562,7 +562,7 @@ fn date_secs(s: &str) -> Option<u64> {
     if !(1..=12).contains(&m) || !(1..=31).contains(&day) {
         return None;
     }
-    // Howard Hinnant's days_from_civil.
+    // Howard Hinnant の days_from_civil。
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = y - era * 400;
@@ -573,24 +573,24 @@ fn date_secs(s: &str) -> Option<u64> {
     u64::try_from(days.checked_mul(86_400)?).ok()
 }
 
-/// Windows keeps eleven names for devices, and a file cannot have one of them
-/// whatever the extension. A note titled "CON" is not a silly case: it is an
-/// abbreviation people write.
+/// Windows はデバイス名を 11 個予約していて、拡張子が何であれファイルには
+/// その名前を付けられない。「CON」というタイトルのノートは架空の例ではなく、
+/// 人が実際に書く略語。
 pub const RESERVED: [&str; 22] = [
     "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
-/// A title, turned into a filename that every filesystem cian runs on accepts.
+/// タイトルを、動作対象のどのファイルシステムでも受け付けるファイル名に変える。
 ///
-/// Not a slug: the titles here are Japanese as often as not, and stripping a
-/// title to ASCII would leave most notes named `.md`. What it removes is only
-/// what a filesystem refuses — the nine characters Windows reserves, control
-/// characters, and the trailing dot or space Explorer silently eats.
+/// slug ではない。ここのタイトルは日本語であることが多く、ASCII に落とすと
+/// ほとんどのノートが `.md` という名前になる。取り除くのはファイルシステムが
+/// 受け付けないものだけ ── Windows が予約している 9 文字、制御文字、そして
+/// エクスプローラーが黙って削る末尾のドットと空白。
 ///
-/// The cap is in **characters and on a char boundary**, but chosen for bytes:
-/// 60 Japanese characters is 180 bytes, comfortably inside the 255 that ext4,
-/// APFS and NTFS all stop at.
+/// 上限は**文字数で、文字境界で切る**が、値はバイト数から決めた ── 日本語
+/// 60 文字は 180 バイトで、ext4・APFS・NTFS がいずれも止まる 255 の内側に
+/// 十分収まる。
 pub fn file_stem(title: &str) -> String {
     let mut out = String::new();
     let mut gap = false;
@@ -601,8 +601,8 @@ pub fn file_stem(title: &str) -> String {
             gap = true;
             continue;
         }
-        // A run of refused characters collapses to one `-`, and never opens
-        // the name: `?? notes` should be `notes`, not `- notes`.
+        // 受け付けない文字が続いたら `-` 1 つにまとめる。先頭には置かない ──
+        // `?? notes` は `- notes` ではなく `notes` になるべき。
         if gap && !out.is_empty() {
             out.push('-');
         }
@@ -616,7 +616,7 @@ pub fn file_stem(title: &str) -> String {
     if out.is_empty() {
         return String::new();
     }
-    // `CON.md` is still CON to Windows. So is `con`.
+    // `CON.md` も Windows からは CON。`con` も同じ。
     let head = out.split('.').next().unwrap_or(&out).to_ascii_uppercase();
     if RESERVED.contains(&head.as_str()) {
         return format!("_{out}");
@@ -624,16 +624,16 @@ pub fn file_stem(title: &str) -> String {
     out
 }
 
-/// One line to search a note by: its title, its tags, and the start of it.
+/// ノートを検索するための 1 行 ── タイトル、タグ、本文の冒頭。
 ///
-/// A listing filters on the filename, which finds a note only if you named
-/// the file what the note is about. That holds for notes cian made and for
-/// nothing else — an imported page is `page-0012.md` with a title inside it,
-/// and a tag is never in a filename at all.
+/// 一覧の絞り込みはファイル名に対して効くので、中身に合わせた名前を付けた
+/// ノートしか見つからない。それが成り立つのは amber が作ったノートだけで、
+/// 取り込んだページは中にタイトルを持つ `page-0012.md` だし、タグはそもそも
+/// ファイル名に入らない。
 ///
 /// Tags keep their `#`, so `#仕事` narrows to the tag and `仕事` also finds
-/// the ones that merely say it. Lowercased once here rather than at every
-/// keystroke of the filter.
+/// 単に言及しているだけのものより上に出す。小文字化は絞り込みのキー入力ごと
+/// ではなく、ここで一度だけ行う。
 pub fn haystack(n: &Note) -> String {
     let mut s = String::with_capacity(n.title.len() + n.excerpt.len() + 16);
     s.push_str(&n.title);
@@ -643,7 +643,7 @@ pub fn haystack(n: &Note) -> String {
     }
     s.push(' ');
     s.push_str(&n.excerpt);
-    // 見出しと表の升は**探せるだけ**（一覧の二行目には出さない・依頼 606）。
+    // 見出しと表のセルは**検索できるだけ**（一覧の 2 行目には出さない・依頼 606）。
     if !n.findable.is_empty() {
         s.push(' ');
         s.push_str(&n.findable);
@@ -651,20 +651,20 @@ pub fn haystack(n: &Note) -> String {
     s.to_lowercase()
 }
 
-/// A note, and where it sits under the folder that was walked.
+/// ノートと、走査したフォルダの中でのその位置。
 pub struct Found {
-    /// Path relative to the walked folder, with `/` separators.
+    /// 走査したフォルダからの相対パス。区切りは `/`。
     pub rel: String,
     pub note: Note,
 }
 
-/// Every Markdown note under `dir`, with the walk's own account of itself.
+/// `dir` 配下のすべての Markdown ノートと、走査自体の結果。
 ///
-/// Here rather than in the engine because there are two callers now — the
-/// window asks over a pipe, and a phone will ask over a C ABI — and "what
-/// counts as a note" written twice is two answers that drift. The rules are
-/// the whole content: directories are not notes, a `.md`/`.markdown` suffix
-/// is, and the first sixty lines are enough to know a title from an excerpt.
+/// エンジン側ではなくここに置いているのは、呼び出し側が 2 つあるから ──
+/// デスクトップ版はパイプ越しに、iPhone は C ABI 越しに問い合わせる ── そして
+/// 「何をノートと見なすか」を 2 回書けば、答えは 2 つに分かれていく。規則が
+/// 中身のすべて ── ディレクトリはノートではない、`.md`/`.markdown` はノート、
+/// タイトルと抜粋を知るには先頭 60 行で足りる。
 pub fn list(
     dir: &std::path::Path,
     limits: crate::survey::Limits,
@@ -697,26 +697,26 @@ pub fn list(
 /// **書きかけの置き土産か。** 人の書いたノートではないので、一覧に出さない。
 ///
 /// 隠しファイル（`.` で始まるもの）は歩く側が既に落としている ── iCloud の
-/// まだ降りていない札（`.名前.md.icloud`）も、macOS の相棒（`._名前.md`）も、
+/// まだダウンロードされていないプレースホルダ（`.名前.md.icloud`）も、macOS が作る
 /// LibreOffice の錠（`.~lock.名前.md#`）もそこで落ちる。**落ちないのは
 /// Windows 側の作法**で、Office と同じ `~$` で始まる置き土産は隠しに
 /// ならない ── 会社の端末で同じフォルダを開いた人の一覧に、`x` という
 /// 題のノートが一本増えていた。
 ///
 /// **同期がぶつかった控えは落とさない**（`段取り (競合コピー…).md`）──
-/// あれは人の書いた字で、消えていいものではない。
+/// あれは人が書いた内容で、消えていいものではない。
 fn scratch(path: &std::path::Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.starts_with("~$"))
 }
 
-/// Make a note in `dir` and say where it went.
+/// `dir` の中にノートを作り、どこに置いたかを返す。
 ///
-/// The name that is free, not the name that was free a moment ago:
-/// `create_new` fails if the file appeared between the check and the write,
-/// and two people on one shared folder is the case this whole mode exists
-/// for. Shared with the engine for the same reason as [`list`].
+/// 「いま空いている名前」であって、「少し前に空いていた名前」ではない ──
+/// `create_new` は確認と書き込みのあいだにファイルができていれば失敗する。
+/// 共有フォルダを 2 人で使う状況こそ、この仕組み全体が存在する理由。
+/// エンジンと共有しているのは [`list`] と同じ理由。
 pub fn create(
     dir: &std::path::Path,
     title: &str,
@@ -740,11 +740,11 @@ pub fn create(
 /// 「（コピー）」を書き足す筋合いは無い（ノートはただの Markdown）。
 ///
 /// 画像は写さない ── `attachments/` は同じフォルダの中で、二つのノートが
-/// 同じ一枚を指すだけ。ノートを消しても画像は残る（`delete` は `.md` しか
+/// 同じファイルを指すだけ。ノートを消しても画像は残る（`delete` は `.md` しか
 /// 消さない）ので、片方を消してもう片方の画像が欠ける、は起きない。
 ///
 /// `into` を渡せば、そこへ写す（テンプレートから作るとき・依頼 417）──
-/// **写す仕組みは一つ**にする。「型から作る」を別の道にすると、`created`
+/// **コピーの仕組みは 1 つ**にする。「テンプレートから作る」を別の経路にすると、`created`
 /// を今日にするのを片方だけ直した日に、二つの作り方が食い違う。
 pub fn duplicate(
     at: &std::path::Path,
@@ -767,7 +767,7 @@ pub fn duplicate(
 
 /// まだ無い名前を一つ ── `名前.md`、埋まっていれば `名前-2.md`、…。
 ///
-/// **上書きしない。** 同じ名前で作りにいく道が二つある（新規と写し）ので、
+/// **上書きしない。** 同じ名前で作りにいく経路が 2 つある（新規とコピー）ので、
 /// 空いているかを見てから開くのではなく、`create_new` で取りにいく。
 fn fresh_file(dir: &std::path::Path, stem: &str) -> anyhow::Result<std::path::PathBuf> {
     std::fs::create_dir_all(dir)?;
@@ -785,21 +785,21 @@ fn fresh_file(dir: &std::path::Path, stem: &str) -> anyhow::Result<std::path::Pa
     }
 }
 
-/// Put a picture beside a note, and say what to write in the text.
+/// ノートの隣に画像を置き、本文に何と書けばよいかを返す。
 ///
-/// `attachments/` next to the note, not a folder of its own per note and not
-/// a database: the whole point of cian mode is that a notes folder is a
-/// folder, and somebody looking at it from the Mac — or from Explorer, or
-/// from a phone's Files — should see what they expect.
+/// 置き場所はノートの隣の `attachments/`。ノートごとのフォルダでも
+/// データベースでもない ── ノートのフォルダがただのフォルダであることが
+/// この仕組みの要点で、Mac から見ても、エクスプローラーから見ても、
+/// iPhone の「ファイル」から見ても、期待どおりに見えるべきだから。
 ///
-/// The name carries the note's own and the clock. **Not a counter**: the
-/// folder is shared with everything else attached there, and a counter
-/// eventually picks a name that already exists.
+/// 名前にはノート名と時刻を入れる。**連番にはしない** ── そのフォルダは
+/// そこに添付されたほかのものとも共有されるので、連番はいつか既にある
+/// 名前を選んでしまう。
 ///
-/// Shared with the engine because the phone attaches photos and the window
-/// pastes screenshots, and the two must land in the same place with the same
-/// kind of name — otherwise a notes folder written from both looks like two
-/// folders that happen to overlap.
+/// エンジンと共有しているのは、iPhone が写真を添付し、デスクトップ版が
+/// スクリーンショットを貼り付けるから。両者は同じ場所へ同じ形の名前で
+/// 着地しなければならない ── そうでないと、両方から書かれたノートフォルダが
+/// たまたま重なった 2 つのフォルダのように見える。
 pub fn attach(note: &std::path::Path, bytes: &[u8], ext: &str) -> anyhow::Result<String> {
     if bytes.is_empty() {
         anyhow::bail!("画像が空です");
@@ -823,68 +823,68 @@ pub fn attach(note: &std::path::Path, bytes: &[u8], ext: &str) -> anyhow::Result
         .unwrap_or(0);
     let name = format!("{}-{stamp}.{ext}", file_stem(&stem));
     std::fs::write(at.join(&name), bytes)?;
-    // Relative, with forward slashes: this goes into a Markdown link, which is
-    // a URL and not a Windows path.
+    // 相対パスで、区切りはスラッシュ。これは Markdown のリンクに入るもので、
+    // URL であって Windows のパスではない。
     Ok(format!("attachments/{name}"))
 }
 
-/// One piece of a note, as something that can be drawn.
+/// ノートの構成要素 1 つを、描画できる形で表したもの。
 ///
-/// Blocks, not a tree: a note is read top to bottom, and every renderer this
-/// has to feed — a phone's list of views, the window, whatever a tablet turns
-/// out to be — lays out a sequence. Anything that needs nesting (a list inside
-/// a quote) is rare enough in a notebook to be worth losing.
+/// 木ではなくブロックの列。ノートは上から下へ読まれるし、これを受け取る
+/// 側 ── iPhone の View の並び、デスクトップ版、タブレットで何になるにせよ ──
+/// はどれも列としてレイアウトする。入れ子が要るもの（引用の中のリストなど）は、
+/// ノートの中では十分に稀なので、捨てる価値がある。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
     /// `line` は**ファイルの行番号**（前書きを含めて数えた 0 起点）。
-    /// 目次から飛ぶのに要る ── チェックの升と同じ理由で、何番目の見出しかを
+    /// 目次から飛ぶのに要る ── チェックボックスと同じ理由で、何番目の見出しかを
     /// 数えると、前書きのあるノートでずれる。
     Heading { level: u8, text: String, line: usize },
     Paragraph(String),
-    /// One item. `text` keeps its inline markup for the renderer to handle.
+    /// 項目 1 つ。`text` はインラインの記法を保持したまま渡し、描く側が処理する。
     Bullet(String),
-    /// `- [ ] milk`. Carries the line it came from, because the only useful
-    /// thing to do with a checkbox is press it — and pressing it has to say
-    /// *which* one without the caller re-deriving an index that the next
-    /// edit will move.
+    /// `- [ ] 牛乳`。元の行番号を持つ。チェックボックスに対してできる唯一
+    /// 有用なことは押すことで、押すときには*どれ*かを言う必要がある ── 呼び出し
+    /// 側が、次の編集でずれる添え字を計算し直さずに済むように。
+    ///
     Check { done: bool, text: String, line: usize },
     Numbered { n: u32, text: String },
     Quote(String),
-    /// Verbatim, including the blank lines inside it. `lang` may be empty.
+    /// 中の空行も含めてそのまま。`lang` は空のことがある。
     Code { lang: String, text: String },
-    /// `![alt](link)` on a line of its own — the only image that gets a block.
-    /// One inside a sentence stays in the sentence, where it was written.
+    /// 単独の行に置かれた `![alt](link)` ── ブロックになる画像はこれだけ。
+    /// 文の中にあるものは、書かれた場所のまま文の中に残る。
     Image { alt: String, link: String },
-    /// A table. `align` has one entry per column of the header.
+    /// 表。`align` はヘッダーの列ごとに 1 つ持つ。
     ///
-    /// **Here rather than on the phone.** Without it the phone joined the
+    /// **iPhone 側ではなくここで処理する。** これが無かった頃、iPhone は行を
     /// rows into one paragraph and drew `| 面 | 何が見えるか | …` as a
-    /// sentence — which is what a table looks like when nobody parsed it.
-    /// A row may be shorter or longer than the header; the drawer decides
-    /// what to do about that, but it is handed the truth.
+    /// 1 つの文として扱っていた ── 誰も解析しなかったときの表の見た目そのもの。
+    /// 行はヘッダーより短いことも長いこともある。それをどう扱うかは描く側が
+    /// 決めるが、渡されるのは事実そのもの。
     Table {
         head: Vec<String>,
         align: Vec<crate::markdown::Align>,
         rows: Vec<Vec<String>>,
     },
-    /// `> [!NOTE]` — GitHub's five kinds, and nothing else.
+    /// `> [!NOTE]` ── GitHub と同じ 5 種類だけ。
     ///
-    /// The body is **paragraphs**, not blocks. A note's alert holds sentences
-    /// in practice, and a nested block tree would have to be understood by
-    /// every drawer that exists — the window builds its own from the HTML.
+    /// 中身は**段落**であってブロックではない。ノートの注記に入るのは実際には文
+    /// だけだし、入れ子のブロック木にすると、存在するすべての描画側がそれを
+    /// 理解しなければならない ── デスクトップ版は HTML から自前で組み立てる。
     Alert { kind: String, body: Vec<String> },
     Rule,
 }
 
-/// Split a note into things to draw, skipping its front matter.
+/// ノートを描画単位に分割する。front matter は飛ばす。
 ///
-/// **Here rather than in Swift.** A renderer written on the phone is a
-/// renderer no test can reach, and "what is a heading" is exactly the kind of
-/// question that drifts. What the phone does with a `Heading` is the phone's
-/// business; whether a line *is* one is not.
+/// **Swift 側ではなくここに置く。** iPhone 側に書いたレンダラはテストが
+/// 届かないレンダラになるし、「何が見出しか」はまさに解釈がずれていく類の
+/// 問い。`Heading` をどう描くかは iPhone の裁量だが、その行が見出し*である*
+/// かどうかは違う。
 ///
-/// The front matter goes because it is how the note describes itself, not
-/// something it says — the title and the tags are already on screen.
+/// front matter を除くのは、それがノートの自己説明であって本文として述べて
+/// いることではないから ── タイトルとタグは既に画面に出ている。
 pub fn blocks(text: &str) -> Vec<Block> {
     let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
     let start = front(&lines).lines;
@@ -903,9 +903,9 @@ pub fn blocks(text: &str) -> Vec<Block> {
         let raw = &lines[i];
         let t = raw.trim();
 
-        // A fence runs to its closing fence, or to the end of the note — an
-        // unclosed one is a mistake somebody made, and swallowing the rest of
-        // the file is friendlier than pretending each line is a paragraph.
+        // フェンスは閉じるフェンスまで、無ければノートの終わりまで続く ── 閉じ忘れは
+        // 誰かのミスであり、残りを丸ごと取り込むほうが、1 行ずつ段落のふりをするより
+        // 親切。
         if let Some(lang) = t.strip_prefix("```") {
             flush(&mut para, &mut out);
             let lang = lang.trim().to_string();
@@ -926,8 +926,8 @@ pub fn blocks(text: &str) -> Vec<Block> {
             continue;
         }
 
-        // `---` is a rule here and not front matter: the front matter was
-        // taken off the top before this loop began.
+        // ここでの `---` は水平線であって front matter ではない。front matter は
+        // このループが始まる前に先頭から取り除いてある。
         if t == "---" || t == "***" || t == "___" {
             flush(&mut para, &mut out);
             out.push(Block::Rule);
@@ -938,9 +938,9 @@ pub fn blocks(text: &str) -> Vec<Block> {
         if let Some(rest) = t.strip_prefix('#') {
             let level = 1 + rest.chars().take_while(|c| *c == '#').count();
             let text = rest.trim_start_matches('#').trim();
-            // `#tag` at the start of a line is a tag, not a heading — the
-            // space is what makes it one, which is what Markdown says and
-            // what a notes app has to get right.
+            // 行頭の `#tag` はタグであって見出しではない ── 見出しにするのは空白で、
+            // それが Markdown の規定であり、ノートアプリが取り違えてはいけないところ。
+            //
             if level <= 6 && (rest.starts_with(' ') || rest.trim_start_matches('#').starts_with(' ')) {
                 flush(&mut para, &mut out);
                 out.push(Block::Heading { level: level as u8, text: text.to_string(), line: i });
@@ -956,9 +956,9 @@ pub fn blocks(text: &str) -> Vec<Block> {
             continue;
         }
 
-        // A table: a header row, the separator under it, then rows until
-        // they stop. The separator is what makes it a table — a lone line
-        // with pipes in it is a sentence somebody wrote.
+        // 表 ── ヘッダー行、その下の区切り行、そして行が続くかぎりの本体。
+        // 表にしているのは区切り行で、パイプが入っているだけの単独の行は
+        // 誰かが書いた文にすぎない。
         if t.starts_with('|')
             && i + 1 < lines.len()
             && crate::markdown::is_table_separator(&lines[i + 1])
@@ -979,7 +979,7 @@ pub fn blocks(text: &str) -> Vec<Block> {
             continue;
         }
 
-        // `> [!NOTE]` and the quoted lines under it.
+        // `> [!NOTE]` と、その下の引用行。
         if let Some(kind) = crate::markdown::alert_kind(t) {
             flush(&mut para, &mut out);
             i += 1;
@@ -1015,8 +1015,8 @@ pub fn blocks(text: &str) -> Vec<Block> {
 
         if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
             flush(&mut para, &mut out);
-            // A task before a bullet: `- [ ] x` is both, and the one that
-            // can be pressed is the more useful answer.
+            // チェックボックスを箇条書きより先に判定する。`- [ ] x` は両方に当てはまり、
+            // 押せるほうが有用な答えだから。
             if let Some(done) = ticked(rest) {
                 out.push(Block::Check {
                     done,
@@ -1046,31 +1046,31 @@ pub fn blocks(text: &str) -> Vec<Block> {
     out
 }
 
-/// A piece of a line, and the colour it was written in.
+/// 行の一部分と、それが書かれた色。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
     pub text: String,
-    /// `#rrggbb`, lowercased, or `None` for the colour the reader is using.
+    /// 小文字の `#rrggbb`、または読み手の既定色を意味する `None`。
     pub color: Option<String>,
 }
 
-/// Split a line into coloured and uncoloured pieces.
+/// 行を、色付きの部分と色無しの部分に分ける。
 ///
-/// **Markdown has no colour**, so this reads the one notation the most tools
-/// already understand: `<span style="color:#rrggbb">…</span>`. VS Code's
-/// preview, Obsidian, Typora and pandoc all render it; GitHub strips the
-/// `style` attribute and shows the words plainly. That last part is the
-/// reason for choosing it over the `$\color{red}{...}$` trick, which renders
-/// on GitHub and leaves an unreadable pile of symbols everywhere else — a
-/// note has to degrade into *the sentence*, not into notation.
+/// **Markdown に色の記法は無い**ので、最も多くのツールが解釈できる書き方を
+/// 1 つだけ読む ── `<span style="color:#rrggbb">…</span>`。VS Code の
+/// プレビューも Obsidian も Typora も pandoc も描画するし、GitHub は `style`
+/// 属性を落として言葉をそのまま表示する。最後の点が、`$\color{red}{...}$` の
+/// 手を採らなかった理由 ── あれは GitHub では描画されるが、ほかのすべての場所
+/// では読めない記号の山を残す。ノートは*文*に劣化すべきであって、記法に
+/// 劣化すべきではない。
 ///
-/// **Here rather than in either front end.** Two parsers for one notation is
-/// two answers, and the window and the phone would start disagreeing about
-/// what a note says the first time either was touched.
+/// **どちらのフロントエンドでもなくここに置く。** 1 つの記法に 2 つのパーサーは
+/// 2 つの答えであり、どちらかに手を入れた瞬間から、デスクトップ版と iPhone は
+/// ノートの解釈で食い違いはじめる。
 ///
-/// Anything that is not a well-formed colour span is left exactly as typed,
-/// including a `<span>` with some other style on it: cian is not an HTML
-/// renderer and should not pretend to be one.
+/// 正しい形の色 span でないものは、打たれたとおりに残す。ほかの style が
+/// 付いた `<span>` も同じ ── ここは HTML レンダラではないし、そのふりを
+/// すべきでもない。
 pub fn spans(line: &str) -> Vec<Span> {
     let mut out: Vec<Span> = Vec::new();
     let mut rest = line;
@@ -1080,8 +1080,8 @@ pub fn spans(line: &str) -> Vec<Span> {
         let Some(gt) = from.find('>') else { break };
         let open = &from[..=gt];
         let Some(color) = color_of(open) else {
-            // Not ours. Keep the tag as text and carry on past it, or a
-            // `<span class=…>` would swallow the rest of the line.
+            // こちらが書いたものではない。タグをテキストとして残して先へ進む。
+            // そうしないと `<span class=…>` が行の残りを飲み込む。
             push(&mut out, &rest[..at + gt + 1], None);
             rest = &from[gt + 1..];
             continue;
@@ -1096,17 +1096,17 @@ pub fn spans(line: &str) -> Vec<Span> {
     out
 }
 
-/// A colour span at the very start of `s`: its text, its colour, and how
-/// many **characters** it took.
+/// `s` の先頭にある色 span ── そのテキスト、色、そして消費した**文字数**。
 ///
-/// For a scanner that is walking a line character by character and needs to
-/// know whether *this* is the start of one. The recognising is the same as
-/// [`spans`] — one notation, one place that knows it.
 ///
-/// **Characters and not bytes.** `find` counts bytes; the caller counts
-/// characters. With Japanese inside the span the two are three times apart,
-/// so the scanner jumped past the span *and* the text after it — which
-/// showed up as a second coloured word on a line coming out as
+/// 行を 1 文字ずつ走査していて、*ここ*が色 span の開始かどうかを知りたい
+/// 側のためのもの。判定は [`spans`] と同じ ── 記法は 1 つ、それを知る場所も
+/// 1 つ。
+///
+/// **バイトではなく文字で数える。** `find` はバイトを数え、呼び出し側は文字を
+/// 数える。span の中が日本語だと 3 倍ずれるので、スキャナが span *とその後ろの
+/// テキスト*をまとめて飛ばしていた ── 1 行に色付きの語が 2 つあるときに、
+/// 2 つ目の色付きの語が
 /// `e="color:#0E93A8">シアン</span>` in the middle of a sentence.
 pub fn first_color(s: &str) -> Option<(String, String, usize)> {
     if !s.starts_with("<span") {
@@ -1124,8 +1124,8 @@ fn push(out: &mut Vec<Span>, text: &str, color: Option<String>) {
     if text.is_empty() {
         return;
     }
-    // Two runs of the same colour side by side are one run — the renderer
-    // should not have to care how the line was cut up.
+    // 同じ色が隣り合っていれば 1 つにまとめる ── 行がどう切られたかを、
+    // 描く側が気にする必要は無い。
     if let Some(last) = out.last_mut() {
         if last.color == color {
             last.text.push_str(text);
@@ -1135,11 +1135,11 @@ fn push(out: &mut Vec<Span>, text: &str, color: Option<String>) {
     out.push(Span { text: text.to_string(), color });
 }
 
-/// `#rrggbb` out of `<span style="color:#0e93a8">`, if that is what this is.
+/// `<span style="color:#0e93a8">` から `#rrggbb` を取り出す。そうでなければ `None`。
 ///
-/// Only hex, and only six digits: a name like `red` means a different colour
-/// in every renderer, and cian writing one would be writing something it
-/// cannot promise the Mac will draw the same.
+/// 16 進の 6 桁だけを受ける。`red` のような名前はレンダラごとに違う色になり、
+/// それを書くのは「Mac でも同じに描かれる」と約束できないものを書くことに
+/// なる。
 fn color_of(open: &str) -> Option<String> {
     let lower = open.to_ascii_lowercase();
     let at = lower.find("color:")?;
@@ -1153,25 +1153,25 @@ fn color_of(open: &str) -> Option<String> {
     }
 }
 
-/// What a search box means: an OR of ANDs.
+/// 検索ボックスの意味 ── AND のまとまりを OR でつないだもの。
 ///
 /// `仕事 週報` finds notes with both. `仕事 OR 家` finds either. Written
 /// together — `仕事 週報 OR 家` — the OR is the weaker join, so that reads as
 /// (仕事 AND 週報) OR (家), which is how everybody writes it and nobody
-/// explains it.
+/// が説明する。
 ///
-/// **Here rather than in the front ends.** What a query means is a decision;
-/// three front ends deciding it separately is three search boxes that agree
-/// until somebody types two words. The matching itself stays where the list
-/// is — this says what to match.
+/// **フロントエンドではなくここに置く。** クエリの意味は決めごとであり、
+/// 3 つのフロントエンドが別々に決めれば、2 語打たれるまでは一致している
+/// 3 つの検索ボックスになる。照合そのものは一覧のある場所に残す ── ここは
+/// 何を照合するかを言う。
 ///
-/// `OR`, `or`, `|` and `｜` all mean the same thing: nobody remembers which
-/// one an app wanted, and the full-width bar is what a Japanese keyboard
-/// gives you without switching.
+/// `OR` `or` `|` `｜` はすべて同じ意味。どのアプリがどれを求めるか誰も
+/// 覚えていないし、全角の縦棒は日本語キーボードで切り替えずに打てるもの
+/// だから。
 /// 絞り込みの一語。
 ///
 /// `field` は `any`（どこでも）/ `title` / `tag` / `book`。**`body` は無い** ──
-/// 一覧が持っているのは本文の頭 100 字だけなので、`body:` を受けると
+/// 一覧が持っているのは本文の先頭 100 文字だけなので、`body:` を受けると
 /// 「本文を探したのに見つからない」を作る。奥の一文は `find` の仕事。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Term {
@@ -1208,8 +1208,8 @@ pub fn terms(query: &str) -> Vec<Vec<Term>> {
     let mut group: Vec<Term> = Vec::new();
     for word in shatter(query) {
         if matches!(word.as_str(), "OR" | "or" | "|" | "｜") {
-            // A bare `OR` at the start, or two in a row, is somebody still
-            // typing — not an empty group that matches everything.
+            // 先頭の裸の `OR` や、2 つ続いた `OR` は、まだ打っている途中 ──
+            // すべてに一致する空のグループではない。
             if !group.is_empty() {
                 out.push(std::mem::take(&mut group));
             }
@@ -1220,7 +1220,7 @@ pub fn terms(query: &str) -> Vec<Vec<Term>> {
             Some(r) if !r.is_empty() => (true, r.to_string()),
             _ => (false, word),
         };
-        // `tag:定型` のような綴じ。**知らない見出しは字として扱う** ──
+        // `tag:定型` のような絞り込み。**知らない接頭辞は文字列として扱う** ──
         // `http://…` や「10:30」を書いただけで消える語ができると、
         // 探せなくなったことに気づけない。
         let (field, w) = match rest.split_once(':') {
@@ -1254,7 +1254,7 @@ pub fn terms(query: &str) -> Vec<Vec<Term>> {
     out
 }
 
-/// Whether `hay` answers the query. Empty query matches everything.
+/// `hay` がクエリに一致するか。空のクエリはすべてに一致する。
 pub fn hits(hay: &str, query: &str) -> bool {
     let groups = terms(query);
     if groups.is_empty() {
@@ -1269,16 +1269,16 @@ pub fn hits(hay: &str, query: &str) -> bool {
         .any(|g| g.iter().all(|t| hay.contains(&t.word) != t.not))
 }
 
-/// The words, with the colour notation taken off.
+/// 色の記法を取り除いた言葉。
 ///
-/// For the places that want a sentence rather than a drawing: the second line
-/// of a row, and what a search matches against.
+/// 描画ではなく文が欲しい場所のため ── 一覧の 2 行目と、検索の照合対象。
+///
 pub fn plain(line: &str) -> String {
     spans(line)
         .into_iter()
         .map(|s| {
-            // 色の中に印があるときは、そこも剥がす（依頼 633）── 抜粋や
-            // 探しものに `**` が出ると、字ではない記号で引っかかる。
+            // 色の内側に記号があるときは、そこも剥がす（依頼 633）── 抜粋や
+            // 検索対象に `**` が出ると、本文ではない記号で引っかかる。
             if s.text.contains('*') || s.text.contains('~') || s.text.contains('`') {
                 let inner: String = spans(&s.text).into_iter().map(|x| x.text).collect();
                 if inner != s.text {
@@ -1290,14 +1290,14 @@ pub fn plain(line: &str) -> String {
         .collect()
 }
 
-/// Wrap a piece of text in a colour, the way cian writes it.
+/// テキストを色で包む。amber が書くのと同じ形式で。
 pub fn paint(text: &str, color: &str) -> String {
     format!("<span style=\"color:{color}\">{text}</span>")
 }
 
-/// Whether `[ ] x` / `[x] x` starts this bullet's text, and which.
+/// この箇条書きの本文が `[ ] x` / `[x] x` で始まるか、そしてどちらか。
 ///
-/// `[X]` counts too: a note typed on somebody else's machine is still a note.
+/// `[X]` も受ける ── 別の環境で打たれたノートもノートには変わりない。
 fn ticked(rest: &str) -> Option<bool> {
     let b = rest.as_bytes();
     if b.len() < 3 || b[0] != b'[' || b[2] != b']' {
@@ -1310,13 +1310,13 @@ fn ticked(rest: &str) -> Option<bool> {
     }
 }
 
-/// Tick or untick the checkbox on one line, and hand the whole note back.
+/// 指定した行のチェックボックスを切り替え、ノート全体を返す。
 ///
-/// **By line number, not by which checkbox it is.** The list on screen was
-/// drawn from a `blocks()` that may be a moment old; counting boxes would
-/// tick the wrong one the first time a note gains a task above the one you
-/// pressed. A line that is not a checkbox is left exactly as it was — the
-/// screen and the file can disagree, and when they do nothing should happen.
+/// **何番目のチェックボックスかではなく、行番号で指定する。** 画面の一覧は
+/// 少し前の `blocks()` から描かれているかもしれない。個数で数えると、押した
+/// ものより上にチェックボックスが 1 つ増えた時点で、別のものを切り替えて
+/// しまう。チェックボックスでない行はそのまま残す ── 画面とファイルは
+/// 食い違いうるし、食い違ったときは何も起きないのが正しい。
 pub fn set_check(text: &str, line: usize, done: bool) -> String {
     let mut lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
     let Some(row) = lines.get_mut(line) else { return text.to_string() };
@@ -1337,10 +1337,10 @@ pub fn set_check(text: &str, line: usize, done: bool) -> String {
     out
 }
 
-/// `![alt](link)` and nothing else on the line.
+/// 行に `![alt](link)` だけがある状態。
 ///
-/// `markdown::to_html` asks this too. **どこからが画像かは一か所** ── 窓が
-/// 自分で `![` を探しはじめると、iPhone が画像として積む行を窓が字で出す、
+/// `markdown::to_html` もここを呼ぶ。**どこからが画像かの判断は 1 か所** ── デスクトップ版が
+/// 自分で `![` を探しはじめると、iPhone が画像として表示する行をデスクトップ版がテキストで出す、
 /// という食い違いが静かに育つ。
 pub(crate) fn lone_image(t: &str) -> Option<Block> {
     let rest = t.strip_prefix("![")?;
@@ -1357,16 +1357,16 @@ pub(crate) fn lone_image(t: &str) -> Option<Block> {
     })
 }
 
-/// Set or remove one plain field in a note's front matter, and hand back the
-/// whole note.
+/// ノートの front matter にある単純なフィールドを 1 つ設定または削除し、
+/// ノート全体を返す。
 ///
-/// Text in, text out, for the same reason as [`set_tags`]: the caller saves
-/// it the ordinary way, so pinning a note is checked against the file on disk
-/// exactly as typing in it is.
+/// テキストを受けてテキストを返す。理由は [`set_tags`] と同じ ── 呼び出し側が
+/// 通常の手順で保存するので、ピン留めもディスク上のファイルに対して、入力と
+/// まったく同じように競合検査される。
 ///
-/// `None` takes the field off rather than writing an empty one — a note that
-/// says `pinned:` with nothing after it is a note that will be read as pinned
-/// by the next thing that looks.
+/// `None` は空の値を書くのではなくフィールドごと削除する ── `pinned:` と
+/// 書いて後ろが空のノートは、次に読んだものからピン留め済みと解釈される
+/// から。
 pub fn set_field(text: &str, key: &str, value: Option<&str>) -> String {
     let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
     let end = text.ends_with('\n');
@@ -1413,16 +1413,16 @@ pub fn set_field(text: &str, key: &str, value: Option<&str>) -> String {
     s
 }
 
-/// Put a new set of tags on a note, and hand back the whole note.
+/// ノートのタグを入れ替え、ノート全体を返す。
 ///
-/// Text in, text out: the caller saves it the way it saves any other edit, so
-/// tagging goes through the same conflict check as typing does. A tagger that
-/// wrote the file itself would be a second way to write a note, and the
-/// second way is the one that loses somebody else's paragraph.
+/// テキストを受けてテキストを返す。呼び出し側はほかの編集と同じ手順で保存する
+/// ので、タグ付けも入力と同じ競合検査を通る。自分でファイルを書くタグ付けは
+/// ノートを書く 2 つ目の経路になり、2 つ目の経路こそが他人の段落を
+/// 消すもの。
 ///
-/// A note with no front matter gets one. A note whose front matter has no
-/// `tags:` gets the line added at the end of it — **not the start**: the
-/// order somebody put their own fields in is theirs.
+/// front matter の無いノートには作る。front matter はあるが `tags:` の無い
+/// ノートには、その末尾に行を足す ── **先頭ではない**。自分のフィールドを
+/// どの順に並べたかは、その人のもの。
 pub fn set_tags(text: &str, tags: &[String]) -> String {
     let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
     let end = text.ends_with('\n');
@@ -1438,19 +1438,19 @@ pub fn set_tags(text: &str, tags: &[String]) -> String {
 
     let mut out: Vec<String> = Vec::with_capacity(lines.len() + 4);
     if f.lines == 0 {
-        // No front matter at all. It goes on the top, with nothing else in it.
+        // front matter がまったく無い。先頭に、それだけを置く。
         out.push("---".into());
         out.push(line);
         out.push("---".into());
         out.extend(lines);
     } else {
-        // `f.lines` counts the fences too, so the body of it is 1..f.lines-1.
+        // `f.lines` は区切り行も数えるので、中身は 1..f.lines-1。
         let mut wrote = false;
         out.push(lines[0].clone());
         let mut list = false;
         for raw in &lines[1..f.lines - 1] {
             let t = raw.trim_start();
-            // A `tags:` written as a list takes its `- item` lines with it.
+            // リスト形式で書かれた `tags:` は、その `- item` の行も一緒に持っていく。
             if list && t.starts_with("- ") {
                 continue;
             }
@@ -1479,21 +1479,21 @@ pub fn set_tags(text: &str, tags: &[String]) -> String {
     s
 }
 
-/// Move a note into another folder, taking its pictures with it.
+/// ノートを別のフォルダへ移す。画像も一緒に連れていく。
 ///
-/// **The pictures have to come.** A note's links are relative — `![](
-/// attachments/note-1788450324680.jpg)` — so a note that moves on its own
-/// arrives with every picture broken, and the breakage shows up later, when
-/// somebody opens the note and cannot tell whether the image was deleted or
-/// never arrived.
+/// **画像は必ず一緒に動かす。** ノートのリンクは相対パス ── `![](
+/// attachments/note-1788450324680.jpg)` ── なので、ノートだけが移動すると
+/// 画像が全部壊れた状態で着く。しかもそれが表に出るのは後になってからで、
+/// ノートを開いた人は、画像が消されたのか最初から来なかったのか判断
+/// できない。
 ///
-/// Which pictures are "its" is answered by **reading the note**, not by
-/// guessing from the file names — [`crate::naming::bring_pictures`] does it.
-/// A picture another note in the folder also points at is **copied** rather
-/// than moved: moving it would break that other note, which nobody touched.
+/// どの画像が「そのノートのもの」かは、**ノートを読んで**判断する。ファイル名
+/// からの推測ではない ── [`crate::naming::bring_pictures`] がそれをやる。
+/// 同じフォルダの別のノートも参照している画像は、移動ではなく**コピー**する。
+/// 移動すると、誰も触っていないそのノートが壊れるから。
 ///
-/// Nothing is overwritten: a name already taken at the destination stops the
-/// move with the note still where it was.
+/// 上書きはしない。移動先に同じ名前があれば、ノートを元の場所に残したまま
+/// 移動を中止する。
 pub fn move_to(note: &std::path::Path, dir: &std::path::Path) -> anyhow::Result<std::path::PathBuf> {
     let Some(name) = note.file_name() else {
         anyhow::bail!("移せません: {}", note.display())
@@ -1520,44 +1520,44 @@ pub fn move_to(note: &std::path::Path, dir: &std::path::Path) -> anyhow::Result<
     Ok(to)
 }
 
-/// Today, where the person is sitting.
+/// 今日の日付。使っている人のいる場所での。
 ///
-/// Local and not UTC: a note written at ten at night in Tokyo is dated that
-/// day, not the next one. Separate from [`new_note`] so that one can be told
-/// what day it is and tested.
+/// UTC ではなくローカル時刻。東京で夜 10 時に書いたノートは翌日ではなく
+/// その日の日付になる。[`new_note`] と分けてあるのは、あちらに日付を渡して
+/// テストできるようにするため。
 pub fn today() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
-/// Now, as the clock on this machine reads it.
+/// 現在時刻。この端末の時計が示すもの。
 ///
-/// Here so that a front end which has to keep its own timers does not have to
-/// depend on a date library to ask what time it is — the two things it needs
-/// (this and [`next_ring`]) then come from the same place, and cannot end up
-/// disagreeing about which day it is.
+/// ここに置いてあるのは、自前のタイマーを持つフロントエンドが、現在時刻を
+/// 知るためだけに日付ライブラリに依存せずに済むようにするため ── 必要な
+/// 2 つ（これと [`next_ring`]）が同じ場所から来るので、どちらの日付かで
+/// 食い違うことがない。
 pub fn now_local() -> chrono::NaiveDateTime {
     chrono::Local::now().naive_local()
 }
 
-/// The moment, to the second — what an untitled note is called.
+/// 秒までの時刻 ── 無題のノートの名前になるもの。
 ///
-/// The day alone is not enough: three notes made in one afternoon were
-/// 「2026-09-05」, 「2026-09-05-2」 and 「2026-09-05-3」, and the number says
-/// nothing about which is which. The time does.
+/// 日付だけでは足りない。1 つの午後に作った 3 つのノートが「2026-09-05」
+/// 「2026-09-05-2」「2026-09-05-3」になり、番号はどれがどれかを何も
+/// 言わない。時刻なら言える。
 pub fn now_stamp() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-/// The filename and the first bytes of a new note.
+/// 新しいノートのファイル名と、最初の中身。
 ///
-/// Pure, and given the date rather than reading a clock, so the shape of a new
-/// note is a thing tests can state. The engine does the writing and picks a
-/// name that is free; everything about *what a note is* is here, because this
-/// is the module that can travel to a phone.
+/// 純粋関数で、時計を読まずに日付を受け取る。新しいノートの形をテストで
+/// 記述できるようにするため。書き込みと空き名前の選択はエンジンがやる。
+/// *ノートとは何か*に関わることはすべてここにある。ここが iPhone まで
+/// 持っていけるモジュールだから。
 ///
-/// The body is front matter and nothing else. A `# title` heading under a
-/// `title:` field says the same thing twice, and the second copy is the one
-/// that goes stale when the note is renamed.
+/// 中身は front matter だけ。`title:` フィールドの下に `# タイトル` の見出しを
+/// 置くと同じことを 2 回言うことになり、2 つ目のほうが、ノートを改名したときに
+/// 古くなって残る。
 /// その名前は、amber が付けた「作った時刻」か。
 ///
 /// **人が付けた名前と区別が要る。** `買うもの.md` の中身が空でも、題は
@@ -1580,10 +1580,10 @@ pub fn made_up_name(stem: &str) -> bool {
 
 pub fn new_note(title: &str, today: &str, now: &str) -> (String, String) {
     let title = title.trim();
-    // An untitled note is named for the *moment* it was made — the day alone
-    // gives three notes one afternoon the same name and a number after it,
-    // and the number says nothing about which is which. `created` stays a
-    // date: it is a field things parse, and a title is a thing people read.
+    // 無題のノートは作られた*時刻*で名前を付ける ── 日付だけだと、1 つの午後に
+    // 作った 3 つのノートが同じ名前＋番号になり、番号はどれがどれかを何も
+    // 言わない。`created` は日付のまま ── あれは機械が解析するフィールドで、
+    // タイトルは人が読むもの。
     let shown = if title.is_empty() { now } else { title };
     let stem = match file_stem(shown) {
         s if s.is_empty() => today.to_string(),
@@ -1643,7 +1643,7 @@ mod tests {
     ///
     /// 同じフォルダを Windows からも開くので、Office 系の置き土産
     /// （`~$…`）が一覧に紛れ込んでいた。逆に、**同期がぶつかった控えは
-    /// 人の字**なので、落としてはいけない。
+    /// 人が打った文字**なので、落としてはいけない。
     #[test]
     fn the_listing_drops_scratch_files_but_keeps_conflicted_copies() {
         let dir = tempfile::tempdir().unwrap();
@@ -1706,7 +1706,7 @@ mod tests {
     }
 
 
-    /// 読みやすさのため、`Term` を `見出し:語` の一本の字に畳む。
+    /// 読みやすさのため、`Term` を `接頭辞:語` の 1 つの文字列に畳む。
     fn flat(q: &str) -> Vec<Vec<String>> {
         terms(q)
             .into_iter()
@@ -1756,7 +1756,7 @@ mod tests {
         assert!(hits("週報 仕事", "仕事 -買い物"));
         assert!(!hits("週報 仕事 買い物", "仕事 -買い物"));
 
-        // **知らない見出しは字のまま。** `http://…` や「10:30」を打っただけで
+        // **知らない接頭辞は文字列のまま。** `http://…` や「10:30」を打っただけで
         // 消える語ができると、探せなくなったことに気づけない。
         assert_eq!(flat("http://example.com"), vec![vec!["any:http://example.com"]]);
         assert_eq!(flat("10:30"), vec![vec!["any:10:30"]]);
@@ -1829,7 +1829,7 @@ mod tests {
         assert_eq!(one[1], Span { text: "シアン".into(), color: Some("#0e93a8".into()) });
         assert_eq!(one[2], Span { text: "あと".into(), color: None });
 
-        // 色の無い span は、cian のものではない。字として残す。
+        // 色の無い span は、こちらが書いたものではない。文字として残す。
         let asis = spans("<span class=\"x\">そのまま</span>");
         assert_eq!(asis.iter().filter(|s| s.color.is_some()).count(), 0);
         assert_eq!(asis.iter().map(|s| s.text.as_str()).collect::<String>(),
@@ -1843,7 +1843,7 @@ mod tests {
         // 閉じていないものは、書いた通りに。
         assert_eq!(spans("<span style=\"color:#123456\">とじ忘れ").len(), 1);
 
-        // 色の無い行は1つの塊。
+        // 色の無い行は 1 つのまとまり。
         assert_eq!(spans("ただの行"), vec![Span { text: "ただの行".into(), color: None }]);
         assert!(spans("").is_empty());
 
@@ -1855,7 +1855,7 @@ mod tests {
             assert_eq!(read(&p, 40).unwrap().excerpt, "本文です。");
         }
 
-        // 一覧の二行目と検索は、字だけを見る ── 色を付けた語が
+        // 一覧の 2 行目と検索は、テキストだけを見る ── 色を付けた語が
         // 探せなくなるのが一番困る。
         assert_eq!(plain("あ<span style=\"color:#0e93a8\">い</span>う"), "あいう");
 
@@ -1891,7 +1891,7 @@ mod tests {
         // 画面とファイルが食い違っているのに書き込むのが一番悪い。
         assert_eq!(set_check(text, 9, true), text);
         assert_eq!(set_check("- ふつう\n", 0, true), "- ふつう\n");
-        // 字下げは字下げのまま
+        // インデントはそのまま
         assert_eq!(set_check("  - [ ] 中\n", 0, true), "  - [x] 中\n");
     }
     use super::*;
@@ -1914,17 +1914,17 @@ mod tests {
         assert!(h.contains("#仕事"), "the tag, with its hash: {h}");
         assert!(h.contains("#onenote"), "lowercased, so the filter need not be: {h}");
         assert!(h.contains("本文です"), "and the start of it: {h}");
-        // 見出しと表の升も探せる（依頼 606・本人が決めた）。
+        // 見出しと表のセルも検索できる（依頼 606・本人が決めた）。
         assert!(h.contains("来期の見通し"), "見出しも探し先に入る: {h}");
         // `haystack` は小文字に揃える（探す側も揃えるので、これで当たる）。
         assert!(h.contains("ｃｐｕ"), "表の升も探し先に入る: {h}");
     }
 
-    /// **出す字と、探す字を分ける**（依頼 606）。
+    /// **表示するテキストと、検索対象のテキストを分ける**（依頼 606）。
     ///
     /// 一覧の二行目（`excerpt`）は一行の要約なので、見出しも表も入れない
     /// ── そこは変えない。けれど「書いたのに探せない」は別の話で、
-    /// 小見出しや升の中身は書いた本人にとっては書いたことそのもの。
+    /// 小見出しやセルの中身は、書いた本人にとっては書いたことそのもの。
     #[test]
     fn 見出しと表の升は探せるが_一覧の二行目には出ない() {
         let dir = tempfile::tempdir().unwrap();
@@ -1937,12 +1937,12 @@ mod tests {
         let n = read(&at, 60).unwrap();
         // 一覧の二行目は、いままでどおり地の文だけ。
         assert_eq!(n.excerpt, "書き出しの一行。", "{:?}", n.excerpt);
-        // 探し先には見出しと升が入る。**飾りは落ちている**（`**来期**` ではない）。
+        // 検索対象には見出しとセルが入る。**書式は落ちている**（`**来期**` ではない）。
         let h = haystack(&n);
         assert!(h.contains("来期の見通し"), "見出し: {h}");
         assert!(h.contains("ｃｐｕ") && h.contains("８コア"), "升の中身: {h}");
         assert!(h.contains("名前"), "見出しの行の升も: {h}");
-        // 区切りの行は字ではない。コード枠の中は拾わない。
+        // 区切り行は本文ではない。コードブロックの中は拾わない。
         assert!(!h.contains("---"), "区切りの行は入れない: {h}");
         // **枠の中の見出しは、見出しではない。** 「Markdown の書き方」を
         // 書いたノートが、中の例文ぜんぶで当たるようになる。
@@ -1951,7 +1951,7 @@ mod tests {
         assert!(!h.contains("**"), "飾りは落とす: {h}");
     }
 
-    /// **折りたたみの札は、一覧の二行目に出さない**（依頼 619）。
+    /// **折りたたみのタグは、一覧の 2 行目に出さない**（依頼 619）。
     ///
     /// `<details>` と `</details>` は「ここから畳んである」という形の話で、
     /// 一覧に山括弧が並ぶ（実機で出た）。**見出しは残す** ── あれは
@@ -1975,9 +1975,9 @@ mod tests {
 
     /// **表は、文ではない。**
     ///
-    /// 升に切らずに渡していた頃、電話は行を空白で繋いで
-    /// `| 面 | 何が見えるか | …` を一つの段落として描いた ── 表を誰も
-    /// 読まなかったときの見た目そのもの。窓は `to_html` で読めていたので、
+    /// セルに分けずに渡していた頃、iPhone は行を空白でつないで
+    /// `| 画面 | 何が見えるか | …` を 1 つの段落として描いていた ── 表を誰も
+    /// 解釈しなかったときの見た目そのもの。デスクトップ版は `to_html` で解釈できていたので、
     /// **同じノートが二つの amber で別のものに見えていた。**
     #[test]
     fn 表は升に切って渡す() {
@@ -1989,7 +1989,7 @@ mod tests {
         assert_eq!(align[0], crate::markdown::Align::Left);
         assert_eq!(align[1], crate::markdown::Align::Center);
         assert_eq!(rows.len(), 2);
-        // 升の中の飾りは剥がさない ── 剥がす側を二つ持たない。
+        // セルの中の書式は剥がさない ── 剥がす処理を 2 か所に持たない。
         assert_eq!(rows[0][0], "**表示**");
         assert_eq!(rows[1][1], "直すとき");
 
@@ -1998,7 +1998,7 @@ mod tests {
         assert!(matches!(b[0], Block::Paragraph(_)), "{:?}", b);
     }
 
-    /// 注記は、引用と別のもの ── `[!TIP]` を字として出さない。
+    /// 注記は引用とは別物 ── `[!TIP]` を文字として出さない。
     #[test]
     fn 注記は種類と中身に分かれる() {
         let b = blocks("> [!TIP]\n> ここで打てます。\n> 手順はありません。\n>\n> 二つめの段。\n");
@@ -2026,13 +2026,13 @@ mod tests {
         let n = read(&p, 60).unwrap();
         assert_eq!(n.excerpt, "本文はこちら。", "got {:?}", n.excerpt);
 
-        // The alt text is words somebody chose, so it stays.
+        // 代替テキストは人が選んだ言葉なので残す。
         std::fs::write(&p, "# 題\n![現場の写真](a.jpg) のとおり。\n").unwrap();
         assert_eq!(read(&p, 60).unwrap().excerpt, "現場の写真 のとおり。");
 
-        // An ordinary link keeps its words and loses its notation — the
+        // 通常のリンクは言葉を残して記法を落とす ── その大きさでは誰も読まない
         // same as the title does. `[手順](x.md)` in a one-line reminder is
-        // six characters of destination nobody reads at that size, and the
+        // 数十文字の URL は落とし、
         // title next to it already says just 手順.
         std::fs::write(&p, "# 題\n[手順](x.md) を見て。\n").unwrap();
         assert_eq!(read(&p, 60).unwrap().excerpt, "手順 を見て。");
@@ -2042,12 +2042,12 @@ mod tests {
         std::fs::write(&p, "# 題\n> **大事**なのは `ここ`。\n").unwrap();
         assert_eq!(read(&p, 60).unwrap().excerpt, "大事なのは ここ。");
 
-        // A bullet is still a sentence; its mark is not part of it.
+        // 箇条書きも文であることに変わりはない。その記号は文の一部ではない。
         std::fs::write(&p, "# 題\n- [ ] 牛乳を買う\n").unwrap();
         assert_eq!(read(&p, 60).unwrap().excerpt, "牛乳を買う");
 
-        // A note that is only a picture has no excerpt, rather than an
-        // excerpt made of a filename.
+        // 画像だけのノートは抜粋を持たない ── ファイル名でできた抜粋を
+        // 持つよりよい。
         std::fs::write(&p, "# 題\n![](a.jpg)\n").unwrap();
         assert_eq!(read(&p, 60).unwrap().excerpt, "");
     }
@@ -2056,17 +2056,17 @@ mod tests {
     fn a_note_comes_apart_into_things_that_can_be_drawn() {
         let md = "---\ntitle: 段取り\n---\n# 見出し\n本文の一行目\nと二行目。\n\n- ひとつ\n2. ふたつ\n> 引用\n![現場](a.jpg)\n\n```rust\nfn main() {}\n\nlet x = 1;\n```\n---\nおわり\n";
         let b = blocks(md);
-        // The front matter is how the note describes itself, not something it
-        // says — and the title is already on screen above this.
+        // front matter はノートの自己説明であって、本文として述べていることでは
+        // ない ── タイトルはこの上に既に表示されている。
         assert_eq!(b[0], Block::Heading { level: 1, text: "見出し".into(), line: 3 });
-        // Two lines with no blank between them are one paragraph, as Markdown
-        // says and as anybody typing on a phone expects.
+        // あいだに空行の無い 2 行は 1 つの段落。Markdown の規定どおりで、
+        // iPhone で打っている人が期待するとおり。
         assert_eq!(b[1], Block::Paragraph("本文の一行目 と二行目。".into()));
         assert_eq!(b[2], Block::Bullet("ひとつ".into()));
         assert_eq!(b[3], Block::Numbered { n: 2, text: "ふたつ".into() });
         assert_eq!(b[4], Block::Quote("引用".into()));
         assert_eq!(b[5], Block::Image { alt: "現場".into(), link: "a.jpg".into() });
-        // A fence keeps its blank line: losing it would change the code.
+        // コードブロックは空行を保つ。落とすとコードが変わってしまう。
         assert_eq!(b[6], Block::Code { lang: "rust".into(), text: "fn main() {}\n\nlet x = 1;".into() });
         assert_eq!(b[7], Block::Rule, "`---` below the front matter is a rule");
         assert_eq!(b[8], Block::Paragraph("おわり".into()));
@@ -2076,16 +2076,16 @@ mod tests {
     #[test]
     fn a_hash_without_a_space_is_a_tag_and_not_a_heading() {
         // `#仕事` on its own line is how people write a tag. Reading it as a
-        // heading would make every tagged note open with its tag in 32pt.
+        // 見出しにすると、タグの付いたノートがすべて 32pt のタグで始まることになる。
         assert_eq!(blocks("#仕事\n"), vec![Block::Paragraph("#仕事".into())]);
         assert_eq!(blocks("# 仕事\n"), vec![Block::Heading { level: 1, text: "仕事".into(), line: 0 }]);
-        // An image with words after it is a sentence, not a picture on its own.
+        // 後ろに言葉が続く画像は文であって、単独の画像ではない。
         assert_eq!(
             blocks("![a](b.jpg) のとおり\n"),
             vec![Block::Paragraph("![a](b.jpg) のとおり".into())]
         );
-        // A fence nobody closed swallows the rest rather than pretending each
-        // line is a paragraph.
+        // 閉じられなかったコードブロックは、1 行ずつ段落のふりをせず、残りを
+        // 丸ごと取り込む。
         assert_eq!(
             blocks("```\nx\ny\n"),
             vec![Block::Code { lang: String::new(), text: "x\ny".into() }]
@@ -2098,11 +2098,11 @@ mod tests {
         let note = d.path().join("段取り.md");
         std::fs::write(&note, "# 段取り\n").unwrap();
         let link = attach(&note, &[1, 2, 3], "png").unwrap();
-        // **The link has to be in the note.** Which pictures come is read out
-        // of the body now, not guessed from the file names: a picture nothing
-        // points at is not "its" — it is a spare, and `spare::find` offers it.
+        // **リンクがノートの中にあることが条件。** どの画像が一緒に動くかは本文を
+        // 読んで決める。ファイル名からの推測ではない ── どこからも参照されていない
+        // 画像は「そのノートのもの」ではなく余りで、`spare::find` がそれを扱う。
         std::fs::write(&note, format!("# 段取り\n![]({link})\n")).unwrap();
-        // Another note's picture, which must stay where it is.
+        // 別のノートの画像なので、その場に残さなければならない。
         let other = d.path().join("他.md");
         let others = attach(&other, &[9], "png").unwrap();
         std::fs::write(&other, format!("x ![]({others})\n")).unwrap();
@@ -2110,19 +2110,19 @@ mod tests {
         let book = d.path().join("仕事");
         let moved = move_to(&note, &book).unwrap();
         assert_eq!(moved, book.join("段取り.md"));
-        // The link inside the note is relative, so it has to still find the
-        // picture from where the note now is.
+        // ノートの中のリンクは相対パスなので、移動先でも同じものを指せなければ
+        // ならない。
         assert_eq!(std::fs::read(book.join(&link)).unwrap(), vec![1, 2, 3]);
         assert!(!d.path().join(&link).exists(), "and not left behind as well");
         assert!(std::fs::read(d.path().join(&others)).is_ok(), "the other note's picture stays");
 
-        // A name already taken stops the move rather than overwriting.
+        // 同じ名前が既にあれば、上書きせずに移動を中止する。
         let clash = d.path().join("段取り.md");
         std::fs::write(&clash, "別物").unwrap();
         assert!(move_to(&clash, &book).is_err());
         assert_eq!(std::fs::read_to_string(&clash).unwrap(), "別物", "still where it was");
 
-        // Moving into the folder it is already in is not a failure.
+        // すでにいるフォルダへの移動は失敗ではない。
         assert_eq!(move_to(&moved, &book).unwrap(), moved);
     }
 
@@ -2140,19 +2140,19 @@ mod tests {
         let made = carry_out(&t, NaiveDate::from_ymd_opt(2026, 9, 2).unwrap()).unwrap();
         assert_eq!(made.file_name().unwrap(), "ごみ出し 2026-09-02.md");
         let copy = std::fs::read_to_string(&made).unwrap();
-        // A task, not another template: it must not spawn copies of its own.
+        // できるのはタスクであってテンプレートではない。自分自身の複製を生んではいけない。
         assert!(!copy.contains("repeat"), "{copy}");
         assert!(!copy.contains("last"), "{copy}");
         assert!(copy.contains("title: ごみ出し 2026-09-02"), "{copy}");
         assert!(copy.contains("created: 2026-09-02"), "{copy}");
-        // What the task is stays: the tags and the checklist.
+        // そのタスクの中身 ── タグとチェックリスト ── は残る。
         assert!(copy.contains("tags: [家]"), "{copy}");
         assert!(copy.contains("- [ ] 燃えるゴミ"), "{copy}");
-        // And the template is untouched.
+        // そしてテンプレート自体は変わらない。
         assert!(std::fs::read_to_string(&t).unwrap().contains("repeat: weekly wed 09:00"));
 
-        // Twice for the same day is once — otherwise two devices catching up
-        // put two Wednesdays in the list.
+        // 同じ日に 2 回は 1 回として扱う ── そうしないと、2 台が追いつく処理を
+        // したときに水曜日が 2 つ並ぶ。
         let again = carry_out(&t, NaiveDate::from_ymd_opt(2026, 9, 2).unwrap()).unwrap();
         assert_eq!(again, made);
         assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 2);
@@ -2165,14 +2165,14 @@ mod tests {
         assert_eq!(r.once, NaiveDate::from_ymd_opt(2026, 9, 10).unwrap().and_hms_opt(9, 0, 0));
 
         assert_eq!(remind("---\nrepeat: daily 07:30\n---\n").every, Some((Every::Daily, 7, 30)));
-        // Monday is 0, as chrono counts from Monday — wed is 2.
+        // 月曜が 0（chrono と同じ数え方）なので、水曜は 2。
         assert_eq!(remind("---\nrepeat: weekly wed 09:00\n---\n").every, Some((Every::Weekly(2), 9, 0)));
-        // The character people actually type in Japanese.
+        // 日本語で実際に打たれる文字。
         assert_eq!(remind("---\nrepeat: weekly 水 09:00\n---\n").every, Some((Every::Weekly(2), 9, 0)));
         assert_eq!(remind("---\nrepeat: monthly 1 09:00\n---\n").every, Some((Every::Monthly(1), 9, 0)));
 
-        // Nonsense is nothing, not a guess: a reminder invented from a typo
-        // goes off at a time nobody chose.
+        // 解釈できないものは「無し」にする。推測はしない ── 打ち間違いから作られた
+        // 通知は、誰も選んでいない時刻に鳴る。
         assert_eq!(remind("---\nrepeat: weekly ときどき 09:00\n---\n").every, None);
         assert_eq!(remind("---\nremind: あした\n---\n").once, None);
         assert_eq!(remind("---\nrepeat: daily 25:00\n---\n").every, None);
@@ -2184,26 +2184,26 @@ mod tests {
         use chrono::NaiveDate;
         let d = |y, m, day| NaiveDate::from_ymd_opt(y, m, day).unwrap();
 
-        // 2026-09-02 is a Wednesday. Away for two weeks, two Wednesdays owed.
+        // 2026-09-02 は水曜日。2 週間空ければ、水曜が 2 回ぶん溜まる。
         let due = due_since(Every::Weekly(2), Some(d(2026, 8, 30)), d(2026, 9, 10));
         assert_eq!(due, vec![d(2026, 9, 2), d(2026, 9, 9)]);
 
-        // Nothing owed between one Wednesday and the next day.
+        // ある水曜日とその翌日のあいだには、何も溜まらない。
         assert!(due_since(Every::Weekly(2), Some(d(2026, 9, 2)), d(2026, 9, 3)).is_empty());
 
-        // Never carried out: today counts, if today is the day.
+        // 一度も実行していない場合、今日がその曜日なら今日も数える。
         assert_eq!(due_since(Every::Weekly(2), None, d(2026, 9, 2)), vec![d(2026, 9, 2)]);
         assert!(due_since(Every::Weekly(2), None, d(2026, 9, 3)).is_empty());
 
-        // A 31st in a short month lands on the last day rather than being
-        // skipped — a monthly routine that misses February is worse than one
-        // that is a day early.
+        // 31 日は、その月に 31 日が無ければ末日に落とす。飛ばさない ── 2 月を
+        // 飛ばす毎月の繰り返しは、1 日早く来るものより悪い。
+        //
         assert_eq!(
             due_since(Every::Monthly(31), Some(d(2026, 1, 31)), d(2026, 2, 28)),
             vec![d(2026, 2, 28)]
         );
 
-        // A `last` from long ago produces a handful, not seven hundred.
+        // ずっと前の `last` からでも、出るのは数件であって 700 件ではない。
         assert!(due_since(Every::Daily, Some(d(2024, 1, 1)), d(2026, 9, 10)).len() <= 32);
     }
 
@@ -2213,19 +2213,19 @@ mod tests {
         let on = set_field(src, "pinned", Some("true"));
         assert_eq!(on, "---\ntitle: 段取り\ntags: [仕事]\npinned: true\n---\n本文。\n");
 
-        // Off takes the line away rather than writing `pinned: false` — and
-        // certainly rather than `pinned:` with nothing after it, which the
-        // next thing to read the note would take for pinned.
+        // 解除は `pinned: false` を書くのではなく行ごと削除する ── ましてや
+        // 後ろが空の `pinned:` にはしない。次にノートを読んだものが、それを
+        // ピン留め済みと解釈するから。
         let off = set_field(&on, "pinned", None);
         assert_eq!(off, src);
 
-        // Setting it twice does not write it twice.
+        // 2 回設定しても、2 行にはならない。
         let twice = set_field(&set_field(src, "pinned", Some("true")), "pinned", Some("true"));
         assert_eq!(twice.matches("pinned").count(), 1);
 
-        // Removing a field a note does not have leaves the note alone.
+        // 持っていないフィールドを削除しても、ノートは変わらない。
         assert_eq!(set_field(src, "pinned", None), src);
-        // A note with no front matter and nothing to write stays as it is.
+        // front matter が無く、書くものも無いノートは、そのまま。
         assert_eq!(set_field("本文。\n", "pinned", None), "本文。\n");
     }
 
@@ -2233,8 +2233,8 @@ mod tests {
     fn the_three_ways_people_write_yes() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("n.md");
-        // `pinned` is what notes written before favourites existed say, and
-        // they must not quietly stop being favourites.
+        // `pinned` は、お気に入りができる前に書かれたノートが使っている書き方。
+        // それらが黙ってお気に入りでなくなってはいけない。
         for key in ["star", "favorite", "pinned"] {
             for (v, want) in [
                 ("true", Some("")),
@@ -2256,33 +2256,33 @@ mod tests {
 
     #[test]
     fn tags_go_on_without_disturbing_the_rest_of_the_note() {
-        // The other fields, and the order they were written in, are the
-        // writer's — only the tags line is replaced.
+        // ほかのフィールドと、その並び順は書いた人のもの ── 置き換えるのは
+        // タグの行だけ。
         let src = "---\ntitle: 段取り\ncreated: 2026-09-04\ntags: [古い]\n---\n本文。\n";
         let out = set_tags(src, &["仕事".into(), "cian".into()]);
         assert_eq!(
             out,
             "---\ntitle: 段取り\ncreated: 2026-09-04\ntags: [仕事, cian]\n---\n本文。\n"
         );
-        // And it reads back as those tags, which is the only thing that
-        // actually matters.
+        // そして読み戻すとそのタグになる。実際に意味があるのはそこだけ。
+        //
         let lines: Vec<String> = out.lines().map(String::from).collect();
         assert_eq!(front(&lines).tags, vec!["仕事".to_string(), "cian".into()]);
 
-        // No front matter: one is made, and the note is left below it.
+        // front matter が無い場合は作り、ノート本体はその下にそのまま残す。
         let out = set_tags("# 題\n本文。\n", &["あ".into()]);
         assert_eq!(out, "---\ntags: [あ]\n---\n# 題\n本文。\n");
 
-        // Front matter with no tags: the line is added at the *end* of it.
+        // front matter はあるがタグが無い場合、行はその*末尾*に足す。
         let out = set_tags("---\ntitle: x\n---\n本文。\n", &["あ".into()]);
         assert_eq!(out, "---\ntitle: x\ntags: [あ]\n---\n本文。\n");
 
-        // Tags written as a list take their items with them, rather than
-        // leaving orphaned `- ` lines behind the new line.
+        // リスト形式で書かれたタグは、その項目も一緒に置き換える ── 新しい行の
+        // 後ろに `- ` の行が取り残されないように。
         let out = set_tags("---\ntags:\n  - 古い\n  - もっと古い\ntitle: x\n---\n本文。\n", &["新しい".into()]);
         assert_eq!(out, "---\ntags: [新しい]\ntitle: x\n---\n本文。\n");
 
-        // Taking them all off leaves an empty list, not a broken line.
+        // 全部外したら空のリストになる。壊れた行にはならない。
         let out = set_tags("---\ntags: [あ]\n---\n本文。\n", &[]);
         assert_eq!(out, "---\ntags: []\n---\n本文。\n");
     }
@@ -2296,24 +2296,24 @@ mod tests {
         let link = attach(&note, &[1, 2, 3], "PNG").unwrap();
         assert!(link.starts_with("attachments/段取り-"), "{link}");
         assert!(link.ends_with(".png"), "the extension is lowercased: {link}");
-        // The link is relative to the note, so following it from the folder
-        // finds the file — on a Mac, in Explorer, and on a phone.
+        // リンクはノートからの相対パスなので、フォルダから辿ればファイルに
+        // 行き着く ── Mac でも、エクスプローラーでも、iPhone でも。
         assert_eq!(std::fs::read(d.path().join(&link)).unwrap(), vec![1, 2, 3]);
 
-        // Twice in the same millisecond is the only way to collide, and the
-        // stamp makes that the only case; twice in general must not.
+        // 衝突しうるのは同じミリ秒に 2 回のときだけで、時刻を入れているのはその
+        // 場合だけに限るため。一般に 2 回作って衝突してはいけない。
         let again = attach(&note, &[4], "png").unwrap();
         assert!(std::fs::read(d.path().join(&link)).is_ok(), "the first is still there");
         assert!(std::fs::read(d.path().join(&again)).is_ok());
 
-        // A name a filesystem would refuse cannot come back through a note's
-        // own title — `file_stem` is applied to it here too.
+        // ファイルシステムが受け付けない名前が、ノートのタイトル経由で戻って
+        // こないように ── ここでも `file_stem` を通す。
         let odd = d.path().join("a-b.md");
         std::fs::write(&odd, "x").unwrap();
         assert!(attach(&odd, &[1], "").unwrap().ends_with(".png"), "no extension means png");
 
-        // Nothing to attach is refused rather than written as an empty file
-        // the link would then point at.
+        // 添付する中身が無ければ、リンク先になる空ファイルを書かずに拒否する。
+        //
         assert!(attach(&note, &[], "png").is_err());
     }
 
@@ -2321,8 +2321,8 @@ mod tests {
     fn a_new_note_reads_back_as_the_note_it_says_it_is() {
         let (name, body) = new_note("段取り", "2026-09-02", "2026-09-02 14:03:09");
         assert_eq!(name, "段取り.md");
-        // The point of the shape: what `new_note` writes, `front` understands.
-        // These two have drifted apart in every notes app that has two.
+        // この形の要点 ── `new_note` が書いたものを `front` が解釈できる。
+        // この 2 つを別々に持つノートアプリは、どれもいつか食い違っている。
         let lines: Vec<String> = body.lines().map(|l| l.to_string()).collect();
         let f = front(&lines);
         assert_eq!(f.fields.get("title").map(String::as_str), Some("段取り"));
@@ -2354,7 +2354,7 @@ mod tests {
         std::fs::write(&mine, "").unwrap();
         assert_eq!(read(&mine, 60).unwrap().title, "買うもの");
 
-        // 似ているが人の名前（秒が無い・字が混じる）は、題のまま。
+        // 似ているが人が付けた名前（秒が無い・文字が混じる）は、タイトルのまま。
         for name in ["2026-09-06.md", "2026-09-06 13-07.md", "2026-09-06 会議.md"] {
             let at = d.path().join(name);
             std::fs::write(&at, "").unwrap();
@@ -2387,24 +2387,24 @@ mod tests {
 
     #[test]
     fn a_title_a_filesystem_would_refuse_is_made_into_one_it_takes() {
-        // Slashes and colons are what people type in a title without thinking
+        // スラッシュとコロンは、人がタイトルに何気なく打つ文字。
         // — a date, a path, a ratio.
         assert_eq!(file_stem("2026/09/02 の予定"), "2026-09-02 の予定");
         assert_eq!(file_stem("a:b*c?d"), "a-b-c-d");
-        // A run collapses to one dash, and never opens the name.
+        // 連続したものはダッシュ 1 つにまとめ、名前の先頭には置かない。
         assert_eq!(file_stem("??  なぞ"), "なぞ");
-        // Explorer eats a trailing dot or space, so the name it shows would
-        // not be the name on disk.
+        // エクスプローラーは末尾のドットと空白を削るので、表示される名前が
+        // ディスク上の名前と食い違う。
         assert_eq!(file_stem("あとで書く. "), "あとで書く");
-        // Windows device names are still device names with an extension.
+        // Windows のデバイス名は、拡張子を付けてもデバイス名のまま。
         assert_eq!(file_stem("CON"), "_CON");
         assert_eq!(file_stem("con.old"), "_con.old");
         assert_eq!(file_stem("console"), "console", "only the exact name is reserved");
-        // Long enough to matter, cut on a character and not in the middle of
-        // one — 60 characters of Japanese is 180 bytes, inside every limit.
+        // 十分な長さで、文字の途中ではなく文字境界で切る ── 日本語 60 文字は
+        // 180 バイトで、どの上限にも収まる。
         let long = "あ".repeat(200);
         assert_eq!(file_stem(&long).chars().count(), 60);
-        // Nothing usable left: the caller falls back to the date.
+        // 使える文字が残らなかった場合、呼び出し側は日付にフォールバックする。
         assert_eq!(file_stem("///"), "");
     }
 
@@ -2424,10 +2424,10 @@ mod tests {
         assert_eq!(f.get("status"), Some("done"));
     }
 
-    /// **A `---` that is not front matter must not be treated as some.** A
-    /// horizontal rule partway down, and a document that opens with one and
-    /// never closes it, are both ordinary Markdown — swallowing either would
-    /// eat the start of somebody's note.
+    /// **front matter でない `---` を front matter として扱ってはいけない。**
+    /// 途中にある水平線も、先頭にあって閉じられない文書も、どちらも普通の
+    /// Markdown ── どちらかを飲み込めば、誰かのノートの冒頭を食べることに
+    /// なる。
     #[test]
     fn a_rule_is_not_front_matter() {
         assert_eq!(front(&ls("# title\n\n---\n\nbody\n")).lines, 0);
@@ -2451,14 +2451,14 @@ mod tests {
         std::fs::write(&p, "本文だけ\n").unwrap();
         assert_eq!(read(&p, 40).unwrap().title, "本文だけ", "then the first line");
 
-        // 行頭の印は外す ── `- 牛乳` の題は「牛乳」。
+        // 行頭の記号は外す ── `- 牛乳` のタイトルは「牛乳」。
         std::fs::write(&p, "- 牛乳\n- パン\n").unwrap();
         let n = read(&p, 40).unwrap();
         assert_eq!(n.title, "牛乳");
         // **題になった行は、二行目に出さない。** 一行のノートが二行に見える。
         assert!(!n.excerpt.starts_with("牛乳"), "二度言っている: {}", n.excerpt);
 
-        // チェックの印も、強調の印も外す。
+        // チェックボックスの記号も、強調の記号も外す。
         std::fs::write(&p, "- [ ] **急ぎ**の用\n").unwrap();
         assert_eq!(read(&p, 40).unwrap().title, "急ぎの用");
 
@@ -2477,8 +2477,8 @@ mod tests {
         assert_eq!(read(&p, 40).unwrap().title, "kickoff", "then the file name");
     }
 
-    /// The second line of a row says what the note is *about*, so what it is
-    /// made of — headings, fences, front matter — is left out.
+    /// 一覧の 2 行目は、そのノートが*何についてのものか*を言う。だから何で
+    /// できているか ── 見出し、コードブロック、front matter ── は除く。
     #[test]
     fn the_excerpt_skips_the_scaffolding() {
         let d = tempfile::tempdir().unwrap();
@@ -2512,27 +2512,27 @@ mod tests {
     }
 }
 
-/// Carry out a routine: make today's copy of a template note.
+/// 繰り返しを実行する ── テンプレートのノートから今日のぶんを作る。
 ///
-/// The copy is the note without its `repeat` and `last` — it is a task, not
-/// another template — with `created` set to the day it stands for and the day
-/// appended to its title, so a month of them reads as a list of days rather
-/// than the same word twelve times.
+/// 作られるのは `repeat` と `last` を除いたノート ── テンプレートではなく
+/// タスク ── で、`created` はそれが表す日、タイトルの末尾にもその日を
+/// 付ける。1 か月ぶん並べたときに、同じ言葉が 12 回ではなく日付の一覧として
+/// 読めるように。
 ///
-/// **Not scheduled by cian.** A phone does not let an app wake at nine on a
-/// Wednesday to write a file. The notification arrives on time; the copy is
-/// made the next time the app is opened, from `last`, which is why `last`
-/// exists. Say so plainly rather than implying a clock nobody has.
-/// Make every copy a routine owes, and write down that it was made.
+/// **amber がスケジュール実行するのではない。** iPhone はアプリを水曜の 9 時に
+/// 起こしてファイルを書かせてくれない。通知は時間どおりに届き、コピーが
+/// 作られるのは次にアプリを開いたとき ── `last` を見て。`last` があるのは
+/// そのため。誰も持っていない時計をほのめかさず、はっきりそう書く。
+/// 繰り返しが溜めているぶんをすべて作り、作ったことを記録する。
 ///
-/// **The writing down is the whole point.** The copy is easy; remembering
-/// that it happened is what stops tomorrow making it again — and the first
-/// version of this in the window did the first half only, so opening the
+/// **記録することが要点。** コピーを作るのは簡単で、作ったことを憶えておくのが
+/// 明日もう一度作るのを止める ── デスクトップ版の最初の版は前半しかやって
+/// いなかったので、開くたびに増えていった。
 /// folder said 「1 件作りました」 every single time. One function, called by
-/// both front ends, so there is one answer to "has this been done".
+/// 両方のフロントエンドから使うので、「これは実行済みか」の答えが 1 つになる。
 ///
-/// Returns what it made. A note with no routine makes nothing and is not an
-/// error — most notes have no routine.
+/// 作ったものを返す。繰り返しの無いノートは何も作らないが、それはエラーでは
+/// ない ── ほとんどのノートは繰り返しを持たない。
 pub fn catch_up(path: &Path, today: chrono::NaiveDate) -> anyhow::Result<Vec<PathBuf>> {
     let text = std::fs::read_to_string(path)?;
     let r = remind(&text);
@@ -2545,23 +2545,23 @@ pub fn catch_up(path: &Path, today: chrono::NaiveDate) -> anyhow::Result<Vec<Pat
         last = Some(day);
     }
     if let Some(day) = last {
-        // Read again: `carry_out` did not touch this file, but somebody else
-        // may have, and the field goes onto what is there now.
+        // 読み直す ── `carry_out` はこのファイルに触っていないが、ほかの誰かが
+        // 触ったかもしれない。フィールドはいまそこにある内容に対して書く。
         let now = std::fs::read_to_string(path)?;
         std::fs::write(path, set_field(&now, "last", Some(&day.to_string())))?;
     }
     Ok(made)
 }
 
-/// When a routine next comes round, from a given moment.
+/// 与えた時点から見て、繰り返しが次に来るのはいつか。
 ///
-/// **For a front end that has to keep its own clock.** The phone hands the
-/// times to iOS and forgets them; a window has no such thing, so it sets a
-/// timer — and the moment to set it for is a judgement about what "every
-/// Wednesday at nine" means, which belongs here rather than in JavaScript.
+/// **自前の時計を持たなければならないフロントエンドのため。** iPhone はこれを
+/// iOS に渡して忘れるが、デスクトップ版にはそういう仕組みが無いので自分で
+/// タイマーを張る ── そのタイマーを何時に張るかは「毎週水曜の 9 時」が
+/// 何を意味するかの判断で、JavaScript ではなくここに属する。
 ///
-/// `from` is exclusive: called again the instant after one fires, it gives
-/// the one after, not the same one for ever.
+/// `from` は含まない。1 回鳴った直後にもう一度呼べば、同じものではなく
+/// 次のものを返す。
 pub fn next_ring(
     every: Every,
     hour: u32,
@@ -2579,9 +2579,9 @@ pub fn next_ring(
             }
         }
         Every::Weekly(w) => {
-            // The note counts Monday as 0; chrono counts it as 0 too
-            // (`num_days_from_monday`), which is the one place these two
-            // agree and worth saying out loud.
+            // ノート側は月曜を 0 とし、chrono も 0 とする
+            // （`num_days_from_monday`）。この 2 つが一致している唯一の場所なので、
+            // はっきり書いておく価値がある。
             use chrono::Datelike;
             let mut d = day;
             for _ in 0..8 {
@@ -2598,10 +2598,10 @@ pub fn next_ring(
         }
         Every::Monthly(want) => {
             let mut d = day;
-            // Two months of days is enough to find the next one, and it
-            // handles a 31st in a month that has thirty — `last_day` is what
-            // decides where that lands, so this asks the same question the
-            // catching-up does rather than a second opinion.
+            // 2 か月ぶん見れば次の 1 件は必ず見つかるし、30 日しかない月の 31 日も
+            // 扱える ── どこに落ちるかを決めるのは `last_day` なので、ここは
+            // 溜まったぶんを数える側と同じ問いを投げていて、2 つ目の判断を
+            // 持たない。
             for _ in 0..64 {
                 if due_on(want, d) {
                     if let Some(at) = d.and_hms_opt(hour, minute, 0) {
@@ -2645,8 +2645,8 @@ pub fn carry_out(
     };
     let name = format!("{}.md", file_stem(&format!("{title} {day}")));
     let at = dir.join(&name);
-    // Already carried out — by another device, or by this one before `last`
-    // was written. Doing it again would put two of the same day in the list.
+    // 実行済み ── 別の端末か、`last` が書かれる前のこの端末によって。
+    // もう一度やると、同じ日のものが 2 つ並ぶ。
     if at.exists() {
         return Ok(at);
     }
@@ -2654,39 +2654,39 @@ pub fn carry_out(
     Ok(at)
 }
 
-// ---- Reminders and routines ----------------------------------------------
+// ---- 通知と繰り返し ------------------------------------------------------
 
-/// How often a routine comes round.
+/// 繰り返しの周期。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Every {
     Daily,
     /// 0 = Monday, as `chrono::Weekday::num_days_from_monday` counts.
     Weekly(u32),
-    /// Day of the month. A 31 in a short month lands on the last day rather
-    /// than being skipped — a monthly routine that silently misses February
-    /// is worse than one that is a day early.
+    /// 月の何日か。31 日が無い月では末日に落とす。飛ばさない ── 2 月を黙って
+    /// 飛ばす毎月の繰り返しは、1 日早く来るものより悪い。
+    ///
     Monthly(u32),
 }
 
-/// When a note wants to be brought up.
+/// そのノートがいつ呼び出されたいか。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Remind {
     /// `remind: 2026-09-10 09:00` — once.
     pub once: Option<chrono::NaiveDateTime>,
-    /// `repeat: weekly wed 09:00` — again and again.
+    /// `repeat: weekly wed 09:00` ── 繰り返し。
     pub every: Option<(Every, u32, u32)>,
-    /// `last: 2026-09-03` — the last day this routine was carried out. Kept
-    /// in the note because that is where everything else about the note is,
-    /// and because a phone that is off for a week must be able to work out
-    /// what it missed.
+    /// `last: 2026-09-03` ── この繰り返しを最後に実行した日。ノートの中に持つのは、
+    /// そのノートに関するほかのものが全部そこにあるから。そして 1 週間電源を
+    /// 切っていた iPhone が、何を逃したかを自分で計算できる必要があるから。
+    ///
     pub last: Option<chrono::NaiveDate>,
 }
 
-/// Read the reminder out of a note's front matter.
+/// ノートの front matter から通知の設定を読む。
 ///
-/// Written by hand rather than by a date library's parser: the three shapes
-/// below are what a person types, and a parser that also accepts eleven other
-/// shapes accepts eleven ways to be surprised.
+/// 日付ライブラリのパーサーではなく手書きにしてある ── 下の 3 つの形が人の
+/// 打つもので、ほかに 11 通りも受け付けるパーサーは、驚き方を 11 通り
+/// 受け入れることになる。
 ///
 /// ```text
 /// remind: 2026-09-10 09:00
@@ -2764,7 +2764,7 @@ fn clock(s: &str) -> Option<(u32, u32)> {
     (h < 24 && m < 60).then_some((h, m))
 }
 
-/// `mon`…`sun`, and the Japanese single characters people actually type.
+/// `mon`…`sun` と、日本語で実際に打たれる 1 文字の曜日。
 fn weekday(s: &str) -> Option<u32> {
     let s = s.trim().to_ascii_lowercase();
     let names = [
@@ -2774,15 +2774,15 @@ fn weekday(s: &str) -> Option<u32> {
     names.iter().position(|(en, ja)| s.starts_with(en) || s == *ja).map(|i| i as u32)
 }
 
-/// The days a routine came due between `last` and `today`, inclusive of
+/// `last` から `today` までに繰り返しが来た日。`today` も含む。
 /// today.
 ///
-/// **Catching up matters.** A phone that was off for a week, or an app that
-/// was not opened, must be able to say what it missed — otherwise a weekly
-/// routine quietly becomes "whenever you happen to open cian".
+/// **溜まったぶんを数えられることが重要。** 1 週間電源を切っていた iPhone も、
+/// 開かれなかったアプリも、何を逃したか言えなければならない ── そうでないと
+/// 毎週の繰り返しが、黙って「たまたまアプリを開いたとき」になる。
 ///
-/// Capped, because a note whose `last` is two years old should produce a
-/// handful of copies and not seven hundred.
+/// 上限を設けている。`last` が 2 年前のノートが作るべきなのは数件であって、
+/// 700 件ではない。
 pub fn due_since(
     every: Every,
     last: Option<chrono::NaiveDate>,
@@ -2790,7 +2790,7 @@ pub fn due_since(
 ) -> Vec<chrono::NaiveDate> {
     use chrono::Datelike;
     let from = match last {
-        // Never carried out: today counts if today is a day it falls on.
+        // 一度も実行していない場合、今日がその日に当たるなら今日も数える。
         None => today,
         Some(l) => l.succ_opt().unwrap_or(today),
     };
@@ -2811,9 +2811,9 @@ pub fn due_since(
     out
 }
 
-/// Whether a monthly routine falls on this day.
+/// 毎月の繰り返しが、その日に当たるか。
 ///
-/// The 31st in a month of thirty lands on the last day of it — otherwise
+/// 30 日しかない月の 31 日は、その月の末日に落とす ── そうしないと
 /// 「毎月31日」 quietly means 「7か月だけ」. One answer, asked by both the
 /// catching-up and the next-time-round.
 fn due_on(want: u32, d: chrono::NaiveDate) -> bool {
@@ -2829,11 +2829,11 @@ fn last_day(year: i32, month: u32) -> u32 {
         .unwrap_or(28)
 }
 
-/// A note the search matched, and the first line worth showing for it.
+/// 検索に一致したノートと、そのノートについて最初に見せるべき行。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hit {
     pub path: std::path::PathBuf,
-    /// 1-based, as it is shown. 0 when nothing on one line matched.
+    /// 表示と同じく 1 始まり。どの行にも一致しなかったときは 0。
     pub line: usize,
     pub text: String,
 }
@@ -2844,7 +2844,7 @@ pub struct Hit {
 /// 理由は二つ。**ひとつ、あちらは `cloud` を引きずる** ── ノートのアプリが
 /// OneDrive のプレースホルダ判定を積む理由が無い。**ふたつ、探し方が違った** ──
 /// あちらは打った文字列をそのまま含むかを見る。こちらは [`hits`] を通すので、
-/// 窓の `/` 絞り込みと同じ **AND と OR**（`OR` / `or` / `|` / `｜`）が効く。
+/// デスクトップ版の `/` 絞り込みと同じ **AND と OR**（`OR` / `or` / `|` / `｜`）が効く。
 /// 同じ言葉で探して同じものが出る、が二つの前端の間で成り立つ。
 ///
 /// 探す先は題・タグ・本文。一行に全部の語が揃っている必要は無いので、
