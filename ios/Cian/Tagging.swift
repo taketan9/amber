@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// The tags on one note.
+/// ノート 1 件のタグ。
 ///
-/// Offers the tags already in the folder rather than making somebody type
+/// そのフォルダに既にあるタグを候補として出す。打ち直させない ── 打ち直すと、
 /// 「仕事」 again and get 「 仕事」 — a tag with a stray space is a second tag
-/// that looks like the first one, and nothing on screen would say so.
+/// 最初のものとそっくりな別のタグができるが、画面には何も出ない。
 struct Tagging: View {
     @Binding var tags: [String]
     let known: [String]
@@ -39,8 +39,8 @@ struct Tagging: View {
                         Button("作る") { add(typed) }
                             .disabled(clean(typed).isEmpty)
                     }
-                    // The ones already in the folder, minus the ones already
-                    // on this note.
+                    // フォルダに既にあるもののうち、このノートに
+                    // まだ付いていないもの。
                     ForEach(known.filter { !tags.contains($0) }, id: \.self) { t in
                         Button("#\(t)") { add(t) }
                     }
@@ -54,9 +54,9 @@ struct Tagging: View {
         }
     }
 
-    /// A tag is one word without its hash: people type the `#` because that is
+    /// タグはハッシュを除いた 1 語。人が `#` を打つのは、表示される場所がどこも
     /// how they see it written, and a tag stored as `#仕事` would be `##仕事`
-    /// everywhere it is shown.
+    /// そうなっているから。
     private func clean(_ s: String) -> String {
         s.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "#"))

@@ -1,20 +1,20 @@
 import SwiftUI
 
-/// Everything there is, in the shape it is in — folders opening to show what
-/// is inside them, notes included.
+/// あるものすべてを、そのままの構造で ── フォルダを開くと中身が出て、
+/// ノートもそこに並ぶ。
 ///
 /// 2026-09-05: 「フォルダの構成という表示がすごくわかりやすい。デフォルトを
 /// この見え方にして、＋ノートもその中にあるものを表示させる」. The list that
-/// shows one level at a time is right for *using* a folder; this is right for
-/// *knowing* one, and knowing turns out to be what a notes app is mostly for.
+/// 1 階層ずつ見せる形はフォルダを*使う*のに向いている。こちらはフォルダを
+/// *把握する*のに向いていて、ノートアプリの用途はたいていそちらだった。
 ///
-/// **Favourites first, and not as a folder.** They are a second place a note
-/// is, so they open at the top with a star rather than sitting among the
-/// directories pretending to be one.
+/// **お気に入りを先頭に。フォルダとしては出さない。** あれはノートの 2 つ目の
+/// 居場所なので、ディレクトリに混ざってフォルダのふりをするのではなく、
+/// 星印を付けていちばん上に開く。
 struct Nest: View {
     @ObservedObject var store: NotesStore
     let open: (Note) -> Void
-    /// Drawn by the caller, so a row here looks like a row there.
+    /// 描くのは呼び出し側。ここの行と向こうの行が同じ見た目になるように。
     let row: (Note) -> AnyView
 
     var body: some View {
@@ -23,9 +23,9 @@ struct Nest: View {
                 Section {
                     branch(star: "", depth: 0)
                 } header: {
-                    // `textCase(nil)` or a list header shouts the name back
-                    // in capitals — which turns 「cian」 into 「CIAN」 and a
-                    // folder somebody named into something they did not.
+                    // `textCase(nil)` を付けないと、リストの見出しは名前を
+                    // 大文字で返してくる ──「cian」が「CIAN」になり、
+                    // 人が付けたフォルダ名が別のものになる。
                     Label("ブックマーク", systemImage: "star.fill")
                         .foregroundStyle(.orange)
                         .textCase(nil)
@@ -43,16 +43,16 @@ struct Nest: View {
 
     // MARK: folders
 
-    /// One folder's contents: the folders under it, then its own notes.
+    /// フォルダ 1 つの中身 ── 配下のフォルダ、そのあとに自分のノート。
     ///
-    /// Recursion rather than a flattened list with indents: the disclosure
-    /// arrow has to hide what is under it, and a flat list would have to work
-    /// out for itself which rows those are.
+    /// インデント付きの平らな一覧ではなく再帰にしてある ── 開閉の三角は
+    /// 自分の配下を隠さなければならず、平らな一覧ではどの行がそれに当たるかを
+    /// 自力で計算することになる。
     ///
-    /// **`AnyView`, and only here.** A view that contains itself has a type
-    /// that contains itself, and Swift will not infer one — the error says
-    /// "defines the opaque type in terms of itself". Erasing at the one place
-    /// the recursion happens is the price of a tree.
+    /// **`AnyView` はここだけで使う。** 自分自身を含む View は自分自身を含む型に
+    /// なり、Swift はそれを推論できない ── エラーは "defines the opaque type in
+    /// terms of itself" と言う。再帰が起きるこの 1 か所だけで型を消すのが、
+    /// ツリー表示の代償。
     private func branch(book: String, depth: Int) -> AnyView {
         AnyView(branchBody(book: book, depth: depth))
     }
@@ -79,7 +79,7 @@ struct Nest: View {
         }
     }
 
-    // MARK: favourite shelves
+    // MARK: お気に入りのフォルダ
 
     private func branch(star: String, depth: Int) -> AnyView {
         AnyView(branchBody(star: star, depth: depth))
@@ -92,8 +92,8 @@ struct Nest: View {
                 branch(star: s.path, depth: depth + 1)
             } label: {
                 HStack(spacing: 8) {
-                    // A star and not a folder: a shelf is not a directory,
-                    // and drawing it as one promises that moving it moves
+                    // フォルダではなく星印にする。お気に入りはディレクトリでは
+                    // なく、フォルダとして描くと「動かせばノートも動く」と
                     // files.
                     Image(systemName: "star.square.fill").foregroundStyle(.orange)
                     Text(s.name).lineLimit(1)

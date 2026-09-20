@@ -1,17 +1,17 @@
 import SwiftUI
 import UserNotifications
 
-/// What a note asked to be reminded about.
+/// そのノートが通知してほしいと言っている内容。
 struct Reminder: Equatable {
     var once: String = ""
     /// "", "daily", "weekly", "monthly"
     var kind: String = ""
-    /// Weekday (0 = Monday) or day of month.
+    /// 曜日（0 = 月曜）または月の何日か。
     var n: Int = 0
     var hour: Int = 9
     var minute: Int = 0
     var last: String = ""
-    /// Days the routine came due and has not been carried out.
+    /// 繰り返しの期日が来て、まだ実行していない日。
     var due: [String] = []
 
     var repeats: Bool { !kind.isEmpty }
@@ -30,7 +30,7 @@ struct Reminder: Equatable {
         }
     }
 
-    /// How the note writes it down.
+    /// ノートへの書き方。
     var repeatLine: String? {
         switch kind {
         case "daily": return String(format: "daily %02d:%02d", hour, minute)
@@ -41,20 +41,20 @@ struct Reminder: Equatable {
     }
 }
 
-/// The phone's own alarm clock.
+/// iPhone 自身の目覚まし。
 ///
-/// **cian does not have a clock.** iOS will not wake a sandboxed app at nine
-/// on a Wednesday to write a file, and pretending otherwise would mean a
-/// routine that silently only happens when you open the app. So: the
-/// *notification* is scheduled with the system and arrives on time, and the
-/// note it stands for is written the next time cian is opened — which is what
-/// `last` in the note is for.
+/// **amber は時計を持っていない。** iOS はサンドボックスの中のアプリを水曜の
+/// 9 時に起こしてファイルを書かせたりしない。持っているふりをすると、
+/// 繰り返しは黙って「アプリを開いたときだけ」起きることになる。だから ──
+/// *通知*は OS に登録して時間どおりに届き、それが表すノートは次に amber を
+/// 開いたときに書く。ノートの中の `last` はそのためにある。
+///
 @MainActor
 enum Bell {
     static let dayNames = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
     static let dayLabels = ["月", "火", "水", "木", "金", "土", "日"]
 
-    /// Ask once. Refused is an answer, not a failure to retry at every launch.
+    /// 許可を求めるのは一度だけ。断られたのも答えであって、起動のたびに
     static func ask() async -> Bool {
         let c = UNUserNotificationCenter.current()
         if let granted = try? await c.requestAuthorization(options: [.alert, .sound, .badge]) {
@@ -63,11 +63,11 @@ enum Bell {
         return false
     }
 
-    /// Put this note's reminders on the system's clock, replacing whatever
-    /// was there for it.
+    /// このノートの通知を OS に登録する。そのノートについて登録済みのものは
+    /// 置き換える。
     ///
-    /// Keyed by the note's path so re-scheduling replaces rather than stacks:
-    /// a note edited five times should not ring five times.
+    /// キーはノートのパス。登録し直しても積み上がらず置き換わる ── 5 回編集
+    /// したノートが 5 回鳴ってはいけない。
     static func set(_ note: Note, _ r: Reminder) {
         let c = UNUserNotificationCenter.current()
         let ids = ["\(note.path)#once", "\(note.path)#every"]
@@ -77,9 +77,9 @@ enum Bell {
         body.title = note.title
         body.body = note.excerpt.isEmpty ? "ambər" : note.excerpt
         body.sound = .default
-        // Which note this was about. Without it a notification can only say
-        // "open amber", and the person then has to find the note the phone
-        // just interrupted them about.
+        // どのノートについての通知か。これが無いと通知は「amber を開いて」と
+        // しか言えず、たったいま邪魔してきた当のノートを自分で探すことに
+        // なる。
         body.userInfo = ["path": note.path]
 
         if !r.once.isEmpty, let at = parts(r.once) {
@@ -92,9 +92,9 @@ enum Bell {
             when.minute = r.minute
             switch r.kind {
             case "weekly":
-                // `DateComponents.weekday` counts Sunday as 1; the note counts
-                // Monday as 0. Getting this wrong moves every routine by a day
-                // and nothing on screen says so.
+                // `DateComponents.weekday` は日曜を 1 と数え、ノート側は月曜を 0 と
+                // 数える。ここを間違えると繰り返しが全部 1 日ずれるが、画面には
+                // 何も出ない。
                 when.weekday = (r.n + 1) % 7 + 1
             case "monthly":
                 when.day = r.n
@@ -122,21 +122,21 @@ enum Bell {
     }
 }
 
-/// The note a notification was about, from the moment it is pressed until
-/// the list has opened it.
+/// 通知が指していたノートを、押された瞬間から一覧が開くまで
+/// 預かっておく。
 ///
-/// A tiny object rather than a callback: the notification can be pressed
-/// while the app is not running, in which case the answer arrives *before*
-/// there is a view to hand it to. Somewhere to put it until somebody asks is
-/// the whole job.
+/// コールバックではなく小さなオブジェクトにしてある ── 通知はアプリが
+/// 動いていないときにも押され、そのとき答えは渡す先の View ができる*前*に
+/// 届く。誰かが訊きに来るまで置いておく場所を作るのが、ここの仕事の
+/// すべて。
 @MainActor
 final class Ring: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     static let shared = Ring()
-    /// The path pressed, cleared by whoever acts on it.
+    /// 押されたノートのパス。処理した側が消す。
     @Published var wanted: String?
 
-    /// Start listening. Must happen before the app finishes launching, or a
-    /// notification pressed from the lock screen is delivered to nobody.
+    /// 受け取りを始める。アプリの起動が終わる前に設定しなければならない ──
+    /// ロック画面から押された通知が、誰にも届かなくなる。
     static func listen() {
         UNUserNotificationCenter.current().delegate = shared
     }
@@ -149,8 +149,8 @@ final class Ring: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
         await MainActor.run { Ring.shared.wanted = path }
     }
 
-    /// Show it even while cian is open. The alternative is a routine that
-    /// comes due, rings nowhere, and looks broken.
+    /// amber を開いているあいだも通知を出す。そうしないと、期日が来ても
+    /// どこにも鳴らず、壊れているように見える。
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification

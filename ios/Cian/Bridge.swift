@@ -1,12 +1,12 @@
 import Foundation
 
-/// The one door to cian.
+/// amber への唯一の入口。
 ///
-/// Everything the app knows about a note — its title, the line under it, its
-/// tags — comes back through here from Rust. **Nothing about notes is decided
-/// in Swift.** The window on the Mac reads the same `cian_core::note`, and two
-/// implementations of "what is a title" would be two answers that drift apart
-/// the first time either is touched.
+/// アプリがノートについて知っていることは全部 ── タイトル、その下の行、
+/// タグ ── ここを通って Rust から返ってくる。**ノートに関することは Swift
+/// では何も決めない。** Mac のデスクトップ版も同じ `amber_core::note` を読む。
+/// 「何がタイトルか」の実装が 2 つあれば、どちらかに手を入れた瞬間から
+/// 答えは 2 つに分かれていく。
 enum Cian {
     enum Failure: LocalizedError {
         case engine(String)
@@ -15,12 +15,12 @@ enum Cian {
         }
     }
 
-    /// Ask cian something. `method` and `params` go over as JSON and the
-    /// answer comes back as JSON.
+    /// amber に問い合わせる。`method` と `params` を JSON で渡し、答えも
+    /// JSON で返る。
     ///
-    /// The answer is C-allocated and **must** be handed back: `defer` does it
-    /// on every path out, including the throwing ones, which is the whole
-    /// reason the free is not written at the end.
+    /// 答えは C 側で確保されていて、**必ず**返さなければならない。`defer` が
+    /// 抜けるすべての経路で返す（throw する経路も含めて）── 末尾に書いて
+    /// いないのはそのため。
     static func call(_ method: String, _ params: [String: Any] = [:]) throws -> [String: Any] {
         // **クラウドと同じフォルダを触るときは、一言通す**（PLANS 一）。
         guard let at = coordinated(method, params) else { return try raw(method, params) }
@@ -75,18 +75,18 @@ enum Cian {
         guard let obj = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else {
             throw Failure.engine("答えを読めません: \(text)")
         }
-        // An error is an answer like any other — there is no second way for a
-        // call to fail, so this is the only place that has to be checked.
+        // エラーもほかと同じ 1 つの答え ── 呼び出しが失敗する経路はほかに
+        // 無いので、確かめる場所もここだけでよい。
         if let why = obj["error"] as? String { throw Failure.engine(why) }
         return obj
     }
 }
 
-/// One note, as cian describes it.
+/// amber が返すノート 1 件の形。
 ///
-/// A plain struct built from the JSON rather than `Codable` against a wire
-/// format: the fields cian sends will grow, and a decoder that fails on an
-/// unknown key would turn a new field on the Mac into a broken phone.
+/// 通信形式に対する `Codable` ではなく、JSON から組み立てる素の struct。
+/// amber が送るフィールドは増えていくので、知らないキーで失敗する decoder は、
+/// Mac 側でフィールドが 1 つ増えた日に iPhone を壊す。
 struct Note: Identifiable, Hashable {
     let path: String
     /// 題。**空のことがある** ── amber が付けた `2026-09-06 13-07-22` は
@@ -98,13 +98,13 @@ struct Note: Identifiable, Hashable {
     let excerpt: String
     let tags: [String]
     let updated: UInt64
-    /// When it was started, as against when it was last touched. Two
-    /// different questions, and people look for notes by both.
+    /// いつ始めたか。最後にいつ触ったか、とは別の問いで、人はその両方で
+    /// ノートを探す。
     let created: UInt64
-    /// The directory it sits in, relative to the chosen root — a notebook, in
-    /// the sense Inkdrop means. Empty for a note at the top.
+    /// 選んだルートから見た、そのノートのディレクトリ ── Inkdrop の言う
+    /// ノートブックのこと。ルート直下のノートでは空。
     ///
-    /// Shown because the list reaches six levels down: without it two notes
+    /// 一覧が 6 階層まで届くので表示する。これが無いと、名前の同じ 2 件の
     /// called 「打合せ」 in two different months are the same row twice.
     let book: String
     /// どの保存ディレクトリのものか（そのフォルダの道）と、その呼び名（依頼 511）。
@@ -112,13 +112,13 @@ struct Note: Identifiable, Hashable {
     /// 「仕事」を分けるのはこちら。
     let root: String
     let place: String
-    /// A favourite, and which favourite shelf it stands on — `""` is the top
-    /// of the favourites. **A second place, not a move**: the note stays in
-    /// the folder it was written in, and this says where it also shows up.
+    /// お気に入りかどうかと、どのお気に入りフォルダに入っているか ── `""` は
+    /// お気に入りの最上位。**移動ではなく 2 つ目の居場所** ── ノートは書かれた
+    /// フォルダに残り、これはそれがほかにどこへ出るかを言う。
     let star: String?
-    /// Title, `#tags` and the start of the body, lowercased — **cian's own
-    /// answer to "what does this note match"**, so a search here finds the
-    /// same notes it finds in the window.
+    /// タイトル・`#tags`・本文の冒頭を小文字にしたもの ── **「このノートは何に
+    /// 一致するか」に対する amber 自身の答え**なので、ここでの検索は
+    /// デスクトップ版と同じノートを見つける。
     let search: String
     /// クラウドが同時に書いたときに作った控えなら、もとのノートの名前と
     /// 誰のものか。**一覧からは消さない** ── 消すと、中身を助け出すパスが

@@ -1,21 +1,21 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Where the notes are kept, and how they get in and out.
+/// ノートの置き場所と、出し入れの仕方。
 ///
-/// The folder button used to open the system file picker straight away, which
-/// answers a question nobody asked: it looks like "find a file" when what it
-/// is for is "this is where my notes live, and I might move them". This says
-/// where they are first, and offers the picker as one of the things you can
-/// do about it.
+/// 以前はフォルダのボタンがいきなり OS のファイル選択を開いていた。それは
+/// 誰も訊いていない問いに答えている ──「ファイルを探す」に見えるが、
+/// 用途は「ノートはここにある。移すかもしれない」。まずどこにあるかを
+/// 言い、選択画面はそれに対してできることの 1 つとして出す。
+///
 struct Where: View {
     @ObservedObject var store: NotesStore
-    /// Asked for after this sheet has closed.
+    /// このシートが閉じたあとで開く。
     ///
-    /// **A file picker cannot be opened from inside a sheet** — it is a
-    /// presentation over a presentation, and it silently does nothing, which
+    /// **シートの中からファイル選択は開けない** ── シートの上にシートを
+    /// 重ねることになり、黙って何も起きない。
     /// is exactly how 「保存場所を選ぶ」 behaved: pressed, and no answer at
-    /// all. So the sheet closes first and the screen underneath opens it.
+    /// だからシートを先に閉じ、その下の画面が開く。
     /// 保存ディレクトリの場所を選ぶ（`nil` は「足す」、それ以外はその id の場所を変える）。
     let choose: (String?) -> Void
     let bringIn: () -> Void
@@ -186,7 +186,7 @@ struct Where: View {
                 } header: {
                     Text("保存ディレクトリの追加・変更・削除")
                 } footer: {
-                    // **The thing that is actually hard.** 2026-09-05:
+                    // **本当に難しいのはここ。** 2026-09-05:
                     // 「どこのディレクトリなのかが単純にわからないんだ。探せなくて困っている」。
                     // 提供者はみな選ぶ画面の何段か下に居て、どれも人が当たりを付ける場所に無い。
                     Text("ノートを置くフォルダ。いくつでも。同期先はフォルダごとに選べます（iCloud と OneDrive は、これから）。\n\n選ぶ画面が開いたら、左上の「ブラウズ」から辿ります。iCloud Drive はそのまま一覧に、Google Drive / Dropbox は「場所」の下。出てこないときは「…」→「サイドバーを編集」でオンに（「ファイル」アプリ側の設定）。パソコン版の ambər に同じフォルダを指定すれば、両方から同じノートを触れます。")
@@ -263,8 +263,8 @@ struct Where: View {
                         Label("ほかの場所のノートを開く", systemImage: "doc.badge.ellipsis")
                     }
                     // The other half of 「バックアップ」. Without it a zip is
-                    // a thing you can make and never use, which is not a
-                    // backup — it is a file.
+                    // 作れるだけで一度も使わないものは、バックアップではなく
+                    // ただのファイル。
                     Button {
                         dismiss()
                         restore()
@@ -284,10 +284,10 @@ struct Where: View {
                     } label: {
                         Label("使われていない画像", systemImage: "photo.badge.checkmark")
                     }
-                    // The scope is a choice because backing up is
-                    // something people do *before* something — before a
-                    // reinstall, before handing a folder to somebody, before
-                    // tidying. Each of those wants a different amount.
+                    // 範囲を選ばせるのは、バックアップが何かの*前*に
+                    // することだから ── 入れ直す前、フォルダを誰かに渡す前、
+                    // 片付ける前。それぞれ必要な範囲が違う。
+                    //
                     Menu {
                         Button("すべて") { make("all", "") }
                         if !store.allBooks.isEmpty {
@@ -366,14 +366,14 @@ struct Where: View {
                 } header: {
                     Text("テーマ")
                 } footer: {
-                    // Three and not two: a phone that goes dark at sunset is
-                    // the common case, and a switch with no way back to it
-                    // is a switch that gets set once and regretted.
+                    // 2 つではなく 3 つ。日が暮れると暗くなる端末が普通で、
+                    // そこへ戻せないスイッチは、一度設定して後悔する
+                    // スイッチになる。
                     Text("「琥珀 ── OS に合わせる」は、OS がダークのとき一緒に暗くなります。")
                 }
             }
-            // The zip exists before the share sheet opens, so what is being
-            // handed over is a file that is already there — not a promise.
+            // zip は共有シートが開く前にできているので、渡すのは
+            // すでにあるファイル ── 約束ではない。
             .sheet(item: $zip) { at in
                 ActivityView(item: at)
             }
@@ -439,10 +439,10 @@ extension URL: @retroactive Identifiable {
     public var id: String { absoluteString }
 }
 
-/// The system's own share sheet, for a file that already exists.
+/// OS の共有シート。すでに存在するファイルを渡すため。
 ///
-/// `ShareLink` wants its item when the view is built; a backup is made when
-/// the button is pressed, which is a different moment.
+/// `ShareLink` は View を組み立てる時点で対象を要求するが、バックアップが
+/// できるのはボタンを押した時点で、そこがずれている。
 struct ActivityView: UIViewControllerRepresentable {
     let item: URL
     func makeUIViewController(context: Context) -> UIActivityViewController {

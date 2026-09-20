@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// One piece of a note, ready to draw.
+/// ノートの構成要素 1 つを、描画できる形にしたもの。
 ///
-/// What a heading *is* was decided in `cian_core::note`; what it looks like is
-/// decided here. Splitting it the other way would put a Markdown parser on
-/// the phone, where no test can reach it.
+/// 何が見出し*である*かは `amber_core::note` が決め、どう見えるかはここで決める。
+/// 逆の分け方をすると、テストの届かない iPhone 側に Markdown パーサーを
+/// 置くことになる。
 struct Block: Identifiable {
     let id = UUID()
     let kind: String
@@ -14,17 +14,17 @@ struct Block: Identifiable {
     let lang: String
     let alt: String
     let link: String
-    /// A task, and the line of the note it is written on.
+    /// チェックボックスと、それが書かれているノートの行番号。
     let done: Bool
     let line: Int
-    /// The line cut into coloured and uncoloured pieces — worked out by
-    /// `cian_core::note::spans`, so the window draws the same pieces.
+    /// 行を色付きと色無しの部分に切ったもの ── 計算するのは
+    /// `amber_core::note::spans` なので、デスクトップ版も同じ切り方で描く。
     let runs: [(String, String?)]
-    /// A table: the header, how each column lines up, and the rows.
+    /// 表 ── ヘッダー、列ごとの寄せ方、そして本体の行。
     let head: [String]
     let align: [String]
     let rows: [[String]]
-    /// `> [!NOTE]` — which of GitHub's five, and the paragraphs under it.
+    /// `> [!NOTE]` ── GitHub の 5 種類のどれかと、その下の段落。
     let alert: String
     let body: [String]
 

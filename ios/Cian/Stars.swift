@@ -1,16 +1,16 @@
 import SwiftUI
 
-/// The favourites, with shelves of their own.
+/// お気に入りと、その中のフォルダ。
 ///
-/// **A favourite is a second place a note is, not a move.** The note stays in
-/// the folder it was written in; this is a different way in to the same file.
-/// So the shelves here are not directories, and a note can only stand on one
-/// of them — two answers to "where is this" is the thing this exists to
+/// **お気に入りはノートの 2 つ目の居場所であって、移動ではない。** ノートは
+/// 書かれたフォルダに残り、ここは同じファイルへの別の入口。
+/// だからここのフォルダはディレクトリではないし、ノートが入れるのは 1 つだけ ──
+/// 「これはどこにあるか」の答えが 2 つになるのは、この仕組みが避けるべき
 /// avoid.
 struct Stars: View {
     @ObservedObject var store: NotesStore
     let open: (Note) -> Void
-    /// Which shelf is open, `""` for the top.
+    /// どのフォルダを開いているか。`""` は最上位。
     @State private var at = ""
     @State private var making = false
     @State private var name = ""
@@ -32,9 +32,9 @@ struct Stars: View {
                         Label {
                             Text(s.name)
                         } icon: {
-                            // A star and not a folder: these are not
-                            // directories, and drawing them as directories
-                            // would promise that moving one moves files.
+                            // フォルダではなく星印にする。これらはディレクトリでは
+                            // なく、ディレクトリとして描くと「動かせばファイルも
+                            // 動く」と約束することになる。
                             Image(systemName: "star.square.fill").foregroundStyle(.orange)
                         }
                         Spacer()
@@ -46,9 +46,9 @@ struct Stars: View {
                 .buttonStyle(.plain)
                 .swipeActions {
                     Button("ブックマークグループを消す", role: .destructive) {
-                        // The notes are not touched — only the shelf they
-                        // were standing on. They are still in their folders,
-                        // which is where they always were.
+                        // ノートには触っていない ── 変わるのは入っていた
+                        // お気に入りのフォルダだけ。ノートは元のフォルダに
+                        // あり、それはずっと変わっていない。
                         do { try store.shelf(s.path, drop: true) }
                         catch { store.trouble = error.localizedDescription }
                     }
@@ -58,8 +58,8 @@ struct Stars: View {
                 Button { open(note) } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(note.shown).font(.body.weight(.semibold)).lineLimit(1)
-                        // Where it actually lives, which is the question a
-                        // favourite makes you ask.
+                        // 実際にどこにあるか ── お気に入りがあると
+                        // 訊きたくなる問い。
                         Label(store.bookLabel(note), systemImage: "folder")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
@@ -114,7 +114,7 @@ struct Stars: View {
     }
 }
 
-/// Choosing which shelf a favourite stands on.
+/// お気に入りをどのフォルダに入れるか選ぶ。
 struct Shelving: View {
     @ObservedObject var store: NotesStore
     let note: Note
@@ -129,11 +129,11 @@ struct Shelving: View {
                     row("（トップページ）", "")
                     ForEach(store.stars, id: \.self) { s in row(s, s) }
                 }
-                // **Making a shelf from where you need one.** It was only
-                // possible from inside the favourites screen, which is only
-                // reachable once something is already a favourite — so the
-                // first shelf could not be made at the moment anybody wanted
-                // one, and the list looked like it had no shelves at all.
+                // **必要になった場所でフォルダを作れるようにした。** 以前は
+                // お気に入りの画面からしか作れず、そこへは何かが既に
+                // お気に入りになっていないと辿り着けなかった ── つまり
+                // 最初の 1 つは欲しい瞬間に作れず、一覧はフォルダが
+                // 1 つも無いように見えていた。
                 Section {
                     Button {
                         name = ""
@@ -184,11 +184,11 @@ struct Shelving: View {
     }
 }
 
-/// The colour a folder is.
+/// フォルダの色。
 ///
-/// **Free choice, not a cyan-only palette.** The point of a colour on a
-/// folder is telling folders apart at a glance, and a palette that keeps them
-/// all in one hue defeats that.
+/// **シアン系だけのパレットではなく、自由に選べるようにする。** フォルダに
+/// 色を付けるのは一目で見分けるためで、全部同じ色相のパレットでは
+/// その目的を潰す。
 struct Colouring: View {
     @ObservedObject var store: NotesStore
     let folder: String
@@ -254,10 +254,10 @@ struct Colouring: View {
 extension Colouring {
     /// A dot of one colour, for a menu.
     ///
-    /// **`.alwaysOriginal` or it comes out cyan.** A menu tints its images
-    /// with the accent like any other symbol, so a palette drawn with
-    /// `systemImage:` is eleven identical cyan dots — which is exactly what
-    /// it was, until somebody looked.
+    /// **`.alwaysOriginal` を付けないとシアンになる。** メニューはほかの記号と
+    /// 同じようにアクセント色で画像を染めるので、`systemImage:` で描いた
+    /// パレットは同じシアンの丸が 11 個並ぶ ── 誰かが見るまで、実際に
+    /// そうなっていた。
     static func dot(_ hex: String) -> UIImage {
         let side = 16.0
         let r = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
@@ -270,9 +270,9 @@ extension Colouring {
 }
 
 extension Color {
-    /// `#RRGGBB` as written in the settings file. `nil` for anything else —
-    /// a colour somebody typed by hand into the file should not take the
-    /// list down with it.
+    /// 設定ファイルに書かれたままの `#RRGGBB`。それ以外は `nil` ── 人が手で
+    /// ファイルに書いた色が、一覧ごと落とすことがないように。
+    ///
     init?(hex: String) {
         var s = hex.trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("#") { s.removeFirst() }

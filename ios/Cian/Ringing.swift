@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Setting a note's reminder, and its routine.
+/// ノートの通知と、繰り返しの設定。
 struct Ringing: View {
     let note: Note
     @Binding var text: String
@@ -49,9 +49,9 @@ struct Ringing: View {
                         DatePicker("時刻", selection: $clock, displayedComponents: .hourAndMinute)
                     }
                 } footer: {
-                    // The one sentence that stops this being a lie. iOS will
-                    // not wake an app to write a file, and a routine that
-                    // claimed to would quietly only happen when you looked.
+                    // これを嘘にしないための一文。iOS はファイルを書かせるために
+                    // アプリを起こしてはくれないので、そう名乗る繰り返しは、
+                    // 実際には見に行ったときにだけ黙って起きることになる。
                     Text("繰り返しは、時刻に通知が届きます。その日のノートは、次に ambər を開いたときに作られます（iPhone はアプリを勝手に動かさないため）。")
                 }
             }

@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// Naming a new folder.
+/// 新しいフォルダに名前を付ける。
 ///
-/// A sheet and not an alert-with-a-field. Two reasons, and the second is the
-/// honest one: a sheet has room to say *where* the folder is going, which an
-/// alert's one line does not; and an alert containing a text field could not
-/// be driven by the checks that watch this app work, so shipping one would
-/// mean shipping a screen nobody had seen operate.
+/// アラートに入力欄を付けるのではなくシートにした。理由は 2 つで、正直なのは
+/// 2 つ目 ── シートにはフォルダが*どこに*できるかを書く余白があり、アラートの
+/// 1 行には無い。そして入力欄の入ったアラートは、このアプリの動作を見張る
+/// テストから操作できないので、それを出すのは「誰も動くところを見ていない
+/// 画面」を出すことになる。
 struct Booking: View {
-    /// Where it will go, for the line that says so.
+    /// どこにできるか。それを書く行のため。
     let inside: String
     let make: (String) -> Void
     @Environment(\.dismiss) private var dismiss

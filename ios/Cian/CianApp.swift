@@ -2,13 +2,13 @@ import SwiftUI
 
 @main
 struct CianApp: App {
-    // Before any view exists: a notification pressed from the lock screen
-    // arrives while the app is still starting, and a delegate set later
-    // never hears about it.
+    // View ができる前に設定する ── ロック画面から押された通知は、アプリが
+    // まだ起動している途中に届くので、あとから設定した delegate には
+    // 一度も届かない。
     init() { Ring.listen() }
 
-    /// Light, dark, or whatever the phone is doing. **Three, not two** — a
-    /// switch with only light and dark is a switch you can never put back.
+    /// ライト、ダーク、または端末の設定に従う。**2 つではなく 3 つ** ──
+    /// ライトとダークだけのスイッチは、二度と元に戻せないスイッチになる。
     @AppStorage("cian.look") private var look = Look.auto
     /// 文字の大きさ。**デスクトップ版と同じものをiPhone にも**（デスクトップ版は ⌘+ / ⌘−）── 本人が
     /// 「文字が全般的に小さくない？」（2026-09-08）。
@@ -26,9 +26,9 @@ struct CianApp: App {
                 // している人の設定を、こちらが上書きしない ── 上書きすると
                 // 「iPhone を大きくしたのに amber だけ小さい」になる。
                 .modifier(Sized(size: font))
-                // Cyan, because that is what the app is called and what its
-                // icon is. One accent through the whole app rather than a
-                // colour per screen: the tint is how you tell what can be
+                // シアン。アプリの名前もアイコンもそれだから。画面ごとに
+                // 色を変えず、アプリ全体で 1 色にする ── 色は「触れるもの」を
+                // 見分ける手がかりで、画面ごとに答えが違えば
                 // touched, and a different answer on every screen is no
                 // answer.
                 // 配色を選んでも tint はシアンのまま（依頼 75・色は一つ、置き場所も一つ）。
@@ -96,7 +96,7 @@ struct Sized: ViewModifier {
     }
 }
 
-/// What the app looks like, and where that is remembered.
+/// アプリの見た目と、それをどこに記録しているか。
 enum Look: String, CaseIterable, Identifiable {
     case auto, light, dark
     var id: String { rawValue }

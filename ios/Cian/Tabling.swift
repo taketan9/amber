@@ -1,17 +1,17 @@
 import SwiftUI
 
-/// Making a table without typing pipes.
+/// パイプを打たずに表を作る。
 ///
-/// **A 2×2 skeleton was the wrong answer.** A table you have to type into is
-/// a table you have to keep counting `|` for, and the row that decides the
-/// alignment (`:---`, `:---:`, `---:`) is the one nobody remembers the shape
-/// of. So the shape is chosen here — how many columns, what they are called,
-/// which way each one lines up — and the pipes are cian's problem.
+/// **2×2 の空の表を挿入するのは答えではなかった。** 打ち込んでいく表は、
+/// `|` を数え続ける表になるし、寄せ方を決める行（`:---` `:---:` `---:`）は
+/// 誰も形を覚えていない。だから形はここで選ばせる ── 列はいくつか、
+/// 何という名前か、どちら寄せか ── そしてパイプは amber の仕事にする。
 ///
-/// What it makes is ordinary Markdown. Nothing here is a cian table; it is a
-/// table any other tool reads, made without the counting.
+///
+/// できるのは普通の Markdown。amber 独自の表ではなく、ほかのどのツールでも
+/// 読める表を、数えずに作れるようにしただけ。
 struct Tabling: View {
-    /// Hands back the finished Markdown to drop in.
+    /// 出来上がった Markdown を、挿入用に返す。
     let put: (String) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -56,9 +56,9 @@ struct Tabling: View {
                             .labelsHidden()
                         }
                     }
-                    // The same pair of words and the same shape as the rows
-                    // below: two controls that do the same thing to two
-                    // different numbers should not look like two different
+                    // 下の行と同じ言葉づかい・同じ形にする ── 2 つの数に
+                    // 同じことをする 2 つのコントロールが、別々のものに
+                    // 見えてはいけない。
                     // ideas.
                     more(add: { heads.append(""); ways.append(.left) },
                          drop: { heads.removeLast(); ways.removeLast() },
@@ -76,9 +76,9 @@ struct Tabling: View {
                 }
 
                 Section("できるもの") {
-                    // Shown as the text it will be, not as a drawn table: the
-                    // note is the text, and what goes in has to be what you
-                    // are agreeing to.
+                    // 描画した表ではなく、実際に入る文字列として見せる ──
+                    // ノートとは文字列であり、入るものは同意したものと
+                    // 同じでなければならない。
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(markdown)
                             .font(.caption.monospaced())
@@ -121,9 +121,9 @@ struct Tabling: View {
 
     /// The table, as Markdown.
     ///
-    /// An ideographic space in the empty cells rather than nothing: a row of
-    /// `|  |  |` collapses to something a renderer may drop, and an empty
-    /// table that vanishes looks like a table that failed to be made.
+    /// 空のセルには全角空白を入れる。何も入れないと `|  |  |` の行は
+    /// レンダラが落としうる形に潰れ、消えた表は「作り損ねた表」に
+    /// 見える。
     private var markdown: String {
         let cells = heads.map { $0.isEmpty ? "\u{3000}" : $0 }
         var out = "| " + cells.joined(separator: " | ") + " |\n"

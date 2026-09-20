@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// Making a note: its title, then its tags, then it exists.
+/// ノートを作る ── タイトル、次にタグ、そこで初めて存在する。
 ///
-/// Two steps and not one. Typing a title used to make the note the moment the
-/// keyboard's return was pressed, which put the note into the world before
-/// anybody had said what it was about — and tagging it afterwards meant going
-/// back into a note you had only just left.
+/// 1 段ではなく 2 段。以前はタイトルを打ってキーボードの return を押した瞬間に
+/// ノートができていて、何についてのノートかを言う前に世に出てしまっていた ──
+/// そしてあとからタグを付けるには、たったいま離れたノートへ戻ることになる。
 ///
-/// A sheet rather than an alert, because an alert with a text field in it can
-/// hold one question and this is two.
+///
+/// アラートではなくシートにしたのは、入力欄付きのアラートが持てる問いは 1 つ
+/// で、ここでは 2 つだから。
 struct Making: View {
     /// Called with the title and the tags when 作成 is pressed.
     let make: (String, [String]) -> Void
@@ -32,8 +32,8 @@ struct Making: View {
                 Section("タイトル") {
                     TextField("例: 買い物メモ", text: $title)
                         .focused($naming)
-                        // Return moves on to the tags rather than making the
-                        // note: the note is made by the button that says so.
+                        // return はノートを作らず、タグへ進む ──
+                        // ノートを作るのは、そう書いてあるボタン。
                         .submitLabel(.next)
                         .onSubmit { naming = false }
                     Text("空のままでもかまいません。そのときは、本文の1行目がタイトルになります")
