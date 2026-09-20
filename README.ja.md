@@ -14,7 +14,7 @@
 **ビギナーが軽く使って、思ったよりすごいことができる。** スマートフォンで
 言えば iPhone の位置を狙う（Taketan・2026-09-08）。
 
-- **一生に一度使うかどうかの機能は、作らない。** 献立に一行増えるたび、
+- **一生に一度使うかどうかの機能は、作らない。** メニューに一行増えるたび、
   毎日押すものが一行ぶん下がる。「あると便利」は、たいてい「無くても困らない」
 - そのぶん **見た目と動かし方に振り切る。** 押し心地・caret の行き先・
   記号の見せ方・言葉づかい ── ここに時間を使う
@@ -34,7 +34,7 @@ gui\run.bat         # Windows
 ```
 
 どちらも同じことをする ── エンジン（`amber-server`）を建て、初回だけ
-`npm install` と `node vendor.js` を通し、窓を開く。要るのは **rustup と
+`npm install` と `node vendor.js` を通し、アプリを起動する。要るのは **rustup と
 Node.js** の二つだけ。
 
 **`gui/vendor/` は git に入れていない。** Monaco も vim も図もそこに置く
@@ -43,18 +43,18 @@ Node.js** の二つだけ。
 
 ## いまあるもの
 
-- **窓版**（Electron）── 三列（行き先・ノート・中身）、読む面で直に書ける、
+- **デスクトップ版**（Electron）── 3 列（行き先・ノート・中身）、表示画面のまま直接書ける、
   Markdown の道具、vim、目次、図（mermaid）、テーマ、書き出し
 - **iPhone アプリ**（SwiftUI）── 一覧・編集・タグ・お気に入り・フォルダの色・
   画像の貼り付け・通知つきの繰り返し・バックアップと復元
 - **`amber-core`**（Rust）── 判断ぜんぶ。**I/O と UI に依存しない。**
   題をどう決めるか、チェックをどう切り替えるか、AND/OR をどう解くか
-- **`amber-ffi`** ── 扉は一つ。JSON を渡して JSON が返る（`amber_call` /
+- **`amber-ffi`** ── 入口は 1 つ。JSON を渡して JSON が返る（`amber_call` /
   `amber_free`）
 
 ## いま詰めているところ
 
-**「表示」の面のまま書ける**、が ambər の芯（Inkdrop は編集面と preview 面が
+**「表示」画面のまま書ける**、が ambər の芯（Inkdrop は編集画面と preview 画面が
 別で、書くのは記号の側だけ）。だからここは違和感なく・バグなく・美しく
 なければいけない ── そして**いちばん壊れやすい**。やることは
 [PAPER.ja.md](PAPER.ja.md) に置いてある。
@@ -71,21 +71,21 @@ Node.js** の二つだけ。
 ```
 cargo test --workspace          # 判断のテスト
 node scripts/diagram-test.js    # 図が、直しても失われないか
-node scripts/paper-test.js      # 「表示」の面が、打っても字を失わないか
-node scripts/round-test.js      # 字 → 面 → 字 が、元に戻るか（総当たり）
-node scripts/key-test.js        # 「表示」の面で鍵を押したら、字がどうなるか
-node scripts/win-test.js        # Windows の道と鍵盤（mac では一生出ない不具合）
+node scripts/paper-test.js      # 「表示」画面が、入力しても文字を失わないか
+node scripts/round-test.js      # テキスト → 画面 → テキスト が、元に戻るか（総当たり）
+node scripts/key-test.js        # 「表示」画面でキーを押したら、テキストがどうなるか
+node scripts/win-test.js        # Windows のパスとキーボード（mac では一生出ない不具合）
 node scripts/contract.js        # 同梱する側（crmaine）との約束が生きているか
 node gui/vendor.js              # Monaco・vim・mermaid を落とす（git に入れていない）
 ./scripts/ios-build.sh          # iPhone 向け（3ターゲット、記号まで見る）
-python3 packaging/amber_icon.py # アイコンを焼く
+python3 packaging/amber_icon.py # アイコンを生成する
 python3 scripts/requests.py     # 頼まれたことが守られているか
-python3 scripts/shipped.py      # 窓に配られていないものが溜まっていないか
+python3 scripts/shipped.py      # デスクトップ版に配られていないものが溜まっていないか
 ```
 
-**iPhone も `gui/vendor/` を見る。** 図は電話でも mermaid が描くので、
+**iPhone も `gui/vendor/` を見る。** 図は iPhone でも mermaid が描くので、
 `node gui/vendor.js` を通していない木から建てると**図の出ないアプリ**が
-できる（落ちるのではなく、ノートは字のまま出る）。Xcode の「図の道具」
+できる（落ちるのではなく、ノートはテキストのまま出る）。Xcode の「図のツール」
 フェーズがそこを警告で言う。
 
 **rustup は keg-only で PATH に居ない**（`/usr/local/opt/rustup/bin`）。

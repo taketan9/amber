@@ -5,10 +5,10 @@
 
 > **v0.1 から3か所変わりました**（2026-09-14）。Power Automate のクラウド版は
 > 使えないと分かったためです ―― 他人の予定表は `/me/` の口からは読めず、
-> Graph を直に叩く口はプレミアムでした。**実際に動いた道は Excel の VBA**
+> Graph を直に叩く API はプレミアムでした。**実際に動いた方法は Excel の VBA**
 > （物理端末で 97 個の予定表・1,514 件を読めています）。
 >
-> 1. **`cancelled` 列を削除**（元の応答に取消の印が無い）
+> 1. **`cancelled` 列を削除**（元の応答に取消のフラグが無い）
 > 2. **`organizer` は表示名**（アドレスではない。COM が名前を返すため）
 > 3. `start` / `end` は**最初からローカル時刻**（COM は JST で返すので変換なし）
 >
@@ -104,7 +104,7 @@
 
 ---
 
-## 見本
+## サンプル
 
 ```csv
 fetched_at,owner,owner_mail,start,end,all_day,subject,location,show_as,sensitivity,organizer,uid

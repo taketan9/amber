@@ -1,6 +1,7 @@
-//! 見本を開いて Markdown を出す（目で見る用）: `cargo run -p amber-onenote --example peek -- <道>`
+//! サンプルを読み込んで Markdown を出力する（目視確認用）:
+//! `cargo run -p amber-onenote --example peek -- <パス>`
 fn main() -> anyhow::Result<()> {
-    let p = std::env::args().nth(1).expect("道を渡してください");
+    let p = std::env::args().nth(1).expect("パスを渡してください");
     let got = amber_onenote::open(std::path::Path::new(&p))?;
     println!("book={:?}", got.book);
     for u in &got.units {

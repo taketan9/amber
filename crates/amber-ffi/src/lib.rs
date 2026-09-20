@@ -1,37 +1,30 @@
-//! cian's notes, for a machine that cannot run the engine.
+//! iPhone からノートの機能を呼ぶための入口。
 //!
-//! The window talks to `cian-server` over a pipe: a method name, a JSON
-//! object, a JSON answer. **A phone gets the same conversation through a C
-//! ABI** — [`amber_call`] takes those two strings and returns that answer.
+//! デスクトップ版は `amber-server` をパイプ越しに呼ぶ。操作名と JSON を渡すと
+//! JSON が返る。iPhone も同じやり取りで、経路が C の ABI になるだけ。
 //!
-//! One symbol rather than one per operation, deliberately. Every function a
-//! C ABI exports has to be declared again in a bridging header, matched by
-//! hand, and kept in step; a second method would otherwise be a change in
-//! three places, and the third is in Xcode where nothing here can check it.
-//! With one door, adding an operation is a match arm and no header edit.
+//! 公開する関数は 1 つだけにしてある。C の ABI で公開すると、ブリッジング
+//! ヘッダーにも同じ宣言が要り、手で突き合わせて保守することになる。関数を
+//! 増やせば操作 1 つの追加が 3 か所の修正になり、3 か所目は Xcode の中で、
+//! ここからは確認できない。入口が 1 つなら match の分岐を足すだけで済む。
 //!
-//! **The judgement is not here.** What a title is, what an excerpt leaves
-//! out, what a note is called when it is made — all of that is
-//! `amber_core::note`, which the window uses too. This crate is the doorway:
-//! strings in, strings out, and nothing decided on the way past. That is the
-//! whole reason the notes half of cian was written in the core rather than in
-//! the renderer.
+//! 判断はここにはない。タイトルの決め方も抜粋の切り方も `amber_core::note`
+//! にあり、デスクトップ版も同じコードを使う。この crate は文字列を受け渡す
+//! だけ。
 
 use std::ffi::{c_char, CStr, CString};
 
-/// Answer a request. Both arguments are UTF-8 C strings; the answer is a
-/// JSON object the caller must hand back to [`amber_free`].
+/// リクエストに答える。引数はどちらも UTF-8 の C 文字列で、返り値は JSON。
+/// 呼び出し側が [`amber_free`] で解放する。
 ///
 /// # Safety
 ///
-/// `method` and `params` must be valid NUL-terminated strings, or null.
-/// The returned pointer is owned by the caller and is freed only by
-/// [`amber_free`]; it is never null.
+/// `method` と `params` は NUL 終端の文字列か null。返したポインタの所有権は
+/// 呼び出し側に移り、解放できるのは [`amber_free`] だけ。null は返さない。
 #[no_mangle]
 pub unsafe extern "C" fn amber_call(method: *const c_char, params: *const c_char) -> *mut c_char {
-    // A panic that unwinds across a C ABI is undefined behaviour, and the
-    // caller here is an app that must not simply vanish. Anything that goes
-    // wrong comes back as an error the phone can show.
+    // C の ABI を越えて panic が巻き戻るのは未定義動作で、呼び出し元は黙って
+    // 終了してはいけないアプリ。異常は iPhone 側が表示できるエラーにして返す。
     let answer = std::panic::catch_unwind(|| {
         let method = unsafe { cstr(method) };
         let params = unsafe { cstr(params) };
@@ -52,12 +45,12 @@ pub unsafe extern "C" fn amber_call(method: *const c_char, params: *const c_char
     into_c(answer)
 }
 
-/// Give back a string [`amber_call`] returned.
+/// [`amber_call`] が返した文字列を解放する。
 ///
 /// # Safety
 ///
-/// `p` must be a pointer this library returned and has not already been
-/// given back. Null is accepted and does nothing.
+/// `p` はこのライブラリが返した、まだ解放していないポインタ。null を渡しても
+/// よく、その場合は何もしない（呼び出し側のエラー処理がそこを通る）。
 #[no_mangle]
 pub unsafe extern "C" fn amber_free(p: *mut c_char) {
     if !p.is_null() {
@@ -74,9 +67,8 @@ unsafe fn cstr(p: *const c_char) -> String {
 
 fn into_c(v: serde_json::Value) -> *mut c_char {
     let text = v.to_string();
-    // A NUL inside would truncate the answer at the C boundary. It cannot
-    // happen — `serde_json` escapes it — but the fallback says so rather than
-    // handing back a silently shortened object.
+    // 文字列の途中に NUL があると C の境界で答えが切れる。`serde_json` が
+    // エスケープするので起こらないが、起きたときに黙って短い JSON を返さない。
     CString::new(text)
         .unwrap_or_else(|_| CString::new(r#"{"error":"答えに NUL が入りました"}"#).unwrap())
         .into_raw()
@@ -86,17 +78,17 @@ fn err(why: String) -> serde_json::Value {
     serde_json::json!({ "error": why })
 }
 
-// 扉そのものを試す。**中身の判断は `amber_core::api` のテストが見ている** ──
-// ここで見るのは「C の境界を越えても壊れないか」だけ。
+// 入口そのものの試験。中身の判断は `amber_core::api` の試験が見ている。
+// ここで確認するのは、C の境界を越えても壊れないかだけ。
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn a_bad_request_is_an_answer_and_not_a_crash() {
+    fn おかしなリクエストは_クラッシュではなく答えで返る() {
         assert!(amber_core::api::call("いない", &serde_json::json!({})).is_err());
-        // Through the real door, an error is JSON like anything else — an app
-        // that got a null here would have no way to say what went wrong.
+        // 本物の入口を通ればエラーも普通の JSON。ここで null を受け取った
+        // アプリには、何が起きたのか伝える手段がない。
         let m = CString::new("いない").unwrap();
         let p = CString::new("{}").unwrap();
         let out = unsafe { amber_call(m.as_ptr(), p.as_ptr()) };
@@ -108,9 +100,8 @@ mod tests {
     }
 
     #[test]
-    fn null_and_nonsense_do_not_take_the_app_down_with_them() {
-        // Swift can hand over a null pointer, and it must not be the last
-        // thing the app ever does.
+    fn null_や壊れた_json_でアプリを道連れにしない() {
+        // Swift は null ポインタを渡しうる。それがアプリの最期になってはいけない。
         let out = unsafe { amber_call(std::ptr::null(), std::ptr::null()) };
         assert!(!out.is_null());
         unsafe { amber_free(out) };
@@ -122,7 +113,7 @@ mod tests {
         unsafe { amber_free(out) };
         assert!(text.contains("JSON ではありません"), "{text}");
 
-        // Freeing null is allowed, because the caller's error path will.
+        // null の解放を許すのは、呼び出し側のエラー処理がそうするため。
         unsafe { amber_free(std::ptr::null_mut()) };
     }
 }

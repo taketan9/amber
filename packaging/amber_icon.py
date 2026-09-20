@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""amber のアイコン（案2「琥珀の中の Markdown」）を焼く。
+"""amber のアイコン（案2「琥珀の中の Markdown」）を生成する。
 
-    python3 packaging/amber_icon.py                 # 原本 → すべての大きさ
-    python3 packaging/amber_icon.py --lift 見本.jpg  # 見本の紙から原本を起こす
+    python3 packaging/amber_icon.py                 # 原本 → すべてのサイズ
+    python3 packaging/amber_icon.py --lift 元絵.jpg  # 元絵の画像から原本を起こす
 
 **この絵は描けない。** 琥珀は透けていて、中に気泡があり、縁には光が回っている。
 `amber.py` の走査線は角丸と丸端の線しか塗れないので、案 S4 の葉のようには
@@ -13,13 +13,13 @@
   * `amber-master.png`        RGBA。角丸のまま、外は透明。
   * `amber-master-square.png` RGB。角まで埋めた真四角。iOS 用の下地。
 
-見本の絵は **790x886 と、正方形ではなかった**（描き手が少し縦長に置いた）。
+元絵は **790x886 と、正方形ではなかった**（描き手が少し縦長に置いた）。
 アプリのアイコンは正方形でなければ iOS と macOS の型に角を削られるので、
 `--lift` で**縦を詰めて正方形にする**。伸ばさず詰めるのは、伸ばすと無い画素を
 作ることになるから。角丸は 12% ぶんだけ縦につぶれるが、その差は 180 の半径に
 対して見えない。
 
-外部ライブラリは使わない ── `amber.py` と同じ理由で、この機械には PIL も
+外部ライブラリは使わない ── `amber.py` と同じ理由で、この環境には PIL も
 ImageMagick も rsvg も無い。使うのは `sips`（JPEG を PNG に直すときだけ）と
 `iconutil`（icns を綴じるときだけ）で、どちらも macOS に元から居る。
 """
@@ -40,7 +40,7 @@ MASTER_SQ = OUT / 'amber-master-square.png'
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 ICNS_SIZES = [16, 32, 64, 128, 256, 512, 1024]
 
-# macOS だけ、絵を canvas いっぱいに置かない。Apple の升目では 1024 のうち
+# macOS だけ、画像を canvas いっぱいに置かない。Apple のガイドラインでは 1024 のうち
 # 角丸の四角は 824 で、まわりの 100 は余白（と影）のために空いている。
 # **いっぱいに置くと Dock で隣より一回り大きく見える。**
 MAC_BODY = 824
@@ -140,7 +140,7 @@ def png_write(path, w, h, rgba, alpha=True):
 # 色が縁ににじむ ── 立方体の外は真っ白なので、白いふちになって出る。
 
 def _mitchell(t):
-    """縮めるとき。B=C=1/3。輪を作らないので小さい札で崩れない。"""
+    """縮小時の補間。B=C=1/3。リンギングが出ないので小さいサイズでも崩れない。"""
     t = abs(t)
     b = c = 1.0 / 3.0
     if t < 1:
@@ -260,13 +260,13 @@ def ico(pngs):
     return head + dirs + body
 
 
-# ── 見本の紙から原本を起こす（--lift） ────────────────────────────────
+# ── 元絵の画像から原本を起こす（--lift） ──────────────────────────────
 
 def lift(sheet, pick=None):
-    """見本の紙から琥珀の四角を切り出し、外を透かして原本にする。
+    """元絵から琥珀の四角を切り出し、外を透明にして原本にする。
 
-    紙には案が二つ並んでいる。**濃い橙が続く列の帯**を数えて塊に分け、
-    面積の一番大きいものを採る（`--pick` で左から数えて選び直せる）。
+    元絵には案が 2 つ並んでいる。**濃い橙が続く列の帯**を数えて領域に分け、
+    面積のいちばん大きいものを採る（`--pick` で左から数えて選び直せる）。
 
     縁は一画素で立ち上がる。横に走査すると左右はきれいに出るが、上下の縁は
     寝ているので出ない ── だから**縦にも走査して、二つの小さいほうを採る**。
@@ -284,7 +284,7 @@ def lift(sheet, pick=None):
     w, h, px = png_read(src)
     if tmp:
         tmp.unlink()          # 5MB の途中の絵を置いていかない
-    print(f'見本: {w}x{h}')
+    print(f'元絵: {w}x{h}')
 
     def amber(x, y):
         """彩度。**橙み（赤-青）では下の縁が切れない。**
@@ -319,7 +319,7 @@ def lift(sheet, pick=None):
     if cur is not None:
         runs.append(cur)
     if not runs:
-        raise SystemExit('琥珀の塊が見つかりません。')
+        raise SystemExit('琥珀の領域が見つかりません。')
 
     boxes = []
     for x0, x1 in runs:
@@ -392,7 +392,7 @@ def lift(sheet, pick=None):
         t = math.sqrt(R * R - d * d)
         return R - t, bw - R + t
 
-    # ── 型を焼く。縦に 4 枚重ね、横は区間のまま画素に配る（階調が閉じた式で出る）
+    # ── マスクを作る。縦に 4 枚重ね、横は区間のまま画素に配る（階調が閉じた式で出る）
     SS = 4
     cover = [[0.0] * bw for _ in range(bh)]
     for py in range(bh):
@@ -480,12 +480,12 @@ def lift(sheet, pick=None):
     print(f'{MASTER_SQ.relative_to(ROOT)}  {n}x{n} RGB（角まで埋めた）')
 
 
-# ── 焼く ──────────────────────────────────────────────────────────────
+# ── 生成する ──────────────────────────────────────────────────────────
 
 def bake():
     if not MASTER.exists():
         raise SystemExit(f'原本がありません: {MASTER}\n'
-                         '  python3 packaging/amber_icon.py --lift 見本.jpg')
+                         '  python3 packaging/amber_icon.py --lift 元絵.jpg')
     w, h, art = png_read(MASTER)
     print(f'原本 {w}x{h}')
 
@@ -501,21 +501,21 @@ def bake():
     print(f'\namber.ico  {len(blob)} B  （{len(made)} 枚）')
 
     png_write(OUT / 'amber.png', 256, 256, resize(w, h, art, 256, 256))
-    print(f'amber.png  256px（窓と Linux 用）')
+    print(f'amber.png  256px（デスクトップ版と Linux 用）')
 
-    # アプリの**中**の印。窓の左上（26）、空のときの札（54）、iPhone の
-    # 見出し（38pt）で使う。
+    # アプリ**内**で使うマーク。デスクトップ版の左上（26）、空のときの表示（54）、
+    # iPhone の見出し（38pt）で使う。
     #
-    # **描き直さない。** 前は葉を三か所に写して描いていて、四か所が同じ形か
-    # 見張る仕掛けまで要った ── それでもアイコンを替えた日に、中の印だけが
-    # 前の絵のまま残った。同じ絵を渡せば、ずれようがない。
+    # **描き直さない。** 以前は葉を 3 か所に複製して描いていて、4 か所が同じ形か
+    # 見張る仕組みまで必要だった ── それでもアイコンを差し替えたときに、アプリ内の
+    # マークだけが前の絵のまま残った。同じ画像を渡せば、ずれようがない。
     #
-    # 128 なのは、いちばん大きい使い方（54）の 2倍と iPhone の 38pt の 3倍
-    # （114）を両方覆う一枚だから。倍寸を別々に焼くほどの数ではない。
+    # 128 にしているのは、いちばん大きい用途（54）の 2 倍と iPhone の 38pt の 3 倍
+    # （114）を両方カバーできるため。倍率ごとに別々に出力するほどの数ではない。
     png_write(OUT / 'amber-mark.png', 128, 128, resize(w, h, art, 128, 128))
-    print(f'amber-mark.png  128px（アプリの中の印）')
+    print(f'amber-mark.png  128px（アプリ内のマーク）')
 
-    # macOS。**余白を空ける** ── Apple の升目に合わせないと Dock で浮く。
+    # macOS。**余白を空ける** ── Apple のガイドラインに合わせないと Dock で浮く。
     iconset = OUT / 'amber.iconset'
     iconset.mkdir(exist_ok=True)
     body = resize(w, h, art, MAC_BODY, MAC_BODY)
@@ -540,7 +540,7 @@ def bake():
     for f in iconset.iterdir():
         f.unlink()
     iconset.rmdir()
-    print(f'amber.icns  {(OUT / "amber.icns").stat().st_size} B  （Apple の升目、本体 {MAC_BODY}/1024）')
+    print(f'amber.icns  {(OUT / "amber.icns").stat().st_size} B  （Apple のガイドライン、本体 {MAC_BODY}/1024）')
 
     # iOS。角丸もアルファも付けない ── 付けると角が二重に丸まり、審査で弾かれる
     if not MASTER_SQ.exists():
@@ -563,7 +563,7 @@ if __name__ == '__main__':
         args.remove('--lift-only')
     if args and args[0] == '--lift':
         if len(args) < 2:
-            raise SystemExit('使い方: --lift 見本の画像 [--pick 番号] [--lift-only]')
+            raise SystemExit('使い方: --lift 元絵の画像 [--pick 番号] [--lift-only]')
         lift(args[1], pick)
     if not only:
         bake()

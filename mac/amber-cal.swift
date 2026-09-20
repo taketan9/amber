@@ -1,4 +1,4 @@
-// **この Mac の予定表**（依頼 462）。窓（Electron）から呼ばれる小さな道具。
+// この Mac の予定表（依頼 462）。デスクトップ版（Electron）から呼ばれる小さなツール。
 //
 //     amber-cal ask                     許可を訊く
 //     amber-cal month 2026 9            ひと月ぶん（JSON）
@@ -9,13 +9,13 @@
 //     amber-cal notes <id> <メモ>       メモ欄を書き換える（タグの置き場所）
 //
 // **なぜ別の実行ファイルなのか。** Electron から EventKit は呼べない。
-// AppleScript で「カレンダー」アプリに話しかける道もあるが、あちらは
+// AppleScript で「カレンダー」アプリを操作する方法もあるが、あちらは
 // アプリを起こす必要があり、月ぶんを読むのに何秒もかかる。
-// **電話と同じ EventKit** を使えば、窓と電話で同じ答えになる ── 二つの
+// iPhone と同じ EventKit を使えば、デスクトップ版と iPhone で同じ答えになる。2 つの
 // amber から見て、違う予定が出るのがいちばん困る。
 //
 // 答えは JSON を一行。**判断はここに置かない** ── 何を並べるか・何を
-// 混ぜるかは窓の側（と core）の仕事で、ここは OS への口だけ。
+// 混ぜるかはデスクトップ版（と core）の仕事で、ここは OS への窓口だけ。
 
 import EventKit
 import Foundation
@@ -85,7 +85,7 @@ case "month":
     for e in store.events(matching: store.predicateForEvents(withStart: from, end: to, calendars: nil)) {
         guard let start = e.startDate else { continue }
         // **終日で何日かにまたがるものは、その日ぶんぜんぶに置く** ──
-        // 出張や休みは、始まった日にだけ出ても役に立たない（電話と同じ）。
+        // 出張や休みは、開始日にだけ出ても役に立たない（iPhone と同じ）。
         if e.isAllDay {
             var d = cal.startOfDay(for: start)
             let last = e.endDate ?? start
@@ -108,7 +108,7 @@ case "add":
     need()
     guard args.count >= 3 else { no("題と日が要ります") }
     // **どの予定表に書くか**（依頼 544）── 名前で指す。グループカレンダーは
-    // 端末に降りてきた一枚なので、名前でしか指せない（Google 側の id は、
+    // 端末に同期されたデータなので、名前でしか指定できない（Google 側の id は、
     // 端末に降りた時点で別の世界のものになっている）。
     // 言われなければ、いままでどおり既定の予定表へ。
     let wantCal: String? = args.count >= 7 && !args[6].isEmpty ? args[6] : nil
@@ -158,7 +158,7 @@ case "rename":
     do { try store.save(e, span: .thisEvent) } catch { no(error.localizedDescription) }
     out(["ok": true])
 
-// **メモ欄を丸ごと入れ替える。** タグの行だけを差し替えた字は、呼ぶ側が
+// メモ欄を丸ごと入れ替える。タグの行だけを差し替えた文字列は、呼び出し側が
 // core（`caltag::set`）に作らせて持ってくる ── ここは OS への口だけで、
 // 「どこを書き換えるか」の判断は持たない。
 case "notes":
@@ -194,7 +194,7 @@ func one(_ e: EKEvent, _ day: String, _ at: String?, _ to: String?) -> [String: 
         "from": e.calendar?.title ?? "",
         // **メモ欄をそのまま渡す。** 誰の用事かのタグはこの中の最後の行に
         // 置いてあるが、**それを読む判断は core（`caltag`）の仕事** ──
-        // ここで切り出すと、窓と電話で二つの読み方ができる。
+        // ここで切り出すと、デスクトップ版と iPhone で解釈が 2 通りになる。
         "notes": e.notes ?? "",
     ]
 }

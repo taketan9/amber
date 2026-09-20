@@ -1,4 +1,4 @@
-//! 目次つきのフォルダを `.onepkg`（CAB）に包む（窓で試す用）:
+//! 目次つきのフォルダを `.onepkg`（CAB）にまとめる（デスクトップで試す用）:
 //! `cargo run -p amber-onenote --example pack -- <フォルダ> <出力.onepkg>`
 fn main() {
     let mut a = std::env::args().skip(1);

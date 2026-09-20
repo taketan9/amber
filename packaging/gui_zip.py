@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""同梱する側へ渡す一枚（`amber-gui.zip`）を組む。
+"""同梱する側へ渡す zip（`amber-gui.zip`）を作る。
 
     python3 packaging/gui_zip.py out/amber-gui.zip
 
@@ -7,20 +7,20 @@
 
   * `gui/**` ── 画面そのもの（`node_modules` は入れない。あそこには
     Electron 本体が居て、同梱する側は自分の Electron の中で動かす）
-  * `packaging/amber-mark.png` ── 画面は印を `../packaging/amber-mark.png`
-    と指している。`gui/` だけでは印の出ない画面になる
-  * `packaging/welcome/**` ── 「見本のノートを入れる」が写す元。
-    入れておかないと、同梱した側で押した人に「見本が入っていません」が出る
+  * `packaging/amber-mark.png` ── 画面はアイコンを `../packaging/amber-mark.png`
+    と指している。`gui/` だけではアイコンの出ない画面になる
+  * `packaging/welcome/**` ── 「サンプルノートを入れる」のコピー元。
+    入れておかないと、同梱した側でそれを実行した人に「サンプルが入っていません」が出る
 
-**`zip` ではなく Python で組む。** 見本のノートの名前は日本語で、一枚は
-`ambər へようこそ.md`（シュワ入り）── Info-ZIP の `zip` は既定で
-**UTF-8 の印（EFS ビット）を立てない**ので、日本語 Windows で展開すると
-名前が化ける。`zip -UN=UTF8` で立つが、**Apple が入れ替えた zip はその
-札を知らない**（`short option 'N' not supported`）ので、手元で試せない
+**`zip` コマンドではなく Python で作る。** サンプルノートの名前は日本語で、
+1 つは `ambər へようこそ.md`（シュワー入り）── Info-ZIP の `zip` は既定で
+**UTF-8 フラグ（EFS ビット）を立てない**ので、日本語 Windows で展開すると
+名前が化ける。`zip -UN=UTF8` で立つが、**Apple が同梱している zip はその
+オプションを知らない**（`short option 'N' not supported`）ので、手元で試せない
 ものを CI にだけ書くことになる。Python の `zipfile` は非 ASCII の名前に
-必ず印を立てるし、両方で同じものが出る。
+必ずフラグを立てるし、手元でも CI でも同じものが出る。
 
-組んだあと、**自分で開いて数える** ── 入れたつもりで空、を配らないため。
+作ったあと、**自分で開いて数える** ── 入れたつもりで空、を配らないため。
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def rows() -> list[tuple[Path, str]]:
-    """(実物, zip の中の道)。"""
+    """(実ファイル, zip の中でのパス)。"""
     out: list[tuple[Path, str]] = []
     for at in sorted((ROOT / "gui").rglob("*")):
         if not at.is_file():
@@ -72,7 +72,7 @@ def folder(name: str) -> zipfile.ZipInfo:
 
 
 def check(at: Path) -> None:
-    """組んだ一枚を開いて、要るものが本当に入っているか。"""
+    """作った zip を開いて、必要なものが本当に入っているか。"""
     with zipfile.ZipFile(at) as z:
         names = z.namelist()
         info = z.infolist()
@@ -86,21 +86,21 @@ def check(at: Path) -> None:
     want(lambda x: x == "gui/index.html", "画面")
     want(lambda x: x == "gui/vendor/monaco/vs/loader.js", "エディタ")
     want(lambda x: x == "gui/vendor/mermaid/mermaid.min.js", "図")
-    want(lambda x: x == "packaging/amber-mark.png", "印")
-    seen = want(lambda x: x.startswith("packaging/welcome/") and x.endswith(".md"), "見本のノート")
+    want(lambda x: x == "packaging/amber-mark.png", "アイコン")
+    seen = want(lambda x: x.startswith("packaging/welcome/") and x.endswith(".md"), "サンプルノート")
 
     if any(x.startswith("gui/node_modules/") for x in names):
         sys.exit("NG: node_modules が混ざっています（200MB 超）")
 
-    # **名前が化けない札が立っているか。** ここが立っていないと、
-    # 日本語 Windows で展開したときに見本の名前だけが読めなくなる。
+    # **名前が化けないフラグが立っているか。** ここが立っていないと、
+    # 日本語 Windows で展開したときにサンプルの名前だけが読めなくなる。
     flat = [i.filename for i in info
             if not i.filename.isascii() and not (i.flag_bits & 0x800)]
     if flat:
-        sys.exit("NG: UTF-8 の印が立っていない名前があります: " + ", ".join(flat[:3]))
+        sys.exit("NG: UTF-8 フラグが立っていない名前があります: " + ", ".join(flat[:3]))
 
     # **フォルダの項目に、フォルダだと書いてあるか。** 一度これを落とし、
-    # Unix で「中身の無いフォルダ」に見える一枚を三つの版ぶん配った。
+    # Unix で「中身の無いフォルダ」に見える zip を 3 バージョンぶん配った。
     for i in info:
         if not i.filename.endswith("/"):
             continue
@@ -111,7 +111,7 @@ def check(at: Path) -> None:
             sys.exit(f"NG: {i.filename} に実行ビットがありません（Unix で中に入れません）")
 
     kb = at.stat().st_size // 1024
-    print(f"できました: {at} ({kb} KB ・ {len(names)} 件 ・ 見本 {seen} 枚)")
+    print(f"できました: {at} ({kb} KB ・ {len(names)} 件 ・ サンプル {seen} 枚)")
 
 
 def main() -> None:
@@ -121,8 +121,8 @@ def main() -> None:
     at.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(at, "w", zipfile.ZIP_DEFLATED) as z:
         # **フォルダの項目も書く。** `zip -r` は書くので、書かないと
-        # 同じ中身でも**形の違う一枚**になる ── 同梱する側は配られた
-        # この一枚をそのまま組み込むと言ってきていて、実機で展開まで
+        # 同じ中身でも**構造の違う zip** になる ── 同梱する側は配られた
+        # この zip をそのまま組み込むと言ってきていて、実機で展開まで
         # 確かめてある。ほどく側はたいてい親を勝手に作るが、
         # 「たいてい」で配るものではない。
         seen: set[str] = set()
