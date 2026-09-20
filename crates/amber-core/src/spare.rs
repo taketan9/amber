@@ -304,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_pictures_nobody_points_at() {
+    fn 誰も参照していない画像だけを拾う() {
         let d = tempfile::tempdir().unwrap();
         let root = d.path();
         std::fs::create_dir_all(root.join("attachments")).unwrap();
@@ -343,7 +343,7 @@ mod tests {
     /// **枠の中に書いてあっても、消さない。** 出はしないが、人がそこに
     /// パスを書いているなら、消していい理由にはならない。
     #[test]
-    fn a_path_written_inside_a_fence_still_counts_as_used() {
+    fn コードブロックの中に書かれたパスも_使われているとみなす() {
         let d = tempfile::tempdir().unwrap();
         let root = d.path();
         std::fs::create_dir_all(root.join("attachments")).unwrap();

@@ -107,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn an_untouched_file_is_unchanged() {
+    fn 触っていないファイルは変わっていない() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("note.md");
         write(&p, "one\n");
@@ -117,7 +117,7 @@ mod tests {
 
     /// これが存在する理由そのもの: 開いているあいだに誰かが書き換えた。
     #[test]
-    fn a_different_length_is_a_change() {
+    fn 長さが違えば変更() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("note.md");
         write(&p, "one\n");
@@ -130,7 +130,7 @@ mod tests {
     /// **消えたファイルは変更である。** 保存すると復活してしまうし、消したのは
     /// 誰かが意図してやったこと。
     #[test]
-    fn a_missing_file_is_a_change() {
+    fn 消えたファイルは変更() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("note.md");
         write(&p, "one\n");
@@ -141,7 +141,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stamp_that_went_out_and_came_back_is_the_same_stamp() {
+    fn 往復したスタンプは同じスタンプ() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("note.md");
         write(&p, "one\n");
@@ -161,7 +161,7 @@ mod tests {
     /// 同じ長さでの書き換えを、見分けられるだけ時間を空けて行う。
     /// （1 秒以内では見分けられない ── その穴はモジュールの冒頭に書いてある。）
     #[test]
-    fn the_same_length_at_a_different_time_is_a_change() {
+    fn 長さが同じでも時刻が違えば変更() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("note.md");
         write(&p, "one\n");

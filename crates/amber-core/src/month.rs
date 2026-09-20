@@ -263,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn a_month_holds_the_once_the_repeats_and_the_notes() {
+    fn 月の予定は_単発と繰り返しとノートを持つ() {
         let d = tempfile::tempdir().unwrap();
         let root = d.path();
         let put = |name: &str, body: &str| std::fs::write(root.join(name), body).unwrap();
@@ -299,7 +299,7 @@ mod tests {
     /// 三十一日の繰り返しは、短い月では**最後の日**に落ちる ──
     /// 「毎月31日」が七か月だけになるのは、静かに間違っているほうが悪い。
     #[test]
-    fn the_thirty_first_lands_on_the_last_day_of_a_short_month() {
+    fn 三十一日は_短い月では末日に落ちる() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(
             d.path().join("棚卸し.md"),
@@ -318,7 +318,7 @@ mod tests {
     /// 速さではなく、**直した予定が古い姿で出続けること**なので、そこを見張る。
     /// とりわけ、同じ一秒のあいだに長さも変えずに書き替えた場合。
     #[test]
-    fn a_rewritten_note_is_read_again() {
+    fn 書き換えたノートは読み直される() {
         let d = tempfile::tempdir().unwrap();
         let at = d.path().join("面談.md");
         std::fs::write(
@@ -352,7 +352,7 @@ mod tests {
     ///
     /// ここでは**時刻を手で戻して**、その状況をどの環境でも再現する。
     #[test]
-    fn a_note_rewritten_under_a_coarse_clock_is_read_again() {
+    fn 時計の粗い環境で書き換えたノートも読み直される() {
         let d = tempfile::tempdir().unwrap();
         let at = d.path().join("面談.md");
         std::fs::write(

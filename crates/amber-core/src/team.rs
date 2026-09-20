@@ -620,7 +620,7 @@ mod tests {
     const DEAL3: &str = "\u{feff}fetched_at,owner,owner_mail,start,end,all_day,subject,location,show_as,sensitivity,organizer,uid\r\n2026-09-10T08:15:00+09:00,山田 武,yamada.takeshi@example.co.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,false,週次定例,会議室A,busy,normal,鈴木 一郎,040000008200E00074C5B7101A82E008\r\n2026-09-10T08:15:00+09:00,山田 武,yamada.takeshi@example.co.jp,2026-09-11T00:00:00+09:00,2026-09-12T00:00:00+09:00,true,終日出張,,oof,normal,,040000008200E00074C5B7101A82E009\r\n2026-09-10T08:15:00+09:00,鈴木 一郎,suzuki.ichiro@example.co.jp,2026-09-10T14:00:00+09:00,2026-09-10T15:00:00+09:00,false,,,busy,private,,040000008200E00074C5B7101A82E00A\r\n";
 
     #[test]
-    fn the_v03_shape_reads_as_agreed() {
+    fn v03_の形が取り決めどおり読める() {
         let got = of(DEAL3, 2026, 9);
         assert_eq!(got.fetched, "2026-09-10T08:15:00+09:00", "いつ時点かを出す");
         assert_eq!(got.people.len(), 2, "二人");
@@ -640,7 +640,7 @@ mod tests {
     /// **その会議が一人ぶんしか残らない**。人ごとの段に並べる紙なので、
     /// 鍵には人が要る。
     #[test]
-    fn the_same_meeting_stays_on_every_attendee() {
+    fn 同じ会議は出席者全員に残る() {
         let csv = "owner,owner_mail,start,end,subject,uid\n                   山田 武,a@x.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,週次定例,U1\n                   鈴木 一郎,b@x.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,週次定例,U1\n                   佐藤 花子,c@x.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,週次定例,U1\n                   山田 武,a@x.jp,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,週次定例,U1\n";
         let got = of(csv, 2026, 9);
         assert_eq!(got.people.len(), 3, "三人");
@@ -651,7 +651,7 @@ mod tests {
     }
 
     #[test]
-    fn the_agreed_shape_reads_as_agreed() {
+    fn 取り決めた形が取り決めどおり読める() {
         let got = of(DEAL, 2026, 9);
         assert_eq!(got.fetched, "2026-09-10T08:15:00+09:00", "いつ時点かを出す");
         assert_eq!(got.people.len(), 2, "二人");
@@ -681,7 +681,7 @@ mod tests {
     /// **段に出す人は、表示名ではなくメールでまとめる。** 同じ人が
     /// 「山田 武」「山田武」で書き出されても、段は一つ。
     #[test]
-    fn the_same_person_written_two_ways_gets_one_lane() {
+    fn 同じ人を二通りに書いても一つの列になる() {
         let csv = "owner,owner_mail,subject,start,end\n                   山田 武,a@example.jp,朝会,2026-09-10T09:00:00+09:00,2026-09-10T09:30:00+09:00\n                   山田武,a@example.jp,夕会,2026-09-10T17:00:00+09:00,2026-09-10T17:30:00+09:00\n";
         let got = of(csv, 2026, 9);
         assert_eq!(got.people.len(), 1);
@@ -692,7 +692,7 @@ mod tests {
     /// そうなる。ただし**繰り返しの予定は `uid` が同じで開始が違う**ので、
     /// `uid` だけで重ねると回が消える。
     #[test]
-    fn a_repeated_row_is_dropped_but_a_recurring_series_is_not() {
+    fn 重複行は落とすが_繰り返しの予定は落とさない() {
         let csv = "owner_mail,subject,start,end,uid\n                   a@x.jp,定例,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,U1\n                   a@x.jp,定例,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,U1\n                   a@x.jp,定例,2026-09-17T10:00:00+09:00,2026-09-17T11:00:00+09:00,U1\n";
         let got = of(csv, 2026, 9);
         assert_eq!(got.plans.len(), 2, "同じ回は一つ、次の回は残る");
@@ -700,7 +700,7 @@ mod tests {
 
     /// 取り消された予定は、予定ではない。
     #[test]
-    fn a_cancelled_plan_does_not_fill_the_day() {
+    fn 取り消された予定は_その日を埋めない() {
         let csv = "owner,subject,start,end,cancelled\n                   山田,消えた会議,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,true\n                   山田,ある会議,2026-09-10T13:00:00+09:00,2026-09-10T14:00:00+09:00,false\n";
         let got = of(csv, 2026, 9);
         assert_eq!(got.plans.len(), 1);
@@ -710,7 +710,7 @@ mod tests {
     /// **何日もある終日の予定は、日ごとに出す。** 頭の日にだけ出すと、
     /// 三日の出張が初日しか出ず、二日目から居るように読める。
     #[test]
-    fn a_multi_day_all_day_plan_shows_on_every_day() {
+    fn 複数日にまたがる終日予定は_どの日にも出る() {
         let csv = "owner,subject,start,end,all_day\n                   山田,出張,2026-09-10T00:00:00+09:00,2026-09-13T00:00:00+09:00,true\n";
         let got = of(csv, 2026, 9);
         let days: Vec<&str> = got.plans.iter().map(|p| p.day.as_str()).collect();
@@ -721,13 +721,13 @@ mod tests {
     /// **終日の日付は、時差で直さない。** 直すと、どこで読むかで前日に
     /// ずれる ── 一日の出張が前日に出る。
     #[test]
-    fn an_all_day_plan_keeps_its_date() {
+    fn 終日予定は日付を保つ() {
         let csv = "owner,subject,start,end,all_day\n                   山田,休み,2026-09-10T00:00:00+09:00,2026-09-11T00:00:00+09:00,true\n";
         assert_eq!(of(csv, 2026, 9).plans[0].day, "2026-09-10");
     }
 
     #[test]
-    fn it_reads_the_plain_shape() {
+    fn 素の形式を読める() {
         let csv = format!(
             "{HEAD}山田 太郎,定例,2026-09-10 10:00,2026-09-10 11:00,会議室A\n\
              鈴木 花子,面談,2026-09-10 13:30,2026-09-10 14:00,\n"
@@ -744,7 +744,7 @@ mod tests {
     /// **件名に読点が入っても、列がずれない。** ここがずれると、その行から
     /// 先の全部が一つずつ横にずれる。
     #[test]
-    fn a_comma_inside_a_subject_does_not_shift_the_columns() {
+    fn 件名の中のカンマで列がずれない() {
         let csv = format!("{HEAD}山田,\"定例、および報告\",2026-09-10 10:00,2026-09-10 11:00,A\n");
         let got = of(&csv, 2026, 9);
         assert_eq!(got.plans.len(), 1);
@@ -754,7 +754,7 @@ mod tests {
 
     /// 括りの中の改行と、括りの中の `""`。
     #[test]
-    fn a_newline_inside_a_quote_is_not_a_new_row() {
+    fn 引用符の中の改行は_新しい行ではない() {
         let csv = format!("{HEAD}山田,\"一行目\n二行目\",2026-09-10 10:00,,\n山田,\"\"\"引用\"\"\",2026-09-11 09:00,,\n");
         let got = of(&csv, 2026, 9);
         assert_eq!(got.plans.len(), 2);
@@ -764,7 +764,7 @@ mod tests {
 
     /// **UTC は、端末のローカル時刻に直す**（Graph の既定がこれ）。
     #[test]
-    fn a_utc_stamp_becomes_local_time() {
+    fn utc_の時刻はローカル時刻になる() {
         let got = of(&format!("{HEAD}山田,朝会,2026-09-10T01:00:00Z,2026-09-10T02:00:00Z,\n"), 2026, 9);
         let same = of(&format!("{HEAD}山田,朝会,2026-09-10T10:00:00+09:00,2026-09-10T11:00:00+09:00,\n"), 2026, 9);
         assert_eq!(got.plans[0].at, same.plans[0].at);
@@ -773,14 +773,14 @@ mod tests {
 
     /// 時差の無いものは、そのまま読む（直すと二重にずれる）。
     #[test]
-    fn a_bare_stamp_is_left_alone() {
+    fn タイムゾーンの無い時刻はそのまま() {
         let csv = format!("{HEAD}山田,朝会,2026-09-10T10:00:00,2026-09-10T11:00:00,\n");
         assert_eq!(of(&csv, 2026, 9).plans[0].at.as_deref(), Some("10:00"));
     }
 
     /// 日と時刻が**別の列**に分かれている形（日本語版 Outlook の書き出し）。
     #[test]
-    fn it_reads_a_split_date_and_time() {
+    fn 日付と時刻が別の列でも読める() {
         let csv = "表示名,件名,開始日,開始時刻,終了日,終了時刻,終日イベント\n\
                    山田,定例,2026/09/10,10:00:00,2026/09/10,11:30:00,FALSE\n";
         let got = of(csv, 2026, 9);
@@ -790,7 +790,7 @@ mod tests {
 
     /// アメリカ式の `9/10/2026` と、午前午後。
     #[test]
-    fn it_reads_the_american_shape() {
+    fn 米国式の形式も読める() {
         let csv = "Name,Subject,Start Time,End Time,Location,All day event\n\
                    Yamada,Sync,9/10/2026 1:00:00 PM,9/10/2026 2:00:00 PM,Room,FALSE\n";
         let got = of(csv, 2026, 9);
@@ -802,14 +802,14 @@ mod tests {
     /// 件名を伏せて書き出す会社がある ── 空欄の帯は出さない。
     /// **「空」とは書かない**（「空き時間」と読み違える）。
     #[test]
-    fn a_nameless_plan_still_says_something() {
+    fn 件名の無い予定でも何か言う() {
         let csv = format!("{HEAD}山田,,2026-09-10 10:00,2026-09-10 11:00,\n");
         assert_eq!(of(&csv, 2026, 9).plans[0].title, "件名なし");
     }
 
     /// 「空き時間」は、空いているという意味なので出さない。
     #[test]
-    fn free_time_is_not_a_plan() {
+    fn 空き時間は予定ではない() {
         let csv = "名前,件名,開始,終了,公開方法\n\
                    山田,あき,2026-09-10 10:00,2026-09-10 11:00,Free\n\
                    山田,会議,2026-09-10 13:00,2026-09-10 14:00,Busy\n";
@@ -821,7 +821,7 @@ mod tests {
     /// **一日じゅう空いている人も、段を持つ。** 段ごと消えると、書き出せて
     /// いないのか本当に空なのかが、画面からは区別できない。
     #[test]
-    fn someone_with_nothing_but_free_time_still_gets_a_lane() {
+    fn 空き時間しか無い人にも列ができる() {
         let csv = "名前,件名,開始,終了,公開方法,cancelled\n\
                    山田,会議,2026-09-10 13:00,2026-09-10 14:00,Busy,false\n\
                    佐藤,あき,2026-09-10 10:00,2026-09-10 11:00,Free,false\n\
@@ -836,21 +836,21 @@ mod tests {
     /// 日をまたぐ予定は、**その日の終わりで切る** ── 翌朝の時刻をそのまま
     /// 高さにすると、帯が上に向かって伸びる。
     #[test]
-    fn a_plan_across_midnight_stops_at_the_end_of_the_day() {
+    fn 日付をまたぐ予定は_その日の終わりで止まる() {
         let csv = format!("{HEAD}山田,夜勤,2026-09-10 22:00,2026-09-11 06:00,\n");
         assert_eq!(of(&csv, 2026, 9).plans[0].to.as_deref(), Some("24:00"));
     }
 
     /// **人の列が無ければ、何も出さない。** 全員が一段に潰れるほうが困る。
     #[test]
-    fn without_a_person_column_nothing_comes_out() {
+    fn 人の列が無ければ何も出ない() {
         let csv = "件名,開始,終了\n定例,2026-09-10 10:00,2026-09-10 11:00\n";
         assert!(of(csv, 2026, 9).plans.is_empty());
     }
 
     /// 読めない行は飛ばして、読める行は出す ── 一行のせいで全部消えない。
     #[test]
-    fn a_bad_row_does_not_take_the_others_with_it() {
+    fn 壊れた行が_ほかの行を巻き添えにしない() {
         let csv = format!("{HEAD}山田,こわれ,いつか,,\n山田,定例,2026-09-10 10:00,,\n");
         let got = of(&csv, 2026, 9);
         assert_eq!(got.plans.len(), 1);
@@ -859,21 +859,21 @@ mod tests {
 
     /// タブ区切り（Excel で開いて保存し直すと、そうなる環境がある）。
     #[test]
-    fn it_reads_tabs_too() {
+    fn タブ区切りも読める() {
         let csv = "名前\t件名\t開始\t終了\n山田\t定例\t2026-09-10 10:00\t2026-09-10 11:00\n";
         assert_eq!(of(csv, 2026, 9).plans.len(), 1);
     }
 
     /// 頭の BOM で、一つ目の見出しが読めなくならない（取り決めは BOM あり）。
     #[test]
-    fn a_bom_does_not_hide_the_first_column() {
+    fn bom_があっても最初の列は隠れない() {
         let csv = format!("\u{feff}{HEAD}山田,定例,2026-09-10 10:00,,\n");
         assert_eq!(of(&csv, 2026, 9).plans.len(), 1);
     }
 
     /// よその月は出さない。
     #[test]
-    fn other_months_stay_out() {
+    fn ほかの月は入らない() {
         let csv = format!("{HEAD}山田,先月,2026-08-31 10:00,,\n山田,今月,2026-09-01 10:00,,\n");
         let got = of(&csv, 2026, 9);
         assert_eq!(got.plans.len(), 1);
@@ -882,7 +882,7 @@ mod tests {
 
     /// 空っぽの紙でも落ちない（置き換えの途中を読むと、そうなることがある）。
     #[test]
-    fn an_empty_sheet_is_not_a_crash() {
+    fn 空のシートでも落ちない() {
         assert!(of("", 2026, 9).plans.is_empty());
         assert!(of("fetched_at,owner,start\n", 2026, 9).plans.is_empty());
     }

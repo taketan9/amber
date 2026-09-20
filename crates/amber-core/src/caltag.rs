@@ -149,14 +149,14 @@ mod tests {
     }
 
     #[test]
-    fn the_last_line_of_only_tags_is_the_tag_line() {
+    fn タグだけの最終行がタグ行になる() {
         let memo = "買い物のあと、駅前で待ち合わせ。\n保険証を忘れずに。\n\n#太郎 #次郎";
         assert_eq!(tags(memo), v(&["太郎", "次郎"]));
         assert_eq!(body(memo), "買い物のあと、駅前で待ち合わせ。\n保険証を忘れずに。");
     }
 
     #[test]
-    fn a_sentence_that_merely_contains_a_hash_is_not_a_tag_line() {
+    fn ハッシュを含むだけの文はタグ行ではない() {
         // **ここを取り違えると、人の文章がタグになる。**
         assert!(tags("#1 の件、よろしく").is_empty());
         assert!(tags("明日は #太郎 の参観日です").is_empty());
@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_hash_is_a_persons_text_and_stays() {
+    fn 裸のハッシュは人の書いた文字なので残す() {
         // **`tags()` だけでは足りない。** `#` を「タグ行」と読んでも、
         // 名前が空なので `tags()` は空を返す ── 同じ顔をする。
         // 違いが出るのは `body()` で、ここが人の一文字を落とすかどうか。
@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn a_blank_line_is_not_a_tag_line() {
+    fn 空行はタグ行ではない() {
         // いまは空行を先に弾いてからしか呼ばないが、**呼ぶ側の都合に
         // 寄りかからない** ── 弾く場所が動いた日に、空行がタグ行になる。
         assert!(!only_tags(""));
@@ -185,20 +185,20 @@ mod tests {
     }
 
     #[test]
-    fn no_notes_at_all_means_no_tags() {
+    fn メモが無ければタグも無い() {
         assert!(tags("").is_empty());
         assert!(tags("   \n\n  ").is_empty());
         assert_eq!(body(""), "");
     }
 
     #[test]
-    fn the_whole_memo_can_be_one_tag_line() {
+    fn メモ全体がタグ行一行のこともある() {
         assert_eq!(tags("#太郎"), v(&["太郎"]));
         assert_eq!(body("#太郎"), "");
     }
 
     #[test]
-    fn writing_tags_does_not_touch_what_a_person_wrote() {
+    fn タグを書いても_人が書いた内容には触らない() {
         let memo = "買い物のあと、駅前で待ち合わせ。\n保険証を忘れずに。";
         let out = set(memo, &v(&["太郎"]));
         assert_eq!(out, "買い物のあと、駅前で待ち合わせ。\n保険証を忘れずに。\n\n#太郎");
@@ -206,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn writing_again_replaces_the_tag_line_and_nothing_else() {
+    fn 書き直すとタグ行だけが置き換わる() {
         let memo = "保険証を忘れずに。\n\n#太郎 #次郎";
         let out = set(memo, &v(&["花子"]));
         assert_eq!(out, "保険証を忘れずに。\n\n#花子");
@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn clearing_the_tags_removes_the_line_and_the_blank_line_with_it() {
+    fn タグを空にすると_その行と直前の空行も消える() {
         let memo = "保険証を忘れずに。\n\n#太郎";
         assert_eq!(set(memo, &[]), "保険証を忘れずに。");
         // もともと無ければ、何も起きない。
@@ -224,13 +224,13 @@ mod tests {
     }
 
     #[test]
-    fn tags_on_an_empty_memo_stand_alone() {
+    fn 空のメモに付けたタグは_それだけで成り立つ() {
         assert_eq!(set("", &v(&["太郎"])), "#太郎");
         assert_eq!(set("   ", &v(&["太郎"])), "#太郎");
     }
 
     #[test]
-    fn the_shape_of_the_line_survives_a_round_trip() {
+    fn タグ行の形は往復しても変わらない() {
         // テキスト → タグ → テキスト → タグ で、同じものに戻る。
         for memo in [
             "",
@@ -245,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn the_newline_of_the_memo_is_kept() {
+    fn メモの末尾の改行は保たれる() {
         // **Exchange や Windows から来たメモを LF で書き戻さない** ──
         // 触っていない行まで差分になる。
         let memo = "保険証を忘れずに。\r\n二行目。";
@@ -255,20 +255,20 @@ mod tests {
     }
 
     #[test]
-    fn the_same_name_twice_is_one_tag() {
+    fn 同じ名前を二度書いてもタグは一つ() {
         assert_eq!(tags("#太郎 #太郎 #次郎"), v(&["太郎", "次郎"]));
         assert_eq!(set("", &v(&["太郎", "太郎"])), "#太郎");
     }
 
     #[test]
-    fn a_hash_in_front_is_optional_when_writing() {
+    fn 書くときの先頭のハッシュは省ける() {
         // 呼ぶ側が `#太郎` と渡しても `太郎` と渡しても同じ。
         assert_eq!(set("", &v(&["#太郎"])), "#太郎");
         assert_eq!(set("", &v(&["  太郎  "])), "#太郎");
     }
 
     #[test]
-    fn a_name_with_a_space_in_it_cannot_be_a_tag() {
+    fn 空白を含む名前はタグにならない() {
         // 空白で区切って読むので、空白を含む名前は**書けない**。
         // 黙って壊れた行を書くより、落とす。
         assert_eq!(set("", &v(&["山田 太郎"])), "");
@@ -276,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn trailing_blank_lines_go_away_but_nothing_else_does() {
+    fn 末尾の空行は消えるが_ほかは消えない() {
         // タグ行を置ける場所がそこしか無いので、末尾の空行だけは落とす。
         assert_eq!(body("本文\n\n\n"), "本文");
         assert_eq!(set("本文\n\n\n", &v(&["太郎"])), "本文\n\n#太郎");

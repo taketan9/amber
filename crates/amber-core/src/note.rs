@@ -1610,7 +1610,7 @@ pub fn new_note(title: &str, today: &str, now: &str) -> (String, String) {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn a_note_that_is_not_utf8_still_shows_up() {
+    fn utf8_でないノートも一覧に出る() {
         let dir = tempfile::tempdir().unwrap();
         // 古い日本語（Shift_JIS・CRLF）── Windows のメモ帳が置いていく形。
         let body = "---\r\ntitle: 日本語\r\ntags: [仕事]\r\n---\r\n\r\n# 日本語\r\n\r\n本文です。\r\n";
@@ -1645,7 +1645,7 @@ mod tests {
     /// （`~$…`）が一覧に紛れ込んでいた。逆に、**同期がぶつかった控えは
     /// 人が打った文字**なので、落としてはいけない。
     #[test]
-    fn the_listing_drops_scratch_files_but_keeps_conflicted_copies() {
+    fn 一覧は一時ファイルを落とし_競合コピーは残す() {
         let dir = tempfile::tempdir().unwrap();
         let put = |name: &str, body: &str| {
             std::fs::write(dir.path().join(name), body).unwrap();
@@ -1672,7 +1672,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_keeps_the_words_and_takes_today() {
+    fn 複製は本文を保ち_日付は今日になる() {
         let dir = tempfile::tempdir().unwrap();
         let at = dir.path().join("段取り.md");
         std::fs::write(
@@ -1719,7 +1719,7 @@ mod tests {
     }
 
     #[test]
-    fn a_search_box_is_an_or_of_ands() {
+    fn 検索ボックスは_and_のまとまりの_or() {
         assert_eq!(flat("仕事 週報"), vec![vec!["any:仕事", "any:週報"]]);
         assert_eq!(flat("仕事 OR 家"), vec![vec!["any:仕事"], vec!["any:家"]]);
         // OR のほうが弱い綴じ ── (仕事 AND 週報) OR (家)。
@@ -1766,7 +1766,7 @@ mod tests {
     }
 
     #[test]
-    fn catching_up_writes_down_that_it_caught_up() {
+    fn 溜まったぶんの実行は_実行したことを記録する() {
         use chrono::NaiveDate;
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("週報.md");
@@ -1791,7 +1791,7 @@ mod tests {
     }
 
     #[test]
-    fn the_next_time_a_routine_comes_round() {
+    fn 繰り返しが次に来る時刻() {
         use chrono::NaiveDate;
         let at = |y, m, d, h, mi| NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, mi, 0).unwrap();
 
@@ -1822,7 +1822,7 @@ mod tests {
     }
 
     #[test]
-    fn a_colour_is_a_span_and_everything_else_is_left_as_typed() {
+    fn 色は_span_として読み_ほかは打たれたまま残す() {
         let one = spans("ふつうの<span style=\"color:#0E93A8\">シアン</span>あと");
         assert_eq!(one.len(), 3);
         assert_eq!(one[0], Span { text: "ふつうの".into(), color: None });
@@ -1866,7 +1866,7 @@ mod tests {
     }
 
     #[test]
-    fn a_task_is_a_block_you_can_press_and_a_bullet_is_not() {
+    fn チェックボックスは押せるブロックで_箇条書きは違う() {
         let text = "---\ntitle: x\n---\n\n- [ ] 牛乳\n- [x] 珈琲\n- ふつうの箇条書き\n";
         let bs = blocks(text);
         let mut checks = Vec::new();
@@ -1882,7 +1882,7 @@ mod tests {
     }
 
     #[test]
-    fn pressing_a_task_changes_that_line_and_nothing_else() {
+    fn チェックを押すとその行だけが変わる() {
         let text = "- [ ] 牛乳\n- [ ] 珈琲\n";
         let on = set_check(text, 1, true);
         assert_eq!(on, "- [ ] 牛乳\n- [x] 珈琲\n");
@@ -1897,7 +1897,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_note_is_searchable_by_its_title_and_its_tags_not_its_filename() {
+    fn ノートはタイトルとタグで探せる_ファイル名ではなく() {
         let n = Note {
             path: "/n/page-0012.md".into(),
             title: "段取り".into(),
@@ -2015,7 +2015,7 @@ mod tests {
     }
 
     #[test]
-    fn a_picture_does_not_fill_the_line_that_says_what_the_note_is_about() {
+    fn 画像が_ノートの内容を示す行を埋めてしまわない() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("n.md");
         std::fs::write(
@@ -2053,7 +2053,7 @@ mod tests {
     }
 
     #[test]
-    fn a_note_comes_apart_into_things_that_can_be_drawn() {
+    fn ノートは描画できる単位に分かれる() {
         let md = "---\ntitle: 段取り\n---\n# 見出し\n本文の一行目\nと二行目。\n\n- ひとつ\n2. ふたつ\n> 引用\n![現場](a.jpg)\n\n```rust\nfn main() {}\n\nlet x = 1;\n```\n---\nおわり\n";
         let b = blocks(md);
         // front matter はノートの自己説明であって、本文として述べていることでは
@@ -2074,7 +2074,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hash_without_a_space_is_a_tag_and_not_a_heading() {
+    fn 空白の無いハッシュはタグであって見出しではない() {
         // `#仕事` on its own line is how people write a tag. Reading it as a
         // 見出しにすると、タグの付いたノートがすべて 32pt のタグで始まることになる。
         assert_eq!(blocks("#仕事\n"), vec![Block::Paragraph("#仕事".into())]);
@@ -2093,7 +2093,7 @@ mod tests {
     }
 
     #[test]
-    fn a_note_that_moves_takes_its_pictures_with_it() {
+    fn 移動したノートは画像を連れていく() {
         let d = tempfile::tempdir().unwrap();
         let note = d.path().join("段取り.md");
         std::fs::write(&note, "# 段取り\n").unwrap();
@@ -2127,7 +2127,7 @@ mod tests {
     }
 
     #[test]
-    fn a_routine_makes_a_task_and_not_another_template() {
+    fn 繰り返しが作るのはタスクであってテンプレートではない() {
         use chrono::NaiveDate;
         let d = tempfile::tempdir().unwrap();
         let t = d.path().join("ごみ出し.md");
@@ -2159,7 +2159,7 @@ mod tests {
     }
 
     #[test]
-    fn the_three_shapes_a_reminder_is_written_in() {
+    fn 通知の書き方は三つの形() {
         use chrono::NaiveDate;
         let r = remind("---\nremind: 2026-09-10 09:00\n---\n本文\n");
         assert_eq!(r.once, NaiveDate::from_ymd_opt(2026, 9, 10).unwrap().and_hms_opt(9, 0, 0));
@@ -2180,7 +2180,7 @@ mod tests {
     }
 
     #[test]
-    fn a_routine_says_what_it_missed_while_the_phone_was_off() {
+    fn 電源が切れていたあいだに逃したぶんを_繰り返しが言える() {
         use chrono::NaiveDate;
         let d = |y, m, day| NaiveDate::from_ymd_opt(y, m, day).unwrap();
 
@@ -2208,7 +2208,7 @@ mod tests {
     }
 
     #[test]
-    fn a_note_can_be_pinned_and_unpinned_without_losing_anything() {
+    fn ピン留めと解除で_何も失わない() {
         let src = "---\ntitle: 段取り\ntags: [仕事]\n---\n本文。\n";
         let on = set_field(src, "pinned", Some("true"));
         assert_eq!(on, "---\ntitle: 段取り\ntags: [仕事]\npinned: true\n---\n本文。\n");
@@ -2230,7 +2230,7 @@ mod tests {
     }
 
     #[test]
-    fn the_three_ways_people_write_yes() {
+    fn 人が_はい_と書く三通り() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("n.md");
         // `pinned` は、お気に入りができる前に書かれたノートが使っている書き方。
@@ -2255,7 +2255,7 @@ mod tests {
     }
 
     #[test]
-    fn tags_go_on_without_disturbing_the_rest_of_the_note() {
+    fn タグを付けても_ノートのほかの部分は乱れない() {
         // ほかのフィールドと、その並び順は書いた人のもの ── 置き換えるのは
         // タグの行だけ。
         let src = "---\ntitle: 段取り\ncreated: 2026-09-04\ntags: [古い]\n---\n本文。\n";
@@ -2288,7 +2288,7 @@ mod tests {
     }
 
     #[test]
-    fn a_picture_lands_beside_the_note_and_the_link_points_at_it() {
+    fn 画像はノートの隣に置かれ_リンクがそれを指す() {
         let d = tempfile::tempdir().unwrap();
         let note = d.path().join("段取り.md");
         std::fs::write(&note, "# 段取り\n").unwrap();
@@ -2318,7 +2318,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_note_reads_back_as_the_note_it_says_it_is() {
+    fn 新しいノートは_自分が名乗るとおりに読み戻せる() {
         let (name, body) = new_note("段取り", "2026-09-02", "2026-09-02 14:03:09");
         assert_eq!(name, "段取り.md");
         // この形の要点 ── `new_note` が書いたものを `front` が解釈できる。
@@ -2386,7 +2386,7 @@ mod tests {
     }
 
     #[test]
-    fn a_title_a_filesystem_would_refuse_is_made_into_one_it_takes() {
+    fn ファイルシステムが拒む題は_受け付ける名前に直される() {
         // スラッシュとコロンは、人がタイトルに何気なく打つ文字。
         // — a date, a path, a ratio.
         assert_eq!(file_stem("2026/09/02 の予定"), "2026-09-02 の予定");
@@ -2413,7 +2413,7 @@ mod tests {
     }
 
     #[test]
-    fn front_matter_is_read_both_ways_round() {
+    fn front_matter_は書いても読んでも往復する() {
         let f = front(&ls("---\ntitle: 段取り\ntags: [onenote, 2026]\n---\n# 段取り\n"));
         assert_eq!(f.get("title"), Some("段取り"));
         assert_eq!(f.tags, ["onenote", "2026"]);
@@ -2429,14 +2429,14 @@ mod tests {
     /// Markdown ── どちらかを飲み込めば、誰かのノートの冒頭を食べることに
     /// なる。
     #[test]
-    fn a_rule_is_not_front_matter() {
+    fn 水平線は_front_matter_ではない() {
         assert_eq!(front(&ls("# title\n\n---\n\nbody\n")).lines, 0);
         assert_eq!(front(&ls("---\nnot closed\nbody\n")).lines, 0);
         assert_eq!(front(&ls("")).lines, 0);
     }
 
     #[test]
-    fn a_title_falls_back_until_it_finds_one() {
+    fn タイトルは見つかるまで順に候補を下る() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("kickoff.md");
 
@@ -2480,7 +2480,7 @@ mod tests {
     /// 一覧の 2 行目は、そのノートが*何についてのものか*を言う。だから何で
     /// できているか ── 見出し、コードブロック、front matter ── は除く。
     #[test]
-    fn the_excerpt_skips_the_scaffolding() {
+    fn 抜粋は骨組みの部分を飛ばす() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("n.md");
         std::fs::write(&p, "---\ntitle: t\n---\n# 見出し\n\n本文の一行目。\n```\ncode\n```\n二行目。\n").unwrap();
@@ -2489,7 +2489,7 @@ mod tests {
     }
 
     #[test]
-    fn a_typed_date_beats_the_mtime() {
+    fn 打たれた日付が_mtime_より優先される() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("n.md");
         std::fs::write(&p, "---\nupdated: 2020-01-02\n---\nx\n").unwrap();
@@ -2503,7 +2503,7 @@ mod tests {
     }
 
     #[test]
-    fn the_epoch_arithmetic_is_right() {
+    fn epoch_の計算が正しい() {
         assert_eq!(date_secs("1970-01-01"), Some(0));
         assert_eq!(date_secs("2026-09-02"), Some(1_788_307_200));
         assert_eq!(date_secs("2026-09-02T10:11:12"), Some(1_788_307_200), "the day only");

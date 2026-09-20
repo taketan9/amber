@@ -727,7 +727,7 @@ mod tests {
     /* ── 以前からある決めごと ── */
 
     #[test]
-    fn different_places_both_land() {
+    fn 離れた場所の変更は_両方入る() {
         // 二人が別の場所を書いた ── どちらも残る。これが**ふだんの姿**で、
         // 家族と買い物リストを分けていれば、たいていこうなる。
         let was = t(&["# 買い物", "", "- 牛乳", "- パン"]);
@@ -741,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn the_same_line_from_both_keeps_both() {
+    fn 同じ行を両方が変えたら_両方残す() {
         // **同じ行を、二人が別々に書き換えた。** どちらかを捨てない ──
         // 両方置いて、人が選ぶ（`spots`）。
         let was = t(&["集合は 10 時"]);
@@ -757,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn a_line_deleted_here_and_written_there_is_kept() {
+    fn こちらが消し_向こうが書いた行は残る() {
         // **迷ったら残す。** こちらで消し、向こうで書き足した行は残る ──
         // そして、それは**ぶつかった場所**（消した側は行数 0）。
         let was = t(&["- 牛乳", "- パン"]);
@@ -771,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn one_side_untouched_takes_the_other() {
+    fn 片方が手つかずなら_もう片方を採る() {
         let was = t(&["ひとつ", "ふたつ"]);
         let ours = was.clone();
         let theirs = t(&["ひとつ", "ふたつ", "みっつ"]);
@@ -787,7 +787,7 @@ mod tests {
     }
 
     #[test]
-    fn the_same_edit_on_both_sides_is_not_a_clash() {
+    fn 両方が同じ編集をしたら競合しない() {
         let was = t(&["集合は 10 時"]);
         let same = t(&["集合は 11 時"]);
         let m = merge(&was, &same, &same);
@@ -797,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn the_last_newline_survives() {
+    fn 末尾の改行は保たれる() {
         let was = "あ\nい\n";
         let m = merge(was, "あ\nい\nう\n", "あ\nい\n");
         assert!(m.text.ends_with('\n'));
@@ -813,7 +813,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_sides_do_not_panic() {
+    fn 空の入力でも_panic_しない() {
         assert_eq!(merge("", "", "").text, "");
         assert_eq!(merge("", "あ\n", "").text, "あ\n");
         assert_eq!(merge("あ\n", "", "").text, "");
@@ -827,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    fn a_note_with_a_diagram_survives_a_merge() {
+    fn 図の入ったノートもマージを通る() {
         let was = t(&["# 図", "", "```mermaid", "flowchart LR", "  A --> B", "```", "", "あと"]);
         let ours = t(&["# 図", "", "```mermaid", "flowchart LR", "  A --> B", "```", "", "あと", "追記"]);
         let theirs = t(&["# 図と字", "", "```mermaid", "flowchart LR", "  A --> B", "```", "", "あと"]);
@@ -840,7 +840,7 @@ mod tests {
     }
 
     #[test]
-    fn the_marked_rows_point_at_the_merged_text() {
+    fn 目印の付いた行は_マージ後の本文を指す() {
         let was = t(&["a", "b", "c"]);
         let ours = t(&["a", "b", "c", "ours"]);
         let theirs = t(&["a", "THEIRS", "c"]);
@@ -854,7 +854,7 @@ mod tests {
     }
 
     #[test]
-    fn a_very_long_note_still_answers() {
+    fn 非常に長いノートでも答えが返る() {
         let was: String = (0..3000).map(|i| format!("行 {i}\n")).collect();
         let ours = was.replace("行 0\n", "こちら\n");
         let theirs = was.replace("行 2999\n", "向こう\n");
@@ -867,7 +867,7 @@ mod tests {
     /* ── Git の `merge-file` と同じ答え（2026-09-11 に実物で確かめた形） ── */
 
     #[test]
-    fn touching_changes_clash_like_git() {
+    fn 隣接する変更は_git_と同じように競合する() {
         // 隣り合う行を別々に直した ── あいだに変わっていない行が無いので、
         // Git はぶつかったと見る。同じにする。
         let m = merge("a\nb\nc\n", "a\nB\nc\n", "a\nb\nC\n");
@@ -886,7 +886,7 @@ mod tests {
     }
 
     #[test]
-    fn zealous_pulls_equal_rows_out_of_a_clash() {
+    fn 整形すると_同じ内容の行が競合から外れる() {
         // 同じ置き換えの中の一行だけ違う ── 揃っている行は外に出て、
         // 違う一行だけがぶつかる（Git の zealous）。
         let m = merge("x\n", "a\nb\nc\n", "a\nB\nc\n");
@@ -896,7 +896,7 @@ mod tests {
     }
 
     #[test]
-    fn additions_at_the_end() {
+    fn 末尾への追加() {
         // 両方が同じ行を足した → 一つ。別の行を足した → ぶつかる。片方だけ → 入る。
         assert!(!merge("a\nb\nc\n", "a\nb\nc\nd\n", "a\nb\nc\nd\n").needs_eyes());
         let m = merge("a\nb\nc\n", "a\nb\nc\nd\n", "a\nb\nc\ne\n");
@@ -908,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    fn deleted_here_edited_there_is_a_spot_with_an_empty_side() {
+    fn こちらが削除し向こうが編集した箇所は_片側が空の競合になる() {
         let m = merge("a\nb\nc\n", "a\nc\n", "a\nBB\nc\n");
         assert_eq!(m.text, "a\nBB\nc\n");
         assert_eq!(m.spots, vec![Spot { ours: (1, 0), theirs: (1, 1) }]);
@@ -917,7 +917,7 @@ mod tests {
     /* ── 前書き ── */
 
     #[test]
-    fn front_matter_merges_by_key() {
+    fn front_matter_はキー単位でマージする() {
         let was = "---\ntitle: 買い物\ntags: [家]\n---\n\n- 牛乳\n";
         let ours = "---\ntitle: 買い物\ntags: [家, 急ぎ]\n---\n\n- 牛乳\n";
         let theirs = "---\ntitle: 週末の買い物\ntags: [家]\n---\n\n- 牛乳\n";
@@ -928,7 +928,7 @@ mod tests {
     }
 
     #[test]
-    fn front_matter_clash_keeps_ours_and_reports_the_key() {
+    fn front_matter_の競合はこちらを残し_キーを報告する() {
         let was = "---\ntags: [家]\n---\n\n本文\n";
         let ours = "---\ntags: [家, 仕事]\n---\n\n本文\n";
         let theirs = "---\ntags: [家, 急ぎ]\n---\n\n本文\n";
@@ -941,7 +941,7 @@ mod tests {
     }
 
     #[test]
-    fn body_marks_are_offset_past_the_front_matter() {
+    fn 本文の目印は_front_matter_のぶんずれる() {
         let was = "---\ntitle: t\n---\n\na\nb\n";
         let ours = "---\ntitle: t\n---\n\na\nb\n";
         let theirs = "---\ntitle: t\n---\n\na\nB\n";
@@ -1039,7 +1039,7 @@ mod tests {
     }
 
     #[test]
-    fn agrees_with_git_merge_file() {
+    fn git_merge_file_と結果が一致する() {
         // Git が無い環境ではスキップする（CI の Windows など）。
         if git_says("a\n", "a\n", "a\n").is_none() {
             eprintln!("git が無いので飛ばします");
@@ -1071,7 +1071,7 @@ mod tests {
     /* ── 性質 ── でたらめな直しを量産して、失わないことを見る ── */
 
     #[test]
-    fn nothing_written_by_one_side_alone_is_lost() {
+    fn 片方だけが書いた内容は失われない() {
         let mut d = Dice(42);
         for _ in 0..2000 {
             let was = some_note(&mut d);
@@ -1101,7 +1101,7 @@ mod tests {
     }
 
     #[test]
-    fn swapping_sides_keeps_the_same_rows() {
+    fn 左右を入れ替えても同じ行になる() {
         // こちらと向こうを入れ替えても、**残る行の顔ぶれは同じ**（順が違うだけ）。
         let mut d = Dice(7);
         for _ in 0..1000 {

@@ -1306,7 +1306,7 @@ pub fn set_picture_size(line: &str, width: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn set_picture_size_writes_what_a_person_would_type() {
+    fn 画像サイズの設定は_人が打つのと同じ形で書く() {
         let one = |line: &str, w: Option<&str>| super::set_picture_size(line, w);
 
         // 付ける。
@@ -1330,7 +1330,7 @@ mod tests {
     }
 
     #[test]
-    fn picture_size_reads_marp_and_keeps_the_words() {
+    fn 画像サイズは_marp_の書き方も読み_言葉を残す() {
         let one = |md: &str| super::to_html(&[md.to_string()]);
 
         let out = one("![width:200px](猫.png)");
@@ -1381,7 +1381,7 @@ mod tests {
     }
 
     #[test]
-    fn two_coloured_words_on_one_line_both_survive() {
+    fn 一行に色付きの語が二つあっても両方残る() {
         // 一度これで壊れた: `find` はバイトを数え、走査は文字を数えていたので、
         // 日本語を挟むと span の**先まで**飛び越えて、次の span の途中から
         // 文字が表示されていた。
@@ -1395,7 +1395,7 @@ mod tests {
     }
 
     #[test]
-    fn bold_and_italic_together_reads_as_both() {
+    fn 太字と斜体の同時指定は_両方として読む() {
         // 同じノートが、デスクトップ版と iPhone で違って見えていた（原因は `inline`）。
         for line in ["***両方***", "___両方___"] {
             let out = to_html(&lines(line));
@@ -1407,7 +1407,7 @@ mod tests {
     }
 
     #[test]
-    fn three_marks_that_do_not_close_fall_back_to_what_they_were() {
+    fn 閉じない三連記号は_元の形に戻す() {
         // 「3 つ並んでいたら必ず重ねがけ」にすると、閉じていない記号のある行が
         // 今日と違う形に読まれる ── 直したつもりの隣で、触っていない行が変わる。
         let out = to_html(&lines("***閉じていない**"));
@@ -1425,7 +1425,7 @@ mod tests {
     }
 
     #[test]
-    fn front_matter_is_how_a_note_describes_itself_not_something_it_says() {
+    fn front_matter_は自己説明であって_本文ではない() {
         let out = to_html(&lines("---\ntitle: 週報\ntags: [仕事]\n---\n\n# 見出し\n"));
         assert!(!out.contains("title:"), "{out}");
         assert!(out.contains("見出し"), "{out}");
@@ -1435,7 +1435,7 @@ mod tests {
     }
 
     #[test]
-    fn a_colour_survives_the_escaping_and_nothing_else_does() {
+    fn escape_を通っても色だけは残り_ほかは残らない() {
         let out = to_html(&lines("ふつうと<span style=\"color:#0E93A8\">シアン</span>。"));
         assert!(out.contains("<span style=\"color:#0e93a8\">シアン</span>"), "{out}");
         // 他の HTML は、これまでどおり文字として出す。
@@ -1453,7 +1453,7 @@ mod tests {
     }
 
     #[test]
-    fn inline_marks_are_read_once() {
+    fn インライン記号の解釈は一度だけ() {
         assert_eq!(
             inline("a **b** c `d` [e](http://x) ~~f~~"),
             vec![
@@ -1560,21 +1560,21 @@ mod tests {
     }
 
     #[test]
-    fn an_unclosed_mark_stays_text() {
+    fn 閉じていない記号はテキストのまま() {
         // はぐれたアスタリスクはアスタリスクのまま。閉じない強調の開始として
         // 扱うと、その行の残り全部を飲み込む。
         assert_eq!(inline("2 * 3 = 6"), vec![Inline::Text("2 * 3 = 6".into())]);
     }
 
     #[test]
-    fn code_wins_over_emphasis() {
+    fn コードが強調より優先される() {
         // バッククォートの中の `*` はアスタリスク。`*` をバッククォートで囲む
         // 理由がまさにそれ。
         assert_eq!(inline("`a*b*c`"), vec![Inline::Code("a*b*c".into())]);
     }
 
     #[test]
-    fn html_in_the_source_is_shown_not_run() {
+    fn 本文中の_html_は表示され_実行されない() {
         let html = to_html(&lines("<script>alert(1)</script>"));
         assert!(html.contains("&lt;script&gt;"), "{html}");
         assert!(!html.contains("<script>"), "{html}");
@@ -1673,7 +1673,7 @@ mod tests {
     }
 
     #[test]
-    fn a_javascript_link_is_not_a_link() {
+    fn javascript_のリンクはリンクにしない() {
         // 最も古い手口で、README はどこかから来たファイル。テキストは表示される
         // が、どこへも飛ばないだけ。
         let html = to_html(&lines("[click](javascript:alert(1))"));
@@ -1682,7 +1682,7 @@ mod tests {
     }
 
     #[test]
-    fn relative_links_still_work() {
+    fn 相対リンクは動く() {
         let html = to_html(&lines("[readme](docs/README.md)"));
         assert!(html.contains(r#"<a href="docs/README.md">readme</a>"#), "{html}");
     }
@@ -1703,7 +1703,7 @@ mod tests {
     }
 
     #[test]
-    fn a_table_keeps_its_alignment() {
+    fn 表は寄せ方を保つ() {
         let html = to_html(&lines("| a | b |\n| :- | --: |\n| 1 | 2 |"));
         assert!(html.contains("<table>"), "{html}");
         assert!(html.contains(r#"text-align:right"#), "{html}");
@@ -1715,7 +1715,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_lists_close_in_order() {
+    fn 入れ子のリストは順に閉じる() {
         let html = to_html(&lines("- one\n  - deep\n- two"));
         assert_eq!(html.matches("<ul>").count(), 2, "{html}");
         assert_eq!(html.matches("</ul>").count(), 2, "{html}");
@@ -1727,7 +1727,7 @@ mod tests {
     }
 
     #[test]
-    fn a_nested_list_sits_inside_its_parent_item() {
+    fn 入れ子のリストは親の項目の中に入る() {
         // 最初の版が出していたのは `<li>one</li><ul>…</ul>` ── ブラウザは受け入れる
         // が、入れ子が違うかのようにインデントされる。
         // not there.
@@ -1739,7 +1739,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fence_is_verbatim() {
+    fn コードブロックはそのまま出す() {
         let html = to_html(&lines("```rust\nlet x = *p;\n```"));
         assert!(html.contains(r#"<code class="language-rust">"#), "{html}");
         assert!(html.contains("let x = *p;"), "{html}");
@@ -1748,7 +1748,7 @@ mod tests {
     }
 
     #[test]
-    fn a_list_closes_before_what_follows_it() {
+    fn リストは次のものの前で閉じる() {
         // 最初の版はいちばん外側のリストの記録を、`</ul>` を出さずに捨てていた。
         // そのためリストの後の段落がリストの中に入り、リストのある文書すべてで
         // ずっとインデントされたままになっていた。
@@ -1758,7 +1758,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hard_wrapped_paragraph_is_one_paragraph() {
+    fn 改行で折り返した段落は一つの段落() {
         let html = to_html(&lines("one\ntwo\n\nthree"));
         assert_eq!(html.matches("<p>").count(), 2, "{html}");
         // **段落は一つ。ただし、改行は改行として描く**（2026-09-08 に決めた）。
@@ -1800,7 +1800,7 @@ mod tests {
     }
 
     #[test]
-    fn task_boxes_are_marked_and_carry_the_line_they_came_from() {
+    fn チェックボックスは印が付き_元の行番号を持つ() {
         let html = super::to_html(&lines("- [x] done\n- [ ] not"));
         assert!(html.contains("☑"), "{html}");
         assert!(html.contains("☐"), "{html}");
@@ -1813,7 +1813,7 @@ mod tests {
     }
 
     #[test]
-    fn headings_get_an_anchor_to_link_to() {
+    fn 見出しにはリンク先のアンカーが付く() {
         assert_eq!(slug("Usage"), "usage");
         assert_eq!(slug("Getting started!"), "getting-started");
         // 空白 2 つはハイフン 2 つになり、その間で落ちたダッシュも同様。

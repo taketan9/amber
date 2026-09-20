@@ -547,7 +547,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bringing_notes_in_keeps_both_when_the_name_is_taken() {
+    fn 名前が埋まっていたら_取り込みは両方を残す() {
         let home = tempfile::tempdir().unwrap();
         let root = home.path().join("ノート");
         std::fs::create_dir_all(&root).unwrap();
@@ -588,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_remembers_its_colour_and_its_empty_favourites() {
+    fn フォルダは色と_空のお気に入りを憶えている() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         assert_eq!(read(root), Book::default());
@@ -611,7 +611,7 @@ mod tests {
     }
 
     #[test]
-    fn a_broken_settings_file_is_not_a_reason_to_lose_the_notes() {
+    fn 壊れた設定ファイルは_ノートを失う理由にならない() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".amber")).unwrap();
         std::fs::write(file(dir.path()), "{ これは JSON ではない").unwrap();

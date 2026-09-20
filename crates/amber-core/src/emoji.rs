@@ -271,7 +271,7 @@ pub fn table() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn every_face_has_japanese_words_and_appears_once() {
+    fn 絵文字はどれも日本語の語を持ち_一度だけ出る() {
         let mut seen = std::collections::HashMap::new();
         for g in super::GROUPS {
             assert!(!g.faces.is_empty(), "{} が空です", g.name);

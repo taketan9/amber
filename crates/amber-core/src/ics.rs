@@ -343,7 +343,7 @@ BEGIN:VEVENT\r\nDTSTART:20260910T000000Z\r\nSUMMARY:長い題は折り返され\
 END:VEVENT\r\nEND:VCALENDAR\r\n";
 
     #[test]
-    fn a_calendar_becomes_days() {
+    fn カレンダーが日ごとの予定になる() {
         let got = super::month(SAMPLE, 2026, 9);
         assert_eq!(super::name(SAMPLE), "家の予定");
         assert!(super::looks_like(SAMPLE));
@@ -374,7 +374,7 @@ END:VEVENT\r\nEND:VCALENDAR\r\n";
     /// 隔週は、年をまたいでもずれない ── 週番号で引き算していたときは
     /// 一月にずれた。
     #[test]
-    fn every_other_week_survives_the_new_year() {
+    fn 隔週の繰り返しが年をまたいでも続く() {
         let text = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20251217T090000Z\n\
 RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=WE\nSUMMARY:隔週\nEND:VEVENT\nEND:VCALENDAR\n";
         let got: Vec<String> = super::month(text, 2026, 1).iter()
@@ -386,7 +386,7 @@ RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=WE\nSUMMARY:隔週\nEND:VEVENT\nEND:VCALENDAR
     /// **壊れた繰り返しで止まらない。** `UNTIL` も `COUNT` も無い毎日を
     /// 渡されても、数え上げは月の終わりで終わる。
     #[test]
-    fn a_runaway_rule_still_ends() {
+    fn 暴走しそうな繰り返し規則でも必ず終わる() {
         let text = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20200101T090000Z\n\
 RRULE:FREQ=DAILY\nSUMMARY:毎日\nEND:VEVENT\nEND:VCALENDAR\n";
         let got = super::month(text, 2026, 9);

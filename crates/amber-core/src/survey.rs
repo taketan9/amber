@@ -292,7 +292,7 @@ mod tests {
     /// ディレクトリは*配下*の合計を伴って届く。この機能の成否を分ける数値が
     /// それ。以前は空のまま届いていた。
     #[test]
-    fn a_directory_carries_its_subtree() {
+    fn ディレクトリは配下の合計を持って返る() {
         let d = sandbox();
         let s = survey(d.path(), Limits::default(), &AtomicBool::new(false));
         assert_eq!(find(&s, "node_modules").size, 8000, "the package, not the folder entry");
@@ -303,7 +303,7 @@ mod tests {
     /// ない。巨大であることだけが重要なフォルダは、中身が表示されない場合でも
     /// そう伝わる必要がある。
     #[test]
-    fn the_depth_limit_does_not_shrink_the_sizes() {
+    fn 深さの上限はサイズを小さくしない() {
         let d = sandbox();
         let shallow = survey(
             d.path(),
@@ -318,7 +318,7 @@ mod tests {
     /// ドットで始まるディレクトリは不要物ではない。整理系の機能に `.git` を
     /// 候補として見せてはいけない。
     #[test]
-    fn hidden_is_a_choice() {
+    fn 隠しファイルを見るかどうかは選べる() {
         let d = sandbox();
         let without = survey(d.path(), Limits::default(), &AtomicBool::new(false));
         assert!(!without.rows.iter().any(|r| r.rel.starts_with(".git")));
@@ -333,7 +333,7 @@ mod tests {
     /// **報告されない上限は嘘である。** 「見つからなかった」と「見た範囲では
     /// 見つからなかった」は、区別できなければならない。
     #[test]
-    fn a_full_survey_says_so() {
+    fn 上限に達した調査は_そう報告する() {
         let d = sandbox();
         let s = survey(
             d.path(),
@@ -370,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn age_refuses_to_be_negative() {
+    fn 経過日数が負にならない() {
         let now = SystemTime::now();
         assert_eq!(age_days(Some(now - Duration::from_secs(86_400 * 3)), now), Some(3));
         assert_eq!(age_days(Some(now + Duration::from_secs(86_400)), now), None, "clock skew");
@@ -378,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn sizes_read_like_sizes() {
+    fn サイズが人の読める形で出る() {
         assert_eq!(brief_size(0), "0B");
         assert_eq!(brief_size(999), "999B");
         assert_eq!(brief_size(1536), "1.5K");

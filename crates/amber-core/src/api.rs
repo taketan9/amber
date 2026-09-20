@@ -1638,7 +1638,7 @@ mod tests {
     }
 
     #[test]
-    fn a_note_crosses_as_things_to_draw() {
+    fn ノートは描画単位になって渡る() {
         let r = call("blocks", &serde_json::json!({
             "text": "---\ntitle: x\n---\n# 題\n本文。\n![](a.jpg)\n",
         })).unwrap();
@@ -1709,7 +1709,7 @@ mod tests {
     }
 
     #[test]
-    fn the_sentence_you_remember_is_usually_further_down() {
+    fn 憶えている文は_たいてい抜粋より下にある() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(
             d.path().join("long.md"),
@@ -1736,7 +1736,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_notebook_is_still_a_notebook() {
+    fn 空のノートブックもノートブック() {
         let d = note_dir();
         let made = call("mkbook", &serde_json::json!({
             "dir": d.path().join("仕事").to_str().unwrap(),
@@ -1765,7 +1765,7 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_is_a_file_somebody_can_hand_to_something_else() {
+    fn バックアップは_ほかのアプリに渡せるファイルになる() {
         let d = note_dir();
         std::fs::create_dir_all(d.path().join("仕事")).unwrap();
         std::fs::write(
@@ -1798,7 +1798,7 @@ mod tests {
     }
 
     #[test]
-    fn a_routine_is_carried_out_once_and_written_down() {
+    fn 繰り返しは一度だけ実行され_記録される() {
         let d = tempfile::tempdir().unwrap();
         let t = d.path().join("ごみ.md");
         std::fs::write(&t, "---\ntitle: ごみ\nrepeat: weekly wed 09:00\nlast: 2026-08-30\n---\n本文\n").unwrap();
@@ -1817,7 +1817,7 @@ mod tests {
     }
 
     #[test]
-    fn a_photo_is_written_beside_the_note_and_the_link_finds_it() {
+    fn 写真はノートの隣に書かれ_リンクがそれを指す() {
         let d = note_dir();
         let note = d.path().join("a.md").to_str().unwrap().to_string();
         // "aGk=" は "hi"。パディングも data: の前置きも、往復で壊れてはいけない ──
@@ -1834,7 +1834,7 @@ mod tests {
     }
 
     #[test]
-    fn deleting_removes_the_note_and_says_so_when_there_is_none() {
+    fn 削除はノートを消し_無ければ無いと言う() {
         let d = note_dir();
         let note = d.path().join("a.md").to_str().unwrap().to_string();
         assert_eq!(call("delete", &serde_json::json!({ "path": note })).unwrap()["ok"], true);
@@ -1845,7 +1845,7 @@ mod tests {
     }
 
     #[test]
-    fn the_phone_is_told_what_to_match_not_left_to_work_it_out() {
+    fn 照合対象は_iphone_に渡す_向こうで導出させない() {
         let d = note_dir();
         let r = call("notes", &serde_json::json!({ "path": d.path().to_str().unwrap() })).unwrap();
         let notes = r["notes"].as_array().unwrap();
@@ -1859,7 +1859,7 @@ mod tests {
     }
 
     #[test]
-    fn a_note_read_and_written_back_is_the_same_file() {
+    fn 読んで書き戻したノートは同じファイル() {
         let d = note_dir();
         let path = d.path().join("a.md").to_str().unwrap().to_string();
         let before = std::fs::read(d.path().join("a.md")).unwrap();
@@ -1883,7 +1883,7 @@ mod tests {
     }
 
     #[test]
-    fn saving_over_someone_elses_writing_is_refused_not_done() {
+    fn 他人の書き込みへの上書きは_実行せず拒否する() {
         let d = note_dir();
         let path = d.path().join("a.md").to_str().unwrap().to_string();
         let r = call("read", &serde_json::json!({ "path": path })).unwrap();
@@ -1914,7 +1914,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_note_is_made_where_it_was_asked_for() {
+    fn 新しいノートは指定された場所にできる() {
         let d = tempfile::tempdir().unwrap();
         let sub = d.path().join("まだ無い");
         let r = call(
@@ -1934,7 +1934,7 @@ mod tests {
     }
 
     #[test]
-    fn a_coloured_word_comes_back_as_pieces_the_drawer_can_use() {
+    fn 色付きの語は_描く側が使える形に分かれて返る() {
         let text = "ふつうと<span style=\"color:#0E93A8\">シアン</span>。\n";
         let bs = call("blocks", &serde_json::json!({ "text": text })).unwrap();
         let runs = bs["blocks"][0]["runs"].as_array().unwrap();
@@ -1949,7 +1949,7 @@ mod tests {
     }
 
     #[test]
-    fn the_tag_line_of_an_event_goes_in_and_comes_back() {
+    fn 予定のタグ行は_書いて読み戻せる() {
         // **口が繋がっていることを見る。** 判断（`caltag`）の試験は
         // あちらにある ── ここで見たいのは、デスクトップ版と iPhone が呼ぶ名前で
         // 同じ答えが返ってくることだけ。
@@ -1994,7 +1994,7 @@ mod tests {
     }
 
     #[test]
-    fn a_favourite_is_a_second_place_and_not_a_move() {
+    fn お気に入りは二つ目の居場所であって_移動ではない() {
         let d = tempfile::tempdir().unwrap();
         let root = d.path();
         std::fs::create_dir_all(root.join("仕事")).unwrap();
@@ -2034,7 +2034,7 @@ mod tests {
     }
 
     #[test]
-    fn moving_everywhere_copies_first_and_never_overwrites() {
+    fn 全体の移動はコピーが先で_上書きはしない() {
         let d = tempfile::tempdir().unwrap();
         let from = d.path().join("いま");
         let to = d.path().join("あたらしい");
@@ -2066,7 +2066,7 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_goes_back_without_treading_on_what_is_there() {
+    fn バックアップの書き戻しは_そこにあるものを踏まない() {
         let d = tempfile::tempdir().unwrap();
         let root = d.path().join("ノート");
         std::fs::create_dir_all(&root).unwrap();
@@ -2549,7 +2549,7 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_can_be_renamed_or_thrown_away_but_only_inside_the_notes() {
+    fn フォルダは改名も削除もできるが_ノートの中に限る() {
         let d = tempfile::tempdir().unwrap();
         let root = d.path().canonicalize().unwrap();
         std::fs::create_dir_all(root.join("仕事")).unwrap();
@@ -2577,7 +2577,7 @@ mod tests {
     }
 
     #[test]
-    fn a_note_splits_into_its_bookkeeping_and_its_words() {
+    fn ノートは管理情報と本文に分かれる() {
         let text = "---\ntitle: x\ntags: [a]\n---\n\n本文。\n";
         let out = call("split", &serde_json::json!({ "text": text })).unwrap();
         assert_eq!(out["head"], "---\ntitle: x\ntags: [a]\n---\n");
@@ -2593,7 +2593,7 @@ mod tests {
     }
 
     #[test]
-    fn a_task_comes_back_pressable_and_pressing_it_writes_the_line() {
+    fn チェックボックスは押せる形で返り_押すと行が書き換わる() {
         let text = "- [ ] 牛乳\n- [x] 珈琲\n";
         let bs = call("blocks", &serde_json::json!({ "text": text })).unwrap();
         let bs = bs["blocks"].as_array().unwrap();
