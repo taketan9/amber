@@ -742,7 +742,7 @@ const t0 = Date.now();
             await new Promise((g) => setTimeout(g, 250));
         }
         if (!state.notes.length) return { bad: 'ノートが一本も読めません' };
-        // ネットワークは固定の名前で開き直すので、題に合わせた改名は切る（依頼 492）。
+        // 総当たりは固定の名前で開き直すので、題に合わせた改名は切る（依頼 492）。
         nameAuto = false;
         await openNote(${note('網.md')});
         for (let i = 0; i < 40 && !editor; i += 1) await new Promise((g) => setTimeout(g, 100));
@@ -1049,8 +1049,8 @@ try {
     record({ fx: '台本', target: '-', where: '-', op: '-', why: ['台本が途中で落ちました: ' + e.message], name: '[台本] 途中で落ちた' });
     console.log('  ✗ 台本が途中で落ちました: ' + e.message);
 }
-// 後始末 ── ネットワークのノートを元の文字に（デスクトップ版が返ってこないなら諦める）。
-try { await setBody({ ...FIXTURES[0], md: 'ここはネットワークが使うノートです。' }); } catch { /* 報せは書く */ }
+// 後始末 ── 総当たりのノートを元の文字に（デスクトップ版が返ってこないなら諦める）。
+try { await setBody({ ...FIXTURES[0], md: 'ここは総当たりが使うノートです。' }); } catch { /* 報せは書く */ }
 
 /* ── 報せ ── */
 
@@ -1058,7 +1058,7 @@ mkdirSync(OUT, { recursive: true });
 const bad = cases.filter((c) => c.why && c.why.length);
 const seen = cases.filter((c) => !(c.why && c.why.length) && c.want === undefined && c.st);
 const lines = [];
-lines.push(`# ネットワークの報せ（${new Date().toISOString().slice(0, 16).replace('T', ' ')}）`, '');
+lines.push(`# 総当たりの報せ（${new Date().toISOString().slice(0, 16).replace('T', ' ')}）`, '');
 lines.push(`${ran} とおり動かして、落第 ${bad.length} 件・見たまま ${seen.length} 件・${Math.round((Date.now() - t0) / 1000)} 秒`, '');
 lines.push('## 落第', '');
 for (const c of bad) {

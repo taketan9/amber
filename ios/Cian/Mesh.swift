@@ -18,7 +18,7 @@ import WebKit
 /// 送れないので、既定の動きは `execCommand`（`insertText`・`delete`・
 /// `forwardDelete`・`insertParagraph`）で起こす ── WebKit の既定はこれと同じ。
 ///
-/// 判断は画面の中の台本（`script`）が返す。**何が正しいかはデスクトップ版のネットワークと同じ表**
+/// 判断は画面の中の台本（`script`）が返す。**何が正しいかはデスクトップ版の総当たりと同じ表**
 /// （決めごとを写してある）。決めごとの無いところは落第にしない。
 @MainActor
 enum Mesh {
@@ -27,7 +27,7 @@ enum Mesh {
         var bad: [(String, String)] = []
     }
 
-    /// 行のどこで押しても同じ結果であるべきもの（デスクトップ版のネットワークの `SAME_ANYWHERE`）。
+    /// 行のどこで押しても同じ結果であるべきもの（デスクトップ版の総当たりの `SAME_ANYWHERE`）。
     private static let sameAnywhere: Set<String> = [
         "見出し", "箇条書き", "チェック", "番号", "引用", "Tab", "⇧Tab",
     ]
@@ -126,7 +126,7 @@ enum Mesh {
             ?? error.localizedDescription
     }
 
-    /// 画面の中で動く台本。**デスクトップ版のネットワークの `grid-page.js` と `grid.mjs` の写し**だが、
+    /// 画面の中で動く台本。**デスクトップ版の総当たりの `grid-page.js` と `grid.mjs` の写し**だが、
     /// 押し方はiPhone の入口（`window.mark`・`window.putFace`・キーの受け口）に
     /// 合わせてある。決めごとを足したら、デスクトップ版の `expect` と一緒にここも直す。
     static let script = #"""

@@ -287,7 +287,7 @@ function makeWindow() {
         if (level < 2) return;                 // 0=log 1=info 2=warning 3=error
         console.error(`[ウィンドウ] ${message}` + (at ? `  (${at}:${line})` : ''));
     });
-    // **描く側が死んだら、なぜ死んだかを端末に出す。** ネットワークを回している最中に
+    // **描く側が死んだら、なぜ死んだかを端末に出す。** 総当たりを回している最中に
     // デスクトップ版が黙って消えた（2026-09-11・二十分走ったあと）── 落ちたのか、
     // 記憶を使い切ったのかが、これが無いとどこにも残らない。
     win.webContents.on('render-process-gone', (_e, why) => {

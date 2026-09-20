@@ -625,7 +625,7 @@ struct Paper: UIViewRepresentable {
       box.dispatchEvent(new Event('input'));
     };
     /// 行末の Delete（外付けのキーボード・fn+delete）── 次が記号付きの行なら何も
-    /// 起きない（デスクトップ版と同じ・`checkDel`・ネットワークの決めごと 2）。
+    /// 起きない（デスクトップ版と同じ・`checkDel`・総当たりの決めごと 2）。
     const fwd = (e) => {
       if (e.isComposing) return;
       if (checkCut(box)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }

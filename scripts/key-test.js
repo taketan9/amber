@@ -218,7 +218,7 @@ async function press(md, where, at, hit) {
 
         r = await press('## 見出し', '見出し', 0, () => checkReturn(box));
         // **既定に任せない** ── Chromium は空の見出しを上に作り、`# ` の一行が
-        // ファイルに残る（ネットワークが捕まえた・2026-09-10）。
+        // ファイルに残る（総当たりが捕まえた・2026-09-10）。
         ok(r.took === true, '先頭では受ける（上に空の段落を置く）', r.took);
         ok(r.md === '## 見出し\n', '空の段落は文字に出ない（見出しは見出しのまま）', r.md);
         ok(box.firstElementChild.tagName === 'P' && box.children[1].tagName === 'H2',
@@ -267,7 +267,7 @@ async function press(md, where, at, hit) {
         ok(r.took === true, '図のすぐ下の行頭では、何も起きない（受けて止める）', r.took);
         ok(r.md === md + '\n', '文字は一文字も動いていない', r.md);
 
-        // Delete の裏（ネットワークが捕まえた・2026-09-10 ── 既定は図を消して下と繋ぐ）。
+        // Delete の裏（総当たりが捕まえた・2026-09-10 ── 既定は図を消して下と繋ぐ）。
         const up = 'そのまえ。\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nそのあと。';
         r = await press(up, 'そのまえ。', 5, () => checkDel(box));
         ok(r.took === true, '図のすぐ上の行末の Delete は、何も起きない（受けて止める）', r.took);
@@ -395,7 +395,7 @@ async function press(md, where, at, hit) {
            '先頭が触れるものなら、何も置かない', box.firstElementChild.textContent);
     }
 
-    say('記号を外しても、入れ子は失わない（ネットワークが捕まえた・2026-09-10）');
+    say('記号を外しても、入れ子は失わない（総当たりが捕まえた・2026-09-10）');
     {
         const md = '- ひとつ\n- ふたつ\n  - 入れ子\n- みっつ';
         let r = await press(md, 'ふたつ', 0, () => checkBack(box));
@@ -451,7 +451,7 @@ async function press(md, where, at, hit) {
         ok(!box.querySelector('li:empty'), '空の項目を残さない', box.innerHTML);
     }
 
-    say('インデントた段落を見出しにすると、インデントは外れる（ネットワークの決めごと 9 の筋）');
+    say('インデントた段落を見出しにすると、インデントは外れる（総当たりの決めごと 9 の筋）');
     {
         await draw('　インデントた段落。');
         caretAt(find('インデントた'), 0);
@@ -601,7 +601,7 @@ async function press(md, where, at, hit) {
         ok(r.took === false, '箱の外では受けない', r.took);
     }
 
-    say('入れ子を持つ項目の行末の Delete・済んだセルの行頭の Enter（ネットワークが捕まえた・2026-09-11）');
+    say('入れ子を持つ項目の行末の Delete・済んだセルの行頭の Enter（総当たりが捕まえた・2026-09-11）');
     {
         let r = await press('- ふたつ\n  - 入れ子', 'ふたつ', 3, () => checkDel(box));
         ok(r.took === true, '入れ子を持つ項目の文字の終わりで、受けて止める', r.took);

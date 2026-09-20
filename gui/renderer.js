@@ -1666,7 +1666,7 @@ function stripEnds() {
 /// たどると際限なく増える ── 依頼 377 が心配していたのはこれだった
 /// （1002 本のフォルダを上から見ただけで 1002 タブ）。
 ///
-/// **これはネットワークであって、道具ではない。** 50 枚も並べば帯はとうに読めないので、
+/// **これは歯止めであって、道具ではない。** 50 枚も並べば帯はとうに読めないので、
 /// ふだんの片付けは「このノート以外をすべて閉じる」でやる。ここが効くのは、
 /// 片付けを忘れて何百本も見て回った日だけ ── だから低くしない。低くすると、
 /// **まだ使っているタブが黙って消える**ほうの害が出る。
@@ -2297,7 +2297,7 @@ el('read').addEventListener('paste', (e) => {
     }
     // **表のセルには文字だけ（改行は空白に）。項目には文字だけ（改行ごとに
     // 項目を増やす）。** かたまりのまま入れると、セルでは見出しの文字だけが
-    // 混ざって一覧が消え、項目では一覧が入れ子になった（ネットワークが捕まえた・
+    // 混ざって一覧が消え、項目では一覧が入れ子になった（総当たりが捕まえた・
     // 2026-09-10・本人が決めた）。
     {
         const plain = e.clipboardData.getData('text/plain')
@@ -2632,7 +2632,7 @@ function blockToMd(node, depth = 0) {
             .filter((x) => x !== null).join('\n\n');
         // **中身が空なら札だけ。** `>` の行を足すと、表示画面で入れた直後の
         // 注記（`> [!NOTE]`）が次の保存で `> [!NOTE]⏎>` に変わる ── 同期先に
-        // 差分が一度飛ぶ（ネットワークが捕まえた・2026-09-10）。
+        // 差分が一度飛ぶ（総当たりが捕まえた・2026-09-10）。
         if (!body.trim()) return '> [!' + kind.toUpperCase() + ']';
         return ['> [!' + kind.toUpperCase() + ']',
                 ...body.split('\n').map((l) => (l ? '> ' + l : '>'))].join('\n');
@@ -2641,7 +2641,7 @@ function blockToMd(node, depth = 0) {
         case 'H1': case 'H2': case 'H3': case 'H4': case 'H5': case 'H6': {
             // **文字の無い見出しは書かない。** 画面には出ている（打てる形）が、
             // 文字を打つまでファイルには出さない（本人が決めた・2026-09-11・
-            // ネットワークの決めごと 7）── 空の `# ` が同期先へ飛ばない。
+            // 総当たりの決めごと 7）── 空の `# ` が同期先へ飛ばない。
             const t = inlineToMd(node);
             if (!edges(t)) return null;
             return '#'.repeat(Number(node.tagName[1])) + ' ' + t;
@@ -2665,7 +2665,7 @@ function blockToMd(node, depth = 0) {
                 if (li.tagName !== 'LI') continue;
                 // **文字の無い項目は書かない**（入れ子も無ければ）── 項目の末尾で
                 // Enter を押した瞬間の `- ` や `- [ ] ` を、文字を打つまでファイルに
-                // 出さない（本人が決めた・2026-09-11・ネットワークの決めごと 11）。
+                // 出さない（本人が決めた・2026-09-11・総当たりの決めごと 11）。
                 if (!edges(inlineToMd(li)) && !li.querySelector(':scope > ul, :scope > ol')) continue;
                 n += 1;
                 const mark = li.querySelector(':scope > .box');
@@ -2748,7 +2748,7 @@ function blockToMd(node, depth = 0) {
             // **段落の中に潜った一覧を、落とさない。** Chromium の
             // `insertOrderedList` は `<p>` の中に `<ol>` を作ることがあり
             // （`<p><ol><li>…</li></ol></p>`）、`inlineToMd` は一覧を飛ばす
-            // ので、**その行が丸ごと消えていた**（ネットワークが捕まえた・2026-09-10・
+            // ので、**その行が丸ごと消えていた**（総当たりが捕まえた・2026-09-10・
             // 段落で「番号リスト」を押すと段落が消える）。中の一覧は、
             // かたまりとして続けて書く ── 失うよりは、形が少し違うほうがよい。
             const lists = [...node.children].filter((c) => ['UL', 'OL'].includes(c.tagName))
@@ -2875,7 +2875,7 @@ function checkEnter(li) {
 
     // **行頭で押したら、上に空のセルを置く。** 後ろの文字を次へ送ると、済んだ
     // セル（`[x]`）が文字の無い行に残り、文字のほうが新しい空のセルに付く ──
-    // 保存すると `- [x] やった` が `- [ ] やった` に変わる（ネットワークが捕まえた・
+    // 保存すると `- [x] やった` が `- [ ] やった` に変わる（総当たりが捕まえた・
     // 2026-09-11）。文字は自分のセルと一緒に居る。
     if (atHead(li)) {
         const above = document.createElement('li');
@@ -3211,7 +3211,7 @@ function checkReturn(box) {
     //
     // **既定に任せない。** Chromium の既定は、見出しの先頭の Enter で
     // **空の見出し**を上に作る（`<h1><br></h1>`）── 文字に戻すと `# ` の一行が
-    // ファイルに残る（ネットワークが捕まえた・2026-09-10）。`PAPER.ja.md` 六章の乙は
+    // ファイルに残る（総当たりが捕まえた・2026-09-10）。`PAPER.ja.md` 六章の乙は
     // 「上に空の段落が一つ入る」なので、こちらで置く。
     if (atHead(line)) {
         const p = document.createElement('p');
@@ -3261,7 +3261,7 @@ function nextCell(cell) {
 /// 引用・注記の中の Enter は、**改行**（`<br>`）。
 ///
 /// 既定は段落を割る ── 引用では文字に戻すとき二つの段落が並びの行に均される
-/// のに、注記では `>` の空行が挟まり、同じ箱なのに手触りが違っていた（ネットワークが
+/// のに、注記では `>` の空行が挟まり、同じ箱なのに手触りが違っていた（総当たりが
 /// 捕まえた・2026-09-10・本人が決めた「引用と同じ（改行）」・2026-09-11）。
 /// 空の行での Enter は `quitEnter`（箱から出る）が先に受ける。
 /// 受けたら `true`。
@@ -3481,7 +3481,7 @@ function unwrapList(box) {
 /// **一行は、見出しか項目か、どちらか一つ。** 項目の行を見出しにするときは、
 /// 先に点を外す（`PAPER.ja.md` 六章の丙・本人が決めた「点付きが見出しに
 /// なっても驚かない」）。`formatBlock` を項目にそのまま掛けると、Chromium は
-/// 一覧を割って**空の見出しと空の項目を作り、文字を落とす**（ネットワークが捕まえた・
+/// 一覧を割って**空の見出しと空の項目を作り、文字を落とす**（総当たりが捕まえた・
 /// 2026-09-10・一覧の行で「見出し」を押すと文字が消える）。
 function lineToPara(box) {
     for (const line of pickedLines(box)) {
@@ -3519,7 +3519,7 @@ function tidyLists(box) {
 ///   - 一行は、見出しか項目か、どちらか一つ（点を付ける前に見出しを落とし、
 ///     見出しにする前に点を外す）
 ///   - **表のセルの中では、一覧にしない** ── Markdown の表のセルに一覧は
-///     書けず、`insertOrderedList` はセルの文字を消す（ネットワークが捕まえた・
+///     書けず、`insertOrderedList` はセルの文字を消す（総当たりが捕まえた・
 ///     2026-09-10）。受けて、何もしない（`false` を返す）
 function blockAs(box, what) {
     const sel = getSelection();
@@ -3541,7 +3541,7 @@ function blockAs(box, what) {
         flattenHeads(box);
         cmd(what === 'ul' ? 'insertUnorderedList' : 'insertOrderedList');
         tidyLists(box);
-        // インデントは外す ── 項目にインデントは無い（本人が決めた・2026-09-11・ネットワークの決めごと 9）。
+        // インデントは外す ── 項目にインデントは無い（本人が決めた・2026-09-11・総当たりの決めごと 9）。
         for (const li of pickedLines(box).filter((l) => l.tagName === 'LI')) {
             const first = li.firstChild && li.firstChild.classList && li.firstChild.classList.contains('box')
                 ? li.firstChild.nextSibling : li.firstChild;
@@ -3559,7 +3559,7 @@ function blockAs(box, what) {
     if (/^h[1-6]$/.test(what) || what === 'p') {
         if (cell && box.contains(cell)) return false;
         lineToPara(box);
-        // 見出しにインデントは無い ── 項目と同じく外す（ネットワークの決めごと 9 と同じ筋・2026-09-11）。
+        // 見出しにインデントは無い ── 項目と同じく外す（総当たりの決めごと 9 と同じ筋・2026-09-11）。
         if (what !== 'p') {
             for (const l of pickedLines(box)) {
                 const first = l.firstChild;
@@ -3673,7 +3673,7 @@ function checkBack(box) {
 /// その裏で、行末の Delete は**次の行の記号を消さない** ── 既定に任せると
 /// `- [ ] やること⏎- [x] やった` が `- [ ] やることやった` になり（セルが
 /// 一つ消える）、表の最後のセルは下の段落を吸い込み、枠は丸ごと消えて下の
-/// 段落と繋がった（ネットワークが捕まえた・2026-09-10・本人が決めた「次が記号付きの
+/// 段落と繋がった（総当たりが捕まえた・2026-09-10・本人が決めた「次が記号付きの
 /// 行なら、何も起きない」・2026-09-11）。段落と段落は、これまで通り繋がる。
 /// 受けたら `true`（何もしない）。
 function checkDel(box) {
@@ -3683,7 +3683,7 @@ function checkDel(box) {
     if (!line) return false;
     // **項目の「終わり」は、入れ子の手前。** 入れ子を持つ項目は `textContent`
     // に子の文字まで含むので、`atTail` では終わりにならず、既定の Delete が
-    // 入れ子の一つめを親に吸い込んだ（`- ふたつ入れ子`・ネットワークが捕まえた・
+    // 入れ子の一つめを親に吸い込んだ（`- ふたつ入れ子`・総当たりが捕まえた・
     // 2026-09-11）。
     if (!(line.tagName === 'LI' ? atOwnTail(line) : atTail(line))) return false;
     // セルの終わり ── 表の外を吸い込まない。
@@ -3724,14 +3724,14 @@ function unlist(li) {
     if (!list || !['UL', 'OL'].includes(list.tagName)) return false;
     // **入れ子の項目は、いちばん外まで出してから段落にする。** 親の項目の
     // 中に段落は置けない ── 置くと文字に戻すとき親の文字に繋がる
-    // （`- ふたつ入れ子`・ネットワークが捕まえた・2026-09-10）。
+    // （`- ふたつ入れ子`・総当たりが捕まえた・2026-09-10）。
     for (let n = 0; n < 8 && list.parentElement && list.parentElement.tagName === 'LI'; n += 1) {
         outdent(li);
         list = li.parentElement;
     }
     const p = document.createElement('p');
     // **入れ子は連れていかない ── 残す。** 段落の中に一覧を入れると、文字に
-    // 戻す側が飛ばして**入れ子が丸ごと消える**（ネットワークが捕まえた・2026-09-10・
+    // 戻す側が飛ばして**入れ子が丸ごと消える**（総当たりが捕まえた・2026-09-10・
     // 一覧の途中の行頭で Backspace を押すと、その下の入れ子が消えた）。
     // 入れ子の項目は、下に残る項目の頭に並べる。
     const nested = [];
@@ -3839,7 +3839,7 @@ function putBox(li) {
 ///
 /// core は中身の無い注記を札だけで組む（`<div class="alert"><p class="alert-h">`）
 /// ── caret を置く先が無く、表示画面から入れた注記に**何も打てなかった**
-/// （ネットワークが捕まえた・2026-09-10・本人が決めた「打てる空の行を中に置く」）。
+/// （総当たりが捕まえた・2026-09-10・本人が決めた「打てる空の行を中に置く」）。
 /// 空のままなら文字に戻すとき落ちる（`blockToMd` は中身が空なら札だけ書く）。
 function fillAlerts(box) {
     for (const wrap of box.querySelectorAll(':scope > .alert, :scope > blockquote')) {
@@ -3854,7 +3854,7 @@ function fillAlerts(box) {
 ///
 /// 前は core の `mark` にかたまり丸ごとを渡していたので、四つの項目が
 /// 一度にセルになり、引用は引用ごと外れ、見出しは `- [ ] # 見出し` になった
-/// （ネットワークが捕まえた・2026-09-10・本人が決めた「caret の一行だけ。点・番号・
+/// （総当たりが捕まえた・2026-09-10・本人が決めた「caret の一行だけ。点・番号・
 /// 引用・見出し・インデントは外してセルに」）。表のセルでは何もしない（`false`）。
 function checkLine(box) {
     const line = lineAt(box);
@@ -3904,7 +3904,7 @@ function checkLine(box) {
 /// 項目の種類を替える（点 ⇄ 番号）。**その一行だけ ── 一覧はそこで割れる。**
 ///
 /// 既定の `insertOrderedList` を点の項目に掛けると、空の項目が増え、
-/// 押した位置で結果が変わり、セルの行ではセルだけが外に出た（ネットワークが捕まえた・
+/// 押した位置で結果が変わり、セルの行ではセルだけが外に出た（総当たりが捕まえた・
 /// 2026-09-10・本人が決めた「その一行だけ種類を替える」）。セルは連れていく
 /// （`1. [ ] やること` は Markdown が持っている形）。
 function switchItem(li, tag) {
@@ -3931,7 +3931,7 @@ function switchItem(li, tag) {
 /// 貼られた文字を、項目の中へ ── **改行ごとに項目を増やす。**
 ///
 /// 項目の中に見出しや一覧を貼ると、見出しの文字が項目の文字に混ざり、一覧は
-/// 入れ子になった（ネットワークが捕まえた・2026-09-10・本人が決めた「項目には文字だけ、
+/// 入れ子になった（総当たりが捕まえた・2026-09-10・本人が決めた「項目には文字だけ、
 /// 改行ごとに項目を増やす」）。
 function pasteLines(box, lines) {
     const line = lineAt(box);
@@ -4294,7 +4294,7 @@ el('read').addEventListener('keydown', (e) => {
         }
         // **見出しと項目の中では、Enter と同じ**（`PAPER.ja.md` 六章の乙）。
         // 既定に任せると `<br>` が見出しの中に入り、`# 見⏎出し` の形で
-        // ファイルに残る（ネットワークが捕まえた・2026-09-10）── 下の Enter のパスを
+        // ファイルに残る（総当たりが捕まえた・2026-09-10）── 下の Enter のパスを
         // そのまま通し、どれも受けなければ段落を割る既定を自分で呼ぶ。
         const line = lineAt(el('read'));
         if (!line || !(line.tagName === 'LI' || /^H[1-6]$/.test(line.tagName))) return;
@@ -4354,7 +4354,7 @@ el('read').addEventListener('keydown', (e) => {
     if (checkCut(el('read'))) { e.preventDefault(); readChanged(); return; }
     if (e.code === 'Delete') {
         // **枠のすぐ上の行末では、何も起きない**（`checkDel`）── 既定は
-        // 枠を丸ごと消して下の段落と繋ぐ（ネットワークが捕まえた・2026-09-10）。
+        // 枠を丸ごと消して下の段落と繋ぐ（総当たりが捕まえた・2026-09-10）。
         if (checkDel(el('read'))) e.preventDefault();
         return;
     }
@@ -4922,7 +4922,7 @@ const MARKS = [
         ['見出し', '⌘1', () => onRead() ? readHeading() : applyMark('heading')],
         ['箇条書き', '⌘⇧8', () => onRead() ? readBlockAs('ul') : applyMark('line', '- ')],
         // **表のセルでは何もしない** ── 表の文字ぜんぶに `- [ ] ` が付く
-        // （ネットワークが捕まえた・2026-09-10）。
+        // （総当たりが捕まえた・2026-09-10）。
         ['チェックリスト', '⌘⇧9', () => onRead() ? readCheck() : applyMark('line', '- [ ] ')],
         ['番号リスト', '⌘⇧7', () => onRead() ? readBlockAs('ol') : applyMark('line', '1. ')],
         ['太字', '⌘B', () => onRead() ? readDress('bold') : applyMark('wrap', '**')],
@@ -5239,7 +5239,7 @@ const firstWord = (words) => String(words || '').split(' ')[0] || '';
 function putFace(ch) {
     // **並べて表示では、憶えている caret で決める。** 板を押した時点で焦点は
     // 板の欄に移っているので `onRead()`（いまの選び目）は表示画面を指さない
-    // ── 表示画面に打っていた絵文字がコード画面へ入る（ネットワークが捕まえた・
+    // ── 表示画面に打っていた絵文字がコード画面へ入る（総当たりが捕まえた・
     // 2026-09-10）。
     const spotInRead = caretSpot && el('read').contains(
         caretSpot.startContainer.nodeType === 3 ? caretSpot.startContainer.parentNode : caretSpot.startContainer);

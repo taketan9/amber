@@ -39,6 +39,17 @@ const DIRS = ['crates/amber-core', 'crates/amber-ffi', 'crates/amber-server',
               'crates/amber-onenote', 'gui', 'ios/Cian', 'scripts', 'docs',
               'packaging', '.github'];
 
+/// **リポジトリの直下にある文書も見る**（2026-09-21）。
+///
+/// 依頼 642 のときはフォルダだけを見ていて、直下の `.md` が丸ごと外れて
+/// いた ── `PAPER.ja.md` に 67 か所、`PLANS.ja.md` に 49 か所、昔の言葉が
+/// 残ったまま通っていた。**見ていないところは、見ていないと気づけない。**
+///
+/// `REQUESTS*.md` は入れない ── **本人の逐語**と、あの日に何があったかの
+/// 記録なので、あとから言葉を直すものではない（用語表を決めた行そのものも
+/// あそこに居る）。
+const ROOTS = ['README.ja.md', 'PAPER.ja.md', 'PLANS.ja.md'];
+
 /// 見ない場所。
 ///
 ///   * `packaging/welcome/` ── **利用者が読む本文**で、コメントではない。
@@ -50,14 +61,38 @@ const SKIP = ['packaging/welcome/', 'scripts/plain-test.js'];
 
 /// 直さないと決めたもの。**一つずつ理由を書く** ── 理由の書けない例外は、
 /// 例外ではなく直し忘れ。
+///
+/// **当たるのは、その言葉の上に重なったときだけ**（2026-09-21）。前は
+/// 「この行はぜんぶ見ない」だったので、`画面` や `文字` を含む行に混ざった
+/// 「窓」が丸ごと見逃された ── 言い換えたあとの文書はほとんどの行に
+/// `画面` か `文字` が入るので、**見張りがほぼ全部の行で黙っていた**。
+/// 壊して鳴るのを見て気づいた。
 const KEEP = [
     // 試験データ。直すと入力と期待値がずれる。
     /# 図と字/, /献立\.md/, /スマホ 電話 phone/, /"電話"/, /\| 面 \| いつ \|/,
     /"面"\.to_string/, /だいだいの字/, /という札です/, /ふつうの字と/,
+    // **amber の綴りの解き方**（依頼 329・本人が決めた）。README・画面・
+    // iPhone・サンプルのノートの四か所で同じ字。名前なので訳さない。
+    /Advanced Markdown Browser & Editor for Readability/,
     // 普通の日本語で、比喩ではない。
     /添え字/, /星印/, /目印/, /印を付け/, /印刷/, /来た道/, /道があれば/,
-    /窓口/, /葉に字を書いた/, /画面/, /文字/,
+    /窓口/, /葉に字を書いた/,
+    // 「機械的に」は道具の話ではなく「手でなく決まりどおりに」の意味。
+    // 端末とも環境とも言い換えられない。
+    /機械的/,
 ];
+
+/// その場所が、直さないと決めたものの中に入っているか。
+function kept(line, at, word) {
+    for (const k of KEEP) {
+        const re = new RegExp(k.source, 'g');
+        for (let m = re.exec(line); m; m = re.exec(line)) {
+            if (m.index <= at && at + word.length <= m.index + m[0].length) return true;
+            if (m.index === re.lastIndex) re.lastIndex += 1;
+        }
+    }
+    return false;
+}
 
 /// **英語の説明文かどうか。** 語彙だけ直しても、英語のまま残っていては
 /// 「普通の日本語で書く」を果たしたことにならない ── 2026-09-20 に「英語は
@@ -103,7 +138,7 @@ function comments(file, text) {
 function main() {
     const files = execFileSync('git', ['-C', ROOT, 'ls-files', '-z'], { encoding: 'buffer' })
         .toString('utf8').split('\0').filter(Boolean)
-        .filter((f) => DIRS.some((d) => f.startsWith(d)))
+        .filter((f) => DIRS.some((d) => f.startsWith(d)) || ROOTS.includes(f))
         .filter((f) => !f.startsWith('gui/node_modules') && !f.includes('/vendor/'))
         .filter((f) => !SKIP.some((s) => f.startsWith(s)))
         .filter((f) => /\.(rs|swift|js|mjs|py|sh|yml|toml|md|html)$/.test(f));
@@ -112,10 +147,14 @@ function main() {
     for (const f of files) {
         const text = fs.readFileSync(path.join(ROOT, f), 'utf8');
         for (const [n, line, fence] of comments(f, text)) {
-            if (KEEP.some((k) => k.test(line))) continue;
             for (const [word, instead] of PLAIN) {
-                if (line.includes(word)) bad.push({ f, n, word, instead, line: line.trim() });
+                for (let at = line.indexOf(word); at >= 0; at = line.indexOf(word, at + 1)) {
+                    if (kept(line, at, word)) continue;
+                    bad.push({ f, n, word, instead, line: line.trim() });
+                    break;
+                }
             }
+            if (!fence && KEEP.some((k) => k.test(line))) continue;
             if (!fence && englishProse(line)) {
                 bad.push({ f, n, word: '英語のまま', instead: '日本語で書く', line: line.trim() });
             }
