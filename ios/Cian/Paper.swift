@@ -401,6 +401,11 @@ struct Paper: UIViewRepresentable {
       }
       let art = e.target.closest('.mermaid, pre, figure, img');
       if (!art || !box.contains(art)) return;
+      // **打てるコードブロックは、叩いたら caret を置く**（依頼 645）──
+      // 触れないかたまり（図・画像）だけが吹き出しへ。前はここで枠も
+      // 受けていたので、**枠の中に指で入れなかった**（実機で確かめた）。
+      // 枠の吹き出し（コードで直す・消す）は長押しへ移した。
+      if (art.tagName === 'PRE' && !richBlock(art)) return;
       // **画像は包みごと持つ。** `closest` はいちばん内側を返すので、画像を
       // 叩くと `<img>` が来る ── 元の文字（`data-md`）を持っているのは
       // `keepMark` で受け取った `<figure>` のほうなので、そちらへ上がる。
@@ -414,6 +419,26 @@ struct Paper: UIViewRepresentable {
         : (art.classList.contains('mermaid') || art.querySelector('code.language-mermaid') ? 'fig' : 'pre');
       window.webkit.messageHandlers.menu.postMessage({
         kind, at: art.dataset.md || '', line: Number(art.dataset.line ?? -1),
+      });
+    });
+
+    /// **打てるコードブロックの吹き出しは、長押しで**（依頼 645）。
+    ///
+    /// 叩くのは「そこに打つ」になったので、「コードで直す」「消す」の行き先が
+    /// 無くなる ── デスクトップ版で右押しへ移したのと同じものを、iPhone では
+    /// 長押しに置く（`contextmenu` は `WKWebView` でも長押しで出る）。
+    ///
+    /// **選んでいるときは、何もしない。** 枠の中の文字を選ぼうとした長押しを
+    /// 吹き出しで邪魔すると、写すことも消すこともできなくなる。
+    box.addEventListener('contextmenu', (e) => {
+      const art = e.target.closest('pre');
+      if (!art || !box.contains(art) || richBlock(art)) return;
+      const sel = getSelection();
+      if (sel && !sel.isCollapsed && String(sel).length) return;
+      e.preventDefault();
+      picked = art;
+      window.webkit.messageHandlers.menu.postMessage({
+        kind: 'pre', at: art.dataset.md || '', line: Number(art.dataset.line ?? -1),
       });
     });
 
