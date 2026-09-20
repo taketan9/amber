@@ -504,7 +504,9 @@ struct Paper: UIViewRepresentable {
         let n = sel?.anchorNode;
         if (n && n.nodeType === 3) n = n.parentElement;
         const li = n?.closest?.('li');
-        if (!(li ? checkEnter(li) : false) && !quitEnter(n) && !checkReturn(box)) {
+        // コードブロックの中では、枠の中の改行（依頼 644・`checkFenceReturn`）。
+        if (!checkFenceReturn(box)
+          && !(li ? checkEnter(li) : false) && !quitEnter(n) && !checkReturn(box)) {
           document.execCommand('insertParagraph');
         }
       } else if (what.startsWith('mv:')) move(what.slice(3));
@@ -555,6 +557,9 @@ struct Paper: UIViewRepresentable {
       let n = getSelection()?.anchorNode;
       if (n && n.nodeType === 3) n = n.parentElement;
       if (!n || !box.contains(n)) return;
+      // **コードブロックの中は、まずここ**（依頼 644）── 既定は枠を二つに
+      // 割る。デスクトップ版と同じ関数（`checkFenceReturn`）に渡す。
+      if (checkFenceReturn(box)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
       const li = n.closest('li');
       // **iPhone の Return は改行。** 新しい段落は下の帯から（本人が決めた・
       // 2026-09-08）── iOS のメモも LINE も Return は改行で、iPhone に

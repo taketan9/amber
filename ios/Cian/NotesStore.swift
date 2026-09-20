@@ -666,16 +666,37 @@ final class NotesStore: ObservableObject {
     /// 既定は新しい順 ── ノートの一覧は上から読まれ、そこにあるべきなのは
     /// 最後に書いていたもの。名前順は、日付ではなく名前を憶えているときの
     /// ためで、デスクトップ版が出すのと同じ 2 つ。
+    /// **昇順と降順を持つ**（依頼 643・本人「同じボタンを押下したら昇順・降順を
+    /// 変更できないかな？」）。デスクトップ版はボタン 1 つで 6 つを順ぐりに回り、
+    /// こちらはメニューから選ぶ ── 並ぶ 6 つは同じで、順番も同じ。
+    ///
+    /// 矢印は「上に来るのはどちらか」を言う。`↓` は大きいほうが上（新しい順・
+    /// ん→あ）、`↑` は小さいほうが上（古い順・あ→ん）。
     enum Order: String, CaseIterable, Identifiable {
-        case updated, created, title
+        case updated, updatedAsc, created, createdAsc, titleAsc, titleDesc
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .updated: return "更新順"
-            case .created: return "作成順"
-            case .title: return "タイトル順"
+            case .updated: return "更新順 ↓"
+            case .updatedAsc: return "更新順 ↑"
+            case .created: return "作成順 ↓"
+            case .createdAsc: return "作成順 ↑"
+            case .titleAsc: return "タイトル順 ↑"
+            case .titleDesc: return "タイトル順 ↓"
             }
         }
+        /// 何を見て並べるか。見出しの帯（`bands`）はこれで決まる。
+        var by: By { switch self {
+            case .updated, .updatedAsc: return .updated
+            case .created, .createdAsc: return .created
+            case .titleAsc, .titleDesc: return .title
+        } }
+        /// 小さいほうが上か。
+        var ascending: Bool { switch self {
+            case .updatedAsc, .createdAsc, .titleAsc: return true
+            default: return false
+        } }
+        enum By { case updated, created, title }
     }
 
     @Published var order: Order = .updated
@@ -1072,7 +1093,7 @@ final class NotesStore: ObservableObject {
         var names: [String] = []
         var rows: [String: [Note]] = [:]
         for n in list {
-            let name = order == .title ? initial(n.title) : when(order == .created ? n.created : n.updated)
+            let name = order.by == .title ? initial(n.title) : when(order.by == .created ? n.created : n.updated)
             if rows[name] == nil { names.append(name) }
             rows[name, default: []].append(n)
         }
@@ -1101,14 +1122,20 @@ final class NotesStore: ObservableObject {
 
     private func sorted(_ list: [Note]) -> [Note] {
         var out = list
-        switch order {
+        switch order.by {
         case .updated: out.sort { $0.updated > $1.updated }
         case .created: out.sort { $0.created > $1.created }
-        // `localizedStandardCompare` and not `<`: 「あ」 before 「い」, and
+        // `<` ではなく `localizedStandardCompare`。「あ」を「い」より前に、
         // note-2 を note-10 より前に。素の文字列順ではどちらも間違える。
         case .title: out.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         }
-        return out
+        // **逆順は、並べ終えてからひっくり返す**（依頼 643）── 比較の向きを
+        // 2 通り書くと、同じ値のときの並びが向きによって変わる。`sort` は安定
+        // なので、ひっくり返せば同じ値の中の順序も素直に逆になる。
+        //
+        // タイトル順だけ既定が昇順なので、ひっくり返すのは降順のとき。
+        let flip = order.by == .title ? !order.ascending : order.ascending
+        return flip ? out.reversed() : out
     }
 
     /// ノートの本文と、どの時点のものかを言うスタンプ。

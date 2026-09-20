@@ -350,5 +350,65 @@ console.log('図の「元の文字」は、行番号がずれても作り直さ�
     ok(codeOf(pasted) === 'a b', '元の文字が無ければ、文字から拾って &nbsp; を戻す', codeOf(pasted));
 }
 
+console.log('表示画面で直したコードブロックが、ファイルの形で戻るか');
+{
+    // **色を付けたあとの枠は、改行が `<br>`、空白が `&nbsp;`**（`codeOf` と
+    // 同じ話）。そのまま `textContent` で拾うと、直した枠が一行に潰れて、
+    // 空白がぜんぶ U+00A0 で保存される ── 本物のアプリで実際に出た
+    // （2026-09-20・依頼 644）。
+    const pre = document.createElement('pre');
+    pre.innerHTML = '<code class="language-rust">fn&nbsp;main()&nbsp;{<br>'
+        + '&nbsp;&nbsp;&nbsp;&nbsp;let&nbsp;x&nbsp;=&nbsp;1;<br>}</code>';
+    ok(fenceText(pre.querySelector('code')) === 'fn main() {\n    let x = 1;\n}',
+       '改行は改行のまま、空白はふつうの空白で返る', fenceText(pre.querySelector('code')));
+
+    // 直した枠（元の文字と食い違う）は、組み直して返す。
+    pre.dataset.md = '```rust\nfn main() {\n    let x = 1;\n}\n```';
+    pre.innerHTML = '<code class="language-rust">fn&nbsp;main()&nbsp;{<br>'
+        + '&nbsp;&nbsp;&nbsp;&nbsp;let&nbsp;xy&nbsp;=&nbsp;1;<br>}</code>';
+    ok(round(pre.outerHTML) === '```rust\nfn main() {\n    let xy = 1;\n}\n```\n',
+       '打ったところだけ変わって、行も空白もそのまま', round(pre.outerHTML));
+
+    // **触っていない枠は、読んだときの文字のまま**（`~~~` で書いた枠が
+    // ``` で戻ると、触ってもいないノートが同期先で差分になる）。
+    const same = document.createElement('pre');
+    same.dataset.md = '~~~rust\nfn main() {}\n~~~';
+    same.innerHTML = '<code class="language-rust">fn&nbsp;main()&nbsp;{}</code>';
+    ok(round(same.outerHTML) === '~~~rust\nfn main() {}\n~~~\n',
+       '触っていない枠は、囲みの形まで元のまま', round(same.outerHTML));
+}
+
+console.log('コードブロックの中の Enter は、枠を割らずに改行するか');
+{
+    // **既定は枠を二つに割る** ── 二行目を書いたつもりが、枠が二つになって
+    // 出る（本物のアプリで確かめた・2026-09-20・依頼 644）。
+    box.innerHTML = '<pre><code class="language-js">const a = 1;</code></pre>';
+    const code = box.querySelector('code');
+    const r = document.createRange();
+    r.setStart(code.firstChild, code.firstChild.data.length);
+    r.collapse(true);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    ok(checkFenceReturn(box) === true, '枠の中では受ける');
+    ok(box.querySelectorAll('pre').length === 1, '枠は一つのまま',
+       box.querySelectorAll('pre').length);
+    ok(fenceText(code) === 'const a = 1;', '末尾の詰め物は文字に出ない', fenceText(code));
+    // **行末で押したときは、改行を二つ。** 一つだけだと caret の行き先が
+    // 無く、押したのに何も起きていないように見える（`<pre>` の末尾の改行）。
+    ok(code.textContent.endsWith('\n\n'), '行末で押したら、立てる行を一つ用意する',
+       JSON.stringify(code.textContent));
+
+    // 枠の外では受けない ── ふつうの段落の Enter は、これまでどおり。
+    box.innerHTML = '<p>ふつうの段落</p>';
+    const p = box.querySelector('p');
+    const r2 = document.createRange();
+    r2.setStart(p.firstChild, 3);
+    r2.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r2);
+    ok(checkFenceReturn(box) === false, '枠の外では受けない');
+}
+
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');
 process.exit(bad ? 1 : 0);

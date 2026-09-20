@@ -259,20 +259,23 @@ async function press(md, where, at, hit) {
 
     say('触れないかたまりは、一打では消えない');
     {
-        const md = '```\nコード\n```\n\nそのあと。';
+        // **材料は図。** コードブロックは 2026-09-20 に触れるようになった
+        // （依頼 644）ので、守りが要るのは図と画像だけになった ── 材料を
+        // 替えずに残すと、この守りは何も見ていないのに通り続ける。
+        const md = '```mermaid\nflowchart LR\n  A --> B\n```\n\nそのあと。';
         let r = await press(md, 'そのあと', 0, () => checkBack(box));
-        ok(r.took === true, '枠のすぐ下の行頭では、何も起きない（受けて止める）', r.took);
+        ok(r.took === true, '図のすぐ下の行頭では、何も起きない（受けて止める）', r.took);
         ok(r.md === md + '\n', '文字は一文字も動いていない', r.md);
 
-        // Delete の裏（ネットワークが捕まえた・2026-09-10 ── 既定は枠を消して下と繋ぐ）。
-        const up = 'そのまえ。\n\n```\nコード\n```\n\nそのあと。';
+        // Delete の裏（ネットワークが捕まえた・2026-09-10 ── 既定は図を消して下と繋ぐ）。
+        const up = 'そのまえ。\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nそのあと。';
         r = await press(up, 'そのまえ。', 5, () => checkDel(box));
-        ok(r.took === true, '枠のすぐ上の行末の Delete は、何も起きない（受けて止める）', r.took);
+        ok(r.took === true, '図のすぐ上の行末の Delete は、何も起きない（受けて止める）', r.took);
         ok(r.md === up + '\n', '文字は一文字も動いていない', r.md);
         r = await press(up, 'そのまえ。', 2, () => checkDel(box));
         ok(r.took === false, '行の途中の Delete は、文字を消すキーのまま', r.took);
         r = await press(up, 'そのあと。', 5, () => checkDel(box));
-        ok(r.took === false, '隣が枠でなければ、既定のまま', r.took);
+        ok(r.took === false, '隣が図でなければ、既定のまま', r.took);
     }
 
     say('選んで飾る ── 一行は見出しか項目か、どちらか一つ');
@@ -352,26 +355,39 @@ async function press(md, where, at, hit) {
 
     say('矢印 ── 触れないかたまりを跨ぐ');
     {
-        const md = '上の段落。\n\n```\nコード\n```\n\n下の段落。';
+        const md = '上の段落。\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\n下の段落。';
         let r = await press(md, '上の段落', 5, () => checkArrow(box, 'down'));
-        ok(r.took === true, '枠の上の行の末尾で ↓ を押すと、跨ぐ', r.took);
+        ok(r.took === true, '図の上の行の末尾で ↓ を押すと、跨ぐ', r.took);
         ok(r.md === md + '\n', '文字は一文字も動かない', r.md);
 
         r = await press(md, '下の段落', 0, () => checkArrow(box, 'up'));
-        ok(r.took === true, '枠の下の行の頭で ↑ を押すと、跨ぐ', r.took);
+        ok(r.took === true, '図の下の行の頭で ↑ を押すと、跨ぐ', r.took);
 
         r = await press(md, '上の段落', 2, () => checkArrow(box, 'down'));
         ok(r.took === false, '行の途中では、ふつうに動く（既定に任せる）', r.took);
 
+        // **コードブロックは跨がない**（依頼 644）── 触れるようになったので、
+        // ↓ で入っていける。跨いでしまうと、中に caret を置く手が無くなる。
+        const fence = '上の段落。\n\n```\nコード\n```\n\n下の段落。';
+        r = await press(fence, '上の段落', 5, () => checkArrow(box, 'down'));
+        ok(r.took === false, 'コードブロックは跨がない（中へ入れる）', r.took);
+
         // 図で始まるノート ── 上に一行足すパスが要る。
-        const top = '```\nコード\n```\n\n下の段落。';
+        const top = '```mermaid\nflowchart LR\n  A --> B\n```\n\n下の段落。';
         await draw(top);
         headStop(box);
         const first = box.firstElementChild;
         ok(first && first.tagName === 'P' && !first.textContent.trim(),
-           '枠で始まるノートの上に、降りられる一行が置かれる', first && first.tagName);
+           '図で始まるノートの上に、降りられる一行が置かれる', first && first.tagName);
         ok(paperToMd(box, '') === top + '\n',
            'その一行は、文字に戻すとき落ちる（ファイルは増えない）', paperToMd(box, ''));
+
+        // **コードブロックで始まるノートには、要らない**（依頼 644）──
+        // 中に caret を置けるので、上に空の一行を足す理由が無い。
+        await draw('```\nコード\n```\n\n下の段落。');
+        headStop(box);
+        ok(box.firstElementChild.tagName === 'PRE',
+           'コードブロックで始まるノートには、一行を足さない', box.firstElementChild.tagName);
 
         await draw('ふつうの段落。');
         headStop(box);

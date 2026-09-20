@@ -59,7 +59,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1A000000000000000000000D /* Build configuration list for PBXNativeTarget "Cian" */;
 			buildPhases = (
-				1A0000000000000000000031 /* Engine freshness */,
+				1A0000000000000000000031 /* エンジンが新しいか */,
 				1A0000000000000000000005 /* Sources */,
 				1A0000000000000000000006 /* Frameworks */,
 				1A0000000000000000000007 /* Resources */,
@@ -126,7 +126,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		1A0000000000000000000031 /* Engine freshness */ = {
+		1A0000000000000000000031 /* エンジンが新しいか */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -134,7 +134,7 @@
 			);
 			inputPaths = (
 			);
-			name = "Engine freshness";
+			name = "エンジンが新しいか";
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;

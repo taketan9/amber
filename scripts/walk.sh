@@ -176,6 +176,31 @@ fn main() {}
 ![amber の印](attachments/amber.png)
 MD
 
+# **コードブロックの段が使うノート**（依頼 644）。色を付ける枠（言語つき）と
+# 段落を混ぜておく ── 表示画面で選んで囲む・枠の中に打つ、をここで試す。
+cat > "$notes/枠.md" <<'MD'
+---
+title: 枠
+created: 2026-09-03
+---
+
+前の段落。
+
+```js
+const a = 1;
+```
+
+後ろの段落。
+
+もう一つの段落。
+
+```rust
+fn main() {
+    let x = 1;
+}
+```
+MD
+
 # **改名の段が使うノート**（依頼 492）。一行目で題が決まるもの・題が同じ二本目。
 printf -- '名前は一行目から\n\n本文。\n' > "$notes/改名.md"
 printf -- '# 買い物\n\n二本目。\n' > "$notes/二本目.md"
@@ -231,8 +256,13 @@ sleep 0.5
 # 訊きに行って、裏の側が止まる ── 2026-09-11・二度）。設定は上の写しと戻しで守り、
 # **走っているあいだは本人のアプリを触らない**（本人が変えた見方が巻き戻る）。
 # `AMBER_AWAKE` ── 後ろに隠れたテスト用のアプリを App Nap に止めさせない（`main.js`）。
+# **`--use-mock-keychain` が要る。** `$HOME` を作り替えているので、Chromium が
+# 鍵束を `$HOME/Library/Keychains` に探しに行って見つからず、**本人の画面に
+# 「amber を保持するキーチェーンが見つかりません」を出して、答えるまで止まる**
+# （2026-09-20 に実際に出した ── 走らせている本人が強制終了することになった）。
+# この旗を渡すと、鍵束の代わりに其の場限りの入れ物を使うので、何も訊かない。
 (cd "$root/gui" && env HOME="$work/home" AMBER_AWAKE=1 AMBER_DRIVE_URL="http://127.0.0.1:$driveport" AMBER_DRIVE_TOKEN=fake \
-  npx electron --remote-debugging-port="$port" \
+  npx electron --remote-debugging-port="$port" --use-mock-keychain \
   --disable-background-timer-throttling --disable-renderer-backgrounding \
   --disable-features=IntensiveWakeUpThrottling . \
   >"$work/win.log" 2>&1 &)

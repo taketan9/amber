@@ -54,12 +54,19 @@ await step('フォルダへ', `state.dest = { kind: 'book', what: '仕事' }; dr
 await step('タグへ', `state.dest = { kind: 'tag', what: '仕事' }; drawRail(); drawList(); return true;`, true);
 await step('ブックマークへ', `state.dest = { kind: 'star', what: '' }; drawRail(); drawList(); return true;`, true);
 await step('すべてのノートへ', `state.dest = { kind: 'all', what: '' }; drawRail(); drawList(); return true;`, true);
+// **同じボタンを押し続けると、6 とおりを順ぐりに回って元へ戻る**（依頼 643・
+// 本人「同じボタンを押下したら昇順・降順を変更できないかな？」）。
+// 一覧も毎回組み直されるので、どの並びでも落ちないことをここで見る。
 await step('並び順を回す', `
+    const was = [order, asc].join();
+    const seen = new Set();
     for (let i = 0; i < ORDERS.length; i += 1) {
-        order = ORDERS[(ORDERS.findIndex(([k]) => k === order) + 1) % ORDERS.length][0];
-        drawOrder(); drawList();
+        nextOrder();
+        seen.add([order, asc].join());
+        if (shownNotes().length === 0) return '並べたら一覧が空になりました: ' + order + ' ' + asc;
     }
-    return order.length > 0;`, true);
+    if (seen.size !== ORDERS.length) return '同じ並びを二度通りました: ' + [...seen].join(' / ');
+    return [order, asc].join() === was ? true : '元の並びに戻りません: ' + order + ' ' + asc;`, true);
 // **本文の中の言葉で引く。** 題で引くと「買い物」と「買い物リスト」の
 // 二本に当たり、数で見張れない（部分一致はそれで正しい）。
 // **一本にしか無い言葉で引く。** 「買い物」は題で二本に当たり、
@@ -292,6 +299,126 @@ await step('セルを押す', `
     if (!b) return 'なし';
     b.click();
     return true;`, true);
+
+// 五の乙。コードブロック（依頼 644）
+//
+// **jsdom では出ない形がここにある。** 表示画面の枠は Monaco が色を付けた
+// あとの姿で、改行が br・空白が nbsp ── 素の textContent で拾うと、直した
+// 枠が一行に潰れて、空白がぜんぶ U+00A0 で保存される（2026-09-20 に実際に
+// 出た）。paper-test は同じ形を手で組んで見ているが、**Monaco が本当に
+// その形を作るか**を見られるのはここだけ。
+await step('枠のノートを開く', `
+    await openNote(${path('枠.md')});
+    setView('read');
+    await new Promise((g) => setTimeout(g, 400));
+    return view;`, 'read');
+await step('選んだ段落が、コードブロックになる', `
+    const box = el('read');
+    const p = [...box.children].find((n) => n.tagName === 'P' && n.textContent.includes('前の段落'));
+    if (!p) return 'その段落がありません';
+    const r = document.createRange();
+    r.selectNodeContents(p);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    await readFence();
+    await new Promise((g) => setTimeout(g, 500));
+    const q = String.fromCharCode(96).repeat(3);
+    const n = String.fromCharCode(10);
+    const md = editor.getValue();
+    // 段落の下に空の枠が増えていない（前は増えていた）。
+    if ((md.match(/前の段落。/g) || []).length !== 1) return '段落が増えました';
+    return md.includes(q + n + '前の段落。' + n + q) ? 'ok' : md.slice(0, 200);`, 'ok');
+await step('二つの段落にまたがって選んでも、枠は一つ', `
+    const box = el('read');
+    const kids = [...box.children];
+    const a = kids.find((n) => n.tagName === 'P' && n.textContent.includes('後ろの段落'));
+    const b = kids.find((n) => n.tagName === 'P' && n.textContent.includes('もう一つ'));
+    if (!a || !b) return '段落がありません';
+    const r = document.createRange();
+    r.setStart(a.firstChild, 0);
+    r.setEnd(b.firstChild, b.firstChild.data.length);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    await readFence();
+    await new Promise((g) => setTimeout(g, 500));
+    const q = String.fromCharCode(96).repeat(3);
+    const n = String.fromCharCode(10);
+    const want = q + n + '後ろの段落。' + n + n + 'もう一つの段落。' + n + q;
+    return editor.getValue().includes(want) ? 'ok' : editor.getValue().slice(-200);`, 'ok');
+await step('枠の中の Enter は、枠を割らずに改行する', `
+    const box = el('read');
+    const pre = [...box.children].find((n) => n.tagName === 'PRE'
+        && /language-js/.test((n.querySelector(':scope > code') || {}).className || ''));
+    if (!pre) return 'js の枠がありません';
+    const code = pre.querySelector(':scope > code');
+    const w = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+    let last = null;
+    for (let t = w.nextNode(); t; t = w.nextNode()) last = t;
+    if (!last) return '枠の中に文字がありません';
+    const r = document.createRange();
+    r.setStart(last, last.data.length);
+    r.collapse(true);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    box.focus();
+    box.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true, cancelable: true,
+    }));
+    document.execCommand('insertText', false, 'const b = 2;');
+    await new Promise((g) => setTimeout(g, 1200));
+    await syncRead(true);
+    await new Promise((g) => setTimeout(g, 1000));
+    const q = String.fromCharCode(96).repeat(3);
+    const n = String.fromCharCode(10);
+    const want = q + 'js' + n + 'const a = 1;' + n + 'const b = 2;' + n + q;
+    return editor.getValue().includes(want) ? 'ok' : editor.getValue().slice(0, 300);`, 'ok');
+await step('何行もある枠の途中に打っても、行も空白も潰れない', `
+    const box = el('read');
+    const pre = [...box.children].find((n) => n.tagName === 'PRE'
+        && /language-rust/.test((n.querySelector(':scope > code') || {}).className || ''));
+    if (!pre) return 'rust の枠がありません';
+    const code = pre.querySelector(':scope > code');
+    // 色付けは let と x を別の span に刻む ── 枠ぜんぶの文字を数えて場所を出す。
+    const w = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let all = '';
+    for (let t = w.nextNode(); t; t = w.nextNode()) { nodes.push([t, all.length]); all += t.data; }
+    const idx = all.replace(/\u00a0/g, ' ').indexOf('let x');
+    if (idx < 0) return '途中の行がありません: ' + JSON.stringify(all);
+    const at = idx + 'let x'.length;
+    const hit = nodes.filter(([t, a]) => a <= at && at <= a + t.data.length).pop();
+    if (!hit) return '場所が出せません';
+    const r = document.createRange();
+    r.setStart(hit[0], at - hit[1]);
+    r.collapse(true);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    box.focus();
+    document.execCommand('insertText', false, 'y');
+    await new Promise((g) => setTimeout(g, 1200));
+    await syncRead(true);
+    await new Promise((g) => setTimeout(g, 1000));
+    const n = String.fromCharCode(10);
+    const want = 'fn main() {' + n + '    let xy = 1;' + n + '}';
+    return editor.getValue().includes(want) ? 'ok' : editor.getValue().slice(-220);`, 'ok');
+// **左押しは打つためのものになった**（依頼 644）ので、「コードで直す」と
+// 「消す」は右押しへ移した ── 移した先に本当に出るかを見る。
+await step('枠の右押しに、コードで直すと消すが出る', `
+    const pre = [...el('read').children].find((n) => n.tagName === 'PRE' && !richBlock(n));
+    if (!pre) return '枠がありません';
+    pre.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true, clientX: 300, clientY: 300,
+    }));
+    await new Promise((g) => setTimeout(g, 300));
+    const names = [...el('more').querySelectorAll('button')].map((b) => b.textContent);
+    closeMenu();
+    const want = ['枠の中身を写す', 'コードで直す', 'この枠を消す'];
+    return want.every((w) => names.some((n) => n.includes(w))) ? 'ok' : names.join(' / ');`, 'ok');
+await step('枠の左押しでは、メニューを出さない', `
+    const pre = [...el('read').children].find((n) => n.tagName === 'PRE' && !richBlock(n));
+    if (!pre) return '枠がありません';
+    pre.click();
+    await new Promise((g) => setTimeout(g, 300));
+    const out = el('more').hidden;
+    closeMenu();
+    return out;`, true);
+await step('よくばりへ戻る', `await openNote(${path('よくばり.md')}); return !!state.open;`, true);
 
 // 六。コード画面で書く
 await step('コード画面へ', `setView('write'); return view;`, 'write');

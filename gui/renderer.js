@@ -623,13 +623,34 @@ function hitTerm(n, t) {
 /// `localizedStandardCompare` で、**同じ規則をそれぞれの土地の言葉で言って
 /// いる**。core に上げなかったのはそのため ── Rust には土地を知った自然順が
 /// 標準に無く、上げると iPhone の並びのほうが悪くなる。
+///
+/// **昇順と降順は、同じボタンを押し続けて回る**（依頼 643・本人「同じボタンを
+/// 押下したら昇順・降順を変更できないかな？」）。列の見出しを二度押すと逆順に
+/// なるファイラの挙動が本人の手に入っているが、amber にあるのはボタン 1 つで
+/// 見出しの列ではない ── なので 3 つ × 2 向き = 6 つを順ぐりにする。押し続ければ
+/// 必ず元へ戻り、**行き止まりが無い**。
+///
+/// 矢印は「上に来るのはどちらか」を言う ── `↓` は大きいほうが上（新しい順・
+/// ん→あ）、`↑` は小さいほうが上（古い順・あ→ん）。
 const ORDERS = [
-    // 名前はiPhone と同じ三語（本人・2026-09-12）。
-    ['updated', '更新順'],
-    ['created', '作成順'],
-    ['title', 'タイトル順'],
+    // 名前は iPhone と同じ三語（本人・2026-09-12）。
+    ['updated', false, '更新順 ↓', '新しい順'],
+    ['updated', true, '更新順 ↑', '古い順'],
+    ['created', false, '作成順 ↓', '新しい順'],
+    ['created', true, '作成順 ↑', '古い順'],
+    ['title', true, 'タイトル順 ↑', 'あ→ん'],
+    ['title', false, 'タイトル順 ↓', 'ん→あ'],
 ];
 let order = 'updated';
+/// 昇順か。**既定は降順**（更新順と作成順は新しい順、タイトル順だけ昇順が既定）。
+let asc = false;
+
+/// いま何番目の並びか。憶えている値が古い形（向きを持たない）でも読めるように、
+/// 見つからなければその物差しの**最初の向き**に落とす。
+function orderAt() {
+    const i = ORDERS.findIndex(([k, a]) => k === order && a === asc);
+    return i >= 0 ? i : Math.max(0, ORDERS.findIndex(([k]) => k === order));
+}
 
 /// 名前順に並べる物差し。**一度だけ作って、使い回す。**
 ///
@@ -648,12 +669,22 @@ function sortNotes(list) {
     } else {
         out.sort((a, b) => (b.updated || 0) - (a.updated || 0));
     }
-    return out;
+    // **逆順は、並べ終えてからひっくり返す**（依頼 643）── 比較の向きを
+    // 二通り書くと、同じ値のときの並びが向きによって変わる（`sort` は安定
+    // なので、ひっくり返せば同じ値の中の順序も素直に逆になる）。
+    //
+    // タイトル順だけ既定が昇順なので、ひっくり返すのは `asc` が偽のとき。
+    const flip = order === 'title' ? !asc : asc;
+    return flip ? out.reverse() : out;
 }
 
 function drawOrder() {
-    const at = ORDERS.findIndex(([k]) => k === order);
-    el('order').textContent = ORDERS[at < 0 ? 0 : at][1];
+    const [, , label, which] = ORDERS[orderAt()];
+    const next = ORDERS[(orderAt() + 1) % ORDERS.length];
+    el('order').textContent = label;
+    // **次に何になるかを、札に書く。** 6 つを順ぐりにすると「あと何回押せば
+    // 目当てに着くか」が見えない ── 次の一つが見えていれば、押しながら探せる。
+    el('order').title = `${label}（${which}）── 押すと「${next[2]}」`;
 }
 
 el('findbtn').innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none"'
@@ -669,13 +700,17 @@ for (const b of el('tablebar').querySelectorAll('button')) {
     b.onclick = () => tableDo(b.dataset.do);
 }
 
-el('order').onclick = () => {
-    const at = ORDERS.findIndex(([k]) => k === order);
-    order = ORDERS[(at + 1) % ORDERS.length][0];
-    window.amber.remember({ order });
+el('order').onclick = nextOrder;
+
+/// 次の並びへ。**3 つ × 2 向きを順ぐり**（依頼 643）。
+function nextOrder() {
+    const [k, a] = ORDERS[(orderAt() + 1) % ORDERS.length];
+    order = k;
+    asc = a;
+    window.amber.remember({ order, orderAsc: asc });
     drawOrder();
     drawList();
-};
+}
 
 function drawList() {
     const rows = sortNotes(narrowed());
@@ -777,13 +812,7 @@ el('list').addEventListener('contextmenu', (e) => {
     popMenu([
         { name: '新しいノート', key: '⌘N', run: newNote },
         { name: 'ここに貼り付けて新しいノート', run: cmdPasteNote },
-        { name: '並び順 ── ' + ORDERS.find(([k]) => k === order)[1], sep: true, run: () => {
-            const n = ORDERS.findIndex(([k]) => k === order);
-            order = ORDERS[(n + 1) % ORDERS.length][0];
-            window.amber.remember({ order });
-            drawOrder();
-            drawList();
-        } },
+        { name: '並び順 ── ' + ORDERS[orderAt()][2], sep: true, run: nextOrder },
         { name: 'すべて選ぶ', key: '⌘A', sep: true, run: pickAll },
         { name: '一覧を畳む', key: '⌘⌥/', run: toggleList },
     ], at);
@@ -2322,11 +2351,22 @@ try {
 /// 触ってはいけないかたまりか。
 function richBlock(node) {
     if (!node || node.nodeType !== 1) return false;
-    // **表と注記は触れる。** 文字に戻せる形をしているので、触らせない理由が
-    // 無い ── 触れないままだと「表示画面だけで完結できる」が嘘になる。
-    // 枠（コード）と図と画像だけは、戻せないので編集画面へ送る。
-    if (['PRE', 'FIGURE'].includes(node.tagName)) return true;
+    // **表と注記とコードブロックは触れる。** 文字に戻せる形をしているので、
+    // 触らせない理由が無い ── 触れないままだと「表示画面だけで完結できる」が
+    // 嘘になる。図と画像だけは、戻せないので編集画面へ送る。
+    //
+    // **コードブロックは 2026-09-20 に触れるようにした**（依頼 644・本人
+    // 「IT素人にむけ、表示モードで操作が完結する思想なんだから、これは
+    // 修正してほしい」）。戻せなかったのではなく、**戻す道を書いていなかった**
+    // だけだった ── 中身に色は付けていない（`hljs` を使っていない）ので、
+    // `<code>` の中の文字がそのまま元の文字で、`blockToMd` の `PRE` が
+    // `` ``` `` で挟み直せば済む。写すボタン（`.cp`）は `<pre>` の直下に
+    // 居て `<code>` の中ではないので、文字には混ざらない。
+    if (node.tagName === 'FIGURE') return true;
     if (node.classList.contains('mermaid')) return true;
+    // **図の枠だけは、触れないまま。** あれは押すと工房が開く場所で、
+    // 中身は mermaid の綴り ── 直すのは工房の仕事。
+    if (node.tagName === 'PRE' && node.querySelector('code.language-mermaid')) return true;
     // **折りたたみは、まるごと元の文字で返す**（依頼 619）。
     //
     // 中は畳んであるので、そこを文字に戻すのは「見えていないものを
@@ -2499,6 +2539,29 @@ function paperToMd(box, head) {
     return head ? '\n' + body : body;
 }
 
+/// 枠の中の文字を、画面から拾う（依頼 644）。
+///
+/// **`textContent` では足りない。** 色を付けたあとの枠は Monaco が組んだ
+/// 姿で、**改行は `<br>`、空白は `&nbsp;`** になっている（`codeOf` の註と
+/// 同じ話）── そのまま拾うと、直した枠が**一行に潰れて**、空白がぜんぶ
+/// 別の文字（U+00A0）で保存される。本物のアプリで確かめて出てきた
+/// （2026-09-20 ── const・a・= のあいだが U+00A0 でファイルに残った）。
+///
+/// 色を付けていない枠（言語を書いていないもの）は素の文字なので、
+/// どちらの形でもここを通れば同じ答えになる。
+function fenceText(box) {
+    let out = '';
+    const walk = (n) => {
+        for (const kid of n.childNodes) {
+            if (kid.nodeType === 3) out += kid.data;
+            else if (kid.tagName === 'BR') out += '\n';
+            else if (kid.nodeType === 1) walk(kid);
+        }
+    };
+    walk(box);
+    return out.replace(/\u00a0/g, ' ').replace(/\n+$/, '');
+}
+
 function blockToMd(node, depth = 0) {
     if (node.nodeType === 3) return node.data.trim() ? node.data : null;
     if (node.nodeType !== 1) return null;
@@ -2594,14 +2657,28 @@ function blockToMd(node, depth = 0) {
             return out.join('\n');
         }
         case 'PRE': {
-            // **表示画面からはここへ来ない**（枠は触れないかたまりで、
-            // `paperToMd` が元の文字をそのまま返す）── ここへ来るのは
-            // よそから貼られた HTML だけ（依頼 421）。
-            const body = node.textContent.replace(/\n+$/, '');
+            // ここへ来るのは二とおり ── よそから貼られた HTML（依頼 421）と、
+            // **表示画面で直したコードブロック**（依頼 644）。
+            //
+            // **中身は `<code>` から取る。** `node.textContent` だと、枠の中に
+            // 置いてある「コピー」のボタン（依頼 614）の文字まで混ざる。
+            const code = node.querySelector(':scope > code');
+            const body = fenceText(code || node);
+            // **触っていない枠は、読んだときの文字をそのまま返す**（依頼 644）。
+            //
+            // 囲みは `` ``` `` とは限らず `~~~` のこともあり、組み直すと
+            // **触ってもいない枠が同期先で差分になる**（往復の試験が捕まえた ──
+            // `~~~` で書いた枠が `` ``` `` で戻った）。
+            const was = node.dataset.md;
+            if (was !== undefined) {
+                const lines = was.split('\n');
+                const closed = lines.length > 1
+                    && /^\s*(`{3,}|~{3,})\s*$/.test(lines[lines.length - 1]);
+                if (lines.slice(1, closed ? -1 : undefined).join('\n') === body) return was;
+            }
             // 中に ``` があるなら、囲みを長くする ── 短いと途中で閉じる。
             const fence = '`'.repeat(Math.max(3, ...(body.match(/`+/g) || []).map((x) => x.length + 1)));
-            const lang = (node.querySelector('code')?.className || '')
-                .match(/language-([\w+-]+)/)?.[1] || '';
+            const lang = (code?.className || '').match(/language-([\w+-]+)/)?.[1] || '';
             return fence + lang + '\n' + body + '\n' + fence;
         }
         case 'BLOCKQUOTE':
@@ -3170,6 +3247,46 @@ function checkSoftReturn(box) {
     if (!br.nextSibling) br.after(document.createElement('br'));
     const to = document.createRange();
     to.setStartAfter(br);
+    to.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(to);
+    return true;
+}
+
+/// コードブロックの中の Enter（依頼 644）。
+///
+/// **既定は枠を二つに割る。** `contenteditable` の中で Enter を押すと、
+/// ブラウザはいまのかたまりを複製して二つにする ── 段落ではそれが正しいが、
+/// コードブロックでは「二行目を書いた」つもりが**枠が二つ**になって出る
+/// （本物のアプリで確かめた・2026-09-20）。
+///
+/// 枠の中では、改行は**ただの改行**。文字を一つ入れるだけにする。
+///
+/// **行末で押したときは、改行を二つ入れる。** 一つだけだと `<pre>` の
+/// いちばん後ろの改行に caret の行き先が無く、押したのに何も起きていない
+/// ように見える。ファイルに出るときは末尾の改行が落ちる（`blockToMd` の
+/// `PRE`）ので、余分な空行は残らない。
+function checkFenceReturn(box) {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount) return false;
+    let n = sel.anchorNode;
+    if (n && n.nodeType === 3) n = n.parentElement;
+    if (!n || !box.contains(n)) return false;
+    const pre = n.closest ? n.closest('pre') : null;
+    // 触れないかたまり（図）は、そもそも caret が入らない ── 入る形に
+    // 変わっても、ここで書き換えない。
+    if (!pre || !box.contains(pre) || richBlock(pre)) return false;
+    const code = pre.querySelector(':scope > code') || pre;
+    const r = sel.getRangeAt(0);
+    if (!code.contains(r.startContainer)) return false;
+    r.deleteContents();
+    const tail = document.createRange();
+    tail.setStart(r.endContainer, r.endOffset);
+    tail.setEnd(code, code.childNodes.length);
+    const nl = document.createTextNode(tail.toString() === '' ? '\n\n' : '\n');
+    r.insertNode(nl);
+    const to = document.createRange();
+    to.setStart(nl, 1);
     to.collapse(true);
     sel.removeAllRanges();
     sel.addRange(to);
@@ -4041,6 +4158,9 @@ el('read').addEventListener('keydown', (e) => {
     let n = getSelection()?.anchorNode;
     if (n && n.nodeType === 3) n = n.parentElement;
     if (!n || !el('read').contains(n)) return;
+    // **コードブロックの中は、まずここ**（依頼 644）── `⇧` が付いていても
+    // 同じ。枠の中に `<br>` を入れる意味は無い。
+    if (checkFenceReturn(el('read'))) { e.preventDefault(); readChanged(); return; }
     // **`⇧Enter` は段落の中の改行。** Enter は新しい段落 ── Word・Docs・
     // Notion の手がそのまま動く（本人が決めた・2026-09-08）。
     if (e.shiftKey) {
@@ -4501,20 +4621,24 @@ function inCell() {
 /// **いったん全部を文字に戻してから直し、組み直す。** 見た目の上でやろうと
 /// すると、セルや表のような「ラベルの形が決まっているもの」を DOM の上で組み立て
 /// 直すことになり、そこだけ別の作り方が生える。
-async function readSourceEdit(change, node, stay) {
+async function readSourceEdit(change, node, stay, upto) {
     const box = el('read');
     // 直すところは、たいてい caret のあるかたまり。**押して開く工房だけは
     // 別** ── 右押しは caret を動かさないので、押されたものを名指しで渡す。
     const at = [...box.children].indexOf(node || caretBlock());
     if (at < 0) return;
+    // **選んだ範囲が二つ以上のかたまりにまたがることがある**（依頼 644 の
+    // コードブロック）。`upto` を渡すと、そこまでをひとまとめにして渡し、
+    // 返ってきた文字で置き換える ── 渡さなければ、これまでどおり 1 つだけ。
+    const end = upto ? Math.max(at, [...box.children].indexOf(upto)) : at;
     const blocks = [...box.children].map((n) =>
         richBlock(n) ? n.dataset.md : (blockToMd(n) ?? ''));
     if (blocks.some((b) => b === undefined)) {
-        say('ここからは書き戻せません（コードか図の元の文字が取れません）');
+        say('ここからは書き戻せません（図の元の文字が取れません）');
         return;
     }
     try {
-        blocks[at] = await change(blocks[at]);
+        blocks.splice(at, end - at + 1, await change(blocks.slice(at, end + 1).join('\n\n')));
     } catch (e) {
         say('置けません: ' + why(e));
         return;
@@ -4567,6 +4691,45 @@ const readMark = (kind, withWhat, stay) => readSourceEdit((md) =>
     ask('mark', { kind, with: withWhat || '', text: md }).then((r) => r.text), null, stay);
 
 const readPut = (text) => readSourceEdit((md) => (md.trim() ? md + '\n\n' : '') + text);
+
+/// 表示画面の「コードブロック」。
+///
+/// **選んでいる文字があれば、それをコードブロックにする**（依頼 644・本人
+/// 「文字を範囲選択した状態で『コードブロック』を押下すると、選択した文字じゃ
+/// なく、その文字の下側にコードブロックがでてくる」）。
+///
+/// 前は選んでいるかどうかを一度も見ずに、caret のあるかたまりの**下に**空の枠を
+/// 足していた ── 太字も引用も選んだところに効くのに、ここだけ効かなかった。
+///
+/// **かたまりごと包む。** 段落の途中だけを選んでも、その段落まるごとが枠に
+/// なる ── 引用や箇条書き（`readBlockAs`）と同じ考えで、かたまりの種類を
+/// 変える道具は、かたまりに効く。二つ以上にまたがって選べば、まとめて 1 つの枠。
+///
+/// 選んでいなければ、これまでどおり空の枠を下に置く（依頼 618 ── 中身は空で
+/// 出す。サンプルの文字を入れると、枠の中では消すところから始まる）。
+function readFence() {
+    const box = el('read');
+    const sel = getSelection();
+    if (!sel || sel.isCollapsed || !sel.toString().trim()) return readPut('```\n\n```');
+    const r = sel.getRangeAt(0);
+    const blockOf = (n) => {
+        if (n && n.nodeType === 3) n = n.parentNode;
+        if (!n || !box.contains(n)) return null;
+        while (n && n.parentElement !== box) n = n.parentElement;
+        return n;
+    };
+    const from = blockOf(r.startContainer);
+    const to = blockOf(r.endContainer) || from;
+    if (!from) return readPut('```\n\n```');
+    return readSourceEdit((md) => {
+        // **囲みは、中身より長くする。** 中に `` ``` `` があると、そこで枠が
+        // 閉じて続きが本文として出る（Markdown の決まり）。
+        const longest = Math.max(0, ...md.split('\n')
+            .map((l) => /^(`{3,})/.exec(l)?.[1].length || 0));
+        const wall = '`'.repeat(Math.max(3, longest + 1));
+        return wall + '\n' + md + '\n' + wall;
+    }, from, false, to);
+}
 
 /// マークダウンの書き方。**押せる形で出す** ── 選ぶとその場に入る。
 ///
@@ -4674,7 +4837,7 @@ const MARKS = [
         // **中身は空で出す。** サンプルの文字を入れると（表がそうしている）、
         // 枠の中では**消すところから始まる** ── 枠に入れたいのは自分の文字で、
         // 言い換えるためのサンプルではない。
-        ['コードブロック', '', () => (onRead() ? readPut('```\n\n```') : putFence())],
+        ['コードブロック', '', () => (onRead() ? readFence() : putFence())],
         // **折りたたみ**（依頼 619・本人「コードがめちゃくちゃ長くて見にくい」）。
         // 記法は `<details>` ── GitHub がそのまま畳む形で、メモ帳で開いた
         // 人にも「畳んであるもの」と読める。ambər だけの記号は作らない。
@@ -6630,7 +6793,11 @@ el('read').addEventListener('click', async (e) => {
         // 打てるのに保存されない、を作らないための逃げ道。
         // **`richBlock()` と同じ顔ぶれにする。** ここだけ古いままだと、
         // 触れるようにしたはずの表を押した瞬間に編集画面へ飛ぶ（実際に飛んだ）。
-        const rich = e.target.closest('pre, figure, .mermaid');
+        // **コードブロックは、ここへ来ない**（依頼 644）── 触れるように
+        // なったので、押すのは「中に caret を置く」こと。図の枠だけは
+        // `richBlock()` が触れないままにしてあるので、こちらへ来る。
+        let rich = e.target.closest('pre, figure, .mermaid');
+        if (rich && !richBlock(rich)) rich = null;
         if (rich && el('read').contains(rich)) {
             // **画像は、押したら原寸で開く**（依頼 637）── 紙の幅に
             // 合わせて描いているので、文字の入った画面写真は縮んで読めない。
@@ -6840,6 +7007,20 @@ function readMenu(e) {
             { name: '左に寄せる', sep: true, run: () => tableDo('align:left') },
             { name: '真ん中に寄せる', run: () => tableDo('align:center') },
             { name: '右に寄せる', run: () => tableDo('align:right') },
+        ], at);
+        return;
+    }
+
+    // コードブロックの中（依頼 644）── **左押しは打つためのもの**になったので、
+    // 「コードで直す」と「消す」はここへ移した。前は左押しでこの二つを出して
+    // いたが、それだと枠の中に caret が置けず、本人の言う「表示モードで操作が
+    // 完結する」に届かない。図（mermaid）は今までどおり左押しで工房が開く。
+    const fence = t.closest('pre');
+    if (fence && el('read').contains(fence) && !richBlock(fence)) {
+        popMenu([
+            { name: '枠の中身を写す', run: () => copyText(codeOf(fence), 'コード') },
+            { name: 'コードで直す', sep: true, sub: '「コード」のその行へ', run: () => toSource(fence) },
+            { name: 'この枠を消す', run: () => dropBlock(fence) },
         ], at);
         return;
     }
@@ -13380,6 +13561,9 @@ const escapeAttr = escapeHtml;
     setFont(fontStep, true);
     setCalFont(typeof saved.calFontStep === 'number' ? saved.calFontStep : 0, true);
     if (saved.order) order = saved.order;
+    // **向きを憶えていない古い設定でも読める** ── 無ければその物差しの既定。
+    if (typeof saved.orderAsc === 'boolean') asc = saved.orderAsc;
+    else asc = order === 'title';
     if (saved.tocOn) tocOn = true;
     if (saved.theme) setTheme(knownTheme(saved.theme));
     if (saved.lineNo) lineNo = true;
