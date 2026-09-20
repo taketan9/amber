@@ -2,7 +2,7 @@
 /* 総ざらいの**同期の段だけ**。偽の Drive（`fake-drive.js`）を相手に、上げ
  * 下ろし・混ぜ・選び口・消しを順に押す。
  *
- *     scripts/walk.sh walk-sync   # 場所を作り、偽の Drive と窓を出し、これだけ走らせる
+ *     scripts/walk.sh walk-sync   # 場所を作り、偽の Drive とデスクトップ版を出し、これだけ走らせる
  *
  * `walk.mjs` からも同じものが呼ばれる（総ざらいの二十の三）。
  */
@@ -12,7 +12,7 @@ import { step, bad, tally, ready, report, NOTES } from './walk-harness.mjs';
 
 /* ── 二十の三。**同期 ── 偽の Drive と上げ下ろし**（依頼 489〜） ──
  *
- * 窓は `AMBER_DRIVE_URL` で偽の Drive を指し、サインインは済んでいる体。
+ * デスクトップ版は `AMBER_DRIVE_URL` で偽の Drive を指し、サインインは済んでいる体。
  * 向こうの端末（太郎の iPhone）は node の側が演じる（`/_put` `/_trash`）。
  */
 const DRIVE = process.env.DRIVE || '';
@@ -38,7 +38,7 @@ export async function syncWalk() {
         const there = await drive('/_list');
         const rels = there.map((f) => f.appProperties.rel);
         if (!rels.includes('よくばり.md') || !rels.includes('仕事/段取り.md')) {
-            bad.push({ name: '同期：向こうに同じ道で並ぶ', why: ['向こうの一覧: ' + rels.slice(0, 8).join(' / ')] });
+            bad.push({ name: '同期：向こうに同じパスで並ぶ', why: ['向こうの一覧: ' + rels.slice(0, 8).join(' / ')] });
         }
         if (!rels.includes('attachments/amber.png')) bad.push({ name: '同期：絵も上がる', why: ['向こうの一覧に attachments/amber.png がありません'] });
         const pic = await drive('/_get?rel=' + encodeURIComponent('attachments/amber.png'));
@@ -49,7 +49,7 @@ export async function syncWalk() {
             } catch (e) { bad.push({ name: '同期：絵は bytes のまま上がる', why: [e.message] }); }
         }
         const one = await drive('/_get?rel=買い物.md');
-        if (!one.text || !one.text.includes('- 牛乳')) bad.push({ name: '同期：向こうの字がこちらと同じ', why: [String(JSON.stringify(one.text)).slice(0, 120)] });
+        if (!one.text || !one.text.includes('- 牛乳')) bad.push({ name: '同期：向こうの文字がこちらと同じ', why: [String(JSON.stringify(one.text)).slice(0, 120)] });
     }
     await step('同期の様子：運んだ直後は色つきの列に「アップロードN本」', `
         const box = el('syncsay');
@@ -70,7 +70,7 @@ export async function syncWalk() {
         const r = await syncNow('手');
         return r && r.up === 0 && r.down === 0 && r.clash === 0 ? true : JSON.stringify(r);`, true);
 
-    // 向こうが絵を一枚置いた → こちらに bytes のまま下りてくる（依頼 497）。
+    // 向こうが絵を1 つ置いた → こちらに bytes のまま下りてくる（依頼 497）。
     const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     await drive('/_put', { rel: 'attachments/太郎の絵.png', b64: PNG1, by: '太郎の iPhone' });
     await step('同期：向こうが置いた絵が、こちらに bytes のまま下りてくる', `
@@ -85,7 +85,7 @@ export async function syncWalk() {
     }
 
     // 向こうが一本置いた。
-    await drive('/_put', { rel: '太郎から.md', text: '---\ncreated: 2026-09-11\n---\n\n# 太郎から\n\n電話で書いた。\n', by: '太郎の iPhone' });
+    await drive('/_put', { rel: '太郎から.md', text: '---\ncreated: 2026-09-11\n---\n\n# 太郎から\n\niPhone で書いた。\n', by: '太郎の iPhone' });
     await step('同期：向こうが置いたノートが、こちらに来る', `
         const r = await syncNow('手');
         if (!r || r.down !== 1) return JSON.stringify(r);
@@ -96,12 +96,12 @@ export async function syncWalk() {
         tally.ran += 1;
         try {
             const got = readFileSync(NOTES + '/太郎から.md', 'utf8');
-            if (!got.includes('電話で書いた。')) bad.push({ name: '同期：ファイルにも同じ字', why: [JSON.stringify(got.slice(0, 120))] });
-        } catch (e) { bad.push({ name: '同期：ファイルにも同じ字', why: [e.message] }); }
+            if (!got.includes('iPhone で書いた。')) bad.push({ name: '同期：ファイルにも同じ文字', why: [JSON.stringify(got.slice(0, 120))] });
+        } catch (e) { bad.push({ name: '同期：ファイルにも同じ文字', why: [e.message] }); }
     }
 
     // 向こうが直した（こちらは触っていない）。
-    await drive('/_put', { rel: '太郎から.md', text: '---\ncreated: 2026-09-11\n---\n\n# 太郎から\n\n電話で書いた。\n\n直した。\n', by: '太郎の iPhone' });
+    await drive('/_put', { rel: '太郎から.md', text: '---\ncreated: 2026-09-11\n---\n\n# 太郎から\n\niPhone で書いた。\n\n直した。\n', by: '太郎の iPhone' });
     await step('同期：向こうが直したぶんが、黙って下りてくる', `
         const r = await syncNow('手');
         if (!r || r.down !== 1 || r.clash !== 0) return JSON.stringify(r);
@@ -118,13 +118,13 @@ export async function syncWalk() {
         await syncNow('手');
         setView('write');
         await new Promise((g) => setTimeout(g, 200));
-        // エディタの字は末尾の改行を持たない（前書きを切るときに落ちる）。
+        // エディタの文字は末尾の改行を持たない（前書きを切るときに落ちる）。
         const nl = String.fromCharCode(10);
         const v = editor.getValue();
         loading = true;
         editor.setValue(v + (v.endsWith(nl) ? '' : nl) + '- 卵' + nl);
         loading = false;
-        readStale();   // 打ったのと同じ ── 読む面はもう今の字ではない
+        readStale();   // 打ったのと同じ ── 表示画面はもう今の文字ではない
         state.dirty = true;
         await save();
         clearTimeout(syncTimer);
@@ -133,7 +133,7 @@ export async function syncWalk() {
     tally.ran += 1;
     {
         const one = await drive('/_get?rel=買い物.md');
-        if (!one.text || !one.text.includes('- 卵')) bad.push({ name: '同期：向こうに上がった字', why: [String(JSON.stringify(one.text)).slice(0, 160)] });
+        if (!one.text || !one.text.includes('- 卵')) bad.push({ name: '同期：向こうに上がった文字', why: [String(JSON.stringify(one.text)).slice(0, 160)] });
     }
 
     // 同じ行を両方で直した → 混ぜて、選び口。
@@ -145,7 +145,7 @@ export async function syncWalk() {
         loading = true;
         editor.setValue(editor.getValue().replace('- 卵', '- 卵（こちらは十個）'));
         loading = false;
-        readStale();   // 打ったのと同じ ── 読む面はもう今の字ではない
+        readStale();   // 打ったのと同じ ── 表示画面はもう今の文字ではない
         state.dirty = true;
         await save();
         clearTimeout(syncTimer);
@@ -162,7 +162,7 @@ export async function syncWalk() {
     {
         const one = await drive('/_get?rel=買い物.md');
         if (!one.text || !one.text.includes('十個') || !one.text.includes('六個')) {
-            bad.push({ name: '同期：混ぜた字が向こうにも上がる', why: [String(JSON.stringify(one.text)).slice(0, 160)] });
+            bad.push({ name: '同期：混ぜた文字が向こうにも上がる', why: [String(JSON.stringify(one.text)).slice(0, 160)] });
         }
     }
     await step('同期：「こちらの記載を反映する」を選ぶと、向こうにもそれが上がる', `
@@ -187,7 +187,7 @@ export async function syncWalk() {
     {
         const one = await drive('/_get?rel=買い物.md');
         if (!one.text || one.text.includes('六個') || !one.text.includes('十個')) {
-            bad.push({ name: '同期：選んだあとの字が向こうにも', why: [String(JSON.stringify(one.text)).slice(0, 160)] });
+            bad.push({ name: '同期：選んだあとの文字が向こうにも', why: [String(JSON.stringify(one.text)).slice(0, 160)] });
         }
     }
 
@@ -210,7 +210,7 @@ export async function syncWalk() {
         const t = el('syncmark').textContent;
         return t.includes('同期しています') ? true : JSON.stringify(t);`, true);
 
-    // サインインする前の姿（この窓ではサインイン済みなので、様子だけ作って見る）。
+    // サインインする前の姿（このデスクトップ版ではサインイン済みなので、様子だけ作って見る）。
     await step('同期の様子：始める前は「まだ同期していません」の列と二つのボタン', `
         const was = syncAccount;
         syncAccount = { signedIn: false };
@@ -239,7 +239,7 @@ export async function syncWalk() {
             await openNote(state.root + '/買い物.md');
             el('title').textContent = '買いもの';
             await titleDone(true);
-            if (!state.open.path.endsWith('/買いもの.md')) return '道が ' + state.open.path;
+            if (!state.open.path.endsWith('/買いもの.md')) return 'パスが ' + state.open.path;
             clearTimeout(syncTimer);
             const r = await syncNow('手');
             return r && r.moved === 1 ? true : JSON.stringify(r);
@@ -262,8 +262,8 @@ export async function syncWalk() {
             return r && r.moved === 1 ? true : JSON.stringify(r);
         } finally { nameAuto = false; }`, true);
 
-    // フォルダへ移す → 向こうも同じ ID のまま道が変わる（依頼 496）。
-    await step('同期：フォルダへ移すと、向こうも同じ ID のまま道が変わる', `
+    // フォルダへ移す → 向こうも同じ ID のままパスが変わる（依頼 496）。
+    await step('同期：フォルダへ移すと、向こうも同じ ID のままパスが変わる', `
         // 総ざらいの途中では、このノートは別のフォルダに居たり 買い物.3.md だったり
         // する（同じ題が増えると番号は加算）── 開いている一本（題が 買い物）を使う。
         const note = state.open;
@@ -287,7 +287,7 @@ export async function syncWalk() {
 
     // 向こうで改名 → こちらも改名。
     await drive('/_move', { rel: '太郎から.md', to: '太郎のメモ.md' });
-    await drive('/_put', { rel: '太郎のメモ.md', text: '---\ncreated: 2026-09-11\n---\n\n# 太郎のメモ\n\n電話で書いた。\n\n直した。\n', by: '太郎の iPhone' });
+    await drive('/_put', { rel: '太郎のメモ.md', text: '---\ncreated: 2026-09-11\n---\n\n# 太郎のメモ\n\niPhone で書いた。\n\n直した。\n', by: '太郎の iPhone' });
     await step('同期：向こうで名前が変わると、こちらのファイルも変わる', `
         const r = await syncNow('手');
         if (!r || r.moved !== 1 || r.down !== 1) return JSON.stringify(r);
@@ -299,8 +299,8 @@ export async function syncWalk() {
         tally.ran += 1;
         try {
             const got = readFileSync(NOTES + '/太郎のメモ.md', 'utf8');
-            if (!got.includes('# 太郎のメモ')) bad.push({ name: '同期：改名したファイルに新しい字', why: [JSON.stringify(got.slice(0, 80))] });
-        } catch (e) { bad.push({ name: '同期：改名したファイルに新しい字', why: [e.message] }); }
+            if (!got.includes('# 太郎のメモ')) bad.push({ name: '同期：改名したファイルに新しい文字', why: [JSON.stringify(got.slice(0, 80))] });
+        } catch (e) { bad.push({ name: '同期：改名したファイルに新しい文字', why: [e.message] }); }
     }
 
     // 向こうで消した → こちらはゴミ箱へ。

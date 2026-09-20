@@ -23,7 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-# **原本の `.pyc` を作らない。** 変異テストは同じ道のファイルを壊しては戻すので、
+# **原本の `.pyc` を作らない。** 変異テストは同じパスのファイルを壊しては戻すので、
 # `cp` が付ける秒とファイルの大きさがたまたま前回と揃うと、Python は古い `.pyc`
 # をそのまま使う ── 戻したはずの原本ではなく、**直前に壊した版**が走る。
 # 最初にこれを踏んだとき、生きている検査が二つ「黙った」ように見えた。
@@ -37,7 +37,7 @@ spec.loader.exec_module(o2m)
 
 def _parse(argv):
     """**本体の引数定義をそのまま使う。**写して持つと、本体に旗を足した日に
-    走査だけが古い定義で走り、`AttributeError` で落ちる ── 画面には
+    走査だけが古い定義でラン、`AttributeError` で落ちる ── 画面には
     「何が足りないのか」が出ない。"""
     return o2m.build_parser().parse_args(argv)
 
@@ -77,23 +77,23 @@ def t_lock(tmp):
 
 def t_names(tmp):
     print("名前 ──")
-    check("Windows で使えない字", o2m.sanitize('a/b:c*d?e"f<g>h|i') == "a_b_c_d_e_f_g_h_i")
-    check("SharePoint が断る字", o2m.sanitize("a#b%c&d~e{f}g") == "a_b_c_d_e_f_g")
+    check("Windows で使えない文字", o2m.sanitize('a/b:c*d?e"f<g>h|i') == "a_b_c_d_e_f_g_h_i")
+    check("SharePoint が断る文字", o2m.sanitize("a#b%c&d~e{f}g") == "a_b_c_d_e_f_g")
     check("_vti_ で始まらない", not o2m.sanitize("_vti_x").lower().startswith("_vti_"))
     check("予約名 CON", o2m.sanitize("CON") == "CON_")
     check("末尾の点と空白", o2m.sanitize("あ. ") == "あ")
     check("空なら fallback", o2m.sanitize("   ") == "untitled")
     check("日本語は削られない", o2m.sanitize("九月の定例") == "九月の定例")
-    # **ここも 60 字。** ambər の `file_stem` が 60 で切るので、120 のままだと
+    # **ここも 60 文字。** ambər の `file_stem` が 60 で切るので、120 のままだと
     # **長い題のページだけ画像の幹がずれ**、改名・移動した日に画像が付いてこない。
-    check("ページの名前も 60 字で切る", len(o2m.sanitize("あ" * 100)) == 60,
+    check("ページの名前も 60 文字で切る", len(o2m.sanitize("あ" * 100)) == 60,
           len(o2m.sanitize("あ" * 100)))
 
-    # **ambər の決まりに合わせた幹**（依頼 593）── ハイフンで繋ぎ、60 字で切る。
+    # **ambər の決まりに合わせた幹**（依頼 593）── ハイフンで繋ぎ、60 文字で切る。
     # `note::file_stem` が正本で、ここはその写し。**写しである以上ずれる。**
-    check("幹は 60 字で切る", len(o2m.amber_stem("あ" * 120)) == 60,
+    check("幹は 60 文字で切る", len(o2m.amber_stem("あ" * 120)) == 60,
           len(o2m.amber_stem("あ" * 120)))
-    check("使えない字はハイフンに", o2m.amber_stem("斜/線") == "斜-線", o2m.amber_stem("斜/線"))
+    check("使えない文字はハイフンに", o2m.amber_stem("斜/線") == "斜-線", o2m.amber_stem("斜/線"))
     # **先頭にハイフンを置かない** ── `-001.png` のような名前になる。
     check("先頭にハイフンを置かない", not o2m.amber_stem("??  notes").startswith("-"),
           o2m.amber_stem("??  notes"))
@@ -145,19 +145,19 @@ def t_cp932(tmp):
 
 
 def t_offline(tmp):
-    print("網に出ない ──")
-    # **会社の端末は網に出られない**（本人・依頼 582）。取り込みの道に
-    # 網を見に行く口が一つでもあると、そこで止まる。
+    print("ネットワークに出ない ──")
+    # **会社の端末はネットワークに出られない**（本人・依頼 582）。取り込みのパスに
+    # ネットワークを見に行く口が一つでもあると、そこで止まる。
     for name in ("onenote2md.py", "onestore.py", "onenote_ui.py"):
         src = (ROOT / name).read_text(encoding="utf-8")
         bad = [w for w in ("urllib.request", "requests.get", "http://", "https://",
                            "socket.create_connection", "pip install")
                if w in src and "example.com" not in src.split(w)[0][-40:]]
-        check(f"網を見に行かせない（{name}）", not bad, bad)
+        check(f"ネットワークを見に行かせない（{name}）", not bad, bad)
 
 
 # ---------------------------------------------------------------------------
-# connect_onenote ── win32com ごと偽って、束ね方の梯子を確かめる
+# connect_onenote ── win32com ごと偽って、まとめ方の梯子を確かめる
 # ---------------------------------------------------------------------------
 import types  # noqa: E402
 
@@ -174,7 +174,7 @@ def t_log(tmp):
                        capture_output=True, text=True)
     body = logfile.read_text(encoding="utf-8") if logfile.exists() else ""
     # **画面には誰もいない。** `pythonw.exe` に stderr は無いので、
-    # `sys.exit("わけ")` の字はどこにも出ないまま終わる。
+    # `sys.exit("わけ")` の文字はどこにも出ないまま終わる。
     check("落ちた回は 0 を返さない", r.returncode != 0, r.returncode)
     check("落ちたわけが、記録に残る", "そんなフォルダは無い" in body, body)
     check("記録に ERROR として残る", "ERROR" in body, body)
@@ -216,7 +216,7 @@ def t_peek(tmp):
     check("形式を数えるのは .one だけ", "1/3 本" in out and "目次" not in out, out)
     # **数えたら、意味を言う。** 数字だけ見せて人に判じさせない。
     check("混ざっていればそう言う", "混ざっています" in out, out)
-    check("探す道の例を出す", "365-1.one" in out or "365-2.one" in out, out)
+    check("探すパスの例を出す", "365-1.one" in out or "365-2.one" in out, out)
     check("見つかった回は 0 を返す", code == 0, code)
 
     only = tmp / "peek-ok"
@@ -237,8 +237,8 @@ def t_peek(tmp):
     # **無いときこそ、意味がある。** SharePoint にしか無い形かもしれない。
     check("一つも無ければ、SharePoint の線を言う", "SharePoint" in out, out)
     check("無い回は 0 を返さない", code != 0, code)
-    code, out = run(tmp / "そんな道は無い")
-    check("道が無ければ、そう言う", "ありません" in out and code != 0, out)
+    code, out = run(tmp / "そんなパスは無い")
+    check("パスが無ければ、そう言う", "ありません" in out and code != 0, out)
     # ── `.onepkg` は入れ物 ──
     #
     # **中を見ないと形式は分からない。** ノートブックをまとめて出すと
@@ -253,7 +253,7 @@ def t_peek(tmp):
         _cab([("400_打合せ/水曜日打合せ.one", body)], compress=True))
     _, out = run(pkg)
     check("入れ物を開いて、中の形式まで数える", "109add3f" in out, out)
-    check("中の道をそのまま出す",
+    check("中のパスをそのまま出す",
           "  400_打合せ/水曜日打合せ.one" in out.splitlines(), out)
     check("圧縮の種類を言う", "MSZIP" in out, out)
 
@@ -281,9 +281,9 @@ def t_from_files(tmp):
                        capture_output=True, text=True, cwd=str(here), errors="replace")
     # **読み込みを抜けたことを見る。** 「落ちなかった」ではなく「先へ進んだ」 ──
     # 空のフォルダなので、抜けていれば「.one がありません」まで行く。
-    # 字の無いことだけ見ていた版は、別の落ち方（道が違う・ファイルが無い）を
+    # 文字の無いことだけ見ていた版は、別の落ち方（パスが違う・ファイルが無い）を
     # 素通りさせた。
-    check("よその場所から走らせても、隣の一枚を読める",
+    check("よその場所から走らせても、隣の1 つを読める",
           "の下に .one がありません" in (r.stdout + r.stderr), (r.stdout + r.stderr)[-200:])
     # **隣に居ないときは、そう言う。** 取り込みが半端なまま走らせた人に
     # `FileNotFoundError` の追跡を見せても、何をすればいいか分からない。
@@ -308,12 +308,12 @@ def t_from_files(tmp):
     out = tmp / "fromfiles"
     keep = ost.pages
     try:
-        # **同じ題が二枚。** 上書きすると字が消えるので、ずらす。
+        # **同じ題が二枚。** 上書きすると文字が消えるので、ずらす。
         ost.pages = lambda d: [
             {"title": "9月の定例", "level": 1,
              "lines": [{"text": "決めたこと", "indent": 0},
                        {"text": "宿題", "indent": 1}]},
-            {"title": "9月の定例", "level": 1, "lines": [{"text": "別の一枚", "indent": 0}]},
+            {"title": "9月の定例", "level": 1, "lines": [{"text": "別の1 つ", "indent": 0}]},
             {"title": "補足", "level": 2, "lines": [{"text": "サブページ", "indent": 0}]},
         ]
         args = _parse(["--out", str(out), str(src)])
@@ -324,7 +324,7 @@ def t_from_files(tmp):
               "書き出し/議事録/9月の定例.md" in got, got)
         check("同じ題は上書きせず、ずらす",
               "書き出し/議事録/9月の定例 (2).md" in got, got)
-        # **サブページは親ページ名のフォルダ**（COM の道と同じ形）。
+        # **サブページは親ページ名のフォルダ**（COM のパスと同じ形）。
         check("サブページは親の下へ",
               "書き出し/議事録/9月の定例/補足.md" in got
               or "書き出し/議事録/9月の定例 (2)/補足.md" in got, got)
@@ -333,7 +333,7 @@ def t_from_files(tmp):
         text = body.decode("utf-8")
         check("前書きに題", 'title: "9月の定例"' in text, text[:120])
         check("本文が入る", "決めたこと" in text and "宿題" in text, text)
-        # **何本目かを数で言う**（依頼 617）。窓はこの行を読んで上に出す ──
+        # **何本目かを数で言う**（依頼 617）。デスクトップ版はこの行を読んで上に出す ──
         # 回っているだけの棒は、何も測っていなかった。
         import logging as _lg, io as _io
         buf = _io.StringIO()
@@ -348,14 +348,14 @@ def t_from_files(tmp):
             o2m.log.removeHandler(h)
             o2m.log.setLevel(was)
         check("いま何本目かを数で言う", "[1/1]" in buf.getvalue(), buf.getvalue()[:200])
-        # 絞りも効く（COM の道と同じ `--only`）。
+        # 絞りも効く（COM のパスと同じ `--only`）。
         out2 = tmp / "fromfiles2"
         code = o2m.run(_parse(["--out", str(out2), str(src), "--only", "そんな名前は無い"]), out2)
         check("--only で外れたら書かない", not list(out2.rglob("*.md")) if out2.exists() else True)
         # 読めないファイルは、落ちずに数える。
         ost.pages = lambda d: (_ for _ in ()).throw(ValueError("壊れている"))
         out3 = tmp / "fromfiles3"
-        # **落ちるのも「黙る」の一種**（依頼 569）── 受け止めて NG にする。
+        # **落ちるのも「報告しない」の一種**（依頼 569）── 受け止めて NG にする。
         try:
             code = o2m.run(_parse(["--out", str(out3), str(src)]), out3)
         except Exception as e:  # noqa
@@ -391,7 +391,7 @@ def t_from_files(tmp):
         check("いまの版は、最後の改訂",
               ost.current({1: ["古い"], 2: ["途中"], 3: ["いま"]}) == ["いま"],
               ost.current({1: ["古い"], 3: ["いま"]}))
-        # 落ちるのも「黙る」の一種 ── 受け止めて NG にする（依頼 569）。
+        # 落ちるのも「報告しない」の一種 ── 受け止めて NG にする（依頼 569）。
         try:
             empty = ost.current({})
         except Exception as e:  # noqa
@@ -409,27 +409,27 @@ def t_onestore_shape(tmp):
     spec.loader.exec_module(ost)
 
     def md(**kw):
-        got = {"text": kw.pop("text", "字"), "indent": kw.pop("indent", 0),
+        got = {"text": kw.pop("text", "文字"), "indent": kw.pop("indent", 0),
                "style": kw.pop("style", ""), "bold": False, "italic": False,
                "strike": False, "list": None, "todo": False, "y": 0, "x": 0}
         got.update(kw)
         return ost.as_markdown(got)
 
     check("見出しは #", md(text="決めたこと", style="h1") == "# 決めたこと", md(style="h1"))
-    check("深い見出しも段に合わせる", md(style="h3") == "### 字", md(style="h3"))
-    check("見出しは 6 段まで", md(style="h9") == "###### 字", md(style="h9"))
-    check("太字は **", md(bold=True) == "**字**", md(bold=True))
-    check("斜体は *", md(italic=True) == "*字*", md(italic=True))
-    check("取り消し線は ~~", md(strike=True) == "~~字~~", md(strike=True))
-    check("箇条書きは -", md(list="bullet") == "- 字", md(list="bullet"))
-    check("番号は 1.", md(list="number") == "1. 字", md(list="number"))
-    check("チェックは升", md(todo=True) == "- [ ] 字", md(todo=True))
-    check("引用は >", md(style="cite") == "> 字", md(style="cite"))
-    check("コードは枠", md(style="code") == "```\n字\n```", md(style="code"))
-    check("深さは字下げ", md(indent=2, list="bullet") == "    - 字", md(indent=2, list="bullet"))
-    # **印は外側から。** 中に入れると `**- 字**` になって、箇条書きが消える。
-    check("箇条書きの印は、太字の外",
-          md(list="bullet", bold=True) == "- **字**", md(list="bullet", bold=True))
+    check("深い見出しも段に合わせる", md(style="h3") == "### 文字", md(style="h3"))
+    check("見出しは 6 段まで", md(style="h9") == "###### 文字", md(style="h9"))
+    check("太字は **", md(bold=True) == "**文字**", md(bold=True))
+    check("斜体は *", md(italic=True) == "*文字*", md(italic=True))
+    check("取り消し線は ~~", md(strike=True) == "~~文字~~", md(strike=True))
+    check("箇条書きは -", md(list="bullet") == "- 文字", md(list="bullet"))
+    check("番号は 1.", md(list="number") == "1. 文字", md(list="number"))
+    check("チェックはセル", md(todo=True) == "- [ ] 文字", md(todo=True))
+    check("引用は >", md(style="cite") == "> 文字", md(style="cite"))
+    check("コードは枠", md(style="code") == "```\n文字\n```", md(style="code"))
+    check("深さはインデント", md(indent=2, list="bullet") == "    - 文字", md(indent=2, list="bullet"))
+    # **マークは外側から。** 中に入れると `**- 文字**` になって、箇条書きが消える。
+    check("箇条書きのマークは、太字の外",
+          md(list="bullet", bold=True) == "- **文字**", md(list="bullet", bold=True))
 
     # **ページ頭の日付と時刻は、本文ではない。**
     for pid in (ost.P_IS_DATE, ost.P_IS_TIME, ost.P_IS_BOILER, ost.P_IS_TITLE):
@@ -439,7 +439,7 @@ def t_onestore_shape(tmp):
           ost.line_of({ost.P_ASCII: b"a"}) is not None)
     check("空の行は落とす", ost.line_of({ost.P_ASCII: b"   "}) is None)
 
-    # **上から下、同じ高さなら左から右**（COM の道と同じ潰し方）。
+    # **上から下、同じ高さなら左から右**（COM のパスと同じ潰し方）。
     import struct as st
 
     # **本物の `pages` の並べ方を見る。** ここで自分で `sorted` を書いて
@@ -513,22 +513,22 @@ def t_style(tmp):
         check("太字の旗が立つ", got["bold"] is True, got)
         check("色が取れる", got["color"] == "#123456", got)
         md = ost.as_markdown(got)
-        check("色は印の外、字は印の中",
+        check("色はマークの外、文字はマークの中",
               md == '<span style="color:#123456">**important**</span>', md)
 
-        # 指し先が無い・壊れているときは、黙って素の字に戻る。
+        # 指し先が無い・壊れているときは、黙って素のテキストに戻る。
         check("たどれなければ書式なし", ost.style_of(b"", look, {}) == {})
         check("指し先が居なければ書式なし",
               ost.style_of(b"", look, {ost.P_STYLE: ("ref", 999)}) == {})
 
-        # **リンクはいちばん内側。** 外に出すと印がリンクの中に入る。
+        # **リンクはいちばん内側。** 外に出すとマークがリンクの中に入る。
         props[7] = {ost.P_BOLD: 1, ost.P_LINK_URL: "https://x/a".encode("utf-16-le")}
         got = ost.line_of(props[1], ost.style_of(b"", look, props[1]))
         check("リンクの行き先が取れる", got["link"] == "https://x/a", got)
-        check("リンクは印の中", ost.as_markdown(got) == "**[important](https://x/a)**",
+        check("リンクはマークの中", ost.as_markdown(got) == "**[important](https://x/a)**",
               ost.as_markdown(got))
 
-        # 見出しは印を重ねないが、色とリンクは残す。
+        # 見出しはマークを重ねないが、色とリンクは残す。
         props[7] = {ost.P_COLOR: b"\x12\x34\x56\x00"}
         h = ost.line_of(props[1], ost.style_of(b"", look, props[1]))
         h["style"] = "h2"
@@ -558,7 +558,7 @@ def t_pictures(tmp):
     check("WEBP まで見て webp", ost.kind_of(b"RIFF" + b"\x00" * 4 + b"WEBP") == "webp")
 
     # **指し先から取る。** 前は画像オブジェクト自身のバイト列を出していて、
-    # 出てくる .png は property set の生バイトだった（一枚も開けない）。
+    # 出てくる .png は property set の生バイトだった（1 つも開けない）。
     keep = ost.read_props
     try:
         img = {"oid": 1, "jcid": ost.JC_IMAGE, "stp": 0, "cb": 0}
@@ -634,7 +634,7 @@ def t_table_refs(tmp):
             props[o["oid"]] = pr
             return o["oid"]
 
-        # **升の中は、升 → アウトライン要素 → 本文 と下がる。**
+        # **セルの中は、セル → アウトライン要素 → 本文 と下がる。**
         t11 = add(ost.JC_TEXT, text="name")
         t12 = add(ost.JC_TEXT, text="value")
         t21 = add(ost.JC_TEXT, text="apple")
@@ -646,7 +646,7 @@ def t_table_refs(tmp):
         r1 = add(ost.JC_ROW, kids=[c11, c12])
         r2 = add(ost.JC_ROW, kids=[c21, c22])
         add(ost.JC_TABLE, kids=[r1, r2])
-        そと = add(ost.JC_TEXT, text="そとの字")
+        そと = add(ost.JC_TEXT, text="そとの文字")
 
         ost.read_props = lambda d, o: props[o["oid"]]
         got = ost.tables(b"", objs)
@@ -661,13 +661,13 @@ def t_table_refs(tmp):
               ost.tables(b"", shuffled)[0]["rows"] == [["name", "value"], ["apple", "120"]],
               ost.tables(b"", shuffled))
 
-        # 表の中の字は、本文に二度出さない（指し先でたどって数える）。
+        # 表の中の文字は、本文に二度出さない（指し先でたどって数える）。
         inside = ost.table_texts(b"", objs)
-        check("表の中の字を数える", len(inside) >= 4, len(inside))
-        check("表の外の字は数えない",
+        check("表の中の文字を数える", len(inside) >= 4, len(inside))
+        check("表の外の文字は数えない",
               id(objs[[o["oid"] for o in objs].index(そと)]) not in inside)
 
-        # **本文に二度出さない** ── `_content` を通して、外の字だけが残ること。
+        # **本文に二度出さない** ── `_content` を通して、外の文字だけが残ること。
         keep_sp = ost.spaces
         try:
             ost.spaces = lambda d: [("os", {1: list(objs) + [
@@ -675,16 +675,16 @@ def t_table_refs(tmp):
             props[999] = {}
             pg = ost.pages(b"")[0]
             body = [l["text"] for l in pg["lines"]]
-            check("表の中の字は、本文に二度出さない", body == ["そとの字"], body)
+            check("表の中の文字は、本文に二度出さない", body == ["そとの文字"], body)
             check("表はちゃんと組める", pg["tables"] and
                   pg["tables"][0]["rows"] == [["name", "value"], ["apple", "120"]], pg["tables"])
         finally:
             ost.spaces = keep_sp
 
         # **行でないものを行として数えない。** 表の下にアウトラインが
-        # ぶら下がっていることがあり、それを行に混ぜると升がずれる。
-        # **升を抱えた別物**を混ぜる ── 中身が空だと、行として数えても
-        # 結果が変わらず、検査が黙る（一度そうなった）。
+        # ぶら下がっていることがあり、それを行に混ぜるとセルがずれる。
+        # **セルを抱えた別物**を混ぜる ── 中身が空だと、行として数えても
+        # 結果が変わらず、検査が報告しない（一度そうなった）。
         tx = add(ost.JC_TEXT, text="まぎれ")
         oe = add(ost.JC_OE, kids=[tx])
         cx = add(ost.JC_CELL, kids=[oe])
@@ -725,7 +725,7 @@ def t_tables(tmp):
         add(ost.JC_CELL); add(ost.JC_TEXT, "120")
         ost.read_props = lambda d, o: props[o["oid"]]
         got = ost.tables(b"", objs)
-        check("表・行・升をたどる", got and got[0]["rows"] == [["name", "value"], ["apple", "120"]],
+        check("表・行・セルをたどる", got and got[0]["rows"] == [["name", "value"], ["apple", "120"]],
               got)
         md = ost.table_markdown(got[0])
         check("Markdown の表になる", md[1] == "| --- | --- |" and "| apple | 120 |" in md, md)
@@ -737,36 +737,36 @@ def t_tables(tmp):
               and len(md) == len(got[0]["rows"]) + 2
               and "| name | value |" in md[2:], md)
 
-        # **升の数が行ごとに違う表は、揃えないと画面の上で崩れる。**
-        # OneNote では升を結合できるので、揃っていない表は普通に出てくる。
+        # **セルの数が行ごとに違う表は、揃えないと画面の上で崩れる。**
+        # OneNote ではセルを結合できるので、揃っていない表は普通に出てくる。
         objs.clear(); props.clear()
         add(ost.JC_TABLE)
         add(ost.JC_ROW); add(ost.JC_CELL); add(ost.JC_TEXT, "a")
         add(ost.JC_CELL); add(ost.JC_TEXT, "b")
         add(ost.JC_ROW); add(ost.JC_CELL); add(ost.JC_TEXT, "c")
         md = ost.table_markdown(ost.tables(b"", objs)[0])
-        check("升の数を、行ごとに揃える",
+        check("セルの数を、行ごとに揃える",
               len({r.count("|") for r in md}) == 1 and "| c |  |" in md, md)
 
-        # 升の中が複数行なら、空白で繋ぐ（Markdown の表に改行は入らない）。
+        # セルの中が複数行なら、空白で繋ぐ（Markdown の表に改行は入らない）。
         objs.clear(); props.clear()
         add(ost.JC_TABLE); add(ost.JC_ROW); add(ost.JC_CELL)
         add(ost.JC_TEXT, "one"); add(ost.JC_TEXT, "two")
         got = ost.tables(b"", objs)
-        check("升の中の改行は、空白で繋ぐ", got[0]["rows"] == [["one two"]], got)
+        check("セルの中の改行は、空白で繋ぐ", got[0]["rows"] == [["one two"]], got)
 
-        # **表の中の字は、本文に二度出さない。**
+        # **表の中の文字は、本文に二度出さない。**
         objs.clear(); props.clear()
         add(ost.JC_PAGE)
-        add(ost.JC_TEXT, "そとの字")
-        add(ost.JC_TABLE); add(ost.JC_ROW); add(ost.JC_CELL); add(ost.JC_TEXT, "なかの字")
+        add(ost.JC_TEXT, "そとの文字")
+        add(ost.JC_TABLE); add(ost.JC_ROW); add(ost.JC_CELL); add(ost.JC_TEXT, "なかの文字")
         keep_sp = ost.spaces
         try:
             ost.spaces = lambda d: [("os", {1: list(objs)})]
             pg = ost.pages(b"")[0]
             body = [l["text"] for l in pg["lines"]]
-            check("表の中の字は、本文に二度出さない",
-                  body == ["そとの字"] and pg["tables"][0]["rows"] == [["なかの字"]],
+            check("表の中の文字は、本文に二度出さない",
+                  body == ["そとの文字"] and pg["tables"][0]["rows"] == [["なかの文字"]],
                   (body, pg["tables"]))
         finally:
             ost.spaces = keep_sp
@@ -819,7 +819,7 @@ def t_revisions(tmp):
     keep_sp, keep_rp = ost.spaces, ost.read_props
     try:
         # **最後の改訂は「変えたところ」しか持っていないことがある。**
-        # `Page` の札も本文も前の改訂に置きっぱなしで、最後だけを見ると
+        # `Page` のラベルも本文も前の改訂に置きっぱなしで、最後だけを見ると
         # **ページまるごと取りこぼす**（現場で「中身がほぼ入っていない」）。
         first = [obj(1, ost.JC_PAGE), obj(2, ost.JC_PAGEMETA), obj(3, ost.JC_TEXT)]
         later = [obj(4, ost.JC_PAGEMETA)]
@@ -842,13 +842,13 @@ def t_revisions(tmp):
                   [l["text"] for l in got[0]["lines"]] == ["本文だ"], got[0]["lines"])
             check("題はいちばん新しいものを採る", got[0]["title"] == "いまの題", got[0])
 
-        # **同じ場所の同じ字は一つ。** 重ねて拾うと同じ行が二つ並ぶことがある。
+        # **同じ場所の同じ文字は一つ。** 重ねて拾うと同じ行が二つ並ぶことがある。
         ost.spaces = lambda d: [("a", {1: [obj(1, ost.JC_PAGE), obj(3, ost.JC_TEXT),
                                            obj(5, ost.JC_TEXT)]})]
         ost.read_props = lambda d, o: ({ost.P_UNICODE: "おなじ".encode("utf-16-le")}
                                        if o["jcid"] == ost.JC_TEXT else {})
         got = ost.pages(b"")
-        check("同じ場所の同じ字は一つにまとめる",
+        check("同じ場所の同じ文字は一つにまとめる",
               got and [l["text"] for l in got[0]["lines"]] == ["おなじ"], got)
 
         # **本文も題も無い空間は、ノートにしない。**
@@ -934,7 +934,7 @@ def t_cab(tmp):
         check(f"開ける（{label}）", entries is not None, why)
         if entries is None:
             continue
-        check(f"目録の道のまま出す（{label}）", [n for n, _ in entries] == names, entries)
+        check(f"目録のパスのまま出す（{label}）", [n for n, _ in entries] == names, entries)
         for (name, q), (_n, body) in zip(entries, want):
             check(f"中身が合う（{label}・{name}）", q.read_bytes() == body,
                   f"{len(q.read_bytes())} ≠ {len(body)}")
@@ -944,7 +944,7 @@ def t_cab(tmp):
               (into / "400_打合せ" / "水曜日打合せ.one").is_file(),
               sorted(str(q.relative_to(into)) for q in into.rglob("*")))
 
-    # **MSZIP は塊をまたぐ。** 一塊に収まる見本では、前の塊を辞書に使う道が
+    # **MSZIP は塊をまたぐ。** 一塊に収まるサンプルでは、前の塊を辞書に使うパスが
     # 一度も通らない ── 32KB を超える中身で確かめる。
     big = [("長い/中身.one", bytes(range(256)) * 400)]     # 102,400 バイト
     at.write_bytes(_cab(big, compress=True, block=32768))
@@ -952,7 +952,7 @@ def t_cab(tmp):
     check("塊をまたいでも中身が合う（MSZIP）",
           entries is not None and entries[0][1].read_bytes() == big[0][1], why)
 
-    # **入れ物の言う道を、そのまま信じない。** `..` を入れた CAB を渡されたら、
+    # **入れ物の言うパスを、そのまま信じない。** `..` を入れた CAB を渡されたら、
     # 出力先の外に書ける。
     evil = [("../../逃げる.one", b"X" * 9)]
     at.write_bytes(_cab(evil))
@@ -961,7 +961,7 @@ def t_cab(tmp):
     check("上の階へ出さない（.. は落とす）",
           entries and entries[0][1] == into / "逃げる.one", entries)
 
-    # **セクションの道は、目録から組む。**
+    # **セクションのパスは、目録からビルドする。**
     at.write_bytes(_cab(want))
     entries, _ = o2m.unpack_onepkg(at, tmp / "opened-sec")
     secs = o2m.opened_sections(tmp / "みそそ.onepkg", entries)
@@ -981,13 +981,13 @@ def t_cab(tmp):
 
 
 def t_ui(tmp):
-    print("押して選ぶ小さい窓 ──")
+    print("押して選ぶ小さいウィンドウ ──")
     import importlib.util as iu, subprocess
     spec = iu.spec_from_file_location("onenote_ui", ROOT / "onenote_ui.py")
     ui = iu.module_from_spec(spec)
     spec.loader.exec_module(ui)
 
-    # **走らせる一行は、Tk の外に出してある。** 中に置くと、Tk の要る機械で
+    # **走らせる一行は、Tk の外に出してある。** 中に置くと、Tk の要る環境で
     # しか確かめられない ── 押したときに何が走るのかを誰も試せなくなる。
     cmd = ui.command("C:\\out\\mesoso.onepkg", "C:\\Users\\t\\Documents\\OneNote")
     check("走らせるのは、いま動いている Python", cmd[0] == sys.executable, cmd)
@@ -1000,7 +1000,7 @@ def t_ui(tmp):
     check("出力先の下見は、ドキュメントの隣の OneNote", out.name == "OneNote", str(out))
     check("amber の下には掘らない", "amber" not in str(out).lower(), str(out))
 
-    # **Tk が無い機械でも、黙って何もしないのではなく代わりの打ち方を出す。**
+    # **Tk が無い環境でも、黙って何もしないのではなく代わりの打ち方を出す。**
     src = (ROOT / "onenote_ui.py").read_text(encoding="utf-8")
     hidden = tmp / "tk無し"
     hidden.mkdir(exist_ok=True)
@@ -1026,7 +1026,7 @@ def t_ui(tmp):
     bat = (ROOT / "onenote2md.bat").read_text(encoding="utf-8", errors="replace")
     check("Python が無ければ、入れ方を言って止まる",
           "Python が見つかりません" in bat and "exit /b 1" in bat, "")
-    check("押しただけなら窓を出す", 'if "%~1"=="" (' in bat, "")
+    check("押しただけならデスクトップ版を出す", 'if "%~1"=="" (' in bat, "")
     check("放り込まれたら、そのまま取り込む", "--out" in bat and "shift" in bat, "")
     # **日本語 Windows の既定は cp932。** ここを立てないと画面が化ける。
     check("先に chcp 65001 を打つ", "chcp 65001" in bat, "")

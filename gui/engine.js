@@ -6,7 +6,7 @@
 // 打鍵より遅くなった瞬間に、その順序は崩れる。
 //
 // cian の `gui/engine.js` と同じ形。**写したのは配管だけで、判断は写して
-// いない** ── 答えるのは `amber_core::api` の一枚だけ。
+// いない** ── 答えるのは `amber_core::api` の1 つだけ。
 
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
@@ -15,7 +15,7 @@ const fs = require('node:fs');
 
 /// エンジンの居場所。二通りの走り方それぞれに。
 ///
-/// 配ったものは窓の隣に居る。ソースから走らせるときは `target/` の下で、
+/// 配ったものはデスクトップ版の隣に居る。ソースから走らせるときは `target/` の下で、
 /// **新しいほうが勝つ ── release ではなく。**
 ///
 /// release を優先するのは丁寧に見えて逆だった（cian で踏んだ）。朝の release
@@ -62,7 +62,7 @@ class Engine {
             for (const { reject } of this.pending.values()) reject(dead);
             this.pending.clear();
         });
-        // **窓を閉じるときに書き込むと、相手はもう居ない。** 最後にやるのは
+        // **デスクトップ版を閉じるときに書き込むと、相手はもう居ない。** 最後にやるのは
         // 憶えごと（大きさ・見た目・開いていたノート）で、そのどれもが呼び出し。
         // 落ちたパイプへの書き込みは `write EOF` になり、誰も聞いていない
         // `error` として Node が例外に昇格させる。閉じかけのエンジンは

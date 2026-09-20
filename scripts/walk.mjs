@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-/* 窓の**総ざらい**。人が押すところを、片端から実際に動かす。
+/* デスクトップ版の**総ざらい**。人が押すところを、片端から実際に動かす。
  *
- *     scripts/walk.sh          # 場所を作り、窓を出し、これを走らせ、片づける
- *     node scripts/walk.mjs    # 既に 9333 で出ている窓に対して走らせる
+ *     scripts/walk.sh          # 場所を作り、デスクトップ版を出し、これを走らせ、片づける
+ *     node scripts/walk.mjs    # 既に 9333 で出ているデスクトップ版に対して走らせる
  *
  * **なぜ要るのか。** 一つずつの試験（`round-test` など）は通っているのに、
  * 実物では落ちる、が何度もあった ── 落ちるのはたいてい「押したときに
@@ -11,12 +11,12 @@
  * 見ているのは三つ:
  *   一。例外が飛ばないこと（`Runtime.exceptionThrown`）
  *   二。`console.error` / `warning` が出ないこと
- *   三。**触ったあと、そのノートがまだ字に戻せること**（`paperToMd`）──
+ *   三。**触ったあと、そのノートがまだテキストに戻せること**（`paperToMd`）──
  *       戻せないノートは、そこから先の保存が黙って止まる
  *
  * 落ちたものだけ出す。ぜんぶ通れば一行。
  *
- * **窓へ送る字の中に、逆引用符と円記号を書かないこと。** ここは
+ * **ウィンドウへ送る文字の中に、逆引用符と円記号を書かないこと。** ここは
  * テンプレートの中なので、そこでテンプレートが閉じる・改行が本物になる
  * ── 三度踏んだ（2026-09-09）。註にも書けない。改行が要るなら
  * String.fromCharCode(10)。
@@ -41,9 +41,9 @@ await step('目次を入れ替える', `const was = tocOn; toggleToc(); return t
 await step('目次を戻す', `const was = tocOn; toggleToc(); return tocOn !== was;`, true);
 await step('ノートだけ大きく', `setZen(true); return zen;`, true);
 await step('もとに戻す', `setZen(false); return zen;`, false);
-await step('字を大きく', `setFont(fontStep + 1); return true;`, true);
-await step('字を小さく', `setFont(fontStep - 1); return true;`, true);
-await step('字の大きさを戻す', `setFont(0); return fontStep;`, 0);
+await step('文字を大きく', `setFont(fontStep + 1); return true;`, true);
+await step('文字を小さく', `setFont(fontStep - 1); return true;`, true);
+await step('文字の大きさを戻す', `setFont(0); return fontStep;`, 0);
 await step('左の列を畳む', `const was = railOff; toggleRail(); return railOff !== was;`, true);
 await step('左の列を出す', `const was = railOff; toggleRail(); return railOff !== was;`, true);
 await step('一覧を畳む', `const was = listOff; toggleList(); return listOff !== was;`, true);
@@ -108,13 +108,13 @@ await step('タブ：同じノートをもう一度押しても増えない', `
     await openNote(two[0]);
     if (tabs.length !== n0) return '同じ一本で増えました（' + tabs.length + '）';
     return showing === two[0] ? true : 'そのタブに移っていません';`, true);
-// 三の二の二。**変換の途中で別のノートへ移っても、打った字が消えない**
+// 三の二の二。**変換の途中で別のノートへ移っても、打った文字が消えない**
 // （依頼 558）── 日本語を打つ人は「一区切り打って、まとめて変換」なので、
 // ここで落とすと一度に消える量が大きい。会社の Windows で本人が踏んだ。
-await step('変換の途中で移っても、打った字が残る', `
+await step('変換の途中で移っても、打った文字が残る', `
     // **使い捨ての一本を自分で作る。** はじめは試しのノートを書き換えて
     // いたが、**題が一行目から決まる**ので名前が変わり、後ろの段を二度
-    // 巻き込んだ ── 散らかすなら、自分の持ち物の中で散らかす。
+    // 巻き込んだ ── 散らかすなら、自分の自前の型の中で散らかす。
     const 作 = await window.amber.call('new', { dir: state.root, title: '変換の試し', tags: [], text: '' });
     const 道 = 作.path || (作.note && 作.note.path);
     await reload({ quiet: true });
@@ -124,7 +124,7 @@ await step('変換の途中で移っても、打った字が残る', `
     if (!two.length) return 'ノートが足りません';
     setView('read');
     await new Promise((g) => setTimeout(g, 400));
-    // 確定した字を一つ置いてから、**変換中のまま**もう一つ置く。
+    // 確定した文字を一つ置いてから、**変換中のまま**もう一つ置く。
     const p = el('read').querySelector('p, div, h1, h2') || el('read');
     const sel = window.getSelection(); const r = document.createRange();
     r.selectNodeContents(p); r.collapse(false); sel.removeAllRanges(); sel.addRange(r);
@@ -147,16 +147,16 @@ await step('変換の途中で移っても、打った字が残る', `
     await closeTab(道);
     await ask('delete', { path: showing === 道 ? 道 : 道 });
     await reload({ quiet: true });
-    if (!now.includes('かくてい')) return '確定した字まで消えました';
-    return now.includes('みかくていのじ') ? true : '変換中だった字が消えました';`, true);
+    if (!now.includes('かくてい')) return '確定した文字まで消えました';
+    return now.includes('みかくていのじ') ? true : '変換中だった文字が消えました';`, true);
 
 // 三の二の三。**表の中の上下は、見た目どおり**（依頼 559・本人）。
-await step('表：下矢印は右ではなく、真下の升へ', `
+await step('表：下矢印は右ではなく、真下のセルへ', `
     await openNote(${path('よくばり.md')});
     setView('read');
     await new Promise((g) => setTimeout(g, 700));
     const cells = [...el('read').querySelectorAll('table th, table td')];
-    if (cells.length < 4) return '表の升が ' + cells.length + ' つです';
+    if (cells.length < 4) return '表のセルが ' + cells.length + ' つです';
     landInCell(cells[0]);
     el('read').focus();
     el('read').dispatchEvent(new KeyboardEvent('keydown',
@@ -164,9 +164,9 @@ await step('表：下矢印は右ではなく、真下の升へ', `
     await new Promise((g) => setTimeout(g, 200));
     let n = getSelection().anchorNode; if (n && n.nodeType === 3) n = n.parentElement;
     const now = n?.closest('td, th');
-    if (!now) return '升の外に出ました';
+    if (!now) return 'セルの外に出ました';
     return now === cells[2] ? true : '行った先は「' + now.textContent.trim() + '」です';`, true);
-await step('表：上矢印は、真上の升へ', `
+await step('表：上矢印は、真上のセルへ', `
     const cells = [...el('read').querySelectorAll('table th, table td')];
     landInCell(cells[3]);
     el('read').focus();
@@ -175,7 +175,7 @@ await step('表：上矢印は、真上の升へ', `
     await new Promise((g) => setTimeout(g, 200));
     let n = getSelection().anchorNode; if (n && n.nodeType === 3) n = n.parentElement;
     const now = n?.closest('td, th');
-    if (!now) return '升の外に出ました';
+    if (!now) return 'セルの外に出ました';
     return now === cells[1] ? true : '行った先は「' + now.textContent.trim() + '」です';`, true);
 
 // 三の二の四。**IME が載っているだけの `keyCode 229` で、手当てを飛ばさない**
@@ -222,7 +222,7 @@ await step('⇧Enter：本当に変換中なら、IME に渡す', `
 await step('タブ：50 枚を超えたら、古いものから閉じる', `
     const real = tabs.slice();
     const here = showing;
-    // 偽のタブを 60 枚。**書きかけの札は、いちばん古いものに付ける** ──
+    // 偽のタブを 60 枚。**書きかけのラベルは、いちばん古いものに付ける** ──
     // 新しいほうに付けると、そもそも閉じる番が回ってこないので、
     // 「書きかけに触らない」枝を一度も踏まない（外しても鳴らなかった）。
     tabs = [{ path: here, keep: null, seen: 999 }];
@@ -234,14 +234,14 @@ await step('タブ：50 枚を超えたら、古いものから閉じる', `
     const left = tabs.length;
     const kept = tabs.some((t) => t.path === window.__dirty);
     const still = tabs.some((t) => t.path === here);
-    // いちばん古い（seen が小さい）ものから消えているか。書きかけの一枚は
+    // いちばん古い（seen が小さい）ものから消えているか。書きかけの1 つは
     // 飛ばすので、その次に古い二枚が代わりに消えていること。
     const next2 = ['/偽/58.md', '/偽/57.md'].some((p) => tabs.some((t) => t.path === p));
     const young = tabs.some((t) => t.path === '/偽/0.md');
     tabs = real; showing = here;
     drawStrip();
     if (left !== 50) return '50 枚に戻っていません（' + left + '）';
-    if (!kept) return '書きかけのタブを閉じました（いちばん古い一枚）';
+    if (!kept) return '書きかけのタブを閉じました（いちばん古い1 つ）';
     if (!still) return 'いま出しているタブを閉じました';
     if (next2) return '古いほうが残っています';
     if (!young) return '新しいほうを閉じています';
@@ -257,7 +257,7 @@ await step('タブ：50 枚までは、何も閉じない', `
     drawStrip();
     return left === 50 ? true : '閉じてはいけないのに閉じました（' + left + '）';`, true);
 
-await step('タブ：右押しの献立は決めた言い方', `
+await step('タブ：右押しのメニューは決めた言い方', `
     const d = el('strip').querySelector('.tab');
     d.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
     await new Promise((g) => setTimeout(g, 250));
@@ -270,41 +270,41 @@ await step('タブ：右押しの献立は決めた言い方', `
 await step('すべて選ぶ', `pickAll(); return state.picked.size > 0;`, true);
 await step('選びを解く', `unpickAll(); return state.picked.size;`, 0);
 
-// 五。表示の面で書く（記号ぜんぶ）
+// 五。表示の画面で書く（記号ぜんぶ）
 await step('よくばりを開き直す', `await openNote(${path('よくばり.md')}); setView('read'); return view;`, 'read');
 for (const [name] of JSON.parse(process.env.MARKS || '[]')) {
-    // 帯の記号は、下でまとめて回す（名前は窓から取る）
+    // 帯の記号は、下でまとめて回す（名前はウィンドウから取る）
     void name;
 }
 const marks = await run(`return MARKS.flat().filter((m) => m[0] !== '|' && m[2]).map((m) => m[0]);`);
 for (const name of marks.value || []) {
-    // 絵と図と絵文字は、窓の外（ファイル選び・工房・板）を開くので別に見る
+    // 絵と図と絵文字は、デスクトップ版の外（ファイル選び・工房・板）を開くので別に見る
     if (['画像', 'フロー', '注記', '絵文字'].includes(name)) continue;
-    await step('表示の面：' + name, `
+    await step('表示の画面：' + name, `
         const p = [...el('read').children].find((n) => n.tagName === 'P');
         if (p) { const r = document.createRange(); r.selectNodeContents(p); r.collapse(false);
                  const s = getSelection(); s.removeAllRanges(); s.addRange(r); el('read').focus(); }
         MARKS.flat().find((m) => m[0] === ${JSON.stringify(name)})[2]();
         return true;`, true);
 }
-await step('升を押す', `
+await step('セルを押す', `
     const b = el('read').querySelector('.box');
     if (!b) return 'なし';
     b.click();
     return true;`, true);
 
-// 六。コードの面で書く
-await step('コードの面へ', `setView('write'); return view;`, 'write');
+// 六。コード画面で書く
+await step('コード画面へ', `setView('write'); return view;`, 'write');
 for (const name of marks.value || []) {
     if (['画像', 'フロー', '注記', '絵文字'].includes(name)) continue;
-    await step('コードの面：' + name, `
+    await step('コード画面：' + name, `
         editor.setPosition({ lineNumber: 3, column: 1 });
         MARKS.flat().find((m) => m[0] === ${JSON.stringify(name)})[2]();
         return true;`, true);
 }
 await step('一つ戻す', `editor.trigger('walk', 'undo'); return true;`, true);
 await step('やり直す', `editor.trigger('walk', 'redo'); return true;`, true);
-await step('表示の面へ戻す', `setView('read'); return view;`, 'read');
+await step('表示の画面へ戻す', `setView('read'); return view;`, 'read');
 
 // 七。絵文字と絵の大きさ
 await step('絵文字の板を出す', `await openEmoji(); return !el('emoji').hidden;`, true);
@@ -343,20 +343,20 @@ await step('ブラウザから貼る', `
 
 // 九。ノートそのもの
 await step('新しいノート', `const at = await newNote(); return !!at;`, true);
-// 新しいノートの小窓（依頼 513・電話の形）── 題とタグを入れて作成／何も入れずに作成。
-await step('新しいノートの小窓：タイトルとタグを入れて作成', `
+// 新しいノートのダイアログ（依頼 513・iPhone の形）── 題とタグを入れて作成／何も入れずに作成。
+await step('新しいノートのダイアログ：タイトルとタグを入れて作成', `
     const p = cmdNewNote();
     await new Promise((g) => setTimeout(g, 300));
-    if (el('newform').hidden) return '小窓が出ていません';
-    el('nntitle').value = '小窓から作ったノート';
-    el('nntag').value = '小窓';
+    if (el('newform').hidden) return 'ダイアログが出ていません';
+    el('nntitle').value = 'ダイアログから作ったノート';
+    el('nntag').value = 'ダイアログ';
     el('nnok').click();
     const at = await p;
     if (!at) return '作れませんでした';
     await new Promise((g) => setTimeout(g, 500));
     const n = state.notes.find((x) => x.path === at);
-    if (!n || n.title !== '小窓から作ったノート') return '題が ' + (n && n.title);
-    if (!(n.tags || []).includes('小窓')) return 'タグが付いていません: ' + JSON.stringify(n && n.tags);
+    if (!n || n.title !== 'ダイアログから作ったノート') return '題が ' + (n && n.title);
+    if (!(n.tags || []).includes('ダイアログ')) return 'タグが付いていません: ' + JSON.stringify(n && n.tags);
     return true;`, true);
 await step('最大化・最小化の印：押すとノートだけになり、もう一度で戻る', `
     await openNote(${path('買い物.md')});
@@ -365,7 +365,7 @@ await step('最大化・最小化の印：押すとノートだけになり、�
     el('zenbtn').click();
     if (!big) return '大きくなりません';
     return zen ? 'もう一度押しても戻りません' : true;`, true);
-await step('新しいノートの小窓：何も入れずに作成でも作れる', `
+await step('新しいノートのダイアログ：何も入れずに作成でも作れる', `
     const p = cmdNewNote();
     await new Promise((g) => setTimeout(g, 300));
     el('nnok').click();
@@ -406,11 +406,11 @@ await step('名前：題の欄から出た瞬間に、ファイル名が題に�
         await openNote(${path('買い物.md')});
         el('title').textContent = '買いもの';
         await titleDone(true);
-        if (!state.open.path.endsWith('/買いもの.md')) return '道が ' + state.open.path;
+        if (!state.open.path.endsWith('/買いもの.md')) return 'パスが ' + state.open.path;
         if (state.notes.some((n) => n.path.endsWith('/買い物.md'))) return '古い名前が一覧に残っています';
         el('title').textContent = '買い物';
         await titleDone(true);
-        return state.open.path.endsWith('/買い物.md') ? true : '戻した道が ' + state.open.path;
+        return state.open.path.endsWith('/買い物.md') ? true : '戻したパスが ' + state.open.path;
     } finally { nameAuto = false; }`, true);
 if (NOTES) {
     tally.ran += 1;
@@ -434,7 +434,7 @@ await step('名前：同じ題は .2 になる', `
         return n ? true : '無い: ' + state.notes.filter((x) => /買い物|二本目/.test(x.path)).map((x) => x.path.split('/').pop()).join(' / ');
     } finally { nameAuto = false; }`, true);
 
-// **小窓を開ける命令は `await` しない。** ★ は置き場所を訊いてくる。
+// **小デスクトップ版を開ける命令は `await` しない。** ★ は置き場所を訊いてくる。
 await step('ブックマークに登録', `
     cmdStar();
     await new Promise((g) => setTimeout(g, 500));
@@ -448,7 +448,7 @@ await step('このノートをテンプレートにする', `
     if (!made) return '写せません: ' + el('say').textContent;
     const after = state.notes.filter((n) => relOf(n.book) === TEMPLATES).length;
     return after === before + 1 ? true : '「テンプレート」が ' + before + ' → ' + after;`, true);
-await step('見本のテンプレートを入れる（三枚・二度目は増えない）', `
+await step('サンプルのテンプレートを入れる（三枚・二度目は増えない）', `
     const a = await window.amber.templates(state.root);
     const b = await window.amber.templates(state.root);
     await reload({ quiet: true });
@@ -480,7 +480,7 @@ await step('フォルダに色を付ける', `
     return true;`, true);
 
 // 十一。履歴と、見せるだけのもの
-// **小窓を開ける命令は `await` しない。** 閉じる人がいないので返らない。
+// **小デスクトップ版を開ける命令は `await` しない。** 閉じる人がいないので返らない。
 await step('過去バージョンを開く', `
     cmdHistory();
     await new Promise((g) => setTimeout(g, 500));
@@ -495,19 +495,19 @@ await step('何をしますか（パレット）', `
     const n = document.querySelectorAll('#sheet .it').length;
     closeSheet(null);
     return n > 10;`, true);
-await step('献立（⋯）を出す', `
+await step('メニュー（⋯）を出す', `
     await openNote(${path('買い物.md')});
     openMenu({ x: 300, y: 300 });
     const n = document.querySelectorAll('#more button').length;
     closeMenu();
     return n > 3;`, true);
-await step('設定の献立を出す', `
+await step('設定のメニューを出す', `
     openMenu({ x: 300, y: 300 }, 'app');
     const n = document.querySelectorAll('#more button').length;
     closeMenu();
     return n > 3;`, true);
 
-// 十二。**右押し、ぜんぶ。** 窓には八か所ある ── どれも「押した瞬間に
+// 十二。**右押し、ぜんぶ。** デスクトップ版には八か所ある ── どれも「押した瞬間に
 // しか通らない道」で、単体の試験は一つも触っていない。
 const RIGHT = [
     ['左の列の行き先', `el('rail').querySelector('.dest')`],
@@ -515,10 +515,10 @@ const RIGHT = [
     ['一覧の空きどころ', `el('list')`],
     ['左の列の空きどころ', `el('rail')`],
     ['帯の題', `el('title')`],
-    ['読む面の字の上', `[...el('read').children].find((n) => n.tagName === 'P')`],
-    ['読む面の表の上', `el('read').querySelector('td')`],
-    ['読む面の升の上', `el('read').querySelector('.box')`],
-    ['読む面のリンクの上', `el('read').querySelector('a')`],
+    ['表示画面の文字の上', `[...el('read').children].find((n) => n.tagName === 'P')`],
+    ['表示画面の表の上', `el('read').querySelector('td')`],
+    ['表示画面のセルの上', `el('read').querySelector('.box')`],
+    ['表示画面のリンクの上', `el('read').querySelector('a')`],
 ];
 await step('よくばりを開く（右押しのため）', `await openNote(${path('よくばり.md')}); setView('read'); return view;`, 'read');
 for (const [name, pick] of RIGHT) {
@@ -559,8 +559,8 @@ await step('右押し：目次の見出し', `
     if (tocOn) toggleToc();
     return out > 0;`, true);
 
-// 十三。まとめて選んだときの献立（一括タグ・移す・消す）
-await step('選んで献立を出す', `
+// 十三。まとめて選んだときのメニュー（一括タグ・移す・消す）
+await step('選んでメニューを出す', `
     pickAll();
     pickedMenu({ x: 300, y: 300 });
     await new Promise((g) => setTimeout(g, 250));
@@ -570,7 +570,7 @@ await step('選んで献立を出す', `
     return out > 2;`, true);
 
 // 十三の二。**テーマぜんぶ**（依頼 495）── 琥珀の三つと、cian と同じ二十一。
-// どれを着せても字と紙の色が分かれていて、着せ替えで例外が飛ばないこと。
+// どれを着せても文字と紙の色が分かれていて、着せ替えで例外が飛ばないこと。
 await step('テーマ：二十四の配色ぜんぶ着せられる', `
     const was = theme;
     const out = [];
@@ -586,7 +586,7 @@ await step('テーマ：二十四の配色ぜんぶ着せられる', `
     if (THEMES.length !== 24) return '配色が ' + THEMES.length + ' 種です（24 のはず）';
     return out.length ? out.join(' / ') : true;`, true);
 
-// 十四。**残りの命令。** 小窓を開けるものは `await` しない。
+// 十四。**残りの命令。** 小デスクトップ版を開けるものは `await` しない。
 const LATER = [
     ['タグ設定', `cmdTags();`],
     ['フォルダへ移動', `cmdMove();`],
@@ -597,7 +597,7 @@ const LATER = [
     ['ambər について', `cmdAbout();`],
     ['ノートを探す', `openFind();`],
     ['期間で絞る', `openDrawer('when');`],
-    // 同期 ── サインインしていなければ「Google でサインイン」の小窓が出て、閉じられる。
+    // 同期 ── サインインしていなければ「Google でサインイン」の小デスクトップ版が出て、閉じられる。
     ['同期', `cmdSync();`],
 ];
 for (const [name, call] of LATER) {
@@ -613,12 +613,12 @@ for (const [name, call] of LATER) {
 await step('命令：現状バージョン保存', `await cmdKeepNow(); return true;`, true);
 
 /// **訊いてくる命令は、返事をしてやる。** `await` すると返ってこない
-/// （小窓が閉じられるのを待っている）── 呼びっぱなしにして、出た小窓に
-/// 答える。答えないと、その先の道を一度も通らない。
+/// （小デスクトップ版が閉じられるのを待っている）── 呼びっぱなしにして、出た小デスクトップ版に
+/// 答える。答えないと、その先のパスを一度も通らない。
 ///
-/// **一度では足りない。** 「家族と共有する」は棚を作るかを訊いたあと、
+/// **一度では足りない。** 「家族と共有する」はフォルダを作るかを訊いたあと、
 /// もう一度**名前**を訊く ── 一度しか答えていなくて、途中で止まっていた
-/// （走査で気づいた）。選ぶ小窓なら一つめを押し、打つ小窓なら字を入れる。
+/// （走査で気づいた）。選ぶダイアログなら一つめを押し、打つダイアログなら文字を入れる。
 const answering = (call, then) => `
     ${call}
     for (let i = 0; i < 5; i += 1) {
@@ -635,13 +635,13 @@ const answering = (call, then) => `
 await step('命令：家族と共有する', answering(
     `await openNote(${path('買い物.md')}); cmdToShare();`,
     `return state.notes.some((n) => n.shared);`), true);
-// **見るのは、そのノート一本。** 棚を作った時点で、その中に元から
+// **見るのは、そのノート一本。** フォルダを作った時点で、その中に元から
 // 居たノート（`家族/買い物リスト.md`）も共有になる ── 「一本も共有されて
 // いないこと」では、いつまでも真にならない（走査で気づいた）。
 await step('命令：共有をやめる', answering(
     `const was = state.open.title; cmdToShare();`,
     `return !state.notes.some((n) => n.title === was && n.shared);`), true);
-await step('命令：見本のノートを入れる', answering(
+await step('命令：サンプルのノートを入れる', answering(
     `cmdWelcome();`,
     `return state.notes.length > 0;`), true);
 
@@ -649,7 +649,7 @@ await step('命令：見本のノートを入れる', answering(
 await step('無いノートを開く', `
     try { await openNote(state.root + '/ありません.md'); } catch { /* 断られてよい */ }
     return true;`, true);
-await step('無い道を core に訊く', `
+await step('無いパスを core に訊く', `
     try { await ask('read', { path: state.root + '/ありません.md' }); return '通った'; }
     catch { return true; }`, true);
 await step('外へ出られないとき', `
@@ -658,7 +658,7 @@ await step('外へ出られないとき', `
 await step('ページでない道', `
     const r = await window.amber.fetchPage('file:///etc/hosts');
     return typeof r.error === 'string';`, true);
-await step('道の形になっていないもの', `
+await step('パスの形になっていないもの', `
     const r = await window.amber.fetchPage('とりこんで');
     return typeof r.error === 'string';`, true);
 await step('壊れた HTML を貼る', `
@@ -676,7 +676,7 @@ if (process.env.SITE) {
     await step('Web から取り込む', `
         const got = await window.amber.fetchPage(${JSON.stringify(process.env.SITE)});
         if (got.error) return got.error;
-        // **窓の cmdClip と同じ呼び方で。** 別の呼び方で確かめると、
+        // **デスクトップ版の cmdClip と同じ呼び方で。** 別の呼び方で確かめると、
         // 呼び方が変わった日にここだけ古いまま通ってしまう
         // （この中に逆引用符は書けない ── 頭の注意書きのとおり）。
         const md = webToMd(bestPart(got.html), got.url);
@@ -685,16 +685,16 @@ if (process.env.SITE) {
 
 /* ── 十六の二。**鍵だけで一周できるか**（依頼 447） ──
  *
- * 鍵は二か所に書いてある ── **見せる側**（CMDS の key）と、**効かせる側**
- * （keydown の if の並び）。別々なので、片方だけ直る日が来る: 献立にも
- * パレットにも出ているのに、押しても何も起きない鍵ができあがる。
+ * キーは二か所に書いてある ── **見せる側**（CMDS の key）と、**効かせる側**
+ * （keydown の if の並び）。別々なので、片方だけ直る日が来る: メニューにも
+ * パレットにも出ているのに、押しても何も起きないキーができあがる。
  *
- * 見るのは二つ。**同じ鍵を二つの命令が名乗っていないこと**（先に書いた
- * ほうが勝ち、あとのほうは永久に押せない）と、**表に載っている鍵を押すと
- * 窓の姿が変わること**。
+ * 見るのは二つ。**同じキーを二つの命令が名乗っていないこと**（先に書いた
+ * ほうが勝ち、あとのほうは永久に押せない）と、**表に載っているキーを押すと
+ * デスクトップ版の姿が変わること**。
  */
 
-await step('鍵：同じ鍵を、二つの命令が名乗っていない', `
+await step('鍵：同じキーを、二つの命令が名乗っていない', `
     const seen = new Map();
     const dup = [];
     for (const c of CMDS) {
@@ -705,12 +705,12 @@ await step('鍵：同じ鍵を、二つの命令が名乗っていない', `
     return dup.length ? dup.join(' / ') : true;
 `, true);
 
-// **ここだけ長く待つ。** 四十本の鍵を一本ずつ、押す前に姿を戻して
+// **ここだけ長く待つ。** 四十本のキーを一本ずつ、押す前に姿を戻して
 // から押すので、既定の待ちでは足りない（待ちきれずに落第になった）。
 const patience = process.env.PATIENCE;
 process.env.PATIENCE = '60000';
-await step('鍵：表に載っている鍵が、ぜんぶ効く', `
-    // たどれる跡を作っておく ── 跡が無いと、前へ戻る鍵は正しく何もしない。
+await step('鍵：表に載っているキーが、ぜんぶ効く', `
+    // たどれる跡を作っておく ── 跡が無いと、前へ戻るキーは正しく何もしない。
     for (const n of state.notes.slice(0, 2)) {
         await openNote(n.path);
         await new Promise((g) => setTimeout(g, 120));
@@ -735,7 +735,7 @@ await step('鍵：表に載っている鍵が、ぜんぶ効く', `
             shiftKey: s.shift, altKey: s.alt, bubbles: true, cancelable: true,
         }));
     };
-    // **窓の姿。** 何が起きたかまでは見ない ── 見ようとすると命令ごとの
+    // **デスクトップ版の姿。** 何が起きたかまでは見ない ── 見ようとすると命令ごとの
     // 見張りを四十本書くことになり、そちらが先に腐る。
     const snap = () => JSON.stringify({
         view, zen, fontStep, railOff, listOff, tocOn,
@@ -761,18 +761,18 @@ await step('鍵：表に載っている鍵が、ぜんぶ効く', `
         el('say').classList.remove('on');
     };
     // **押す前に、効く余地を作る。** 押しても姿が変わらないのは
-    // 「鍵が死んでいる」ときと「もう そうなっている」ときの二通りある
+    // 「キーが死んでいる」ときと「もう そうなっている」ときの二通りある
     // ── 後者で鳴らすと、この検査はすぐ信じられなくなる。
     const pause = (ms) => new Promise((g) => setTimeout(g, ms));
     const NOTE = ${path('よくばり.md')};
     await openNote(NOTE);
     await pause(150);
     const first = editor ? editor.getValue() : '';
-    // 戻す先を積む。**開き直すと消える**ので、その鍵の直前にまく
-    // （前へ戻る鍵が先に走って、ノートを開き直している）。
+    // 戻す先を積む。**開き直すと消える**ので、そのキーの直前にまく
+    // （前へ戻るキーが先に走って、ノートを開き直している）。
     // **二回いる** ── 一回目は「いまの姿」を憶えるだけで、積まれるのは
-    // 二回目から（keepStep）。**書く面で**まかないと、保存は面の側の字を
-    // 採るので、エディタに入れた字が書き込まれない。
+    // 二回目から（keepStep）。**編集画面で**まかないと、保存は画面の側の文字を
+    // 採るので、エディタに入れた文字が書き込まれない。
     const seed = async () => {
         await openNote(NOTE);
         await pause(150);
@@ -786,7 +786,7 @@ await step('鍵：表に載っている鍵が、ぜんぶ効く', `
         }
     };
     const ready = {
-        // 字の大きさは reset で 0 に戻るので、0 に戻す鍵だけ余地が要る。
+        // 文字の大きさは reset で 0 に戻るので、0 に戻す鍵だけ余地が要る。
         font0: async () => { setFont(2, true); },
         undo: seed,
         redo: async () => { await seed(); press('⌘Z'); await pause(240); },
@@ -794,7 +794,7 @@ await step('鍵：表に載っている鍵が、ぜんぶ効く', `
     const dead = [];
     for (const c of CMDS) {
         if (!c.key) continue;
-        // **OS の小窓を開ける鍵は押さない** ── 閉じる人がいないので、
+        // **OS の小デスクトップ版を開けるキーは押さない** ── 閉じる人がいないので、
         // ここで総ざらいが止まる（頭の注意書きと同じ理由）。
         if (c.id === 'outside') continue;
         reset();
@@ -806,7 +806,7 @@ await step('鍵：表に載っている鍵が、ぜんぶ効く', `
         if (snap() === before) dead.push(c.id + ' ' + c.key);
     }
     reset();
-    // 触った字は戻す ── このあとの往復が、崩れたノートで始まらないように。
+    // 触った文字は戻す ── このあとの往復が、崩れたノートで始まらないように。
     await openNote(NOTE);
     await pause(150);
     setView('write');
@@ -823,7 +823,7 @@ if (patience === undefined) delete process.env.PATIENCE; else process.env.PATIEN
 
 /* ── 十六の三。**ノートから使われていない画像**（依頼 449） ── */
 
-await step('使われていない画像：指されている一枚は巻き込まない', `
+await step('使われていない画像：指されている1 つは巻き込まない', `
     const got = await window.amber.call('spare', { path: state.root });
     const names = (got.pictures || []).map((p) => p.rel);
     if (names.some((n) => n.includes('1788000001'))) return '使っている画像が出ています';
@@ -843,14 +843,14 @@ await step('使われていない画像：小さく並ぶ', `
 
 /* ── 十六の三の二。**引きずる帯に、押すものを埋めない**（依頼 477） ── */
 
-await step('帯：押せるものが、窓を引きずる四角の中に埋まっていない', `
+await step('帯：押せるものが、デスクトップ版を引きずる四角の中に埋まっていない', `
     // **none は「引きずらない」ではなく「切り抜かない」。** 親が drag の
     // 四角なら、何も書いていない子はその四角に含まれたままで、OS が先に
     // 押しを取る ── onclick は一度も鳴らない。
     //
     // **作った押しでは捕まらない。** el.click() は OS を通らないので、
     // 総ざらいはずっと素通りしていた（題が打てないのに「通りました」）。
-    // 見るのは、押しの通り道ではなく**四角のほう**。
+    // 見るのは、押しの通りパスではなく**四角のほう**。
     const region = (x) => getComputedStyle(x).webkitAppRegion;
     const stuck = [];
     for (const x of document.querySelectorAll(
@@ -887,8 +887,8 @@ await step('カレンダー：左の列から開ける', `
     // 行き先の光り（すべてのノート）は消える（依頼 510）。
     const lit = el('rail').querySelector('.dest[data-kind="cal"]').classList.contains('on');
     const other = [...el('rail').querySelectorAll('.dest.on')].filter((d) => d.dataset.kind !== 'cal').length;
-    // **ノートと同じ場所に出る**（依頼 478）── 小窓ではないので、
-    // ノートの面は引っ込んでいる。
+    // **ノートと同じ場所に出る**（依頼 478）── 小デスクトップ版ではないので、
+    // ノートの画面は引っ込んでいる。
     const wide = el('cal').closest('#pane') && el('work').hidden;
     calShut();
     if (!open) return '開きませんでした';
@@ -903,7 +903,7 @@ await step('カレンダー：左の列から開ける', `
 
 await step('カレンダー：ひと月ぶんが出る', `
     // **月から始める。** 見方は設定に憶えられているので、前に日や週で閉じて
-    // いれば日や週で開く ── 升目の数が合わなくなる（実際になった・2026-09-11）。
+    // いれば日や週で開く ── セル目の数が合わなくなる（実際になった・2026-09-11）。
     calView = 'month';
     calGroup = false;
     calMonth = { y: 2026, m: 9 };
@@ -951,20 +951,20 @@ await step('カレンダー：終日の段に、ノートは出さない', `
     return twice === 0 ? true : '終日の段に ' + twice + ' 回出ています';
 `, true);
 
-await step('カレンダー：予定に出ているノートを、升目でもう一度出さない', `
+await step('カレンダー：予定に出ているノートを、セル目でもう一度出さない', `
     // 面談は remind: を持つので予定として出る。その日に書いたノートとしても
-    // 数えられるが、同じ升目に二度並べない（二つあるように見える）。
+    // 数えられるが、同じセル目に二度並べない（二つあるように見える）。
     calView = 'month';
     calDay = '2026-09-09';
     await drawCal();
     await new Promise((g) => setTimeout(g, 700));
     const cell = el('cal').querySelector('.d[data-day="2026-09-09"]');
-    if (!cell) return '九日の升目がありません';
+    if (!cell) return '九日のセル目がありません';
     const hits = cell.textContent.split('面談').length - 1;
     return hits === 1 ? true : '面談が ' + hits + ' 回出ています';
 `, true);
 
-await step('カレンダー：升目を二度押しすると、その日に予定を足す小窓が出る', `
+await step('カレンダー：セル目を二度押しすると、その日に予定を足すダイアログが出る', `
     calView = 'month'; calGroup = false; calMonth = { y: 2026, m: 9 }; calDay = '2026-09-09';
     await drawCal();
     const cell = el('cal').querySelector('.d[data-day="2026-09-17"]');
@@ -973,18 +973,18 @@ await step('カレンダー：升目を二度押しすると、その日に予�
     const open = !el('evform').hidden;
     const head = el('evform').querySelector('.hd').textContent;
     el('evcancel').click();
-    if (!open) return '小窓が出ません';
+    if (!open) return 'ダイアログが出ません';
     return head.includes('9/17') || head.includes('17日') || head.includes('09-17') ? true : '日が違います: ' + head;`, true);
-await step('カレンダー：右押しすると「予定を追加」の献立が出る', `
+await step('カレンダー：右押しすると「予定を追加」のメニューが出る', `
     const cell = el('cal').querySelector('.d[data-day="2026-09-17"]');
     cell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 300 }));
     await new Promise((g) => setTimeout(g, 250));
     const rows = [...el('more').querySelectorAll('button')].map((b) => b.textContent);
     closeMenu();
     return rows.some((r) => r.includes('予定を追加')) ? true : JSON.stringify(rows);`, true);
-await step('カレンダー：予定の上で右押しすると、直す道が出る', `
+await step('カレンダー：予定の上で右押しすると、直すパスが出る', `
     const chip = el('cal').querySelector('.d[data-day="2026-09-09"] .ev[data-at]');
-    if (!chip) return '面談の札がありません';
+    if (!chip) return '面談のラベルがありません';
     chip.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 300 }));
     await new Promise((g) => setTimeout(g, 250));
     const rows = [...el('more').querySelectorAll('button')].map((b) => b.textContent);
@@ -1010,7 +1010,7 @@ await step('カレンダー：出さない予定表のものは、どの見方�
     calView = 'month';
     await drawCal();
     // 予定の札（.ev.once）が消えていること ── 面談は「その日に書いたノート」としても
-    // 並ぶので、字で見ると残る。
+    // 並ぶので、文字で見ると残る。
     const month = !!el('cal').querySelector('.ev.once, .ev.repeat');
     calView = 'week'; calDay = '2026-09-09';
     await drawCal();
@@ -1052,16 +1052,16 @@ await step('カレンダー：みんなの表は人ごとに色が違い、右�
     if (new Set(colors.slice(0, 4)).size !== 4) return '色が偏っています: ' + JSON.stringify(colors);
     if (colors[0] !== LANE_COLORS[0] || colors[1] !== LANE_COLORS[1]) return '並び順の色が違います: ' + JSON.stringify(colors);
     const 名 = (CAL_COLORS.find(([h]) => h === LANE_COLORS[0]) || [])[1];
-    if (!名 || !menu.some((m) => m.includes(名))) return '色の献立が出ません: ' + JSON.stringify(menu);
+    if (!名 || !menu.some((m) => m.includes(名))) return '色のメニューが出ません: ' + JSON.stringify(menu);
     return got === '#3b78c9' ? true : '選んだ色になりません: ' + got;`, true);
-await step('カレンダー：個人カレンダーの色を選ぶと、札の色が変わる', `
+await step('カレンダー：個人カレンダーの色を選ぶと、ラベルの色が変わる', `
     calHereColor = '#e8702a'; paintHereColor();
     const v = getComputedStyle(document.documentElement).getPropertyValue('--cal-here').trim();
     calHereColor = ''; paintHereColor();
     const back = getComputedStyle(document.documentElement).getPropertyValue('--cal-here').trim();
     return v === '#e8702a' && back === '' ? true : JSON.stringify([v, back]);`, true);
 
-await step('カレンダー：予定を足す小窓は、空のまま登録できず・終日なら時刻を選べない', `
+await step('カレンダー：予定を足すダイアログは、空のまま登録できず・終日なら時刻を選べない', `
     setTimeout(() => {
         el('evtitle').value = '';
         el('evok').click();
@@ -1088,7 +1088,7 @@ await step('カレンダー：予定を足す小窓は、空のまま登録で�
 await step('カレンダー：予定を足すと、ノートが一本できる', `
     const was = state.notes.length;
     calDay = '2026-09-11';
-    // 小窓は一枚（依頼 493）── タイトルを打ち、開始を選び、登録を押す。
+    // 小デスクトップ版は1 つ（依頼 493）── タイトルを打ち、開始を選び、登録を押す。
     setTimeout(() => {
         el('evtitle').value = '走査の予定';
         el('evstart').value = '11:00';
@@ -1097,7 +1097,7 @@ await step('カレンダー：予定を足すと、ノートが一本できる',
         el('evok').click();
     }, 300);
     calAdd(calDay);
-    // **出るまで待つ**（六秒まで）── 組み直しはノートの数で遅くなる。
+    // **出るまで待つ**（六秒まで）── ビルドし直しはノートの数で遅くなる。
     // 出なかったときは、何が出ていたかを言う（「出ていません」では直せない）。
     let made = [];
     const t0 = performance.now();
@@ -1126,7 +1126,7 @@ await step('カレンダー：予定を足すと、ノートが一本できる',
 /* ── 十六の四の二。**みんなの予定を、人ごとに**（依頼 471） ── */
 
 if (process.env.TEAMCSV) {
-    await step('チームの予定表：読んでいなければ、その字ごと出ない', `
+    await step('チームの予定表：読んでいなければ、その文字ごと出ない', `
         // **初めて amber を開いた人の画面に、会社の話を出さない**
         // （依頼 473・475）。読んでいないときは「更新」も時点も出ない。
         teamFile = '';
@@ -1180,7 +1180,7 @@ if (process.env.TEAMCSV) {
         if (shut.length !== 1) return '非公開が ' + shut.length + ' 件です';
         if (shut[0].title !== '非公開') return '非公開の出し方が ' + shut[0].title + ' です';
         // **件名の取れない予定を「空」とは書かない** ── 直前で「空き時間」を
-        // 落としているので、同じ字だと「空いている」と読める。
+        // 落としているので、同じ文字だと「空いている」と読める。
         if (team.some((s) => s.title === '空')) return '「空」と出ています';
         return true;
     `, true);
@@ -1189,7 +1189,7 @@ if (process.env.TEAMCSV) {
     //
     // 縞（中身の見えない予定）は依頼 471 で決めたのに、**一度も出ていなかった**
     // ── 段の色を塗る規則が `background:` の一括指定で、`background-image` を
-    // 道連れに消していた。札が付いているかだけ見ていると、こういう形は通る。
+    // 道連れに消していた。ラベルが付いているかだけ見ていると、こういう形は通る。
     // **計算後の見た目を見る。**
     await step('チームの予定表：中身の見えない予定は、本当に縞になっている', `
         calView = 'week'; calGroup = true; calDay = '2026-09-09';
@@ -1197,7 +1197,7 @@ if (process.env.TEAMCSV) {
         await new Promise((g) => setTimeout(g, 300));
         const chips = [...el('cal').querySelectorAll('.crowd .chip, .crowd .bar')];
         const shut = chips.find((c) => /非公開/.test(c.textContent));
-        if (!shut) return '非公開の札が画面にありません';
+        if (!shut) return '非公開のラベルが画面にありません';
         const bg = getComputedStyle(shut).backgroundImage;
         const plain = chips.find((c) => !/非公開/.test(c.textContent));
         const ok = bg && bg !== 'none' && /gradient/.test(bg);
@@ -1207,7 +1207,7 @@ if (process.env.TEAMCSV) {
     `, true);
 
     // **決めたことが、次に開いても残っているか**（依頼 562・本人「人を選ぶは
-    // 毎回初期化せず、セットしたことをおぼえてほしい」）。窓を建て直さずに
+    // 毎回初期化せず、セットしたことをおぼえてほしい」）。デスクトップ版を建て直さずに
     // 見るので、**憶える側の道**（`remember` に渡っているか）を見る。
     await step('カレンダー：人の出し入れ・並び・自分・時間帯を憶える', `
         const 元 = { calHide: calHide.slice(), calOrder: calOrder.slice(),
@@ -1234,7 +1234,7 @@ if (process.env.TEAMCSV) {
 
     // **「自分はこの人」を決めたら、日・週・月はその人の予定だけ**（依頼 562・
     // 本人が選んだ）── チームの紙は人ごとの表なので、全員ぶんを重ねると
-    // 自分の予定が他人の予定に埋もれる。**並べて表示は別**（全員を見る面）。
+    // 自分の予定が他人の予定に埋もれる。**並べて表示は別**（全員を見る画面）。
     await step('カレンダー：自分を決めると、週はその人の予定だけになる', `
         const 元 = calMe;
         const 見方 = calView; const 並 = calGroup;
@@ -1256,7 +1256,7 @@ if (process.env.TEAMCSV) {
     `, true);
 
     // **段の呼び名を変えられる**（依頼 563・本人「僕の予定は『予定表』という
-    // 名称で出力されていそう」）── 鍵はメールなので、名前を変えても予定との
+    // 名称で出力されていそう」）── キーはメールなので、名前を変えても予定との
     // 結びつきは動かない。空にすれば元に戻る。
     await step('カレンダー：段の呼び名を変えても、予定はその段のまま', `
         const 元 = { ...calNames };
@@ -1316,7 +1316,7 @@ if (process.env.TEAMCSV) {
     `, true);
 
     // **重なる予定が、重ならずに出る**（依頼 574・本人「2行、3行あるものは
-    // 字が重なって見えない」）。
+    // 文字が重なって見えない」）。
     await step('カレンダー：週で重なる予定は、横に分かれる', `
         const 元 = { me: calMe, view: calView, group: calGroup, day: calDay };
         const one = calSlots.find((s) => s.kind === 'team' && s.at);
@@ -1355,12 +1355,12 @@ if (process.env.TEAMCSV) {
         // **閉じる前に見る。** 先に閉じてから「出ているか」を見ていた（自分で
         // 消しておいて「出ません」と言っていた）。
         const 出 = !more.hidden;
-        const 字 = more.textContent;
+        const 文字 = more.textContent;
         closeMenu();
-        if (!出) return '小窓が出ません';
-        // 札では切れていた件名が、小窓では最後まで出ていること。
+        if (!出) return 'ダイアログが出ません';
+        // ラベルでは切れていた件名が、小デスクトップ版では最後まで出ていること。
         const s2 = evOf(bar);
-        return 字.includes(s2.title) ? true : '件名が出ていません: ' + 字.slice(0, 40);
+        return 文字.includes(s2.title) ? true : '件名が出ていません: ' + 文字.slice(0, 40);
     `, true);
 
     // **段を上下に動かせる**（依頼 562・本人）。
@@ -1391,7 +1391,7 @@ if (process.env.TEAMCSV) {
 
     await step('チームの予定表：日を替えても読み直さない', `
         // **前の月へ戻ったら紙が入れ替わっていた**、が画面の上でいちばん
-        // 分かりにくい壊れ方（依頼 476）。日を替えても、持っている一枚から
+        // 分かりにくい壊れ方（依頼 476）。日を替えても、持っている1 つから
         // 選び直すだけ ── ファイルは開かない。
         const sheet = teamPlans;
         const was = teamAt;
@@ -1589,7 +1589,7 @@ if (process.env.SITE) {
  * 本人が見つけた（ノートの途中で絵文字を入れたら、頭に入った）。
  */
 
-/// 読む面の、長い段落の「途中」に caret を置く。
+/// 表示画面の、長い段落の「途中」に caret を置く。
 const midway = `
     setView('read');
     await new Promise((g) => setTimeout(g, 350));
@@ -1617,7 +1617,7 @@ await step('途中に書く：絵文字が、caret のところに入る', `
     await openNote(${path('途中.md')});
     ${midway}
     // **人が押したときと同じ形にする** ── 板を開くと焦点は板の欄へ移り、
-    // 読む面の選択は消える。ここで caret を憶えていないと頭に入る。
+    // 表示画面の選択は消える。ここで caret を憶えていないと頭に入る。
     await openEmoji();
     await new Promise((g) => setTimeout(g, 300));
     if (document.activeElement === box) return '板を開いても焦点が移っていません（試しになりません）';
@@ -1652,13 +1652,13 @@ await step('途中に書く：記号も、caret のところに効く', `
     const bold = line.querySelector('b, strong');
     if (!bold) return '太字になりませんでした';
     if (line.textContent.startsWith(bold.textContent)) return '行の頭が太字になりました';
-    if (!was.includes(bold.textContent)) return '選んでいない字が太字になりました';
+    if (!was.includes(bold.textContent)) return '選んでいない文字が太字になりました';
     return true;
 `, true);
 
-/* ── 十六の七。**この機械の予定表**（依頼 462） ── */
+/* ── 十六の七。**この環境の予定表**（依頼 462） ── */
 
-await step('この機械の予定表：口が繋がっている', `
+await step('この環境の予定表：口が繋がっている', `
     const got = await window.amber.cal(['month', 2026, 9]);
     if (!got) return '返事がありません';
     // 許可が無ければ「無い」と言うのが正しい姿 ── 落ちないことを見る。
@@ -1666,7 +1666,7 @@ await step('この機械の予定表：口が繋がっている', `
     return Array.isArray(got.days) ? true : '日の一覧がありません';
 `, true);
 
-await step('この機械の予定表：許可が無くても、カレンダーは開く', `
+await step('この環境の予定表：許可が無くても、カレンダーは開く', `
     hereOn = false;
     calMonth = { y: 2026, m: 9 };
     await cmdCalendar();
@@ -1680,18 +1680,18 @@ await step('この機械の予定表：許可が無くても、カレンダー�
 
 /* ── 十七。**触ったあと、壊れていないか** ──
  *
- * ここがこの走査のいちばんの目当て。**面を行き来しただけで字が変わる**、
+ * ここがこの走査のいちばんの目当て。**画面を行き来しただけで文字が変わる**、
  * が実際にあった（2026-09-08・段落の改行が空白に、`*` の点が `-` に、
  * `1. 1.` が `1. 2.` に…）。同期しているフォルダなら、それが全部むこうへ
  * 差分として飛ぶ。
  *
- * 見張りは一つ ── **何もしない往復では、字が一文字も変わらない。**
+ * 見張りは一つ ── **何もしない往復では、文字が一文字も変わらない。**
  */
 
-/// 面を行き来して、字が変わっていないかを見る。
+/// 画面を行き来して、文字が変わっていないかを見る。
 const trip = (name, prepare) => step('往復：' + name, `
     await openNote(${path('往復.md')});
-    // **毎回、元の字から始める。** 前の往復が崩したノートで次を回すと、
+    // **毎回、元の文字から始める。** 前の往復が崩したノートで次を回すと、
     // 崩れたもの同士を比べて「変わっていません」になる（一度そうなった）。
     if (window.__pristine === undefined) {
         window.__pristine = whole();
@@ -1715,10 +1715,10 @@ const trip = (name, prepare) => step('往復：' + name, `
         await new Promise((g) => setTimeout(g, 400));
         // **書き戻しを、必ず一度通す。**
         //
-        // 面を替えるだけでは書き戻しが走らない ── 替えただけの往復は何も
+        // 画面を切り替えるだけでは書き戻しが走らない ── 替えただけの往復は何も
         // 確かめていなかった（前後の空白を落とす壊し方を入れても鳴らな
         // かった。変異させて初めて分かった・2026-09-09）。人が一文字
-        // 打った時と同じ合図を出して、面の字をノートへ返させる。
+        // 打った時と同じ合図を出して、画面の文字をノートへ返させる。
         el('read').dispatchEvent(new Event('input'));
         await new Promise((g) => setTimeout(g, 1100));
     }
@@ -1726,8 +1726,8 @@ const trip = (name, prepare) => step('往復：' + name, `
     if (now === was) return true;
     // どこが変わったかを言う ── 「変わりました」だけでは直せない。
     //
-    // **改行は数で書く。** ここは窓へ送る字（テンプレート）の中なので、
-    // 円記号で書くと走査の側で本物の改行になり、送る字が途中で切れる。
+    // **改行は数で書く。** ここはウィンドウへ送る文字（テンプレート）の中なので、
+    // 円記号で書くと走査の側で本物の改行になり、送る文字が途中で切れる。
     // 逆引用符も同じ理由で書けない ── そこでテンプレートが閉じる。
     const nl = String.fromCharCode(10);
     const a = was.split(nl);
@@ -1750,7 +1750,7 @@ await trip('一文字打ってから', `
     el('read').focus();
     document.execCommand('insertText', false, 'あ');
     await new Promise((g) => setTimeout(g, 1200));`);
-await trip('升を押してから', `
+await trip('セルを押してから', `
     const tick = el('read').querySelector('.box');
     if (tick) tick.click();
     await new Promise((g) => setTimeout(g, 1200));`);
@@ -1799,17 +1799,17 @@ await step('往復：ノートを替えても混ざらない', `
     const b = whole();
     await openNote(${path('よくばり.md')});
     await new Promise((g) => setTimeout(g, 400));
-    if (whole() !== a) return 'よくばりの字が変わりました';
+    if (whole() !== a) return 'よくばりの文字が変わりました';
     await openNote(${path('買い物.md')});
     await new Promise((g) => setTimeout(g, 400));
-    if (whole() !== b) return '買い物の字が変わりました';
+    if (whole() !== b) return '買い物の文字が変わりました';
     setView('read');
     return true;`, true);
 
 /* ── 十八。**よそから来た形のノートを、そのまま返すか**（依頼 429）──
  *
  * Windows で作られたノート（CRLF）、BOM 付き、古い日本語（Shift_JIS）。
- * core は読んだときの形のまま書き戻すが、**窓を通したときもそうか**は
+ * core は読んだときの形のまま書き戻すが、**デスクトップ版を通したときもそうか**は
  * 誰も見ていなかった。開いて、打った時と同じ合図を出して、保存させてから
  * **バイトを見る**（画面では分からない）。
  */
@@ -1820,7 +1820,7 @@ const SHAPES = [
     ['日本語SJIS.md', (b) => b.includes(Buffer.from([0x96, 0x7b])), 'Shift_JIS が UTF-8 になりました'],
 ];
 for (const [name, ok, why] of SHAPES) {
-    // **中身を本当に変える。** 合図だけでは保存が走らない（同じ字なら
+    // **中身を本当に変える。** 合図だけでは保存が走らない（同じ文字なら
     // 書かない）── 壊しても鳴らなかったのはそれだった。一文字入れる。
     await step('形を保つ：' + name, `
         await openNote(state.root + '/' + ${JSON.stringify(name)});
@@ -1851,7 +1851,7 @@ for (const [name, ok, why] of SHAPES) {
 
 /* ── 十九。**大きいノートでも保つか**（依頼 431）──
  *
- * 一万二千行。開く・面を替える・打つ・保存する、それぞれに**時間の上限**を
+ * 一万二千行。開く・画面を切り替える・打つ・保存する、それぞれに**時間の上限**を
  * 置く ── 速さは一度測ったきりで、遅くなったことに気づく仕掛けが無かった。
  * 上限は「人が待てるか」で決める（開くのに三秒かかったら、もう道具ではない）。
  */
@@ -1872,8 +1872,8 @@ await timed('開く', 3000, `
     if (!state.open || !state.open.path.endsWith('大きいノート.md')) return '開けません';
     setView('read');
     await new Promise((g) => setTimeout(g, 100));`);
-await timed('コードの面へ', 2000, `setView('write'); await new Promise((g) => setTimeout(g, 100));`);
-await timed('表示の面へ', 3000, `setView('read'); await new Promise((g) => setTimeout(g, 100));`);
+await timed('コード画面へ', 2000, `setView('write'); await new Promise((g) => setTimeout(g, 100));`);
+await timed('表示の画面へ', 3000, `setView('read'); await new Promise((g) => setTimeout(g, 100));`);
 await step('大きいノート：打って保存する', `
     const p = [...el('read').children].find((n) => n.tagName === 'P');
     const r = document.createRange(); r.selectNodeContents(p); r.collapse(false);
@@ -1883,7 +1883,7 @@ await step('大きいノート：打って保存する', `
     document.execCommand('insertText', false, 'あ');
     await new Promise((g) => setTimeout(g, 2500));
     const ms = Math.round(performance.now() - t0);
-    if (!whole().includes('あ')) return '打った字が残っていません';
+    if (!whole().includes('あ')) return '打った文字が残っていません';
     return ms < 2600 ? true : ms + ' ミリ秒かかりました';`, true);
 await step('大きいノート：目次も出る', `
     if (!tocOn) toggleToc();
@@ -1894,11 +1894,11 @@ await step('大きいノート：目次も出る', `
 
 /* ── 二十。**同じノートを二か所から書き換える**（依頼 433）──
  *
- * クラウドで同じ棚を触っていると起きること。amber は**どちらも捨てない**
+ * クラウドで同じフォルダを触っていると起きること。amber は**どちらも捨てない**
  * ── 分かれる前・こちら・向こうの三つを core に渡して混ぜる。ここまでは
- * core の試験が見ているが、**窓を通した本物**は誰も通していなかった。
+ * core の試験が見ているが、**デスクトップ版を通した本物**は誰も通していなかった。
  *
- * 走査が「向こうの端末」の役をやる: 窓が開いたままのノートを、横から
+ * 走査が「向こうの端末」の役をやる: デスクトップ版が開いたままのノートを、横から
  * 書き換える。
  */
 await step('混ぜる：開く', `
@@ -1924,7 +1924,7 @@ if (NOTES) {
 await step('混ぜる：こちらでも打って、両方残る', `
     // こちらは頭のほうに足す ── 同じ行を取り合わない形。
     const was = whole();
-    const now = was.replace('はじめの行。', 'はじめの行。こちらが足した字。');
+    const now = was.replace('はじめの行。', 'はじめの行。こちらが足した文字。');
     loading = true;
     editor.setValue(state.head ? now.slice(state.head.length) : now);
     loading = false;
@@ -1932,7 +1932,7 @@ await step('混ぜる：こちらでも打って、両方残る', `
     await save();
     await new Promise((g) => setTimeout(g, 1200));
     const out = whole();
-    if (!out.includes('こちらが足した字')) return 'こちらの字が消えました';
+    if (!out.includes('こちらが足した文字')) return 'こちらの文字が消えました';
     if (!out.includes('向こうが足した行')) return '向こうの行が消えました';
     return true;`, true);
 
@@ -1940,7 +1940,7 @@ if (NOTES) {
     tally.ran += 1;
     try {
         const got = readFileSync(NOTES + '/混ぜる.md', 'utf8');
-        if (!got.includes('こちらが足した字') || !got.includes('向こうが足した行')) {
+        if (!got.includes('こちらが足した文字') || !got.includes('向こうが足した行')) {
             bad.push({ name: '混ぜる：ファイルにも両方ある',
                 why: ['ファイルには片方しかありません: ' + JSON.stringify(got.slice(0, 200))] });
         }
@@ -1949,13 +1949,13 @@ if (NOTES) {
     }
 }
 
-/* ── 二十の一の二。**同じ行を両方で直した**（依頼 487・網の決めごと） ──
+/* ── 二十の一の二。**同じ行を両方で直した**（依頼 487・ネットワークの決めごと） ──
  *
  * 別々の場所なら黙って混ざる（上）。同じ行なら**両方残して、帯と選び口が
  * 出て、人が選ぶ**。選んだら片方が消えて、帯が消える。
  */
 // **先にこちらを打ちかけにしてから、向こうが書く。** 打ちかけでないと、
-// 窓は外の変わりを黙って拾い直す（依頼 480）ので、ぶつかりようがない。
+// デスクトップ版は外の変わりを黙って拾い直す（依頼 480）ので、ぶつかりようがない。
 await step('同じ行：こちらで同じ行を打ちかけにする', `
     const was = whole();
     if (!was.includes('おわりの行。')) return '「おわりの行。」が見当たりません';
@@ -1991,12 +1991,12 @@ await step('同じ行：保存すると両方残り、帯と選び口が出る',
     setView('read');
     await new Promise((g) => setTimeout(g, 700));
     const g = el('read').querySelector('.gadget');
-    if (!g) return '読む面に選び口が出ていません';
+    if (!g) return '表示画面に選び口が出ていません';
     if (!g.querySelector('button')) return '選び口にボタンがありません';
-    // **選び口の字は、書き戻しに混ざらない。**
+    // **選び口の文字は、書き戻しに混ざらない。**
     const back = paperToMd(el('read'), state.head);
-    if (back === null) return '選び口を置いたら字に戻せなくなりました';
-    if (back.includes('の記載を反映する')) return '選び口の字が本文に混ざります';
+    if (back === null) return '選び口を置いたら文字に戻せなくなりました';
+    if (back.includes('の記載を反映する')) return '選び口の文字が本文に混ざります';
     return true;`, true);
 await step('同じ行：「こちらの記載を反映する」を押すと、向こうの行が消えて帯も消える', `
     const g = el('read').querySelector('.gadget');
@@ -2024,14 +2024,14 @@ if (NOTES) {
 /* ── 二十の二。**二台で同じフォルダを触る**（依頼 479） ── */
 
 if (NOTES) {
-    // **「向こう」は node 側が演じる。** 歩みの本体は窓の中で走るので、
-    // ファイルを直に書けるのはこちらだけ ── 電話がフォルダに書いたのと
+    // **「向こう」は node 側が演じる。** 歩みの本体はデスクトップ版の中で走るので、
+    // ファイルを直に書けるのはこちらだけ ── iPhone がフォルダに書いたのと
     // 同じことを、ここでやる。
     const other = NOTES + '/二台目.md';
     const wrote = (line) => writeFileSync(other,
         '---\ncreated: 2026-09-05\n---\n# 二台目\n\n' + line + '\n');
 
-    wrote('はじめの字。');
+    wrote('はじめの文字。');
     await sleep(1800);
 
     await step('二台目：向こうが置いたノートが、こちらに出る', `
@@ -2039,23 +2039,23 @@ if (NOTES) {
         if (!n) return '置いたノートが一覧に出ません';
         await openNote(n.path);
         await new Promise((g) => setTimeout(g, 1200));
-        return whole().includes('はじめの字') ? true : '開けていません';
+        return whole().includes('はじめの文字') ? true : '開けていません';
     `, true);
 
-    wrote('向こうが直した字。');
+    wrote('向こうが直した文字。');
     await sleep(2500);
 
     await step('二台目：開いているノートが外で変わったら、拾い直す', `
         // **黙って古いまま残る**のがいちばん悪い ── 見ている人に
         // 気づく手立てが無い。
         const now = whole();
-        return now.includes('向こうが直した字')
+        return now.includes('向こうが直した文字')
             ? true : '古いまま残っています: ' + JSON.stringify(now.slice(0, 120));
     `, true);
 
     await step('二台目：こちらで保存する', `
         loading = true;
-        editor.setValue('# 二台目\\n\\nこちらで保存した字。\\n');
+        editor.setValue('# 二台目\\n\\nこちらで保存した文字。\\n');
         loading = false;
         state.dirty = true;
         await save();
@@ -2073,9 +2073,9 @@ if (NOTES) {
             ? true : '保存したノートは、そのあとずっと無視されます';
     `, true);
 
-    await step('二台目：打ちかけの字を置く', `
+    await step('二台目：打ちかけの文字を置く', `
         loading = true;
-        editor.setValue('# 二台目\\n\\nいま打ちかけの字。\\n');
+        editor.setValue('# 二台目\\n\\nいま打ちかけの文字。\\n');
         loading = false;
         state.dirty = true;
         return true;
@@ -2084,12 +2084,12 @@ if (NOTES) {
     wrote('外から横取り。');
     await sleep(2800);
 
-    await step('二台目：打ちかけの字を、外から消させない', `
-        // **打っているあいだは、下から書き換えない。** 向こうの字は
-        // ファイルに残ったまま待つ ── 画面の字が、打った覚えのないものに
+    await step('二台目：打ちかけの文字を、外から消させない', `
+        // **打っているあいだは、下から書き換えない。** 向こうの文字は
+        // ファイルに残ったまま待つ ── 画面の文字が、打った覚えのないものに
         // 変わるのがいちばん怖い。
-        return whole().includes('いま打ちかけの字')
-            ? true : '打っていた字が消えました';
+        return whole().includes('いま打ちかけの文字')
+            ? true : '打っていた文字が消えました';
     `, true);
 
     await step('二台目：保存したときに、両方とも残る', `
@@ -2098,8 +2098,8 @@ if (NOTES) {
         await save();
         await new Promise((g) => setTimeout(g, 2000));
         const now = whole();
-        if (!now.includes('いま打ちかけの字')) return '打っていた字が消えました';
-        if (!now.includes('外から横取り')) return '向こうの字が消えました';
+        if (!now.includes('いま打ちかけの文字')) return '打っていた文字が消えました';
+        if (!now.includes('外から横取り')) return '向こうの文字が消えました';
         return true;
     `, true);
 }
@@ -2174,7 +2174,7 @@ if (NOTES2) {
         await new Promise((g) => setTimeout(g, 250));
         const t = el('more').textContent;
         el('more').hidden = true;
-        for (const w of ['同期先', '名前を変える', '場所を変える…', '外す', 'この中にフォルダを作る']) if (!t.includes(w)) return '献立に「' + w + '」が無い: ' + t;
+        for (const w of ['同期先', '名前を変える', '場所を変える…', '外す', 'この中にフォルダを作る']) if (!t.includes(w)) return 'メニューに「' + w + '」が無い: ' + t;
         return true;`, true);
     if (DRIVE2) {
         await step('同期：二つ目を Drive にすると、運んだ列に保存ディレクトリの名前が付く', `
@@ -2232,7 +2232,7 @@ if (NOTES2) {
 // 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => relOf(x.book) === '歩き試し'
-            || /複製|新しいノート|週報|二台目|名前は一行目から|小窓から作ったノート/.test(x.title || '')
+            || /複製|新しいノート|週報|二台目|名前は一行目から|ダイアログから作ったノート/.test(x.title || '')
             || /買い物\.2\.md$/.test(x.path))) {
         try { await ask('delete', { path: n.path }); } catch { /* もう無い */ }
     }

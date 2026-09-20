@@ -1,9 +1,9 @@
-/* 総ざらいの**足場**。窓と話す口・一つ動かして見張る `step`・落ちたものの
- * 帳面。`walk.mjs`（ぜんぶ）と `walk-sync.mjs`（同期だけ）が同じものを使う。
+/* 総ざらいの**足場**。デスクトップ版と話す口・一つ動かして見張る `step`・落ちたものの
+ * 帳画面。`walk.mjs`（ぜんぶ）と `walk-sync.mjs`（同期だけ）が同じものを使う。
  *
  *     import { step, run, bad, tally, sleep, ready, report, NOTES } from './walk-harness.mjs';
  *
- * **窓へ送る字の中に、逆引用符と円記号を書かないこと。** ここは
+ * **ウィンドウへ送る文字の中に、逆引用符と円記号を書かないこと。** ここは
  * テンプレートの中なので、そこでテンプレートが閉じる・改行が本物になる
  * ── 三度踏んだ（2026-09-09）。註にも書けない。改行が要るなら
  * String.fromCharCode(10)。
@@ -12,12 +12,12 @@ export const PORT = process.env.PORT || 9333;
 /// 試し場のノートが置いてある道（`walk.sh` が渡す）。
 export const NOTES = process.env.NOTES || '';
 
-/* ── 窓と話す ── */
+/* ── デスクトップ版と話す ── */
 
 const tabs = await (await fetch(`http://127.0.0.1:${PORT}/json`)).json();
 const page = tabs.find((x) => x.type === 'page');
 if (!page) {
-    console.error(`窓が見つかりません（${PORT} で出ていますか）`);
+    console.error(`デスクトップ版が見つかりません（${PORT} で出ていますか）`);
     process.exit(2);
 }
 const ws = new WebSocket(page.webSocketDebuggerUrl);
@@ -25,7 +25,7 @@ await new Promise((go, no) => { ws.onopen = go; ws.onerror = no; });
 
 let id = 0;
 const waits = new Map();
-/// 窓が言ったこと（error と warning と、飛んだ例外）。
+/// デスクトップ版が言ったこと（error と warning と、飛んだ例外）。
 let noise = [];
 let pausedAt = null;
 ws.onmessage = (e) => {
@@ -50,9 +50,9 @@ await send('Runtime.enable');
 
 export const sleep = (ms) => new Promise((go) => setTimeout(go, ms));
 
-/// 窓の中で一つ動かす。返ってくるのは値か、落ちた理由。
+/// デスクトップ版の中で一つ動かす。返ってくるのは値か、落ちた理由。
 ///
-/// **待ちきりにしない。** 小窓を開ける命令を `await` すると、閉じる人が
+/// **待ちきりにしない。** 小デスクトップ版を開ける命令を `await` すると、閉じる人が
 /// いないので永久に返ってこない ── 総ざらいが黙って止まる（実際に止めた）。
 /// 待つのをやめたことは、落第として出す。
 export async function run(src) {
@@ -64,7 +64,7 @@ export async function run(src) {
         sleep(Number(process.env.PATIENCE || 8000)).then(() => 'まった'),
     ]);
     if (r === 'まった') {
-        // **どこで待っているかを言う。** 窓の JS が回りっぱなしなら 1+1 も返らず、
+        // **どこで待っているかを言う。** デスクトップ版の JS が回りっぱなしなら 1+1 も返らず、
         // 約束が解けないだけなら 1+1 は返る ── 直す場所がまるで違う。
         const alive = await Promise.race([
             send('Runtime.evaluate', { expression: '1+1', returnByValue: true }),
@@ -81,14 +81,14 @@ export async function run(src) {
                 send('Runtime.evaluate', { expression: '1+1', returnByValue: true }),
                 sleep(3000).then(() => null),
             ]);
-            if (again) return { bad: '返ってきません（窓は十秒ほど止まっていた）' };
-            // **固まった窓に、残りの段を押しても意味が無い** ── 一段ごとに十秒
+            if (again) return { bad: '返ってきません（デスクトップ版は十秒ほど止まっていた）' };
+            // **固まったデスクトップ版に、残りの段を押しても意味が無い** ── 一段ごとに十秒
             // 待って二時間かける前に、**どこで回っているか**を取って止まる。
             // 回りっぱなしの JS も `Debugger.pause` なら止められる（次の割り込みで）。
             const where = await whereStuck();
-            return { bad: '窓が固まっている（1+1 も返らない）', frozen: true, where };
+            return { bad: 'デスクトップ版が固まっている（1+1 も返らない）', frozen: true, where };
         }
-        return { bad: '返ってきません（窓は生きている・' + (busy && busy.result && busy.result.result ? busy.result.result.value : '?') + '）' };
+        return { bad: '返ってきません（デスクトップ版は生きている・' + (busy && busy.result && busy.result.result ? busy.result.result.value : '?') + '）' };
     }
     const bad = r.result?.exceptionDetails;
     if (bad) {
@@ -110,11 +110,11 @@ export async function step(name, src, want) {
     const r = await run(src);
     await sleep(Number(process.env.WAIT || 260));
     const said = noise.filter((s) => !QUIET.some((q) => s.includes(q)));
-    // **触ったあと、まだ字に戻せるか。** ここが `null` になったノートは、
+    // **触ったあと、まだテキストに戻せるか。** ここが `null` になったノートは、
     // 見た目は何ともないのに、そこから先の保存が黙って止まる。
     const back = await run(`
         if (!state.open || view === 'write') return 'skip';
-        return paperToMd(el('read'), state.head) === null ? 'もう字に戻せません' : 'ok';
+        return paperToMd(el('read'), state.head) === null ? 'もう文字に戻せません' : 'ok';
     `);
     const why = [];
     if (r.bad) why.push(r.bad);
@@ -136,7 +136,7 @@ export async function step(name, src, want) {
     if (why.length) bad.push({ name, why });
 }
 
-/// **黙って見逃すもの。** 窓のせいでないもの・試す場所のせいのもの。
+/// **黙って見逃すもの。** デスクトップ版のせいでないもの・試す場所のせいのもの。
 const QUIET = [
     'Autofill.enable',                 // CDP を繋いだときに Chromium が言う
     'Request Autofill.setAddresses',
@@ -144,7 +144,7 @@ const QUIET = [
 ];
 
 
-/// 固まった窓の、いまの呼び出しの列（上から六つ）。取れなければ空。
+/// 固まったデスクトップ版の、いまの呼び出しの列（上から六つ）。取れなければ空。
 async function whereStuck() {
     const got = new Promise((go) => { pausedAt = go; });
     send('Debugger.enable');
@@ -158,10 +158,10 @@ async function whereStuck() {
     return rows.length ? rows : ['（列が空）'];
 }
 
-/// 落ちたものの帳面と、動かした数。
+/// 落ちたものの帳画面と、動かした数。
 export const tally = { ran: 0 };
 
-/// **窓の台本とエンジンが立ち上がるのを待つ。** 窓が出た直後の一回目は、
+/// **デスクトップ版の台本とエンジンが立ち上がるのを待つ。** デスクトップ版が出た直後の一回目は、
 /// まだ子が起きていないことがある ── 一度きりで見ると、たまに落ちる検査に
 /// なる（実際に何度か落ちた）。**時々鳴る検査は、無いより悪い。**
 /// そのあと、勝手に運ぶのを切る（同期の段で手で呼ぶ ── 裏で運ぶと数が動く）。
@@ -188,7 +188,7 @@ export async function ready() {
         return syncBusy ? '裏の同期が終わりません' : true;`, true);
 }
 
-/// 報せて、窓との口を閉じて、終わる。落ちたものだけ出す。ぜんぶ通れば一行。
+/// 報せて、デスクトップ版との口を閉じて、終わる。落ちたものだけ出す。ぜんぶ通れば一行。
 export function report(times = []) {
     console.log('');
     if (times.length) {

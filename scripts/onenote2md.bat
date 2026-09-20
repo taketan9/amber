@@ -1,11 +1,11 @@
 @echo off
 rem OneNote を ambər に取り込む。**押すのは一回**（依頼 610）。
 rem
-rem   ダブルクリック          小さい窓が出る。選んで「取り込む」を押すだけ
-rem   .onepkg を放り込む      窓を出さずに、そのまま取り込む
+rem   ダブルクリック          小さいデスクトップ版が出る。選んで「取り込む」を押すだけ
+rem   .onepkg を放り込む      デスクトップ版を出さずに、そのまま取り込む
 rem
-rem 網に出られない端末で動く ── 要るのは Python だけ（pywin32 も 32bit も
-rem 要らない。あれは OneNote に直接繋いでいた頃の話で、その道は外した）。
+rem ネットワークに出られない端末で動く ── 要るのは Python だけ（pywin32 も 32bit も
+rem 要らない。あれは OneNote に直接繋いでいた頃の話で、そのパスは外した）。
 rem
 rem **`chcp 65001` を先に打つ。** 日本語 Windows の既定は cp932 で、
 rem セクションの名前が化けたまま画面に出る（本人の端末で出た）。
@@ -25,7 +25,7 @@ if not defined PY (
 )
 
 if "%~1"=="" (
-    rem 押しただけ ── 窓を出す。
+    rem 押しただけ ── デスクトップ版を出す。
     %PY% "%HERE%onenote2md.py"
     exit /b %errorlevel%
 )

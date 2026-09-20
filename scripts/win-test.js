@@ -5,15 +5,15 @@
  *
  * **同じ形の不具合を、二度出した。** どちらも mac では一生出ない:
  *
- *   * 道の区切りを `/` だと思っていた ── Windows の道は `C:\Users\…` で、
- *     `split('/')` は道まるごとを返す。書き出したファイルの名前が道になり、
- *     画像の在りかは空になって**画像が一枚も出なくなった**
- *   * Enter は一つだと思っていた ── フルサイズの鍵盤（会社の机にたいてい
+ *   * パスの区切りを `/` だと思っていた ── Windows のパスは `C:\Users\…` で、
+ *     `split('/')` は道まるごとを返す。書き出したファイルの名前がパスになり、
+ *     画像の在りかは空になって**画像が1 つも出なくなった**
+ *   * Enter は一つだと思っていた ── フルサイズのキーボード（会社の机にたいてい
  *     載っている）は右の Enter を `NumpadEnter` として送る。点と番号は
- *     画面が勝手に続けるので、**升だけが出ない**という形で現れた
+ *     画面が勝手に続けるので、**セルだけが出ない**という形で現れた
  *
  * どちらも「実機で押されるまで分からなかった」ものだが、**判断そのものは
- * 純粋な関数**なので、道と鍵の形さえ渡せばここで捕まる。実機の代わりには
+ * 純粋な関数**なので、パスとキーの形さえ渡せばここで捕まる。実機の代わりには
  * ならない（会社の OneDrive にゴミ箱が無い、は再現できない）が、
  * **半分はここで止められる**。
  *
@@ -25,7 +25,7 @@ const path = require('path');
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'gui', 'renderer.js'), 'utf8');
 
-// **鍵の言い換えは、土台のふりをして試す。** `MAC` は `navigator` を見て
+// **キーの言い換えは、土台のふりをして試す。** `MAC` は `navigator` を見て
 // 決まるので、Windows のふりをしてから切り出す ── mac で走らせても
 // Windows の答えが出る（この試験の値打ちはそこ）。
 // `navigator` は新しい node では書き換えられない（読むだけ）ので、
@@ -39,7 +39,7 @@ const { keyText } = (0, eval)(
 const from = src.indexOf('const isEnter =');
 const to = src.indexOf('const ask =');
 if (from < 0 || to < 0 || to < from) {
-    console.error('gui/renderer.js から道と鍵の道具を切り出せません'
+    console.error('gui/renderer.js からパスとキーの道具を切り出せません'
         + '（`isEnter` から `fileURL` までの並びが変わりました）');
     process.exit(2);
 }
@@ -54,12 +54,12 @@ const ok = (yes, what, got) => {
     if (!yes) { bad++; if (got !== undefined) console.log('      ' + JSON.stringify(got)); }
 };
 
-console.log('Windows の道を、切り分けられるか');
+console.log('Windows のパスを、切り分けられるか');
 {
     const win = 'C:\\Users\\t502960\\Documents\\amber\\買い物.md';
     ok(baseOf(win) === '買い物.md', '名前だけを取る', baseOf(win));
     ok(dirOf(win) === 'C:\\Users\\t502960\\Documents\\amber\\', '在りかを取る', dirOf(win));
-    // **在りかが空になると、画像が一枚も出ない。** 実際にそうなった。
+    // **在りかが空になると、画像が1 つも出ない。** 実際にそうなった。
     ok(dirOf(win) !== '', '在りかが空にならない', dirOf(win));
 
     const nix = '/Users/x/Documents/amber/買い物.md';
@@ -71,36 +71,36 @@ console.log('Windows の道を、切り分けられるか');
     ok(baseOf(sp) === '週報 2026.md', '空白と全角が混ざっても', baseOf(sp));
 
     // 名前だけ・空・null で落ちない。
-    ok(baseOf('ノート.md') === 'ノート.md', '道が無くても');
+    ok(baseOf('ノート.md') === 'ノート.md', 'パスが無くても');
     ok(baseOf('') === '' && dirOf('') === '', '空でも落ちない');
     ok(baseOf(null) === '' && dirOf(null) === '', 'null でも落ちない');
 }
 
-console.log('鍵盤の右の Enter も、Enter として受けるか');
+console.log('キーボードの右の Enter も、Enter として受けるか');
 {
     ok(isEnter({ code: 'Enter' }) === true, 'ふつうの Enter');
-    // **これを見ていなかった。** 会社の机の鍵盤はたいていフルサイズ。
+    // **これを見ていなかった。** 会社の机のキーボードはたいていフルサイズ。
     ok(isEnter({ code: 'NumpadEnter' }) === true, '数字の脇の Enter');
-    ok(isEnter({ code: 'Space' }) === false, 'ほかの鍵は受けない');
-    ok(isEnter({ code: 'NumpadAdd' }) === false, '数字の脇のほかの鍵も受けない');
+    ok(isEnter({ code: 'Space' }) === false, 'ほかのキーは受けない');
+    ok(isEnter({ code: 'NumpadAdd' }) === false, '数字の脇のほかのキーも受けない');
 
-    // ── 鍵の並び ──
+    // ── キーの並び ──
     //
     // 会社の Windows で **`⌘` が出ていた**（本人が見た・2026-09-08）。
-    // あちらに `⌘` という鍵は無いので、**押しようがない案内**が出ていた
+    // あちらに `⌘` というキーは無いので、**押しようがない案内**が出ていた
     // ことになる ── mac では一生出ない。表には mac の記号で書いておき、
     // 出すときに言い換える。
-    console.log('鍵の並びを、その土台の言葉で');
+    console.log('キーの並びを、その土台の言葉で');
     ok(keyText('⌘N') === 'Ctrl+N', '⌘ は Ctrl', keyText('⌘N'));
-    ok(keyText('⌘⇧O') === 'Ctrl+Shift+O', '重ねた鍵は + で繋ぐ', keyText('⌘⇧O'));
+    ok(keyText('⌘⇧O') === 'Ctrl+Shift+O', '重ねたキーは + で繋ぐ', keyText('⌘⇧O'));
     ok(keyText('⌥') === 'Alt', '⌥ は Alt', keyText('⌥'));
     ok(keyText('⌃') === 'Ctrl', '⌃ も Ctrl', keyText('⌃'));
     ok(keyText('F12') === 'F12', '記号の無いものは、そのまま', keyText('F12'));
     ok(keyText('Esc') === 'Esc', 'Esc もそのまま', keyText('Esc'));
     ok(keyText('⌘←') === 'Ctrl+←', '矢印はどちらの土台でも矢印', keyText('⌘←'));
     ok(keyText('⌥ 押し') === 'Alt 押し',
-        '記号のあとの言葉は、+ で繋がない（説明であって鍵ではない）', keyText('⌥ 押し'));
-    ok(keyText('') === '' && keyText(undefined) === '', '鍵が無くても落ちない');
+        '記号のあとの言葉は、+ で繋がない（説明であってキーではない）', keyText('⌥ 押し'));
+    ok(keyText('') === '' && keyText(undefined) === '', 'キーが無くても落ちない');
     ok(!/[⌘⌃⇧⌥]/.test(
         ['⌘N', '⌘⇧O', '⌘/', '⌘⇧/', '⌘←', '⌘→', '⌘⇧P', '⌘E', '⌘D', '⌘S']
             .map(keyText).join(' ')),
@@ -110,42 +110,42 @@ console.log('鍵盤の右の Enter も、Enter として受けるか');
     //
     // 会社の Windows で「この画像は読めません」と出た。`'file://' + 道` は
     // mac の道（`/` で始まる）だと**たまたま**斜線が三本になって通るが、
-    // Windows の道（`C:\…`）では `C:` が機械の名前として読まれ、円記号は
+    // Windows の道（`C:\…`）では `C:` が環境の名前として読まれ、円記号は
     // `%5C` に化ける ── mac では一生出ない。
     console.log('画像の在りかを、画像に渡せる形にする');
     ok(fileURL('/Users/t/Documents/amber/attachments/01.png')
         === 'file:///Users/t/Documents/amber/attachments/01.png',
-        'mac の道は、斜線三本');
+        'mac のパスは、斜線三本');
     ok(fileURL('C:\\Users\\t502960\\Documents\\amber\\attachments\\01_rag_start.png')
         === 'file:///C:/Users/t502960/Documents/amber/attachments/01_rag_start.png',
-        'Windows の道は、円記号を斜線に直して頭に一本足す',
+        'Windows のパスは、円記号を斜線に直して頭に一本足す',
         fileURL('C:\\Users\\t502960\\Documents\\amber\\attachments\\01_rag_start.png'));
     ok(!fileURL('C:\\Users\\t\\画像.png').includes('%5C'),
         '円記号は %5C のまま残さない',
         fileURL('C:\\Users\\t\\画像.png'));
     ok(fileURL('\\\\server\\share\\画像.png').startsWith('file://server/share/'),
-        'ネットワークの置き場所は、斜線二本のまま（機械の名前が入る）',
+        'ネットワークの置き場所は、斜線二本のまま（環境の名前が入る）',
         fileURL('\\\\server\\share\\画像.png'));
     ok(fileURL('/Users/t/あ い/画像.png') === 'file:///Users/t/%E3%81%82%20%E3%81%84/%E7%94%BB%E5%83%8F.png',
         '空白と日本語は、逃がす',
         fileURL('/Users/t/あ い/画像.png'));
-    ok(fileURL('') === 'file:///', '道が無くても落ちない');
+    ok(fileURL('') === 'file:///', 'パスが無くても落ちない');
 
-    // 道を繋いだうえで、ちゃんと URL になるか（実物と同じ順で通す）。
+    // パスを繋いだうえで、ちゃんと URL になるか（実物と同じ順で通す）。
     console.log('ノートの隣の画像を、道からたどる');
     const dir = dirOf('C:\\Users\\t502960\\Documents\\amber\\手順.md');
-    ok(dir === 'C:\\Users\\t502960\\Documents\\amber\\', '道の頭が取れる', dir);
+    ok(dir === 'C:\\Users\\t502960\\Documents\\amber\\', 'パスの頭が取れる', dir);
     ok(fileURL(dir + 'attachments/01_rag_start.png')
         === 'file:///C:/Users/t502960/Documents/amber/attachments/01_rag_start.png',
         'ノートの隣の attachments へ繋がる',
         fileURL(dir + 'attachments/01_rag_start.png'));
 }
 
-// **道を短く見せるところも、Windows の道で切れているか**（依頼 603）。
+// **パスを短く見せるところも、Windows のパスで切れているか**（依頼 603）。
 // `leafOf` で同じ取りこぼしを踏んでいる（依頼 596）── `/` でしか割らない
-// 関数は、Windows の道を**一つも切らずにまるごと**返す。画面の上では
-// 「やけに横に長い一行」として出るので、見ただけでは道の話だと分からない。
-console.log('道を、一行に収まる形にできるか');
+// 関数は、Windows のパスを**一つも切らずにまるごと**返す。画面の上では
+// 「やけに横に長い一行」として出るので、見ただけではパスの話だと分からない。
+console.log('パスを、一行に収まる形にできるか');
 {
     const cut = src.indexOf('function shortPath(at)');
     const end = src.indexOf('\n}', cut) + 2;
@@ -162,16 +162,16 @@ console.log('道を、一行に収まる形にできるか');
         'Windows の家の下は ~ に畳む', winHome('C:\\Users\\t502960\\Documents\\OneNote'));
     const deep = winHome('C:\\Users\\t502960\\Documents\\a\\b\\c\\d\\OneNote');
     ok(deep.includes('…') && deep.endsWith('d\\OneNote'),
-        '深い Windows の道は、中を … にする', deep);
-    ok(!deep.includes('/'), '区切りは、その道が使っているほうのまま', deep);
+        '深い Windows のパスは、中を … にする', deep);
+    ok(!deep.includes('/'), '区切りは、そのパスが使っているほうのまま', deep);
 
     const macHome = make('/Users/taketan/Documents/amber');
     ok(macHome('/Users/taketan/Documents/OneNote') === '~/Documents/OneNote',
         'mac の家の下も ~ に畳む', macHome('/Users/taketan/Documents/OneNote'));
     const deepMac = macHome('/Users/taketan/a/b/c/d/e/f');
     ok(deepMac.includes('…') && !deepMac.includes('\\'),
-        '深い mac の道も … にする（円記号は混ぜない）', deepMac);
-    // **家の外の道は、そのまま。** 勝手に `~` を付けると別の場所に見える。
+        '深い mac のパスも … にする（円記号は混ぜない）', deepMac);
+    // **家の外のパスは、そのまま。** 勝手に `~` を付けると別の場所に見える。
     ok(winHome('D:\\share\\notes') === 'D:\\share\\notes',
         '家の外は、そのまま', winHome('D:\\share\\notes'));
 }
@@ -181,10 +181,10 @@ console.log('道を、一行に収まる形にできるか');
 // F5 で更新するとかの機能はほしいね」）。
 //
 // 見張り（`fs.watch`）は、見張っているフォルダそのものが消えると落ちる ──
-// そのとき画面だけが古いまま残る。押せば必ず読み直す道が要る。
+// そのとき画面だけが古いまま残る。押せば必ず読み直すパスが要る。
 //
 // **どこを打っていても効くこと**を見る ── エディタの中に居るときこそ
-// 押される鍵で、そこで素通りすると「効かない」として出る。
+// 押されるキーで、そこで素通りすると「効かない」として出る。
 console.log('F5 で読み直せるか');
 {
     // **受け口は一つではない。** `keydown` を聞く場所は三つあり、
@@ -225,8 +225,8 @@ console.log('F5 で読み直せるか');
     ok(ev('KeyR', { ctrlKey: true, shiftKey: true }) === 0 && asked === 0,
         'Ctrl+⇧+R は掴まない', asked);
     asked = 0;
-    ok(ev('KeyR') === 0 && asked === 0, '素の R は字のまま', asked);
-    // 隣の鍵を巻き込んでいないか。
+    ok(ev('KeyR') === 0 && asked === 0, '素の R は文字のまま', asked);
+    // 隣のキーを巻き込んでいないか。
     asked = 0; zenned = 0;
     ok(ev('F12') === 1 && zenned === 1 && asked === 0, 'F12 は今までどおり', [zenned, asked]);
 }
@@ -234,7 +234,7 @@ console.log('F5 で読み直せるか');
 // **消えたノートのタブは残さない**（依頼 612・本人「ゴミ箱にすてたはずの
 // ノートがタブの表示に残り続けてしまう」）。
 //
-// 消す道は四つある（⋯ から一本・選んでまとめて・フォルダごと・同期が
+// 消すパスは四つある（⋯ から一本・選んでまとめて・フォルダごと・同期が
 // 向こうの削除を下ろしたとき）。四か所に同じ一行を足すと、三か所目で忘れる
 // ── 数え直したあとの `reload` で一度だけ見る。
 console.log('消えたノートのタブを残さないか');
@@ -261,7 +261,7 @@ console.log('消えたノートのタブを残さないか');
 //
 // 前は題の右押しだけ手書きの四つで、一覧の行や ⋯ とは別のものが出ていた。
 // 同じノートを右押ししているのに、押した場所で出るものが変わる。
-console.log('右押しの献立が、押した場所で変わらないか');
+console.log('右押しのメニューが、押した場所で変わらないか');
 {
     const four = ['タイトルを直す', 'ファイル名を写す', '場所をコピー'];
     for (const name of four) {
@@ -269,12 +269,12 @@ console.log('右押しの献立が、押した場所で変わらないか');
            || new RegExp("name: '" + name + "',[\\s\\S]{0,120}menu: true").test(src),
            '「' + name + '」は命令の表にある（＝どの右押しからも出る）');
     }
-    // 題の右押しは、自分で献立を書かない ── 書けば、その日から二つになる。
+    // 題の右押しは、自分でメニューを書かない ── 書けば、その日から二つになる。
     const at = src.indexOf("el('title').addEventListener('contextmenu'");
     ok(at > 0, '題の右押しがある');
     const body = src.slice(at, src.indexOf('});', at));
-    ok(body.includes('openMenu('), '題の右押しは、同じ献立を呼ぶ', body.slice(0, 200));
-    ok(!body.includes('popMenu('), '題の右押しは、自分で献立を書かない', body.slice(0, 200));
+    ok(body.includes('openMenu('), '題の右押しは、同じメニューを呼ぶ', body.slice(0, 200));
+    ok(!body.includes('popMenu('), '題の右押しは、自分でメニューを書かない', body.slice(0, 200));
 }
 
 // **マウスを乗せたら、そこが選び目**（依頼 613・本人「マウスがオンボード
@@ -282,13 +282,13 @@ console.log('右押しの献立が、押した場所で変わらないか');
 //
 // 「はい」に乗せて押しているのに光っているのは「いいえ」のまま、が
 // いちばん怖い（ゴミ箱の確かめ）。
-console.log('小窓は、マウスを乗せたら選び目が動くか');
+console.log('ダイアログは、マウスを乗せたら選び目が動くか');
 {
     const at = src.indexOf("row.onclick = () => closeSheet(");
-    ok(at > 0, '小窓の行に押しが付いている');
+    ok(at > 0, 'ダイアログの行に押しが付いている');
     const body = src.slice(at, at + 900);
     ok(body.includes('row.onmouseenter'), '乗せたときも受ける', body.slice(0, 120));
-    ok(/at = k/.test(body), '乗せた行を選び目にする（鍵盤と同じ場所を動かす）');
+    ok(/at = k/.test(body), '乗せた行を選び目にする（キーボードと同じ場所を動かす）');
     ok(/classList\.remove\('on'\)/.test(body) && /classList\.add\('on'\)/.test(body),
        '印だけ移す（一行ごとに描き直さない）');
 }
@@ -297,34 +297,34 @@ console.log('小窓は、マウスを乗せたら選び目が動くか');
 console.log('コードの枠');
 {
     const css = fs.readFileSync(path.join(__dirname, '..', 'gui', 'index.html'), 'utf8');
-    ok(/#read pre \{[^}]*max-width: 100%/s.test(css), '枠は面いっぱいまで使う', '');
-    ok(/#read table \{[^}]*max-width: 100%/s.test(css), '表も面いっぱいまで使う', '');
-    ok(/#read pre \.cp \{/.test(css), '写す札の置き場所がある');
+    ok(/#read pre \{[^}]*max-width: 100%/s.test(css), '枠は画面いっぱいまで使う', '');
+    ok(/#read table \{[^}]*max-width: 100%/s.test(css), '表も画面いっぱいまで使う', '');
+    ok(/#read pre \.cp \{/.test(css), '写すラベルの置き場所がある');
     ok(/#read pre:hover \.cp/.test(css), '乗せたときだけ出す');
 
     const at = src.indexOf('function codeOf(pre)');
-    ok(at > 0, '枠の中の字を返す一本がある');
+    ok(at > 0, '枠の中の文字を返す一本がある');
     const body = src.slice(at, src.indexOf('\n}', at));
-    // **画面から拾わない。** 読む面の枠は色が付いたあとの姿で、改行は
+    // **画面から拾わない。** 表示画面の枠は色が付いたあとの姿で、改行は
     // `<br>`、空白は `&nbsp;` になっている（実物で確かめた）。
-    ok(body.includes('dataset.md'), '元の字（data-md）から返す', body.slice(0, 200));
+    ok(body.includes('dataset.md'), '元の文字（data-md）から返す', body.slice(0, 200));
     ok(/`\{3,\}/.test(body), '囲みの ``` は外す');
-    ok(body.includes('\\u00a0'), '色付けの &nbsp; を空白に戻す（元の字が無いとき）');
+    ok(body.includes('\\u00a0'), '色付けの &nbsp; を空白に戻す（元の文字が無いとき）');
 }
 
 // **コードブロック（``` ）を入れる札**（依頼 618）。
 //
-// 名前は「囲み」── 帯のすぐ上に「コード」という面の札があるので、
-// 同じ字を二つ置くと、押す前にどちらの話か分からない。
+// 名前は「囲み」── 帯のすぐ上に「コード」という画面のラベルがあるので、
+// 同じ文字を二つ置くと、押す前にどちらの話か分からない。
 console.log('コードブロックを入れる札');
 {
     ok(/\['コードブロック', '',/.test(src), '帯に「コードブロック」がある');
     ok(/\['折りたたみ', '',/.test(src), '帯に「折りたたみ」がある');
     // 注記の右（本人が場所を決めた）。
-    const band = src.slice(src.indexOf('const MARKS = ['), src.indexOf('/// いま打っているのは読む面か'));
+    const band = src.slice(src.indexOf('const MARKS = ['), src.indexOf('/// いま打っているのは表示画面か'));
     ok(band.indexOf("['注記'") < band.indexOf("['コードブロック'"), '注記の右に並ぶ', '');
-    // **素の「コード」は置かない** ── 面の札と同じ字になる。
-    ok(!/\['コード', '',/.test(band), '帯に素の「コード」は置かない（面の札とぶつかる）', '');
+    // **素の「コード」は置かない** ── 画面のラベルと同じ文字になる。
+    ok(!/\['コード', '',/.test(band), '帯に素の「コード」は置かない（画面のラベルとぶつかる）', '');
 
     // **かたまりを入れるところは一本**（`putBlock`）── 囲みも折りたたみも
     // 同じ守りを通る。二本に分かれると、片方だけ直した日に片方が壊れる。
@@ -332,9 +332,9 @@ console.log('コードブロックを入れる札');
     ok(at > 0, '入れる一本がある');
     const body = src.slice(at, src.indexOf('\n}', at));
     // **行の途中では、かたまりにならない。** ``` も <details> も行の頭に
-    // 無いとただの字で、枠が開かないまま次の行を飲み込む（実機で出た）。
-    ok(/getLineContent/.test(body), '打っている行に字があるかを見る', body.slice(0, 200));
-    ok(/before\.trim\(\) \? '\\n' : ''/.test(body), '字があるときだけ、先に行を改める', body.slice(0, 200));
+    // 無いとただの文字で、枠が開かないまま次の行を飲み込む（実機で出た）。
+    ok(/getLineContent/.test(body), '打っている行に文字があるかを見る', body.slice(0, 200));
+    ok(/before\.trim\(\) \? '\\n' : ''/.test(body), '文字があるときだけ、先に行を改める', body.slice(0, 200));
     ok(/head\.length \+ caret/.test(body), 'caret はかたまりの中へ', body.slice(0, 250));
     ok(/putBlock\('```/.test(src), '囲みは、その一本を通る');
     ok(/putBlock\(FOLD/.test(src), '折りたたみも、その一本を通る');

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /* 図の工房が、図を失わないか。
  *
- * **表で直せる、とは「字に戻せる」ということ。** 読み戻して組み直した字が
- * 元と一字でも違えば、その差は保存の瞬間にノートへ入る ── 触っていない
+ * **表で直せる、とは「テキストに戻せる」ということ。** 読み戻してビルドし直した文字が
+ * 元と一文字でも違えば、その差は保存の瞬間にノートへ入る ── 触っていない
  * ところが勝手に書き換わる。だから `cmdDiagram` の出す八つ全部について、
- * 「読んで、組み直して、元と同じ」を見る。
+ * 「読んで、ビルドし直して、元と同じ」を見る。
  *
  * もう一つは逆側。**読めない形を、読めたことにしない。** 枝の枝や区切りの
  * 二つある予定表を平らに読むと、書き戻したときに黙って形が変わる。そういう
- * ものは `null` を返し、字で直す面に落ちるのが正しい。
+ * ものは `null` を返し、文字で直す画面に落ちるのが正しい。
  *
  *     node scripts/diagram-test.js
  */
@@ -16,7 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 
-// renderer.js は窓の中でしか動かない（`el()` も `document` も要る）ので、
+// renderer.js はデスクトップ版の中でしか動かない（`el()` も `document` も要る）ので、
 // **図の読み書きのところだけを切り出して**動かす。ここは DOM に触らない。
 const file = path.join(__dirname, '..', 'gui', 'renderer.js');
 const src = fs.readFileSync(file, 'utf8');
@@ -28,7 +28,7 @@ if (from < 0 || to < 0 || to < from) {
     process.exit(2);
 }
 // **間接呼びの `eval`。** そのまま `eval(...)` と書くと、切り出した関数が
-// この一枚の中に閉じてしまい（このファイルは strict）、下から名前で呼べない。
+// この1 つの中に閉じてしまい（このファイルは strict）、下から名前で呼べない。
 (0, eval)(src.slice(from, to));
 
 let bad = 0;
@@ -76,7 +76,7 @@ for (const [why, s] of [
     ['囲みのある流れ図', 'flowchart LR\n  subgraph S\n  A[x]\n  end'],
     ['点線の流れ図', 'flowchart LR\n  A[x]\n  B[y]\n  A -.-> B'],
     ['amber の知らない図', 'classDiagram\n  A <|-- B'],
-    ['図ですらないもの', 'これはただの字'],
+    ['図ですらないもの', 'これはただの文字'],
 ]) ok(mmdParse(s) === null, why);
 
 console.log('枝の枝を、深さのまま持って帰るか');
@@ -85,11 +85,11 @@ console.log('枝の枝を、深さのまま持って帰るか');
     const d = mmdParse(want);
     ok(!!d, '枝の枝を読める');
     ok(d && d.rows.map((r) => r.at).join(',') === '0,1,1,0,1', '深さを取り違えない');
-    ok(mmdBuild(d) === want, '同じ字に戻る');
+    ok(mmdBuild(d) === want, '同じ文字に戻る');
 
     // 空白が四つでも二つでも「一段下」は一段下。
     const wide = mmdParse('mindmap\n  root((A))\n        B\n                C');
-    ok(wide && wide.rows.map((r) => r.at).join(',') === '0,1', '字下げの幅に頼らない');
+    ok(wide && wide.rows.map((r) => r.at).join(',') === '0,1', 'インデントの幅に頼らない');
 
     // 親のいない孫は、詰めて親のある形に ── そのまま持つと、書き戻した
     // ときに mermaid がその枝を捨てる。
@@ -112,7 +112,7 @@ console.log('打ち間違いで図を壊さないか');
     const got = mmdBuild(d);
     ok(/\[0\.5, 1\]/.test(got), '0〜1 に収める（' + got.split('\n').pop().trim() + '）');
     const f = mmdParse('flowchart LR\n  A[一]\n  B[二]\n  A --> B');
-    f.rows[0].a = '一[二]|三';                  // 形を壊す字
+    f.rows[0].a = '一[二]|三';                  // 形を壊す文字
     ok(/A\[一二三\]/.test(mmdBuild(f)), '括弧と縦棒を落とす');
 }
 
@@ -124,9 +124,9 @@ console.log('箱ごとの色');
     ok(!!d, '色の付いた図も、表になる');
     ok(d.rows[0].color === '#C4564E', '色は箱に付いて読み戻る', d.rows[0].color);
     ok(d.rows[1].color === undefined, '色の無い箱には付かない');
-    // **往復して同じ字に戻る。** ここがずれると、開いて閉じただけで
+    // **往復して同じテキストに戻る。** ここがずれると、開いて閉じただけで
     // ノートが同期先の差分になる。
-    ok(mmdBuild(d).trim() === painted.trim(), '往復しても同じ字', mmdBuild(d));
+    ok(mmdBuild(d).trim() === painted.trim(), '往復しても同じ文字', mmdBuild(d));
 
     // 色を外したら、style の行ごと消える ── 色なしの style が残ると、
     // mermaid はそれを「透明に塗れ」と読む。

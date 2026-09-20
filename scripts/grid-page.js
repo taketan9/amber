@@ -1,13 +1,13 @@
-/* 網（位置×操作の総当たり）の、**窓の中で動く側**。
+/* 総当たり（位置×操作の総当たり）の、**アプリの中で動く側**。
  *
- *     scripts/grid.mjs が CDP で窓に流し込み、`__g.…` として呼ぶ。
+ *     scripts/grid.mjs が CDP でデスクトップ版に流し込み、`__g.…` として呼ぶ。
  *
  * ここにあるのは「caret をどこに置くか」「どう押すか」「いま何が見えて
  * いるか」だけ ── **何が正しいかは知らない**。判断は `grid.mjs` の側。
  *
  * **切り出しと同じ約束で書く。** 画面のどこにも直に触らず、`el('read')` と
- * 窓の関数（`openNote`・`setView`・`save`・`MARKS`・`putFace`…）だけを
- * 呼ぶ。電話の `WKWebView` に持っていく日に、そのまま流し込めるように。
+ * デスクトップ版の関数（`openNote`・`setView`・`save`・`MARKS`・`putFace`…）だけを
+ * 呼ぶ。iPhone の `WKWebView` に持っていく日に、そのまま流し込めるように。
  *
  * **ここは素の JS のファイル。** `walk.mjs` の頭の注意書き（逆引用符と
  * 円記号をテンプレートの中に書けない）は、ここには当たらない ── 別の
@@ -20,7 +20,7 @@ window.__g = {
 
     pause(ms) { return new Promise((g) => setTimeout(g, ms)); },
 
-    /// 本文を丸ごと置き換えて、読む面を組み直す。**前書きは残す。**
+    /// 本文を丸ごと置き換えて、表示画面をビルドし直す。**前書きは残す。**
     ///
     /// `readSourceEdit` と同じ書き方（前書きの後ろに一行空ける）── ここを
     /// 詰めると、置いただけで往復に差分が出る。
@@ -42,14 +42,14 @@ window.__g = {
         return whole();
     },
 
-    /// 読む面を、人が打ったときと同じ合図で一度書き戻させる（正規化）。
+    /// 表示画面を、人が打ったときと同じ合図で一度書き戻させる（正規化）。
     async settle() {
         el('read').dispatchEvent(new Event('input'));
         await this.pause(950);
         return whole();
     },
 
-    /// 読む面の中で、`text` を含む最初の字の節を探す。
+    /// 表示画面の中で、`text` を含む最初の文字の節を探す。
     seek(text) {
         const box = el('read');
         const walk = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
@@ -67,7 +67,7 @@ window.__g = {
         return n ? n.closest('li, p, h1, h2, h3, h4, h5, h6, td, th') : null;
     },
 
-    /// 読む面の直下で、その節を含むかたまりの番号。
+    /// 表示画面の直下で、その節を含むかたまりの番号。
     blockIndex(node) {
         const box = el('read');
         let n = node && node.nodeType === 3 ? node.parentElement : node;
@@ -77,9 +77,9 @@ window.__g = {
 
     /// `text` の**頭・まん中・末尾**に caret を置く。
     ///
-    /// **人が押したときと同じ形にする** ── 面に焦点を渡し、選び目を置き、
-    /// `selectionchange` を出す（窓はそれで caret を憶える・依頼 461）。
-    /// 返すのは、置いた節とかたまりの番号と、節の字の中で何文字目か。
+    /// **人が押したときと同じ形にする** ── 画面に焦点を渡し、選び目を置き、
+    /// `selectionchange` を出す（デスクトップ版はそれで caret を憶える・依頼 461）。
+    /// 返すのは、置いた節とかたまりの番号と、節の文字の中で何文字目か。
     spot(text, where) {
         const box = el('read');
         let node;
@@ -87,7 +87,7 @@ window.__g = {
         if (text === '') {
             // 空のノート ── 最初の段落の頭。
             const first = box.firstElementChild;
-            if (!first) return { bad: '面に何もありません' };
+            if (!first) return { bad: '画面に何もありません' };
             const r = document.createRange();
             r.selectNodeContents(first);
             r.collapse(true);
@@ -101,7 +101,7 @@ window.__g = {
             return { block: this.blockIndex(first), tag: first.tagName, pos: 0, text: first.textContent };
         }
         const hit = this.seek(text);
-        if (!hit) return { bad: '面に「' + text + '」がありません' };
+        if (!hit) return { bad: '画面に「' + text + '」がありません' };
         node = hit.node;
         const n = text.length;
         off = hit.at + (where === 'head' ? 0 : where === 'mid' ? Math.floor(n / 2) : n);
@@ -128,9 +128,9 @@ window.__g = {
     select(a, b) {
         const box = el('read');
         const from = this.seek(a);
-        if (!from) return { bad: '面に「' + a + '」がありません' };
+        if (!from) return { bad: '画面に「' + a + '」がありません' };
         const to = b ? this.seek(b) : from;
-        if (!to) return { bad: '面に「' + b + '」がありません' };
+        if (!to) return { bad: '画面に「' + b + '」がありません' };
         const r = document.createRange();
         r.setStart(from.node, from.at);
         r.setEnd(to.node, to.at + (b || a).length);
@@ -144,7 +144,7 @@ window.__g = {
         return { block: this.blockIndex(from.node), to: this.blockIndex(to.node), picked: sel.toString() };
     },
 
-    /// 面の字をぜんぶ選ぶ（⌘A の既定と同じ ── 編集の箱の中だけ）。
+    /// 画面の文字をぜんぶ選ぶ（⌘A の既定と同じ ── 編集の箱の中だけ）。
     selectAll() {
         const box = el('read');
         box.focus();
@@ -159,7 +159,7 @@ window.__g = {
         return { picked: sel.toString().length };
     },
 
-    /// 読む面のかたまりを、それぞれ字にしたもの（`paperToMd` と同じ割り方）。
+    /// 表示画面のかたまりを、それぞれ文字にしたもの（`paperToMd` と同じ割り方）。
     blocks() {
         const box = el('read');
         return [...box.children].map((n) => (richBlock(n)
@@ -203,7 +203,7 @@ window.__g = {
         return r && typeof r.then === 'function' ? r : undefined;
     },
 
-    /// 訊いてくる記号（注記）── 小窓が出たら一つめを押す。
+    /// 訊いてくる記号（注記）── 小デスクトップ版が出たら一つめを押す。
     async markAnswering(name) {
         this.mark(name);
         for (let i = 0; i < 6; i += 1) {
@@ -228,7 +228,7 @@ window.__g = {
         return true;
     },
 
-    /// 貼り付け（読む面の受け口へ、人が貼ったときと同じ形で）。
+    /// 貼り付け（表示画面の受け口へ、人が貼ったときと同じ形で）。
     paste(plain, html) {
         const box = el('read');
         const dt = new DataTransfer();
@@ -238,11 +238,11 @@ window.__g = {
         return true;
     },
 
-    /// いま狙っている行の升を押す。
+    /// いま狙っている行のセルを押す。
     tick() {
         const li = this.line && this.line.closest ? this.line.closest('li') : null;
         const b = li ? li.querySelector(':scope > .box') : null;
-        if (!b) return { bad: 'その行に升がありません' };
+        if (!b) return { bad: 'その行にセルがありません' };
         b.click();
         return true;
     },
@@ -250,7 +250,7 @@ window.__g = {
     /// 表の道具。
     table(what) { tableDo(what); return true; },
 
-    /// 面の上の小窓・板・献立を、ぜんぶ閉じる。
+    /// 画面の上のダイアログ・板・メニューを、ぜんぶ閉じる。
     tidy() {
         if (!el('emoji').hidden) closeEmoji();
         if (!el('more').hidden) closeMenu();
@@ -260,9 +260,9 @@ window.__g = {
         return true;
     },
 
-    /* ── コードの面 ── */
+    /* ── コード画面 ── */
 
-    /// コードの面で、`text` を含む最初の行の頭・まん中・末尾に caret を置く。
+    /// コード画面で、`text` を含む最初の行の頭・まん中・末尾に caret を置く。
     codeSpot(text, where) {
         const model = editor.getModel();
         for (let ln = 1; ln <= model.getLineCount(); ln += 1) {
@@ -274,10 +274,10 @@ window.__g = {
             editor.focus();
             return { line: ln, col, text: s };
         }
-        return { bad: 'コードの面に「' + text + '」がありません' };
+        return { bad: 'コード画面に「' + text + '」がありません' };
     },
 
-    /// コードの面で、`a` の頭から `b` の末尾までを選ぶ。
+    /// コード画面で、`a` の頭から `b` の末尾までを選ぶ。
     codeSelect(a, b) {
         const model = editor.getModel();
         let from = null;
@@ -290,7 +290,7 @@ window.__g = {
                 if (b === undefined || s.includes(b)) break;
             }
         }
-        if (!from || !to) return { bad: 'コードの面に見つかりません' };
+        if (!from || !to) return { bad: 'コード画面に見つかりません' };
         editor.setSelection(new monaco.Selection(from.ln, from.col, to.ln, to.col));
         editor.focus();
         return { from, to };

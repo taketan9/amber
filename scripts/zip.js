@@ -1,21 +1,21 @@
 /*
- * **zip を自分で組む**（依頼 550）。
+ * **zip を自分でビルドする**（依頼 550）。
  *
  *     const { zipDir } = require('./zip');
  *     zipDir('/path/to/amber-win-x64', '/path/to/out.zip');
  *
- * 外の道具を呼ばない ── Node に入っている `zlib` だけで組む。
+ * 外の道具を呼ばない ── Node に入っている `zlib` だけでビルドする。
  *
- * **なぜ自前なのか。** 配る zip を組む場所は、会社のネットに出られない
+ * **なぜ自前なのか。** 配る zip をビルドする場所は、会社のネットに出られない
  * Windows でもある（依頼 550）。そこに何が入っているかを当てにできない:
  *
  * - `python3` は**まず無い**（Windows の Python は `python` で、しかも
  *   入っていないことのほうが多い）。前はこれで組んでいた
  * - PowerShell の `Compress-Archive` は有るが、**日本語の名前が化ける** ──
  *   Windows PowerShell 5.1 のあれは UTF-8 の印（汎用ビット 11）を立てない
- *   ので、`はじめにお読みください.txt` が別の字で出てくる端末がある
+ *   ので、`はじめにお読みください.txt` が別の文字で出てくる端末がある
  *
- * なので**印を必ず立てる**。ここが zip を組む唯一の場所で、Mac も Windows も
+ * なので**マークを必ず立てる**。ここが zip をビルドする唯一の場所で、Mac も Windows も
  * これを通る（Mac の `.app` だけは `ditto` ── あちらは記号リンクと資源
  * フォークを持っていくので、置き換えると壊れる）。
  */
@@ -23,7 +23,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
-/** CRC-32（zip が要る形）。表は初回に一度だけ組む。 */
+/** CRC-32（zip が要る形）。表は初回に一度だけビルドする。 */
 let TABLE = null;
 function crc32(buf) {
     if (!TABLE) {
@@ -62,7 +62,7 @@ function walk(dir, base, out) {
 }
 
 /**
- * フォルダを一枚の zip にする。**いちばん上のフォルダごと**入れる
+ * フォルダを1 つの zip にする。**いちばん上のフォルダごと**入れる
  * （`ditto --keepParent` と同じ ── 展開するとフォルダが一つできる。
  * そうしないと、展開した人のデスクトップに二百個のファイルが散る）。
  */
@@ -72,10 +72,10 @@ function zipDir(dir, out) {
 }
 
 /**
- * 決めたものだけを一枚にする（依頼 639）。`rows` は `{ at, rel }` ──
+ * 決めたものだけを1 つにする（依頼 639）。`rows` は `{ at, rel }` ──
  * `at` は実物の道、`rel` は zip の中での道。
  *
- * **フォルダを丸ごと入れられない一枚のために。** 同梱する側へ渡す
+ * **フォルダを丸ごと入れられない1 つのために。** 同梱する側へ渡す
  * `amber-gui.zip` は `gui/**` と `packaging` の一部だけで、間にあるものを
  * 入れない ── 選ぶのは呼ぶ側の仕事で、ここは詰めるだけ。
  */
@@ -131,7 +131,7 @@ function zipFiles(rows, out) {
         dir1.writeUInt32LE(0, 30);          // extra + comment
         dir1.writeUInt16LE(0, 34);          // 何枚目の媒体か
         dir1.writeUInt16LE(0, 36);          // 中身の性質
-        // **実行の印を残す。** Windows では意味を持たないが、mac や Linux で
+        // **実行のマークを残す。** Windows では意味を持たないが、mac や Linux で
         // 展開したときに `amber-server` が実行できないと、そこで止まる。
         // フォルダは MS-DOS の属性も立てる（Windows の道具が見る）。
         dir1.writeUInt32LE(f.dir

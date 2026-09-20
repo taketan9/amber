@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * **配るものを組む**（依頼 519）── Mac は `ambər.app`、Windows は `amber.exe` の入った
+ * **配るものをビルドする**（依頼 519）── Mac は `ambər.app`、Windows は `amber.exe` の入った
  * フォルダ。cian の `packaging/macos/bundle-gui.sh` と crmaine の `gui/pack.js` と
  * 同じ作り方: **Electron の一式を写して、名前と絵と中身だけ差し替える。**
  *
@@ -15,7 +15,7 @@
  *     node scripts\pack.js --out dist --platform win32 --electron C:\electron-v33.4.11-win32-x64 ^
  *                          --engine C:\Downloads\amber-server-win-x64.exe --rcedit C:\tools\rcedit-x64.exe --zip
  *
- * **組むあいだ、網に出ない。** electron-builder のような「取りに行く」道具は
+ * **ビルドするあいだ、ネットワークに出ない。** electron-builder のような「取りに行く」道具は
  * 使わない（crmaine が whl と vsce で二度やった事故 ── 途中で落ちて半端な生成物が
  * 残り、それが正常に見える）。写すだけで作り、**出口で必ず数えて**、欠けていれば
  * 失敗させる。
@@ -26,7 +26,7 @@
  *     gui/                  ← 画面（node_modules は入れない。vendor/ に実行時の一式がある）
  *       amber-server        ← エンジン（engine.js は「隣」を最初に見る）
  *       amber-cal           ← この Mac の予定表に話す道具
- *     packaging/            ← 印・見本・テンプレート（main.js は `../packaging` を見る）
+ *     packaging/            ← 印・サンプル・テンプレート（main.js は `../packaging` を見る）
  *
  * 出来上がり（Windows）:
  *   dist/amber-win-x64/
@@ -54,13 +54,13 @@ const has = (name) => process.argv.includes('--' + name);
 /** エンジンの在り処。**`--server` でも `--engine` でも同じ**（依頼 550）。 */
 const engineArg = () => arg('server') || arg('engine');
 
-/// **どの版を組むか**（依頼 602・本人「会社でビルドする際には、同期に関する
+/// **どの版をビルドするか**（依頼 602・本人「会社でビルドする際には、同期に関する
 /// 機能や表示はすべてクローズにしたい」）。
 ///
-/// `--edition office` を渡すと、配る一枚の中に `gui/edition.json` を置く
-/// ── 画面はそれを見て、外の網に触るもの（Google Drive の同期・iCal の
+/// `--edition office` を渡すと、配る1 つの中に `gui/edition.json` を置く
+/// ── 画面はそれを見て、外のネットワークに触るもの（Google Drive の同期・iCal の
 /// 購読・グループ共有）を**出さないし、走らせない。**
-/// 渡さなければ、その一枚は置かない ＝ ふつうの版。
+/// 渡さなければ、その1 つは置かない ＝ ふつうの版。
 const edition = (() => {
     const want = String(arg('edition', '') || '').trim();
     if (!want || want === 'full') return 'full';
@@ -109,7 +109,7 @@ function copy(from, to, skip = () => false) {
  *
  * `gui/vendor/`（Monaco と mermaid・16MB）は **git に入っていない** ──
  * `npm install` が node_modules に置いたものを `gui/vendor.js` が写す形なので、
- * **ネットに出られない機械では作れない**。出口の `verify` でも捕まるが、
+ * **ネットに出られない環境では作れない**。出口の `verify` でも捕まるが、
  * それでは Electron を二百メガ写したあとで落ちる。**写す前に言う。**
  */
 function preflight() {
@@ -118,8 +118,8 @@ function preflight() {
         && fs.existsSync(path.join(vendor, 'mermaid'))) return;
     console.error('NG: gui/vendor/ がありません（エディタと図の実体）。');
     console.error('');
-    console.error('  ネットに出られる機械で:  cd gui && npm install && node vendor.js');
-    console.error('  出られない機械では:      その gui/vendor/ を丸ごと持ち込んで、同じ場所に置く');
+    console.error('  ネットに出られる環境で:  cd gui && npm install && node vendor.js');
+    console.error('  出られない環境では:      その gui/vendor/ を丸ごと持ち込んで、同じ場所に置く');
     console.error('');
     console.error('  （持ち込む一式は  node scripts/offline-kit.js  がまとめます）');
     process.exit(1);
@@ -143,7 +143,7 @@ function fillApp(appDir, serverExe, exeName, calBin) {
     }
     copy(path.join(ROOT, 'packaging', 'welcome'), path.join(appDir, 'packaging', 'welcome'));
     copy(path.join(ROOT, 'packaging', 'templates'), path.join(appDir, 'packaging', 'templates'));
-    // **会社向けの一枚だけ、版の札を置く**（依頼 602）。無ければふつうの版。
+    // **会社向けの1 つだけ、版のラベルを置く**（依頼 602）。無ければふつうの版。
     if (edition !== 'full') {
         fs.writeFileSync(path.join(appDir, 'gui', 'edition.json'),
             JSON.stringify({ edition }, null, 2));
@@ -188,7 +188,7 @@ function mac(out) {
     const server = engineArg() || path.join(ROOT, 'target', 'release', 'amber-server');
     if (!fs.existsSync(server)) { console.error('amber-server がありません: ' + server + '（cargo build --release -p amber-server）'); process.exit(1); }
     const cal = path.join(ROOT, 'target', 'mac', 'amber-cal');
-    if (!fs.existsSync(cal)) console.error('注意: amber-cal がありません（scripts/mac-build.sh）── この Mac の予定表は読めない一枚になります');
+    if (!fs.existsSync(cal)) console.error('注意: amber-cal がありません（scripts/mac-build.sh）── この Mac の予定表は読めない1 つになります');
     const app = path.join(out, 'ambər.app');
     fs.rmSync(app, { recursive: true, force: true });
     fs.mkdirSync(out, { recursive: true });
@@ -210,7 +210,7 @@ function mac(out) {
     set('CFBundleIdentifier', 'com.taketan.amber');
     set('CFBundleIconFile', 'amber.icns');
     set('CFBundleShortVersionString', version);
-    // 予定表を読む言い分（amber-cal が求める）。無いと macOS は小窓も出さずに断る。
+    // 予定表を読む言い分（amber-cal が求める）。無いと macOS は小デスクトップ版も出さずに断る。
     set('NSCalendarsFullAccessUsageDescription', 'カレンダーに予定を並べ、登録するため');
     set('NSCalendarsUsageDescription', 'カレンダーに予定を並べ、登録するため');
     fillApp(path.join(res, 'app'), server, 'amber-server', cal);
@@ -248,7 +248,7 @@ function win(out) {
         process.exit(1);
     }
     // **名前で見分けられるようにする**（依頼 602）── リリースの資材は
-    // 一つの籠に平らに並ぶので、同じ名前だと片方が片方を上書きする。
+    // 一つのまとまりに平らに並ぶので、同じ名前だと片方が片方を上書きする。
     const dir = path.join(out, 'amber-win-x64' + (edition === 'full' ? '' : '-' + edition));
     fs.rmSync(dir, { recursive: true, force: true });
     copy(electron, dir);
@@ -267,7 +267,7 @@ function win(out) {
     fs.writeFileSync(path.join(dir, 'はじめにお読みください.txt'), [
         'ambər ' + version + '（Windows x64）',
         '',
-        '1. この zip を右クリック →「プロパティ」→「セキュリティ: 許可する」に印 → OK（先に外しておくと、展開したものに印が残りません）',
+        '1. この zip を右クリック →「プロパティ」→「セキュリティ: 許可する」に印 → OK（先に外しておくと、展開したものにマークが残りません）',
         '2. 右クリック →「すべて展開」',
         '3. amber.exe をダブルクリック',
         '',
@@ -278,10 +278,10 @@ function win(out) {
     if (has('zip')) {
         const zip = path.join(out, path.basename(dir) + '-' + version + '.zip');
         fs.rmSync(zip, { force: true });
-        // **組むのは自前**（`scripts/zip.js`・依頼 550）── 前は `python3` を
-        // 呼んでいたが、**組む場所は会社の Windows でもある**。あそこに
+        // **ビルドするのは自前**（`scripts/zip.js`・依頼 550）── 前は `python3` を
+        // 呼んでいたが、**ビルドする場所は会社の Windows でもある**。あそこに
         // python3 は無いし、PowerShell の `Compress-Archive` は日本語の
-        // 名前に UTF-8 の印を立てない（`はじめにお読みください.txt` が化ける）。
+        // 名前に UTF-8 のマークを立てない（`はじめにお読みください.txt` が化ける）。
         zipDir(dir, zip);
         console.log('zip: ' + zip + '  (' + sizeOf(zip) + ')');
     }

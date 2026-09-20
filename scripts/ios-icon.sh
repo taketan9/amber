@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# iOS のアプリアイコンを焼く。
+# iOS のアプリアイコンを埋め込む。
 #
 #   ./scripts/ios-icon.sh
 #
-# **中身は `packaging/amber_icon.py` に移した。** ここは扉を1つに保つためだけに残る
+# **中身は `packaging/amber_icon.py` に移した。** ここは入口を1つに保つためだけに残る
 # ── 以前は `cian.ico`（二画面ファイラの印）を iOS のアイコンにしていたので、
 # このまま走らせると amber のアイコンを cian のもので上書きしてしまう。
 #

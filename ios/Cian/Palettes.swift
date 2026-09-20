@@ -2,10 +2,10 @@
 //
 //     node scripts/themes-test.js --write
 //
-// で隣の cian から作り直す（窓の `gui/palettes.js` と同じ元・同じ算数）。
-// 窓の十五の変数に組み替えたあとの色を持つ。並びは cian と同じ。
+// で隣の cian から作り直す（デスクトップ版の `gui/palettes.js` と同じ元・同じ算数）。
+// デスクトップ版の十五の変数に組み替えたあとの色を持つ。並びは cian と同じ。
 
-/// 一つの配色。`vars` は面（WKWebView）の CSS 変数にそのまま差す。
+/// 一つの配色。`vars` は画面（WKWebView）の CSS 変数にそのまま差す。
 struct Palette {
     let name: String
     let label: String

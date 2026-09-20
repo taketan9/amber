@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-/* 「表示」の面で鍵を押したら、字がどうなるか。
+/* 「表示」画面でキーを押したら、文字がどうなるか。
  *
  * `round-test.js` は**触らずに**往復させる。こちらは**押してから**往復
- * させる ── 押した跡が字に落ちるか、押していない行が動いていないか。
+ * させる ── 押した跡が文字に落ちるか、押していない行が動いていないか。
  *
- *     もとの .md ──▶ 面 ──▶ 鍵を押す ──▶ paperToMd ──▶ 字
+ *     もとの .md ──▶ 画面 ──▶ キーを押す ──▶ paperToMd ──▶ 文字
  *
  * 決めごとは `PAPER.ja.md` 六章の乙（鍵）。芯は三つ:
  *
- *   1. 面の上の一打は、字の上の一つの記号に対応する
+ *   1. 画面の上の一打は、文字の上の一つの記号に対応する
  *      （行頭の Backspace は記号が一つ外れ、Tab は一段深くなる。
  *        「何も起きない・焦点が飛ぶ」は無い ── それは既定の事故）
  *   2. 選びは意思、一打は事故（選ばずに押した一打で、図や枠は消えない）
@@ -46,9 +46,9 @@ if (!engine) {
 
 const src = fs.readFileSync(path.join(root, 'gui', 'renderer.js'), 'utf8');
 const from = src.indexOf('function richBlock(');
-const to = src.indexOf('/// この窓の「表示」の面を、上の切り出しに繋ぐ薄い包み。');
+const to = src.indexOf('/// このデスクトップ版の「表示」画面を、上の切り出しに繋ぐ薄い包み。');
 if (from < 0 || to < 0 || to < from) {
-    console.error('gui/renderer.js から「表示」の面を切り出せません');
+    console.error('gui/renderer.js から「表示」画面を切り出せません');
     process.exit(2);
 }
 const dom = new JSDOM('<!doctype html><body><div id="paper"></div></body>');
@@ -79,14 +79,14 @@ const ask = (m, p2) => new Promise((go) => {
     child.stdin.write(JSON.stringify({ id: ++id, method: m, params: p2 }) + '\n');
 });
 
-/// 面を組む。
+/// 画面をビルドする。
 async function draw(md) {
     const r = await ask('html', { text: md });
     box.innerHTML = r.ok.html || '';
     armPaper(box, md, true);
 }
 
-/// `at` 番目の行（面に出ている順の、いちばん外のかたまり）の中の
+/// `at` 番目の行（画面に出ている順の、いちばん外のかたまり）の中の
 /// `n` 文字目に caret を置く。
 function caretAt(node, n) {
     const walk = document.createTreeWalker(node, 4);
@@ -104,7 +104,7 @@ function caretAt(node, n) {
         }
         seen += t.data.length;
     }
-    // 字の無い節（空の段落）── 節そのものの中へ。
+    // 文字の無い節（空の段落）── 節そのものの中へ。
     const r = document.createRange();
     r.selectNodeContents(node);
     r.collapse(true);
@@ -114,8 +114,8 @@ function caretAt(node, n) {
     return true;
 }
 
-/// 中の字で節を探す。**いちばん内側を掴む** ── 入れ子の一覧では、外側の
-/// 項目も中の字を持っている（`textContent` は子まで拾う）。
+/// 中の文字で節を探す。**いちばん内側を掴む** ── 入れ子の一覧では、外側の
+/// 項目も中の文字を持っている（`textContent` は子まで拾う）。
 const find = (text) => [...box.querySelectorAll('li, p, h1, h2, h3, td, th, blockquote > p, .alert > p')]
     .filter((n) => n.textContent.includes(text))
     .pop();
@@ -127,7 +127,7 @@ const ok = (yes, what, got) => {
 };
 const say = (s) => console.log(s);
 
-/// 押して、字に戻す。
+/// 押して、テキストに戻す。
 ///
 /// caret は **`where` の直前から数えて `at` 文字目**に置く ── 段落の中の
 /// 改行は `<br>` なので、二行の引用は一つの節になっている（節の先頭から
@@ -142,7 +142,7 @@ async function press(md, where, at, hit) {
 }
 
 (async () => {
-    say('Tab ── 一覧の中は段、外は字下げ');
+    say('Tab ── 一覧の中は段、外はインデント');
     {
         let r = await press('- あ\n- い', 'い', 0, () => checkTab(box, false));
         ok(r.md === '- あ\n  - い\n', '二つ目を Tab で一段深く', r.md);
@@ -157,16 +157,16 @@ async function press(md, where, at, hit) {
         ok(r.md === '- あ\n', 'いちばん浅い段では何もしない', r.md);
 
         r = await press('- [ ] やること\n- [ ] もう一つ', 'もう一つ', 0, () => checkTab(box, false));
-        ok(r.md === '- [ ] やること\n  - [ ] もう一つ\n', '升は升のまま深くなる', r.md);
+        ok(r.md === '- [ ] やること\n  - [ ] もう一つ\n', 'セルはセルのまま深くなる', r.md);
     }
 
-    say('Tab ── 段落は字下げ（全角空白）');
+    say('Tab ── 段落はインデント（全角空白）');
     {
         let r = await press('ふつうの段落。', 'ふつう', 0, () => checkTab(box, false));
         ok(r.md === '　ふつうの段落。\n', '段落の頭に全角空白が一つ', r.md);
 
-        r = await press('　字下げた段落。', '字下げた', 0, () => checkTab(box, true));
-        ok(r.md === '字下げた段落。\n', 'Shift+Tab で外れる', r.md);
+        r = await press('　インデントた段落。', 'インデントた', 0, () => checkTab(box, true));
+        ok(r.md === 'インデントた段落。\n', 'Shift+Tab で外れる', r.md);
 
         r = await press('ふつうの段落。', 'ふつう', 3, () => checkTab(box, false));
         ok(r.md === '　ふつうの段落。\n', '行のどこで押しても、頭に付く', r.md);
@@ -182,7 +182,7 @@ async function press(md, where, at, hit) {
         ok(r.md === '- あ\n\nい\n\n- う\n', '途中の項目は、記号が外れて段落になる（下は残る）', r.md);
 
         r = await press('- [x] やった', 'やった', 0, () => checkBack(box));
-        ok(r.md === 'やった\n', '升も一緒に外れる', r.md);
+        ok(r.md === 'やった\n', 'セルも一緒に外れる', r.md);
 
         r = await press('- あ\n  - こ', 'こ', 0, () => checkBack(box));
         ok(r.md === '- あ\n- こ\n', '入れ子の項目は、一段浅くなる', r.md);
@@ -190,10 +190,10 @@ async function press(md, where, at, hit) {
         r = await press('## 見出し', '見出し', 0, () => checkBack(box));
         ok(r.md === '見出し\n', '見出しは段落になる', r.md);
 
-        // 字下げの `　` は**ただの字**なので、Backspace は既定のまま一つ
+        // インデントの `　` は**ただの文字**なので、Backspace は既定のまま一つ
         // 消せばよい（`PAPER.ja.md` 六章 ──「芯の 1 がそのまま効く」）。
-        r = await press('　字下げた段落。', '字下げた', 0, () => checkBack(box));
-        ok(r.took === false, '字下げは、ただの字として一打で消える（既定）', r.took);
+        r = await press('　インデントた段落。', 'インデントた', 0, () => checkBack(box));
+        ok(r.took === false, 'インデントは、ただの文字として一打で消える（既定）', r.took);
 
         r = await press('> 一行目\n> 二行目', '一行目', 0, () => checkBack(box));
         ok(r.md === '一行目\n\n> 二行目\n', '引用は、最初の行の行頭だけ出る', r.md);
@@ -202,7 +202,7 @@ async function press(md, where, at, hit) {
         ok(r.took === false, '引用の途中の行は、前の行と繋がる（既定に任せる）', r.took);
 
         r = await press('ふつうの段落。', 'ふつう', 3, () => checkBack(box));
-        ok(r.took === false, '行頭でなければ、字を消す鍵に戻る', r.took);
+        ok(r.took === false, '行頭でなければ、文字を消すキーに戻る', r.took);
 
         r = await press('ふつうの段落。', 'ふつう', 0, () => checkBack(box));
         ok(r.took === false, '外すものが無ければ、既定に任せる', r.took);
@@ -218,9 +218,9 @@ async function press(md, where, at, hit) {
 
         r = await press('## 見出し', '見出し', 0, () => checkReturn(box));
         // **既定に任せない** ── Chromium は空の見出しを上に作り、`# ` の一行が
-        // ファイルに残る（網が捕まえた・2026-09-10）。
+        // ファイルに残る（ネットワークが捕まえた・2026-09-10）。
         ok(r.took === true, '先頭では受ける（上に空の段落を置く）', r.took);
-        ok(r.md === '## 見出し\n', '空の段落は字に出ない（見出しは見出しのまま）', r.md);
+        ok(r.md === '## 見出し\n', '空の段落は文字に出ない（見出しは見出しのまま）', r.md);
         ok(box.firstElementChild.tagName === 'P' && box.children[1].tagName === 'H2',
            '上に置かれたのは段落で、見出しではない', box.innerHTML);
 
@@ -240,7 +240,7 @@ async function press(md, where, at, hit) {
     say('Shift+Enter ── 段落の中の改行');
     {
         let r = await press('一行目。', '一行目。', 4, () => checkSoftReturn(box));
-        ok(r.md === '一行目。\n', '段落の中に改行が入る（字は変わらない）', r.md);
+        ok(r.md === '一行目。\n', '段落の中に改行が入る（文字は変わらない）', r.md);
 
         r = await press('一行目。つづき', '一行目。', 4, () => checkSoftReturn(box));
         ok(r.md === '一行目。\nつづき\n', '途中で押したら、後ろが次の行へ', r.md);
@@ -262,15 +262,15 @@ async function press(md, where, at, hit) {
         const md = '```\nコード\n```\n\nそのあと。';
         let r = await press(md, 'そのあと', 0, () => checkBack(box));
         ok(r.took === true, '枠のすぐ下の行頭では、何も起きない（受けて止める）', r.took);
-        ok(r.md === md + '\n', '字は一文字も動いていない', r.md);
+        ok(r.md === md + '\n', '文字は一文字も動いていない', r.md);
 
-        // Delete の裏（網が捕まえた・2026-09-10 ── 既定は枠を消して下と繋ぐ）。
+        // Delete の裏（ネットワークが捕まえた・2026-09-10 ── 既定は枠を消して下と繋ぐ）。
         const up = 'そのまえ。\n\n```\nコード\n```\n\nそのあと。';
         r = await press(up, 'そのまえ。', 5, () => checkDel(box));
         ok(r.took === true, '枠のすぐ上の行末の Delete は、何も起きない（受けて止める）', r.took);
-        ok(r.md === up + '\n', '字は一文字も動いていない', r.md);
+        ok(r.md === up + '\n', '文字は一文字も動いていない', r.md);
         r = await press(up, 'そのまえ。', 2, () => checkDel(box));
-        ok(r.took === false, '行の途中の Delete は、字を消す鍵のまま', r.took);
+        ok(r.took === false, '行の途中の Delete は、文字を消すキーのまま', r.took);
         r = await press(up, 'そのあと。', 5, () => checkDel(box));
         ok(r.took === false, '隣が枠でなければ、既定のまま', r.took);
     }
@@ -284,7 +284,7 @@ async function press(md, where, at, hit) {
         flattenHeads(box);
         ok(!box.querySelector('h2'), '見出しが段落に落ちる');
         ok(paperToMd(box, '') === '見出し\n\n段落。\n',
-           '字はそのまま残る（`#` だけが落ちる）', paperToMd(box, ''));
+           '文字はそのまま残る（`#` だけが落ちる）', paperToMd(box, ''));
 
         // 触れる行が無ければ、何もしない。
         await draw('段落だけ。');
@@ -347,7 +347,7 @@ async function press(md, where, at, hit) {
         r.setEnd(cell.firstChild || cell, 1);
         sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
         ok(checkCut(box) === true, '表の外から中へ跨ぐ選びは、受けて止める');
-        ok(paperToMd(box, '') === mix + '\n', '字は一文字も動かない', paperToMd(box, ''));
+        ok(paperToMd(box, '') === mix + '\n', '文字は一文字も動かない', paperToMd(box, ''));
     }
 
     say('矢印 ── 触れないかたまりを跨ぐ');
@@ -355,7 +355,7 @@ async function press(md, where, at, hit) {
         const md = '上の段落。\n\n```\nコード\n```\n\n下の段落。';
         let r = await press(md, '上の段落', 5, () => checkArrow(box, 'down'));
         ok(r.took === true, '枠の上の行の末尾で ↓ を押すと、跨ぐ', r.took);
-        ok(r.md === md + '\n', '字は一文字も動かない', r.md);
+        ok(r.md === md + '\n', '文字は一文字も動かない', r.md);
 
         r = await press(md, '下の段落', 0, () => checkArrow(box, 'up'));
         ok(r.took === true, '枠の下の行の頭で ↑ を押すと、跨ぐ', r.took);
@@ -363,7 +363,7 @@ async function press(md, where, at, hit) {
         r = await press(md, '上の段落', 2, () => checkArrow(box, 'down'));
         ok(r.took === false, '行の途中では、ふつうに動く（既定に任せる）', r.took);
 
-        // 図で始まるノート ── 上に一行足す道が要る。
+        // 図で始まるノート ── 上に一行足すパスが要る。
         const top = '```\nコード\n```\n\n下の段落。';
         await draw(top);
         headStop(box);
@@ -371,7 +371,7 @@ async function press(md, where, at, hit) {
         ok(first && first.tagName === 'P' && !first.textContent.trim(),
            '枠で始まるノートの上に、降りられる一行が置かれる', first && first.tagName);
         ok(paperToMd(box, '') === top + '\n',
-           'その一行は、字に戻すとき落ちる（ファイルは増えない）', paperToMd(box, ''));
+           'その一行は、文字に戻すとき落ちる（ファイルは増えない）', paperToMd(box, ''));
 
         await draw('ふつうの段落。');
         headStop(box);
@@ -379,7 +379,7 @@ async function press(md, where, at, hit) {
            '先頭が触れるものなら、何も置かない', box.firstElementChild.textContent);
     }
 
-    say('記号を外しても、入れ子は失わない（網が捕まえた・2026-09-10）');
+    say('記号を外しても、入れ子は失わない（ネットワークが捕まえた・2026-09-10）');
     {
         const md = '- ひとつ\n- ふたつ\n  - 入れ子\n- みっつ';
         let r = await press(md, 'ふたつ', 0, () => checkBack(box));
@@ -396,8 +396,8 @@ async function press(md, where, at, hit) {
     say('段落の中に潜った一覧を、落とさない（Chromium の insertOrderedList の形）');
     {
         // `execCommand` は軽い DOM に無いので、Chromium が作る形を手で置く。
-        // **`innerHTML` では作れない** ── 字の上では `<p><ol>` は読めない形なので、
-        // 読む側が `<p></p><ol>…</ol><p></p>` に直してしまう。DOM の手で組む。
+        // **`innerHTML` では作れない** ── 文字の上では `<p><ol>` は読めない形なので、
+        // 読む側が `<p></p><ol>…</ol><p></p>` に直してしまう。DOM の手でビルドする。
         const nest = (outer, innerTag, text, lead) => {
             box.innerHTML = '';
             const wrap = document.createElement(outer);
@@ -413,15 +413,15 @@ async function press(md, where, at, hit) {
         };
         await draw('段落。');
         nest('p', 'ol', '最後の段落。');
-        ok(paperToMd(box, '') === '1. 最後の段落。\n', '字に戻すとき、一覧として書く', paperToMd(box, ''));
+        ok(paperToMd(box, '') === '1. 最後の段落。\n', '文字に戻すとき、一覧として書く', paperToMd(box, ''));
         tidyLists(box);
         ok(box.firstElementChild.tagName === 'OL', '皮を剥ぐと一覧がかたまりになる', box.innerHTML);
-        ok(box.firstElementChild.dataset.line === '0', '元の行の札は一覧へ移る', box.firstElementChild.dataset.line);
+        ok(box.firstElementChild.dataset.line === '0', '元の行のラベルは一覧へ移る', box.firstElementChild.dataset.line);
 
-        nest('p', 'ul', '項目', '字。');
-        ok(paperToMd(box, '') === '字。\n\n- 項目\n', '字と一覧が混ざっていても、両方残る', paperToMd(box, ''));
+        nest('p', 'ul', '項目', '文字。');
+        ok(paperToMd(box, '') === '文字。\n\n- 項目\n', '文字と一覧が混ざっていても、両方残る', paperToMd(box, ''));
         tidyLists(box);
-        ok([...box.children].map((n) => n.tagName).join(',') === 'P,UL', '字は段落に残り、一覧は後ろへ', box.innerHTML);
+        ok([...box.children].map((n) => n.tagName).join(',') === 'P,UL', '文字は段落に残り、一覧は後ろへ', box.innerHTML);
     }
 
     say('項目を見出しにすると、点が外れる（丙）');
@@ -435,12 +435,12 @@ async function press(md, where, at, hit) {
         ok(!box.querySelector('li:empty'), '空の項目を残さない', box.innerHTML);
     }
 
-    say('字下げた段落を見出しにすると、字下げは外れる（網の決めごと 9 の筋）');
+    say('インデントた段落を見出しにすると、インデントは外れる（ネットワークの決めごと 9 の筋）');
     {
-        await draw('　字下げた段落。');
-        caretAt(find('字下げた'), 0);
+        await draw('　インデントた段落。');
+        caretAt(find('インデントた'), 0);
         blockAs(box, 'h2');
-        ok(!box.textContent.startsWith('　'), '面の上で字下げが消えている', box.textContent);
+        ok(!box.textContent.startsWith('　'), '画面の上でインデントが消えている', box.textContent);
     }
 
     say('表のセルでは、一覧にしない');
@@ -453,13 +453,13 @@ async function press(md, where, at, hit) {
         ok(blockAs(box, 'h1') === false, '見出しも同じ');
     }
 
-    say('升は、caret の一行に（本人が決めた・2026-09-10）');
+    say('セルは、caret の一行に（本人が決めた・2026-09-10）');
     {
         const md = '- ひとつ\n- ふたつ\n  - 入れ子\n- みっつ';
         await draw(md);
         caretAt(find('ふたつ'), 0);
         ok(checkLine(box) === true, '項目で受ける');
-        ok(paperToMd(box, '') === '- ひとつ\n- [ ] ふたつ\n  - 入れ子\n- みっつ\n', 'その一行だけ升になる', paperToMd(box, ''));
+        ok(paperToMd(box, '') === '- ひとつ\n- [ ] ふたつ\n  - 入れ子\n- みっつ\n', 'その一行だけセルになる', paperToMd(box, ''));
         caretAt(find('ふたつ'), 0);
         checkLine(box);
         ok(paperToMd(box, '') === md + '\n', 'もう一度押すと外れる（点は残る）', paperToMd(box, ''));
@@ -467,20 +467,20 @@ async function press(md, where, at, hit) {
         await draw('## 見出し');
         caretAt(find('見出し'), 0);
         checkLine(box);
-        ok(paperToMd(box, '') === '- [ ] 見出し\n', '見出しは # が外れて升に', paperToMd(box, ''));
+        ok(paperToMd(box, '') === '- [ ] 見出し\n', '見出しは # が外れてセルに', paperToMd(box, ''));
 
         await draw('> 一行目\n\n> 二行目');
         caretAt(find('一行目'), 0);
         checkLine(box);
-        ok(paperToMd(box, '') === '- [ ] 一行目\n\n> 二行目\n', '引用の行は、引用から出て升に', paperToMd(box, ''));
+        ok(paperToMd(box, '') === '- [ ] 一行目\n\n> 二行目\n', '引用の行は、引用から出てセルに', paperToMd(box, ''));
 
-        await draw('　字下げた段落。');
-        caretAt(find('字下げた'), 0);
+        await draw('　インデントた段落。');
+        caretAt(find('インデントた'), 0);
         checkLine(box);
-        ok(paperToMd(box, '') === '- [ ] 字下げた段落。\n', '字下げは外れる', paperToMd(box, ''));
-        // 字の上では `trim()` が `　` を落とすので、**面の側**でも外れていることを見る
-        // （外さないと、次に組み直すまで面に `　` が残る）。
-        ok(!box.querySelector('li').textContent.startsWith('　'), '面の上でも字下げが消えている', box.querySelector('li').textContent);
+        ok(paperToMd(box, '') === '- [ ] インデントた段落。\n', 'インデントは外れる', paperToMd(box, ''));
+        // 文字の上では `trim()` が `　` を落とすので、**画面の側**でも外れていることを見る
+        // （外さないと、次にビルドし直すまで画面に `　` が残る）。
+        ok(!box.querySelector('li').textContent.startsWith('　'), '画面の上でもインデントが消えている', box.querySelector('li').textContent);
 
         const t = '| a | b |\n| --- | --- |\n| 1 | 2 |';
         await draw(t);
@@ -499,7 +499,7 @@ async function press(md, where, at, hit) {
         await draw('- [ ] やること\n- [x] やった');
         caretAt(find('やること'), 0);
         blockAs(box, 'ol');
-        ok(paperToMd(box, '') === '1. [ ] やること\n\n- [x] やった\n', '升は連れていく', paperToMd(box, ''));
+        ok(paperToMd(box, '') === '1. [ ] やること\n\n- [x] やった\n', 'セルは連れていく', paperToMd(box, ''));
 
         await draw('1. 一番\n2. 二番');
         caretAt(find('二番'), 0);
@@ -513,7 +513,7 @@ async function press(md, where, at, hit) {
         caretAt(find('入れ子'), 0);
         blockAs(box, 'blockquote');
         // `formatBlock` は軽い DOM に無い ── 段落まで出ることを見る。
-        ok(paperToMd(box, '') === '- ひとつ\n- ふたつ\n\n入れ子\n\n- みっつ\n', '入れ子の項目でも字は消えず、外へ出る', paperToMd(box, ''));
+        ok(paperToMd(box, '') === '- ひとつ\n- ふたつ\n\n入れ子\n\n- みっつ\n', '入れ子の項目でも文字は消えず、外へ出る', paperToMd(box, ''));
     }
 
     say('空の注記に、打てる一行（本人が決めた・2026-09-10）');
@@ -522,7 +522,7 @@ async function press(md, where, at, hit) {
         ok(!box.querySelector('.alert > p:not(.alert-h)'), '組んだ直後は中身の行が無い');
         fillAlerts(box);
         ok(!!box.querySelector('.alert > p:not(.alert-h)'), '打てる一行が置かれる');
-        ok(paperToMd(box, '') === '> [!NOTE]\n\n次。\n', '空のままなら字に出ない（札だけ）', paperToMd(box, ''));
+        ok(paperToMd(box, '') === '> [!NOTE]\n\n次。\n', '空のままなら文字に出ない（札だけ）', paperToMd(box, ''));
     }
 
     say('項目に貼ると、改行ごとに項目が増える（本人が決めた・2026-09-10）');
@@ -531,14 +531,14 @@ async function press(md, where, at, hit) {
         caretAt(find('やること'), 4);
         pasteLines(box, ['一つめ', '二つめ', '三つめ']);
         // 一行目の `insertText` は軽い DOM に無いので、増えた項目だけ見る。
-        ok(paperToMd(box, '') === '- [ ] やること\n- [ ] 二つめ\n- [ ] 三つめ\n- [x] やった\n', '升の項目には升つきで増える', paperToMd(box, ''));
+        ok(paperToMd(box, '') === '- [ ] やること\n- [ ] 二つめ\n- [ ] 三つめ\n- [x] やった\n', 'セルの項目にはセルつきで増える', paperToMd(box, ''));
     }
 
     say('行末の Delete ── 次が記号付きの行なら、何も起きない（本人が決めた・2026-09-11）');
     {
         let r = await press('- [ ] やること\n- [x] やった', 'やること', 4, () => checkDel(box));
         ok(r.took === true, '項目の終わりでは受けて止める', r.took);
-        ok(r.md === '- [ ] やること\n- [x] やった\n', '次の升は消えない', r.md);
+        ok(r.md === '- [ ] やること\n- [x] やった\n', '次のセルは消えない', r.md);
 
         r = await press('段落。\n\n- ひとつ', '段落。', 3, () => checkDel(box));
         ok(r.took === true, '次が一覧なら、段落の終わりでも止める', r.took);
@@ -550,7 +550,7 @@ async function press(md, where, at, hit) {
         ok(r.took === false, '段落と段落は、既定のまま繋がる', r.took);
 
         r = await press('一つめ。\n\n二つめ。', '一つめ。', 1, () => checkDel(box));
-        ok(r.took === false, '行の途中は、字を消す鍵のまま', r.took);
+        ok(r.took === false, '行の途中は、文字を消すキーのまま', r.took);
 
         const t = '| a | b |\n| --- | --- |\n| 1 | 2 |\n\n下。';
         r = await press(t, '2', 1, () => checkDel(box));
@@ -560,16 +560,16 @@ async function press(md, where, at, hit) {
         ok(r.took === false, '引用の中の段落同士は繋がる（既定）', r.took);
     }
 
-    say('空の記号だけの行は、字を打つまで書かない（本人が決めた・2026-09-11）');
+    say('空の記号だけの行は、文字を打つまで書かない（本人が決めた・2026-09-11）');
     {
-        box.innerHTML = '<h1><br></h1><p>字。</p>';
-        ok(paperToMd(box, '') === '字。\n', '空の見出しは書かれない', paperToMd(box, ''));
+        box.innerHTML = '<h1><br></h1><p>文字。</p>';
+        ok(paperToMd(box, '') === '文字。\n', '空の見出しは書かれない', paperToMd(box, ''));
         box.innerHTML = '<ul><li>ひとつ</li><li><br></li></ul>';
         ok(paperToMd(box, '') === '- ひとつ\n', '空の項目は書かれない', paperToMd(box, ''));
         box.innerHTML = '<ul><li><br></li></ul>';
         ok(paperToMd(box, '') === '\n', '項目が一つも無ければ一覧ごと消える', paperToMd(box, ''));
         box.innerHTML = '<ul><li><ul><li>入れ子</li></ul></li></ul>';
-        ok(paperToMd(box, '') === '- \n  - 入れ子\n', '字が無くても入れ子があれば残る（親の行は要る）', paperToMd(box, ''));
+        ok(paperToMd(box, '') === '- \n  - 入れ子\n', '文字が無くても入れ子があれば残る（親の行は要る）', paperToMd(box, ''));
     }
 
     say('引用・注記の途中の Enter は、改行（本人が決めた・2026-09-11）');
@@ -585,30 +585,30 @@ async function press(md, where, at, hit) {
         ok(r.took === false, '箱の外では受けない', r.took);
     }
 
-    say('入れ子を持つ項目の行末の Delete・済んだ升の行頭の Enter（網が捕まえた・2026-09-11）');
+    say('入れ子を持つ項目の行末の Delete・済んだセルの行頭の Enter（ネットワークが捕まえた・2026-09-11）');
     {
         let r = await press('- ふたつ\n  - 入れ子', 'ふたつ', 3, () => checkDel(box));
-        ok(r.took === true, '入れ子を持つ項目の字の終わりで、受けて止める', r.took);
+        ok(r.took === true, '入れ子を持つ項目の文字の終わりで、受けて止める', r.took);
         ok(r.md === '- ふたつ\n  - 入れ子\n', '入れ子は吸い込まれない', r.md);
 
         r = await press('- [x] やった', 'やった', 0, () => checkEnter(find('やった')));
-        ok(r.took === true, '済んだ升の行頭で受ける', r.took);
-        ok(r.md === '- [x] やった\n', 'チェックは字と一緒に残る（空の升は書かれない）', r.md);
+        ok(r.took === true, '済んだセルの行頭で受ける', r.took);
+        ok(r.md === '- [x] やった\n', 'チェックは文字と一緒に残る（空のセルは書かれない）', r.md);
         ok(box.querySelectorAll('li').length === 2 && box.querySelector('li .box').getAttribute('aria-pressed') === 'false',
-           '上に空の升が置かれる', box.innerHTML);
+           '上に空のセルが置かれる', box.innerHTML);
     }
 
-    say('面の道具（選び口）は、字に戻さない');
+    say('画面の道具（選び口）は、文字に戻さない');
     {
         await draw('ひとつ。\n\nふたつ。');
         const g = document.createElement('div');
         g.className = 'gadget';
         g.innerHTML = '<b>同じ行を両方で直していました</b><button>こちらを残す</button>';
         box.firstElementChild.before(g);
-        ok(paperToMd(box, '') === 'ひとつ。\n\nふたつ。\n', '選び口の字が本文に混ざらない', paperToMd(box, ''));
+        ok(paperToMd(box, '') === 'ひとつ。\n\nふたつ。\n', '選び口の文字が本文に混ざらない', paperToMd(box, ''));
     }
 
-    say('注記の札は、行として数えない');
+    say('注記のラベルは、行として数えない');
     {
         const r = await press('> [!NOTE]\n> 覚えておくこと。', '覚えて', 0, () => checkBack(box));
         ok(r.md === '覚えておくこと。\n', '注記の最初の行も出られる（札ごと消える）', r.md);

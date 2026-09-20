@@ -1,15 +1,15 @@
 #!/bin/zsh
-# **電話の総ざらい**（依頼 448）── 窓の `walk.sh` にあたるもの。
+# **iPhone の総ざらい**（依頼 448）── デスクトップ版の `walk.sh` にあたるもの。
 #
 #     scripts/walk-phone.sh
 #
 # 起こすときに `--walk` を渡すと、画面の代わりに `ios/Cian/Walk.swift` が
-# 走り、落ちた数を持って自分で終わる（`#if DEBUG` の中なので、配るものには
+# ラン、落ちた数を持って自分で終わる（`#if DEBUG` の中なので、配るものには
 # 入らない）。
 #
-# **まっさらから始める。** 先に消してから入れるので、置き場所を決める道も
-# 見本を入れる道も、毎回通る ── 窓の `first-run.sh` と同じ考え。
-# 本人のノートには触らない（電話のアプリは自分の入れ物の中で走る）。
+# **まっさらから始める。** 先に消してから入れるので、置き場所を決めるパスも
+# サンプルを入れるパスも、毎回通る ── デスクトップ版の `first-run.sh` と同じ考え。
+# 本人のノートには触らない（iPhone のアプリは自分の入れ物の中で走る）。
 set -e
 here="${0:A:h}"
 root="${here:h}"
@@ -25,7 +25,7 @@ quit() {
 }
 trap quit EXIT INT TERM
 
-# 取り込みを見るための、手元の一枚。**よそのページで試さない** ── 相手が
+# 取り込みを見るための、手元の1 つ。**よそのページで試さない** ── 相手が
 # 変わった日に、何が原因か分からなくなる。
 rm -rf "$work"; mkdir -p "$work"
 cat > "$work/index.html" <<'PAGE'
@@ -34,11 +34,11 @@ cat > "$work/index.html" <<'PAGE'
 <nav><a href="/">戻る</a></nav>
 <article><h1>取り込みの試し</h1>
 <p>本文の一段落目。<a href="/next">続き</a>があります。</p>
-<p>本文らしいところだけ採るかを見たいので、案内や足より字を多くしておきます。
+<p>本文らしいところだけ採るかを見たいので、案内や足より文字を多くしておきます。
 だからこの段落はわざと長く書いてあります。もっと長く。もっと長く。</p>
-</article><footer>足の字。</footer></body></html>
+</article><footer>足の文字。</footer></body></html>
 PAGE
-# よその予定表（依頼 456）── 走査が読む一枚。
+# よその予定表（依頼 456）── 走査が読む1 つ。
 printf 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:%s\r\nBEGIN:VEVENT\r\nDTSTART;TZID=Asia/Tokyo:20260904T183000\r\nSUMMARY:%s\r\nLOCATION:%s\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260921\r\nDTEND;VALUE=DATE:20260924\r\nSUMMARY:%s\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART;TZID=Asia/Tokyo:20260907T200000\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:%s\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n' \
   '家の予定' '歯医者' '駅前' '旅行' 'ごみ出し' > "$work/away.ics"
 
@@ -46,7 +46,7 @@ printf 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:%s\r\nBEGIN:VEVENT\r\nDTS
 # 片づけのときに本体が生き残る。
 python3 -m http.server "$port" --directory "$work" >/dev/null 2>&1 &
 site=$!
-# **偽の Google Drive**（依頼 500）── 電話の同期を Google 無しで回す。
+# **偽の Google Drive**（依頼 500）── iPhone の同期を Google 無しで回す。
 driveport="${DRIVEPORT:-8733}"
 (node "$here/fake-drive.js" "$driveport" >/dev/null 2>&1 &)
 
@@ -56,12 +56,12 @@ if [ -z "$boot" ]; then
   sleep 8
   boot=$(xcrun simctl list devices booted | grep -o '([0-9A-F-]\{36\})' | head -1 | tr -d '()')
 fi
-[ -n "$boot" ] || { echo "電話が起きていません"; exit 2 }
+[ -n "$boot" ] || { echo "iPhone が起きていません"; exit 2 }
 
 (cd "$root" && ./scripts/ios-build.sh >/dev/null 2>&1) || { echo "エンジンが作れません"; exit 2 }
 (cd "$root/ios" && xcodebuild -project Cian.xcodeproj -scheme Cian \
   -sdk iphonesimulator -destination "platform=iOS Simulator,name=$dev" \
-  -quiet build 2>&1 | grep -E 'error:' ) && { echo "電話が組めません"; exit 2 }
+  -quiet build 2>&1 | grep -E 'error:' ) && { echo "iPhone が組めません"; exit 2 }
 
 built=$(ls -d ~/Library/Developer/Xcode/DerivedData/Cian-*/Build/Products/Debug-iphonesimulator/Cian.app 2>/dev/null | head -1)
 [ -d "$built" ] || { echo "組んだものが見つかりません"; exit 2 }
@@ -70,7 +70,7 @@ built=$(ls -d ~/Library/Developer/Xcode/DerivedData/Cian-*/Build/Products/Debug-
 # 一度目から二度目になる。
 xcrun simctl uninstall "$boot" "$app" >/dev/null 2>&1 || true
 xcrun simctl install "$boot" "$built"
-# **予定表の許可を先に出しておく。** 走査は小窓を押せないので、ここで
+# **予定表の許可を先に出しておく。** 走査は小デスクトップ版を押せないので、ここで
 # 出しておかないと「許可されていない」道しか通らない（依頼 460）。
 xcrun simctl privacy "$boot" grant calendar "$app" >/dev/null 2>&1 || true
 

@@ -2,16 +2,16 @@
 /* ノートを替えても、本文が混ざらないか。
  *
  * **二本のノートが、前書きだけ自分のまま本文が別のノートになった**
- * （2026-09-07）。「表示」の面の書き戻し（`syncRead`）は、面に出ている
- * 字を「いま開いているノートの字」だと思い込んでいた ── 「コード」の
- * 面ではノートを替えても組み直さないので、面は前のノートの字のまま。
- * 次に別のノートへ替えた瞬間、その字が今のノートへ書き込まれた。同じ道で、
- * 「コード」で打った行がノートを替えた瞬間に**組んだ時の字へ戻される**。
+ * （2026-09-07）。「表示」画面の書き戻し（`syncRead`）は、画面に出ている
+ * 文字を「いま開いているノートの文字」だと思い込んでいた ── 「コード」の
+ * 画面ではノートを替えてもビルドし直さないので、画面は前のノートの文字のまま。
+ * 次に別のノートへ替えた瞬間、その文字が今のノートへ書き込まれた。同じパスで、
+ * 「コード」で打った行がノートを替えた瞬間に**ビルドした時の文字へ戻される**。
  *
- * ここは `gui/renderer.js` から `syncRead` と `drawRead`、面の札
+ * ここは `gui/renderer.js` から `syncRead` と `drawRead`、画面の札
  * （`readDrawn` / `readStale` / `readCurrent`）を切り出し、周りを偽物で
- * 囲って踏み直す。**組み直さずにノートを替える**（「コード」の面の形）のが
- * 肝で、それでも前の字が書き戻されなければよい。
+ * 囲って踏み直す。**ビルドし直さずにノートを替える**（「コード」の画面の形）のが
+ * 肝で、それでも前の文字が書き戻されなければよい。
  *
  *     node scripts/switch-test.js
  */
@@ -68,7 +68,7 @@ global.loading = false;
 global.syncing = false;
 global.tocOn = false;
 global.readSeq = 0;
-// 変換中は組み直さない（依頼 404）── ここでは変換していないので偽のまま。
+// 変換中はビルドし直さない（依頼 404）── ここでは変換していないので偽のまま。
 global.composing = false;
 global.drawAfter = false;
 global.writes = [];
@@ -76,7 +76,7 @@ global.told = [];
 global.say = (s) => told.push(s);
 global.why = (e) => String(e && e.message || e);
 global.whole = () => state.head + editor.getValue();
-// 面の字 → Markdown。本物（`paperToMd`）は paper-test が見ている。
+// 画面の文字 → Markdown。本物（`paperToMd`）は paper-test が見ている。
 global.readToMd = () => el('read').textContent;
 global.save = async () => { writes.push({ path: state.open.path, text: whole() }); };
 global.armRead = () => {};
@@ -87,7 +87,7 @@ global.tailStop = () => {};
 global.findPictures = () => {};
 global.paintCode = () => Promise.resolve();
 global.drawDiagrams = () => {};
-// 組む口。**一拍遅れて返す** ── 本物もエンジンとの往復で、その間に
+// ビルドする口。**一拍遅れて返す** ── 本物もエンジンとの往復で、その間に
 // ノートが替わりうる。
 global.htmlDelay = 0;
 global.ask = async (method, params) => {
@@ -100,7 +100,7 @@ global.ask = async (method, params) => {
 // eslint-disable-next-line no-eval
 (0, eval)(line('function readDrawn(') + line('function readStale(') + line('function readCurrent(')
     + cut('function sameNote(')
-    // `drawRead` は組んだあと、先頭が図や枠なら降りられる一行を置く
+    // `drawRead` はビルドしたあと、先頭が図や枠なら降りられる一行を置く
     // （`headStop`・依頼 402）── 本物を渡す（写すと、写した側だけが直る）。
     + cut('function richBlock(') + cut('function headStop(') + cut('function fillAlerts(')
     + cut('async function syncRead(') + cut('async function drawRead('));
@@ -115,9 +115,9 @@ const A = { path: '/notes/障害/A.md', head: '---\ntitle: A\n---\n', body: '\n#
 const B = { path: '/notes/設計/B.md', head: '---\ntitle: B\n---\n', body: '\n# B\n\nこれは B の本文です。\n' };
 const C = { path: '/notes/カーマイン/C.md', head: '---\ntitle: C\n---\n', body: '\n# C\n\nこれは C の本文です。\n' };
 
-/// `openNote` の、面に関わるところだけ。**面は触らない** ── 「コード」の
-/// 面では組み直さないので、前のノートの字が残ったまま次が開く。
-/// （本物の `openNote` は替えるとき面を空にもするが、それに頼らない。）
+/// `openNote` の、画面に関わるところだけ。**画面は触らない** ── 「コード」の
+/// 画面ではビルドし直さないので、前のノートの文字が残ったまま次が開く。
+/// （本物の `openNote` は替えるとき画面を空にもするが、それに頼らない。）
 function open(n) {
     state.open = { path: n.path };
     state.head = n.head;
@@ -136,13 +136,13 @@ function fresh() {
 }
 
 (async () => {
-    console.log('ノートを替えたあと、前のノートの面を書き戻さないか');
+    console.log('ノートを替えたあと、前のノートの画面を書き戻さないか');
     {
         fresh();
         open(A);
         await drawRead();
-        ok(el('read').textContent.includes('A の本文'), '面には A が組んである');
-        // 「コード」へ替えて、B・C と開く（組み直しは走らない）。
+        ok(el('read').textContent.includes('A の本文'), '画面には A が組んである');
+        // 「コード」へ替えて、B・C と開く（ビルドし直しは走らない）。
         view = 'write';
         open(B);
         await syncRead();
@@ -152,7 +152,7 @@ function fresh() {
         ok(editor.getValue() === C.body, 'エディタは C のまま', editor.getValue());
     }
 
-    console.log('「コード」で打ったあと、組んだ時の字へ戻さないか');
+    console.log('「コード」で打ったあと、組んだ時の文字へ戻さないか');
     {
         fresh();
         open(A);
@@ -163,23 +163,23 @@ function fresh() {
         editor.setValue(A.body + '足した一行\n');
         readStale();
         await syncRead();
-        ok(writes.length === 0, '古い面を書き戻さない', writes);
+        ok(writes.length === 0, '古い画面を書き戻さない', writes);
         ok(editor.getValue().includes('足した一行'), '足した行が残る', editor.getValue());
     }
 
-    console.log('面で打ったものは、いつも通り書き戻るか（守りが強すぎないか）');
+    console.log('画面で打ったものは、いつも通り書き戻るか（守りが強すぎないか）');
     {
         fresh();
         open(B);
         await drawRead();
-        el('read').querySelector('p').textContent = 'B を面で直した';
+        el('read').querySelector('p').textContent = 'B を画面で直した';
         await syncRead();
         ok(writes.length === 1 && writes[0].path === B.path, 'B に一度書く', writes);
-        ok(writes.length === 1 && writes[0].text === B.head + 'B を面で直した', '書くのは直した字', writes[0]);
-        ok(editor.getValue() === 'B を面で直した', 'エディタも直した字', editor.getValue());
+        ok(writes.length === 1 && writes[0].text === B.head + 'B を画面で直した', '書くのは直した文字', writes[0]);
+        ok(editor.getValue() === 'B を画面で直した', 'エディタも直した文字', editor.getValue());
     }
 
-    console.log('遅れて着いた前のノートの字に、今のノートの札を付けないか');
+    console.log('遅れて着いた前のノートの文字に、今のノートのラベルを付けないか');
     {
         fresh();
         open(A);
@@ -188,8 +188,8 @@ function fresh() {
         view = 'write';
         open(B);                   // 帰ってくる前に B へ
         await late;
-        ok(!readCurrent(), '面は B のものではない', el('read').dataset.of);
-        ok(!el('read').textContent.includes('A の本文'), '遅れた A の字を面に出さない', el('read').textContent);
+        ok(!readCurrent(), '画面は B のものではない', el('read').dataset.of);
+        ok(!el('read').textContent.includes('A の本文'), '遅れた A の文字を画面に出さない', el('read').textContent);
         await syncRead();
         ok(writes.length === 0, '何も書かない', writes);
     }

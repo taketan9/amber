@@ -4,17 +4,17 @@
  *
  *     node scripts/src-zip.js --engine dist/amber-server-win-x64.exe --out out/amber-src.zip
  *
- * 会社の端末は網の外（依頼 586）で、Rust も npm も無い。だから**組むのに
- * 要るものを、ぜんぶ一枚に入れて持ち込む**:
+ * 会社の端末はネットワークの外（依頼 586）で、Rust も npm も無い。だから**ビルドするのに
+ * 要るものを、ぜんぶ1 つに入れて持ち込む**:
  *
  *   * `gui/`        ── 画面。`vendor/`（Monaco・mermaid）も入れる ＝ `npm` が要らない
- *   * `packaging/`  ── 印・見本のノート・テンプレート
- *   * `scripts/`    ── 組む道具（`build-win.js` / `pack.js` / `zip.js`）
+ *   * `packaging/`  ── 印・サンプルのノート・テンプレート
+ *   * `scripts/`    ── ビルドする道具（`build-win.js` / `pack.js` / `zip.js`）
  *   * `amber-server-win-x64.exe` ── エンジン ＝ Rust が要らない
  *   * `はじめに読んでください.txt` ── 叩く一行
  *
  * **Electron は入れない。** 百メガあり、会社には cian のぶんが既にある
- * （組むときに `--electron` で指す）。
+ * （ビルドするときに `--electron` で指す）。
  *
  * 名前は `cian-src` / `crmaine-src` に揃えて、中のフォルダは `amber-src`
  * ── 手が憶えているほうが正しい（依頼 550 と同じ）。
@@ -38,7 +38,7 @@ function die(why) {
     process.exit(1);
 }
 
-/// 入れる道具。**組むのに要るものだけ** ── 試験や取り込みの道具まで入れると、
+/// 入れる道具。**ビルドするのに要るものだけ** ── 試験や取り込みの道具まで入れると、
 /// 会社の人が「どれを叩くのか」から探すことになる。
 const TOOLS = ['build-win.js', 'pack.js', 'zip.js'];
 
@@ -53,7 +53,7 @@ function rows(engine, version) {
             else out.push({ at, rel });
         }
     };
-    // **`node_modules` は入れない。** 五百メガあり、組むのには要らない
+    // **`node_modules` は入れない。** 五百メガあり、ビルドするのには要らない
     // （実行時に要るものは `gui/vendor/` に積んである）。
     walk(path.join(ROOT, 'gui'), 'amber-src/gui', (n) => n === 'node_modules');
     walk(path.join(ROOT, 'packaging'), 'amber-src/packaging');
@@ -61,7 +61,7 @@ function rows(engine, version) {
         out.push({ at: path.join(ROOT, 'scripts', t), rel: 'amber-src/scripts/' + t });
     }
     out.push({ at: engine, rel: 'amber-src/amber-server-win-x64.exe' });
-    // **許諾も持っていく**（`amber-gui.zip` の中に入る一枚）── 同梱する側が
+    // **許諾も持っていく**（`amber-gui.zip` の中に入る1 つ）── 同梱する側が
     // 配るものの中に、こちらの許諾が無いことになる。
     const lic = path.join(ROOT, 'LICENSE');
     if (fs.existsSync(lic)) out.push({ at: lic, rel: 'amber-src/LICENSE' });
@@ -75,7 +75,7 @@ function readme(version) {
         `ambər ${version} ── 会社で組むための一式`,
         '',
         '要るもの: Node（cian と同じもので構いません）と、Windows の Electron 一式。',
-        'Rust も npm も要りません（エンジンと画面の部品は、この中に入っています）。',
+        'Rust も npm も要りません（エンジンと画面のパーサーは、この中に入っています）。',
         '',
         '組む:',
         '',
@@ -88,12 +88,12 @@ function readme(version) {
         'できるもの（dist の下）:',
         '',
         '    amber-gui.zip                  同梱する側へ渡す画面一式',
-        '    amber-server-win-x64.exe.zip   エンジン一枚',
+        '    amber-server-win-x64.exe.zip   エンジン1 つ',
         `    amber-win-x64-office-${version}.zip   会社向けの ambər 本体`,
         '',
         'ふつうの版（同期やカレンダーの同期が入ったもの）も要るときは --full を足します。',
         '',
-        '組むあいだ、網には出ません。取りに行くものは一つもありません。',
+        '組むあいだ、ネットワークには出ません。取りに行くものは一つもありません。',
         '',
     ].join('\r\n');
 }
@@ -112,7 +112,7 @@ function main() {
 
     const list = rows(engine, version);
     // **積み忘れは、配ってから分かる。** 画面の部品（Monaco・mermaid）は
-    // `npm ci && node vendor.js` を通した機械でしか揃わない ── 数えて言う。
+    // `npm ci && node vendor.js` を通した環境でしか揃わない ── 数えて言う。
     const must = [
         'amber-src/gui/vendor/monaco/vs/loader.js',
         'amber-src/gui/vendor/mermaid/mermaid.min.js',
@@ -132,9 +132,9 @@ function main() {
     }
     const notes = list.filter((r) => r.rel.startsWith('amber-src/packaging/welcome/')
         && r.rel.endsWith('.md')).length;
-    if (notes < 1) die('見本のノートが一枚もありません（packaging/welcome）');
+    if (notes < 1) die('サンプルのノートが1 つもありません（packaging/welcome）');
 
-    // 読む一枚は、その場で作って入れる（実物のファイルは持たない）。
+    // 読む1 つは、その場で作って入れる（実物のファイルは持たない）。
     const tmp = path.join(path.dirname(out), 'はじめに読んでください.txt');
     fs.writeFileSync(tmp, readme(version));
     list.push({ at: tmp, rel: 'amber-src/はじめに読んでください.txt' });
@@ -143,7 +143,7 @@ function main() {
     fs.rmSync(tmp, { force: true });
     console.log('組みました: ' + out);
     console.log('  ' + list.length + ' 枚 ・ '
-        + Math.round(fs.statSync(out).size / 1024 / 1024) + ' MB ・ 見本 ' + notes + ' 枚');
+        + Math.round(fs.statSync(out).size / 1024 / 1024) + ' MB ・ サンプル ' + notes + ' 枚');
 }
 
 main();

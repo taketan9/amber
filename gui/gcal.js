@@ -1,5 +1,5 @@
 'use strict';
-// Google カレンダーとの繋ぎ ── **グループカレンダーを一枚作るところだけ。**
+// Google カレンダーとの繋ぎ ── **グループカレンダーを1 つ作るところだけ。**
 //
 // 予定の読み書きはここを通らない。端末のカレンダー（EventKit・`amber-cal`）が
 // やる ── amber が作ったカレンダーは、Google アカウントの繋がっている Mac と
@@ -13,14 +13,14 @@
 // 指一本触れない**。本人のコンソールで区分を読んだ（2026-09-13）:
 // `calendar.app.created` は**非機密**（審査が要らない）。
 //
-// # 招待だけは、この道を通らない
+// # 招待だけは、このパスを通らない
 //
 // 人を招待する口（`Acl: insert`）には `calendar.acls` が要り、そちらは
-// **機密**（審査が要る）。当面は**そのカレンダーの共有設定のページを開いて、
+// **機密**（審査が要る）。当画面は**そのカレンダーの共有設定のページを開いて、
 // 人にメールアドレスを打ってもらう**（本人が決めた・2026-09-13）。一般公開の
 // ときは審査を通して amber の中で完結させる。
 //
-// # 鍵は Drive と同じ一本
+// # キーは Drive と同じ一本
 //
 // `createDrive` の `token()` をそのまま渡す。**サインインを二度させない** ──
 // 使う人から見れば「Google に繋ぐ」は一回のはず。カレンダーの許可だけは、
@@ -31,7 +31,7 @@ const CAL_API = 'https://www.googleapis.com/calendar/v3';
 /// カレンダーの設定ページ。**人がここでグループの人を招待する。**
 ///
 /// Google はこの URL にカレンダーの id を base64 で埋める（余りの `=` は落とす）。
-/// **本人の本物のカレンダーで確かめた**（2026-09-13）── 組んだ字と、Google が
+/// **本人の本物のカレンダーで確かめた**（2026-09-13）── 組んだ文字と、Google が
 /// 出す URL が一字一句同じだった。id が無いときのために設定の入口も持っておく。
 const SETTINGS_URL = 'https://calendar.google.com/calendar/u/0/r/settings';
 
@@ -41,7 +41,7 @@ function shareUrl(id) {
     return SETTINGS_URL + '/calendar/' + encodeURIComponent(tag);
 }
 
-/// 繋ぎを作る。**鍵の出どころは外から渡す**（Drive と同じ一本／試験では偽物）。
+/// 繋ぎを作る。**キーの出どころは外から渡す**（Drive と同じ一本／試験では偽物）。
 ///
 /// - `token()`  ── いま使える鍵（無ければ null）
 /// - `fetch`    ── 既定は Node の fetch
@@ -53,7 +53,7 @@ function createCal(opts) {
         apiUrl = CAL_API,
     } = opts;
 
-    /// カレンダーの API を一つ叩く。鍵が無ければ、**人の言葉で**断る。
+    /// カレンダーの API を一つ叩く。キーが無ければ、**人の言葉で**断る。
     async function api(pathAndQuery, init = {}) {
         const access = await token();
         if (!access) {
@@ -67,7 +67,7 @@ function createCal(opts) {
         const text = await r.text();
         if (!r.ok) {
             let why = 'HTTP ' + r.status;
-            try { why = JSON.parse(text).error.message || why; } catch { /* 字のまま */ }
+            try { why = JSON.parse(text).error.message || why; } catch { /* 文字のまま */ }
             // **許可が足りないときは、そう言う。** 「HTTP 403」では、もう一度
             // サインインすれば直ることが人には分からない。
             if (r.status === 401 || r.status === 403) {
@@ -78,9 +78,9 @@ function createCal(opts) {
         return text ? JSON.parse(text) : null;
     }
 
-    /// グループカレンダーを一枚作る。返すのは `{ id, name }`。
+    /// グループカレンダーを1 つ作る。返すのは `{ id, name }`。
     ///
-    /// **同じ名前でも、作れば別の一枚になる。** 二枚できるとグループが二手に
+    /// **同じ名前でも、作れば別の1 つになる。** 二枚できるとグループが二手に
     /// 分かれるので、**作ったかどうかを憶えるのは呼ぶ側**（設定に id を置く）。
     /// ここで名前から探し直さないのは、`calendar.app.created` に一覧を読む力が
     /// 無いから ── 探せるふりをしない。

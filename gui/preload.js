@@ -9,7 +9,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('amber', {
     /// エンジンに訊く。`{ ok }` か例外。
     call: (method, params) => ipcRenderer.invoke('amber:call', method, params),
-    /// 憶えておくもの（開いていた場所・大きさ・見た目）。窓の側の話で、
+    /// 憶えておくもの（開いていた場所・大きさ・見た目）。デスクトップ版の側の話で、
     /// ノートの中には書かない ── ノートはただの Markdown のままにする。
     recall: () => ipcRenderer.invoke('amber:recall'),
     remember: (patch) => ipcRenderer.invoke('amber:remember', patch),
@@ -32,10 +32,10 @@ contextBridge.exposeInMainWorld('amber', {
     fileBytes: (file) => ipcRenderer.invoke('amber:fileBytes', file),
     /// 外から渡された `.md`（コマンドラインか「このアプリで開く」）。
     onGuest: (fn) => ipcRenderer.on('amber:openGuest', (_e, at) => fn(at)),
-    /// 窓に落とされたファイルの場所。
+    /// デスクトップ版に落とされたファイルの場所。
     ///
     /// **Electron 32 から `File.path` は無い。** 描く側に「好きなファイルの
-    /// 道を知る」口は作らず、**落とされた `File` を渡して訊く**だけにする。
+    /// パスを知る」口は作らず、**落とされた `File` を渡して訊く**だけにする。
     pathOf: (file) => {
         try {
             return webUtils.getPathForFile(file) || null;
@@ -48,7 +48,7 @@ contextBridge.exposeInMainWorld('amber', {
     cal: (args) => ipcRenderer.invoke('amber:cal', args),
     /// 書き出す。行き先は人が選ぶ。
     saveText: (name, text) => ipcRenderer.invoke('amber:saveText', name, text),
-    /// 読むだけの一本を、その場に置いて道を返す（前の姿を見るのに使う）。
+    /// 読むだけの一本を、その場に置いてパスを返す（前の姿を見るのに使う）。
     scratch: (name, text) => ipcRenderer.invoke('amber:scratch', name, text),
     savePDF: (name, html) => ipcRenderer.invoke('amber:savePDF', name, html),
     /// 期日の来た通知（走っている間だけ）。
@@ -86,15 +86,15 @@ contextBridge.exposeInMainWorld('amber', {
     /// まるごと消える（実際に消えた）。
     appVersion: () => ipcRenderer.invoke('amber:appVersion'),
 
-    /// どの版か（`'full'` / `'office'`）。会社向けの一枚では、外の網に
+    /// どの版か（`'full'` / `'office'`）。会社向けの1 つでは、外のネットワークに
     /// 触るもの（同期・カレンダー）を画面ごと出さない。
     edition: () => ipcRenderer.invoke('amber:edition'),
 
     /// ノートのフォルダを見張ってもらう／動いたら教えてもらう。
     watch: (root) => ipcRenderer.invoke('amber:watch', root),
-    /// 見本のノートを、言われた場所へ置いてもらう。
+    /// サンプルのノートを、言われた場所へ置いてもらう。
     welcome: (root) => ipcRenderer.invoke('amber:welcome', root),
     templates: (root) => ipcRenderer.invoke('amber:templates', root),
-    // 何が変わったかも渡す ── 自分が書いたぶんで棚を数え直さないため。
+    // 何が変わったかも渡す ── 自分が書いたぶんでフォルダを数え直さないため。
     onChanged: (fn) => ipcRenderer.on('amber:changed', (_e, names) => fn(names || [])),
 });

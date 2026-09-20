@@ -2,10 +2,10 @@
 /* 同梱する側との約束を、まだ守れているか。
  *
  * amber の画面は crmaine の中でも動いている。あちらが握っているのは
- * **四つ**で、そこが黙って変わると「札は出るのに何も起きない」という形で
+ * **四つ**で、そこが黙って変わると「ラベルは出るのに何も起きない」という形で
  * 出る ── いちばん辿りにくい壊れ方で、しかも壊したこちらには何も起きない。
  *
- * だから機械に見張らせる。名前を変えるなという意味ではなく、**変えるときに
+ * だから環境に見張らせる。名前を変えるなという意味ではなく、**変えるときに
  * ここが鳴る**ようにしておく（鳴ったら crmaine に一声かけてから直す）。
  *
  *     node scripts/contract.js
@@ -37,7 +37,7 @@ console.log('描く側に見せている口');
         'openLink', 'fileBytes', 'onGuest', 'pathOf', 'trash', 'saveText',
         'savePDF', 'ring', 'clipboardImage', 'appVersion', 'watch', 'onChanged', 'scratch', 'welcome',
         // クラウド（依頼 313・320）── 置き場所の名前を人の言葉で、
-        // フォルダを机の上で開く、この機械が知っている名前。
+        // フォルダを机の上で開く、この環境が知っている名前。
         'clouds', 'reveal', 'userName',
     ];
     // `exposeInMainWorld('amber', { … })` の中の、頭に来る名前だけ。
@@ -65,39 +65,39 @@ console.log('エンジンの探し方');
 }
 
 /* ── 三 ── 画面が指している印 ──────────────────────────────── */
-console.log('印の在りか');
+console.log('マークの在りか');
 {
     ok(read('gui/renderer.js').includes('"../packaging/amber-mark.png"'),
         '画面は ../packaging/amber-mark.png を指す',
         '同梱する側は gui/ の隣に packaging/ を置いています');
     ok(fs.existsSync(path.join(root, 'packaging/amber-mark.png')),
-        'その道にファイルがある',
+        'そのパスにファイルがある',
         'python3 packaging/amber_icon.py で焼けます');
 }
 
-/* ── 見本のノート ──────────────────────────────────────────
- * 「見本のノートを入れる」は `<画面の隣>/../packaging/welcome` を写します。
+/* ── サンプルのノート ──────────────────────────────────────────
+ * 「サンプルのノートを入れる」は `<画面の隣>/../packaging/welcome` を写します。
  * **同梱する側は写しを持ちません**（持つと、amber を入れ替えた日に古い
- * 見本が残る）ので、ここに無いものは向こうにも届きません ── 押した人には
- * 「見本が入っていません」だけが出ます。
+ * サンプルが残る）ので、ここに無いものは向こうにも届きません ── 押した人には
+ * 「サンプルが入っていません」だけが出ます。
  */
-console.log('見本のノートの在りか');
+console.log('サンプルのノートの在りか');
 {
     const at = path.join(root, 'packaging/welcome');
     const notes = fs.existsSync(at)
         ? fs.readdirSync(at).filter((f) => f.endsWith('.md'))
         : [];
     ok(notes.length > 0, 'packaging/welcome に .md がある（' + notes.length + ' 枚）',
-        '同梱する側の「見本のノートを入れる」が、ここを写します');
+        '同梱する側の「サンプルのノートを入れる」が、ここを写します');
     ok(read('.github/workflows/release.yml').includes('packaging/gui_zip.py'),
-        '配る一枚は gui_zip.py が組む（見本を入れて、開いて数える）',
-        'zip コマンドは UTF-8 の印を立てないので、日本語の名前が Windows で化けます');
-    // **配る一枚は、タグから組み直せること。** `npm install` は lock を
+        '配る1 つは gui_zip.py が組む（サンプルを入れて、開いて数える）',
+        'zip コマンドは UTF-8 のマークを立てないので、日本語の名前が Windows で化けます');
+    // **配る1 つは、タグからビルドし直せること。** `npm install` は lock を
     // 書き直すことがあり、書き直されたものがそのまま zip に入る ──
-    // 配る一枚の中に、どのコミットにも無いファイルが混ざる。
+    // 配る1 つの中に、どのコミットにも無いファイルが混ざる。
     ok(/npm ci /.test(read('.github/workflows/release.yml')),
         '配るときは npm ci（lock を書き換えない）',
-        'npm install だと lock がずれ、同じタグから同じ一枚が出なくなります');
+        'npm install だと lock がずれ、同じタグから同じ1 つが出なくなります');
 }
 
 /* ── 四 ── 画面の組み立て手順 ──────────────────────────────── */
@@ -113,7 +113,7 @@ console.log('画面の組み立て');
         ok(/npm install/.test(s) && /vendor\.js/.test(s),
             what + ' の走らせ方が npm install → node vendor.js を通る');
     }
-    // Monaco・vim・図の三つ。どれが欠けても「窓は開くが中身が無い」。
+    // Monaco・vim・図の三つ。どれが欠けても「デスクトップ版は開くが中身が無い」。
     for (const need of ['monaco/vs/loader.js', 'monaco-vim/monaco-vim.umd.js',
                         'mermaid/mermaid.min.js']) {
         ok(vendor.includes(need), '積むもの: ' + need);
@@ -123,6 +123,6 @@ console.log('画面の組み立て');
 console.log(bad
     ? '\n' + bad + ' つ、同梱する側の前提が変わっています。'
         + '\n直す前に crmaine に一声かけてください（黙って変わると'
-        + '「札は出るのに何も起きない」という形で出ます）。'
+        + '「ラベルは出るのに何も起きない」という形で出ます）。'
     : '\n同梱する側との約束は、ぜんぶ守られています');
 process.exit(bad ? 1 : 0);

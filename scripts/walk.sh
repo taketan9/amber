@@ -1,15 +1,15 @@
 #!/bin/zsh
-# 窓の総ざらいを、**安全な場所で**一回やる。
+# デスクトップ版の総ざらいを、**安全な場所で**一回やる。
 #
 #     scripts/walk.sh            # 総ざらい（walk.mjs）
 #     scripts/walk.sh grid       # 網 ── 位置×操作の総当たり（grid.mjs）
 #
-# やること: 試す場所を作る → 設定を退避 → 窓を出す → `walk.mjs` を走らせる
-#          → 窓を閉じる → 設定を戻す → 試す場所を消す
+# やること: 試す場所を作る → 設定を退避 → デスクトップ版を出す → `walk.mjs` を走らせる
+#          → デスクトップ版を閉じる → 設定を戻す → 試す場所を消す
 #
 # **本人のノートには触らない。** 触らないための仕掛けが二つ要る:
 #
-#   一。ノートの置き場所 ── `$HOME` を作り替えて渡す。窓は `documents` を
+#   一。ノートの置き場所 ── `$HOME` を作り替えて渡す。デスクトップ版は `documents` を
 #       そこから引くので、ノートは試す場所の中にできる。
 #
 #   二。設定ファイル ── **macOS の Electron は `appData` に `$HOME` を
@@ -29,7 +29,7 @@ quit() {
   pkill -f "http.server $siteport" 2>/dev/null || true
   pkill -f "fake-drive.js $driveport" 2>/dev/null || true
   sleep 1
-  # **設定を戻すのは、何があっても。** ここを飛ばすと本人の窓が変わる。
+  # **設定を戻すのは、何があっても。** ここを飛ばすと本人のアプリが変わる。
   if [ -f "$work/amber.json.mine" ]; then
     mkdir -p "$(dirname "$mine")"
     cp "$work/amber.json.mine" "$mine"
@@ -67,8 +67,8 @@ if [ -f "$mine" ]; then cp "$mine" "$work/amber.json.mine"; else touch "$work/�
 
 # ── 試すノート。**書けるものを一通り**入れておく ──
 cp "$root/packaging/welcome/attachments/amber.png" "$notes/attachments/" 2>/dev/null || true
-# **途中に書くための一本**（依頼 461）。飾りの無い長い段落が一つ ──
-# よくばり.md は飾りで字が細切れになるので、caret を「途中」に置けない。
+# **途中に書くための一本**（依頼 461）。書式の無い長い段落が一つ ──
+# よくばり.md は書式で文字が細切れになるので、caret を「途中」に置けない。
 cat > "$notes/途中.md" <<'MD'
 ---
 title: 途中
@@ -77,7 +77,7 @@ created: 2026-09-01
 
 # 途中
 
-これは飾りのない十分に長い段落なので、まん中あたりにカーソルを置けます。
+これは書式のない十分に長い段落なので、まん中あたりにカーソルを置けます。
 MD
 
 cat > "$notes/よくばり.md" <<'MD'
@@ -127,7 +127,7 @@ graph TD
 
 ---
 
-　全角の字下げ。
+　全角のインデント。
 MD
 printf -- '---\ntitle: 買い物\ncreated: 2026-09-08\ntags: [暮らし]\n---\n\n# 買い物\n\n- 牛乳\n- パン\n' > "$notes/買い物.md"
 printf -- '---\ntitle: からっぽ\ncreated: 2026-09-06\n---\n\n' > "$notes/からっぽ.md"
@@ -151,7 +151,7 @@ created: 2026-09-02
 
 # 往復
 
-　全角の字下げから始まる段落。
+　全角のインデントから始まる段落。
 行末で折り返した  
 つづき。
 
@@ -180,13 +180,13 @@ MD
 printf -- '名前は一行目から\n\n本文。\n' > "$notes/改名.md"
 printf -- '# 買い物\n\n二本目。\n' > "$notes/二本目.md"
 
-# **網が使うノート**（`grid.mjs`）。中身は網が毎回置き換える ── ここに
+# **ネットワークが使うノート**（`grid.mjs`）。中身はネットワークが毎回置き換える ── ここに
 # あるのは「一本ある」ことと前書きだけ。前書きの無いほうも一本。
 printf -- '---\ntitle: 総当たり\ncreated: 2026-09-01\n---\n\nここは総当たりのテストが使うノートです。\n' > "$notes/総当たり.md"
 printf -- '一行目の段落。\n\n二行目の段落。\n' > "$notes/網なし.md"
 
 # **よそから来た形のノート。** Windows で作られたもの・古い日本語のもの。
-# core は読んだときの文字コード・BOM・改行のまま書き戻すが、**窓を通した
+# core は読んだときの文字コード・BOM・改行のまま書き戻すが、**デスクトップ版を通した
 # ときもそうか**は誰も見ていなかった。
 python3 "$here/fixtures.py" "$notes"
 
@@ -210,27 +210,27 @@ python3 "$here/team-fixture.py" "$work/team.csv"
 (cd "$work/site" && python3 -m http.server "$siteport" >/dev/null 2>&1 &)
 
 # **偽の Google Drive**（`scripts/fake-drive.js`）── 同期の上げ下ろしを、Google
-# 無しで回す。窓には `AMBER_DRIVE_URL` と `AMBER_DRIVE_TOKEN` で「そこを
-# Google だと思え・サインインは済んでいる」と教える。人が使う道には出ない。
+# 無しで回す。デスクトップ版には `AMBER_DRIVE_URL` と `AMBER_DRIVE_TOKEN` で「そこを
+# Google だと思え・サインインは済んでいる」と教える。人が使うパスには出ない。
 driveport="${DRIVEPORT:-8732}"
 (node "$here/fake-drive.js" "$driveport" >/dev/null 2>&1 &)
 sleep 0.5
 
-# **エンジンを作り直してから出す。** 窓は起動時の実行ファイルを掴んだまま
+# **エンジンを作り直してから出す。** デスクトップ版は起動時の実行ファイルを掴んだまま
 # なので、直したはずの判断が効かないまま「通りました」になる（実際になった）。
 (cd "$root" && cargo build -q -p amber-server) || {
   echo "エンジンが作れません"; exit 2
 }
 
-# ── 窓を出す ──
-# **タイマーの絞りを切る。** 窓が隠れる（画面が消える・ほかの窓の下に
+# ── デスクトップ版を出す ──
+# **タイマーの絞りを切る。** デスクトップ版が隠れる（画面が消える・ほかのデスクトップ版の下に
 # 入る）と、Chromium は数分でタイマーを一分に一度まで絞る ── 夜通し回した
-# 網が七時間かかり、「返ってきません」が混ざった（2026-09-10）。
+# ネットワークが七時間かかり、「返ってきません」が混ざった（2026-09-10）。
 # **引き出し（`userData`）は隔離しない。** 一度 `app.setPath('userData')` を試す場所に
-# 向けてみたが、まっさらな引き出しで開いた窓は数分で固まった（Chromium が鍵束に
+# 向けてみたが、まっさらな引き出しで開いたデスクトップ版は数分で固まった（Chromium が鍵束に
 # 訊きに行って、裏の側が止まる ── 2026-09-11・二度）。設定は上の写しと戻しで守り、
-# **走っているあいだは本人の窓を触らない**（本人が変えた見方が巻き戻る）。
-# `AMBER_AWAKE` ── 後ろに隠れた試す窓を App Nap に止めさせない（`main.js`）。
+# **走っているあいだは本人のアプリを触らない**（本人が変えた見方が巻き戻る）。
+# `AMBER_AWAKE` ── 後ろに隠れたテスト用のアプリを App Nap に止めさせない（`main.js`）。
 (cd "$root/gui" && env HOME="$work/home" AMBER_AWAKE=1 AMBER_DRIVE_URL="http://127.0.0.1:$driveport" AMBER_DRIVE_TOKEN=fake \
   npx electron --remote-debugging-port="$port" \
   --disable-background-timer-throttling --disable-renderer-backgrounding \

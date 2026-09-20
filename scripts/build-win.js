@@ -8,19 +8,19 @@
  * 出来上がるのは三つ（`--out`、既定は `dist`）:
  *
  *   * `amber-gui.zip`                    ── 同梱する側（crmaine）へ渡す画面一式
- *   * `amber-server-win-x64.exe.zip`     ── エンジン一枚（持ち込んだものを包み直す）
+ *   * `amber-server-win-x64.exe.zip`     ── エンジン1 つ（持ち込んだものを包み直す）
  *   * `amber-win-x64-office-<版>.zip`    ── 会社向けの ambər 本体
  *
- * **組むだけ。取りに行かない。** 会社の端末は網の外（依頼 586）なので、
+ * **ビルドするだけ。取りに行かない。** 会社の端末はネットワークの外（依頼 586）なので、
  * ここで要るものは**ぜんぶ持ち込んだ一式の中にある**:
  *
  *   * 画面（`gui/`。`vendor/` に Monaco と mermaid が入っている ── `npm` は要らない）
- *   * 印と見本（`packaging/`）
+ *   * マークとサンプル（`packaging/`）
  *   * エンジン（`amber-server-win-x64.exe`。Rust も要らない）
  *
  * **Electron だけは外から。** 百メガあるものを毎回配るより、会社に既に
  * ある一式（cian と同じもの）を指してもらうほうが速い ── `--electron`。
- * 名前と絵を exe に焼くなら `--rcedit C:\tools\rcedit-x64.exe`（無くても
+ * 名前と絵を exe に埋め込むなら `--rcedit C:\tools\rcedit-x64.exe`（無くても
  * 組める。Electron の名前と絵のままになる）。
  *
  * **ふつうの版も要るなら** `--full` ── `amber-win-x64-<版>.zip` が増える。
@@ -48,7 +48,7 @@ function die(why) {
     process.exit(1);
 }
 
-/// 版は `gui/package.json` が言う ── 名前に焼くのはここだけ。
+/// 版は `gui/package.json` が言う ── 名前に埋め込むのはここだけ。
 function version() {
     return JSON.parse(fs.readFileSync(path.join(ROOT, 'gui', 'package.json'), 'utf8')).version;
 }
@@ -71,9 +71,9 @@ function engine() {
     return at;
 }
 
-/// 同梱する側へ渡す一枚（`amber-gui.zip`）。**中身は `packaging/gui_zip.py`
-/// と同じ顔ぶれ** ── 画面と、印と、見本のノート。会社の端末に python は
-/// 無いことのほうが多いので、こちらは Node だけで組む（`scripts/zip.js`）。
+/// 同梱する側へ渡す1 つ（`amber-gui.zip`）。**中身は `packaging/gui_zip.py`
+/// と同じ顔ぶれ** ── 画面と、マークと、サンプルのノート。会社の端末に python は
+/// 無いことのほうが多いので、こちらは Node だけでビルドする（`scripts/zip.js`）。
 function guiZip(out) {
     const rows = [];
     const walk = (dir, into) => {
@@ -131,14 +131,14 @@ function main() {
     const n = guiZip(gui);
     console.log('組みました: ' + gui + '（' + n + ' 枚）');
 
-    // 二、エンジンを包み直す。**中は一枚、名前はそのまま** ── 取り出した人が
+    // 二、エンジンを包み直す。**中は1 つ、名前はそのまま** ── 取り出した人が
     // 名前を直さずに置ける（リリースの並びと同じ形）。
     const engZip = path.join(outDir, 'amber-server-win-x64.exe.zip');
     zipFiles([{ at: eng, rel: 'amber-server-win-x64.exe' }], engZip);
     console.log('組みました: ' + engZip);
 
-    // 三、本体。**組むのは `pack.js`** ── 会社でもリリースでも同じ道具が
-    // 組む（二つ書くと、配った一枚と手元の一枚が別物になりうる）。
+    // 三、本体。**ビルドするのは `pack.js`** ── 会社でもリリースでも同じ道具が
+    // ビルドする（二つ書くと、配った1 つと手元の1 つが別物になりうる）。
     const pack = (edition, into) => {
         const args = [
             path.join(__dirname, 'pack.js'), '--out', into, '--platform', 'win32',
@@ -152,7 +152,7 @@ function main() {
     pack('office', outDir);
     if (has('full')) pack('full', outDir);
 
-    // **出口で数える。** 組んだつもりで無い、を配らないため（`pack.js` も
+    // **出口で数える。** ビルドしたつもりで無い、を配らないため（`pack.js` も
     // 中身を数えるが、こちらは「三つ揃ったか」を見る）。
     const want = [
         'amber-gui.zip',

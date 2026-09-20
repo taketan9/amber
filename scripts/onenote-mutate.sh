@@ -9,7 +9,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-# **壊す先は二枚ある。** 本体と、`.one` を読む一枚（依頼 594）。
+# **壊す先は二枚ある。** 本体と、`.one` を読む1 つ（依頼 594）。
 # どちらに当たるかは `mutate` が自分で探す ── 呼ぶ側に書かせると、
 # 足した日にどちらかだけ壊し忘れる。
 TARGETS=(scripts/onenote2md.py scripts/onestore.py scripts/onenote_ui.py)
@@ -84,10 +84,10 @@ mutate "落ちたわけを記録に落とす" "落ちたわけが、記録に残
             return 1'
 mutate "思わぬ落ち方を黙って捨てる" "落ちたわけが、記録に残る" \
     'except SystemExit as e:' 'except ZeroDivisionError as e:'
-mutate "画面の字を cp932 のままにする" "cp932 に向けても、最後まで出る" \
+mutate "画面の文字を cp932 のままにする" "cp932 に向けても、最後まで出る" \
     'stream.reconfigure(encoding="utf-8", errors="replace")' 'pass' 
 # 構文を壊す壊し方は書かない ── 走査ごと止まると「NG が無い」と同じ顔になる（依頼 569）。
-mutate "網を見に行く口を足す" "網を見に行かせない（onenote2md.py）" \
+mutate "ネットワークを見に行く口を足す" "ネットワークを見に行かせない（onenote2md.py）" \
     'import struct' 'import struct, urllib.request'
 # **ここは壊し方を置いていない**（`os.access` と同じ理由）── どちらも
 # `winreg` の上でしか壊れず、mac には `winreg` が無いので気づけない。
@@ -106,7 +106,7 @@ mutate "ぜんぶ公開仕様でも言わない" "ぜんぶ公開仕様なら、
     'if total and ok == total:' 'if False:'
 mutate "一本も無いのに通ると言う" "一本も無ければ、重いと言う" \
     'if total and ok == total:' 'if total:'
-mutate "道の例を出さない" "探す道の例を出す" \
+mutate "パスの例を出さない" "探すパスの例を出す" \
     'print(f"          例: {sample[key]}")' 'pass'
 mutate "無いときに SharePoint の線を黙る" "一つも無ければ、SharePoint の線を言う" \
     'print("ノートブックが SharePoint にしか無いのかもしれません（手元は別の形）。")' 'pass'
@@ -115,15 +115,15 @@ mutate "無いのに 0 を返す" "無い回は 0 を返さない" \
         return 1' 'return 0'
 mutate "入れ物の中を見ない" "入れ物を開いて、中の形式まで数える" \
     'found += opened' 'found += []'
-mutate "中の道を出さない" "中の道をそのまま出す" \
+mutate "中のパスを出さない" "中のパスをそのまま出す" \
     'print(f"  {name}")' 'pass'
 mutate "圧縮の種類を黙る" "圧縮の種類を言う" \
     'COMP_NAMES = {0: "無圧縮", 1: "MSZIP", 2: "Quantum", 3: "LZX"}' 'COMP_NAMES = {}'
-mutate "幹を 60 字で切らない" "幹は 60 字で切る" \
+mutate "幹を 60 文字で切らない" "幹は 60 文字で切る" \
     'if len(out) >= 60:' 'if len(out) >= 120:'
-mutate "ページの幹を 120 字のままにする" "ページの名前も 60 字で切る" \
+mutate "ページの幹を 120 文字のままにする" "ページの名前も 60 文字で切る" \
     'return name[:60] or fallback' 'return name[:120] or fallback'
-mutate "使えない字を落として詰める" "使えない字はハイフンに" \
+mutate "使えない文字を落として詰める" "使えない文字はハイフンに" \
     'if gap and out:
             out.append("-")' 'if False:
             out.append("-")'
@@ -136,13 +136,13 @@ mutate "同じ題を上書きする" "同じ題は上書きせず、ずらす" \
                     break' 'break'
 mutate "サブページを親の下に置かない" "サブページは親の下へ" \
     'parent = levels.get(level - 1, sec_dir) if level > 1 else sec_dir' 'parent = sec_dir'
-mutate "ファイルの道でも絞りを見ない" "--only で外れたら書かない" \
+mutate "ファイルのパスでも絞りを見ない" "--only で外れたら書かない" \
     'if not chosen("/".join([nb] + gs + [sec]), args):' 'if False:'
 mutate "読めないファイルで落ちる" "読めないファイルは、落ちずにエラーと数える" \
     'except Exception as e:  # noqa
             log.error("読めない %s: %s", at.name, e)' 'except ZeroDivisionError as e:
             log.error("読めない %s: %s", at.name, e)'
-mutate "ファイルの道で CRLF にする" "改行は LF" \
+mutate "ファイルのパスで CRLF にする" "改行は LF" \
     'with open(md_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write("\n".join(head)' \
     'with open(md_path, "w", encoding="utf-8", newline="\r\n") as f:
@@ -151,7 +151,7 @@ mutate "最後の改訂でなく最初を採る" "いまの版は、最後の改
     'return revs[max(revs)] if revs else []' 'return revs[min(revs)] if revs else []'
 mutate "改訂が無いときに落ちる" "改訂が無ければ、空" \
     'return revs[max(revs)] if revs else []' 'return revs[max(revs)]'
-mutate "隣の一枚を import で頼る" "よその場所から走らせても、隣の一枚を読める" \
+mutate "隣の1 つを import で頼る" "よその場所から走らせても、隣の1 つを読める" \
     'at = Path(__file__).resolve().parent / f"{name}.py"' 'at = Path(f"{name}.py")'
 mutate "無いときに黙って進む" "隣に居なければ、そう言う（追跡ではなく）" \
     'if not at.is_file():
@@ -160,7 +160,7 @@ mutate "見出しを段に合わせない" "深い見出しも段に合わせる
     'return "#" * min(int(style[1:]), 6)' 'return "#" * min(1, 6)'
 mutate "見出しの段を止めない" "見出しは 6 段まで" \
     'min(int(style[1:]), 6)' 'int(style[1:])'
-mutate "箇条書きの印を太字の中に入れる" "箇条書きの印は、太字の外" \
+mutate "箇条書きのマークを太字の中に入れる" "箇条書きのマークは、太字の外" \
     'body = linked(line["text"].strip(), line)
     if line.get("bold"):
         body = f"**{body}**"' 'body = linked(line["text"].strip(), line)
@@ -198,7 +198,7 @@ mutate "MSZIP で前の塊を辞書に使わない" "塊をまたいでも中身
     'z = zlib.decompressobj(-15, zdict=history)' 'z = zlib.decompressobj(-15)'
 mutate "MSZIP の塊を繋がない" "塊をまたいでも中身が合う（MSZIP）" \
     'history = (history + out)[-32768:]' 'history = b""'
-mutate "入れ物の言う道をそのまま信じる" "上の階へ出さない（.. は落とす）" \
+mutate "入れ物の言うパスをそのまま信じる" "上の階へ出さない（.. は落とす）" \
     'if not x or x in (".", ".."):' 'if not x:'
 mutate "セクショングループを畳む" "ノートブック・グループ・セクションに分かれる" \
     'out.append((pkg.stem, parts[:-1], Path(at), Path(parts[-1]).stem))' \
@@ -207,16 +207,16 @@ mutate "目次まで写しにいく" ".one だけを拾う（目次は写さな�
     'if not name.lower().endswith(".one"):
             continue' 'if False:
             continue'
-mutate "升の中の改行を捨てる（最後だけ残す）" "升の中の改行は、空白で繋ぐ" \
+mutate "セルの中の改行を捨てる（最後だけ残す）" "セルの中の改行は、空白で繋ぐ" \
     't["rows"] = [[" ".join(c) for c in r] for r in t["rows"] if r]' \
     't["rows"] = [[(c[-1] if c else "") for c in r] for r in t["rows"] if r]'
 mutate "1 行目を見出しに使う（データが一行消える）" "見出しの行は空で置く" \
     'out = ["|" + "  |" * width, "|" + " --- |" * width]' \
     'out = ["| " + " | ".join(rows.pop(0)) + " |", "|" + " --- |" * width]'
-mutate "升の数を行ごとに揃えない" "升の数を、行ごとに揃える" \
+mutate "セルの数を行ごとに揃えない" "セルの数を、行ごとに揃える" \
     'for c in r] + [""] * (width - len(r)) for r in rows]' \
     'for c in r] for r in rows]'
-mutate "表の中の字を本文にも出す" "表の中の字は、本文に二度出さない" \
+mutate "表の中の文字を本文にも出す" "表の中の文字は、本文に二度出さない" \
     'skip.add(id(o))' \
     'pass'
 mutate "Page の無い空間もページにする" "Page の無い空間は、ページにしない（空のノートを作らない）" \
@@ -244,7 +244,7 @@ mutate "前書きを古いほうから採る" "題はいちばん新しいもの
     'meta = next((o for o in objs if o["jcid"] == JC_PAGEMETA), None)
     if False:
         pass'
-mutate "同じ行を二度並べる" "同じ場所の同じ字は一つにまとめる" \
+mutate "同じ行を二度並べる" "同じ場所の同じ文字は一つにまとめる" \
     'if key in seen:
             continue' 'if False:
             continue'
@@ -267,16 +267,16 @@ mutate "自動の色も色として出す" "自動（最後が 0xFF）は色を�
         return None'
 mutate "色を青・緑・赤の順に読む" "赤・緑・青の順" \
     'return "#%02x%02x%02x" % (v[0], v[1], v[2])' 'return "#%02x%02x%02x" % (v[2], v[1], v[0])'
-mutate "リンクを巻かない" "リンクは印の中" \
+mutate "リンクを巻かない" "リンクはマークの中" \
     'return f"[{body}]({url})" if url else body' 'return body'
-mutate "色を巻かない" "色は印の外、字は印の中" \
+mutate "色を巻かない" "色はマークの外、文字はマークの中" \
     "return f'<span style=\"color:{c}\">{body}</span>' if c else body" 'return body'
 mutate "見出しから色とリンクを落とす" "見出しにも色は付く" \
     'head = colored(linked(line["text"].strip(), line), line)' \
     'head = line["text"].strip()'
-mutate "窓が出せないのに 0 を返す" "Tk が無ければ、代わりの打ち方を出して 1 を返す" \
+mutate "デスクトップ版が出せないのに 0 を返す" "Tk が無ければ、代わりの打ち方を出して 1 を返す" \
     '        return 1' '        return 0'
-mutate "窓と別の Python で走らせる" "走らせるのは、いま動いている Python" \
+mutate "デスクトップ版と別の Python で走らせる" "走らせるのは、いま動いている Python" \
     'return [sys.executable, str(HERE / "onenote2md.py"), "--out", out, where]' \
     'return ["python", str(HERE / "onenote2md.py"), "--out", out, where]'
 mutate "出力先を ambər の下に掘る" "amber の下には掘らない" \

@@ -1,7 +1,7 @@
 'use strict';
-// amber の窓。
+// amber のウィンドウ。
 //
-// **持っているのは三つだけ**: 窓、エンジンの子、憶えごとの一枚。
+// **持っているのは三つだけ**: ウィンドウ、エンジンの子、憶えごとの1 つ。
 // ファイラの土台（ペイン・シェル・アーカイブ）は持ってこない ── amber は
 // 2画面ファイラではないので、要らないものを継ぐと、そこから太る。
 
@@ -23,18 +23,18 @@ const { createCal, shareUrl } = require('./gcal');
 // **見える名前は `ambər`、引き出しの名前は `amber` のまま。**
 //
 // 名前を替えると `userData` も一緒に動く ── `.../amber/amber.json` に
-// 入れてある憶えごと（置き場所・見た目・窓の大きさ・見本を置いたか）が
+// 入れてある憶えごと（置き場所・見た目・デスクトップ版の大きさ・サンプルを置いたか）が
 // 丸ごと置き去りになり、開けた人の目には**初めて開いた日の画面**が出る。
-// 置き場所を忘れているので一覧は空、見本を置いたことも忘れているので
-// 見本が生える ── 綴りを変えただけで、そう見える。
+// 置き場所を忘れているので一覧は空、サンプルを置いたことも忘れているので
+// サンプルが生える ── 綴りを変えただけで、そう見える。
 //
 // なので引き出しを先に釘で留めてから、名前を替える。中の名前は変えない
 // （依頼 148 で決めたこと ── 設定キーとバンドル ID は動かさない）。
 app.setPath('userData', path.join(app.getPath('appData'), 'amber'));
 app.setName('ambər');
-// **走査のあいだは、macOS に眠らされない。** 試す窓は本人の窓の後ろに隠れるので、
+// **走査のあいだは、macOS に眠らされない。** テスト用のアプリは本人のアプリの後ろに隠れるので、
 // App Nap で描く側が止められ、段の途中で返事が来なくなる（固まったように見えた・
-// 2026-09-11・四度）。人の道には出ない ── 走査（`walk.sh`）だけが旗を立てる。
+// 2026-09-11・四度）。人のパスには出ない ── 走査（`walk.sh`）だけが旗を立てる。
 if (process.env.AMBER_AWAKE) {
     app.whenReady().then(() => powerSaveBlocker.start('prevent-app-suspension'));
 }
@@ -64,11 +64,11 @@ app.on('open-file', (e, at) => {
 
 /// アプリの印。`packaging/amber_icon.py` が焼いたもの。
 ///
-/// **macOS では窓の `icon` は効かない** ── Dock の絵は束ねたときの
+/// **macOS ではデスクトップ版の `icon` は効かない** ── Dock の絵はまとめたときの
 /// `.icns` から来る。走らせて確かめている間は Electron の絵が出たままなので、
-/// `dock.setIcon` で上書きする。Windows と Linux は窓の `icon` が効く。
+/// `dock.setIcon` で上書きする。Windows と Linux はデスクトップ版の `icon` が効く。
 ///
-/// Dock にだけ別の絵を渡すのは**余白のため**。Apple の升目では 1024 のうち
+/// Dock にだけ別の絵を渡すのは**余白のため**。Apple のセル目では 1024 のうち
 /// 絵は 824 で、まわりの 100 は空けておく決まりになっている。余白の無い
 /// `amber.png` を Dock に置くと、隣のアイコンより一回り大きく見える。
 ///
@@ -83,7 +83,7 @@ let engine = null;
 /// OneNote を取り込む間だけ居る、二本目のエンジン（依頼 621）。
 let oneEngine = null;
 
-/// この機械の予定表に話しかける道具。**配ったものは窓の隣に居る。**
+/// この環境の予定表に話しかける道具。**配ったものはデスクトップ版の隣に居る。**
 /// ソースから走らせるときは `target/mac/` の下。
 function calPath() {
     const beside = path.join(__dirname, 'amber-cal');
@@ -93,7 +93,7 @@ function calPath() {
 }
 
 /// 憶えごとの置き場所。**ノートの中には書かない** ── ノートはただの Markdown
-/// で、同期先で別の端末と出会っても、窓の都合が混ざらない。
+/// で、同期先で別の端末と出会っても、デスクトップ版の都合が混ざらない。
 const STATE = path.join(app.getPath('userData'), 'amber.json');
 
 function recall() {
@@ -110,7 +110,7 @@ function remember(patch) {
         fs.mkdirSync(path.dirname(STATE), { recursive: true });
         fs.writeFileSync(STATE, JSON.stringify(now, null, 2));
     } catch (e) {
-        // 憶えられないのは不便だが、書けないことで窓が閉じる理由はない。
+        // 憶えられないのは不便だが、書けないことでデスクトップ版が閉じる理由はない。
         console.error('憶えられませんでした:', e.message);
     }
     return now;
@@ -119,12 +119,12 @@ function remember(patch) {
 /// 机の上にある、クラウドのフォルダ。**あるものだけ返す。**
 ///
 /// 入っていないサービスを並べると、押した人は「入れれば使える」のか
-/// 「amber が壊れている」のか見分けられない ── 見えるのは、いまこの機械に
+/// 「amber が壊れている」のか見分けられない ── 見えるのは、いまこの環境に
 /// 実際に置かれているフォルダだけ。
 ///
 /// macOS 12 以降、外のサービスは**ぜんぶ `~/Library/CloudStorage` に並ぶ**
 /// （Dropbox も Google Drive も OneDrive も）。昔ながらの `~/Dropbox` も
-/// 残っている機械があるので、両方見て同じ場所は一度だけ出す。
+/// 残っている環境があるので、両方見て同じ場所は一度だけ出す。
 function clouds() {
     const home = os.homedir();
     const out = [];
@@ -151,7 +151,7 @@ function clouds() {
                 if (name.startsWith('.')) continue;
                 add(cloudName(name), path.join(box, name));
             }
-        } catch { /* 一つも入っていない機械 */ }
+        } catch { /* 一つも入っていない環境 */ }
     } else if (process.platform === 'win32') {
         add('iCloud Drive', path.join(home, 'iCloudDrive'));
         add('OneDrive', process.env.OneDrive || process.env.OneDriveConsumer);
@@ -165,7 +165,7 @@ function clouds() {
     return out;
 }
 
-/// `GoogleDrive-taketan@example.com` のような機械の名前を、人の言葉に。
+/// `GoogleDrive-taketan@example.com` のような環境の名前を、人の言葉に。
 function cloudName(raw) {
     const [head, ...rest] = raw.split('-');
     const who = rest.join('-');
@@ -195,7 +195,7 @@ function firstRoot() {
     return fresh;
 }
 
-/// 初めて開いた人に、**空の窓を見せない。**
+/// 初めて開いた人に、**空のデスクトップ版を見せない。**
 ///
 /// 何も無い一覧を前にすると、Markdown を知らない人は「何ができるのか」を
 /// どこからも知れない ── 説明を読ませるより、**読めて・押せて・書き換えられる
@@ -208,35 +208,35 @@ function firstRoot() {
 function seedWelcome() {
     if (recall().seeded) return;
     const from = path.join(__dirname, '..', 'packaging', 'welcome');
-    // 見本そのものが無い置かれ方（同梱の仕方によってはありうる）。
+    // サンプルそのものが無い置かれ方（同梱の仕方によってはありうる）。
     // **憶えないまま帰る** ── 憶えてしまうと、あとで同梱された日に置けない。
     if (!fs.existsSync(from)) return;
     const root = recall().root || firstRoot();
     try {
         // **既にノートがあるなら置かない。** `~/Documents/cian` を引き継いだ
-        // 人や、置き場所を自分のフォルダに向けている人の一覧に、見本が
+        // 人や、置き場所を自分のフォルダに向けている人の一覧に、サンプルが
         // 混ざるのはただの散らかし。それでも「置いた」ことにする ──
         // あとで空にした日に生えてこないように。
         if (!hasNotes(root)) {
             for (const at of walk(from)) {
                 const to = path.join(root, path.relative(from, at));
-                // **上書きはしない。** 同じ名前の自分のノートを消す道は作らない。
+                // **上書きはしない。** 同じ名前の自分のノートを消すパスは作らない。
                 if (fs.existsSync(to)) continue;
                 fs.mkdirSync(path.dirname(to), { recursive: true });
                 fs.copyFileSync(at, to);
             }
-            console.log('見本のノートを置きました:', root);
+            console.log('サンプルのノートを置きました:', root);
         }
         // 憶えるのは**置き終えてから** ── 途中で転んだ回は、次の起動で
         // もう一度試せる（既にあるものは飛ばすので、二重にはならない）。
         remember({ seeded: true });
     } catch (e) {
-        // 見本が置けないことで、窓が開かない理由はない。
-        console.error('見本を置けませんでした:', e.message);
+        // サンプルが置けないことで、デスクトップ版が開かない理由はない。
+        console.error('サンプルを置けませんでした:', e.message);
     }
 }
 
-/// 下まで見て、`.md` が一枚でもあるか。
+/// 下まで見て、`.md` が1 つでもあるか。
 function hasNotes(dir) {
     for (const at of walk(dir)) if (at.toLowerCase().endsWith('.md')) return true;
     return false;
@@ -269,7 +269,7 @@ function makeWindow() {
         title: 'ambər',
         icon: ICON,
         backgroundColor: nativeTheme.shouldUseDarkColors ? '#17140f' : '#fbf7ef',
-        // 題字は窓の中に描く。OS の帯を残すと、三列の上にもう一段増える。
+        // 題文字はデスクトップ版の中に描く。OS の帯を残すと、三列の上にもう一段増える。
         titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
@@ -280,18 +280,18 @@ function makeWindow() {
     });
     // **描く側の例外を、端末にも出す。**
     //
-    // これが無いと、読み込みの途中で落ちたときに窓が真っ白になるだけで、
+    // これが無いと、読み込みの途中で落ちたときにデスクトップ版が真っ白になるだけで、
     // 端末には何も出ない ── 開発者ツールを開くまで、何が起きたのか
-    // 分からない（実際に一度、白い窓を前に十分ほど探した）。
+    // 分からない（実際に一度、白いデスクトップ版を前に十分ほど探した）。
     win.webContents.on('console-message', (_e, level, message, line, at) => {
         if (level < 2) return;                 // 0=log 1=info 2=warning 3=error
-        console.error(`[窓] ${message}` + (at ? `  (${at}:${line})` : ''));
+        console.error(`[ウィンドウ] ${message}` + (at ? `  (${at}:${line})` : ''));
     });
-    // **描く側が死んだら、なぜ死んだかを端末に出す。** 網を回している最中に
-    // 窓が黙って消えた（2026-09-11・二十分走ったあと）── 落ちたのか、
+    // **描く側が死んだら、なぜ死んだかを端末に出す。** ネットワークを回している最中に
+    // デスクトップ版が黙って消えた（2026-09-11・二十分走ったあと）── 落ちたのか、
     // 記憶を使い切ったのかが、これが無いとどこにも残らない。
     win.webContents.on('render-process-gone', (_e, why) => {
-        console.error(`[窓] 描く側が消えました: ${why.reason} (exit ${why.exitCode})`);
+        console.error(`[ウィンドウ] 描く側が消えました: ${why.reason} (exit ${why.exitCode})`);
     });
     win.loadFile(path.join(__dirname, 'index.html'));
     // 描く側が立ち上がってから渡す ── 先に送っても受け取る耳がない。
@@ -314,15 +314,15 @@ function makeWindow() {
     win.on('closed', () => { win = null; });
 
     // 撮って終わる。**`AMBER_SHOT` が無いと何も起きない** ── 見て確かめる
-    // ための口で、人が使う道には出ない。cian の drive.js の代わりに、まずは
-    // これだけ（一枚撮れれば「開いたか」「どう見えるか」は分かる）。
+    // ための口で、人が使うパスには出ない。cian の drive.js の代わりに、まずは
+    // これだけ（1 つ撮れれば「開いたか」「どう見えるか」は分かる）。
     if (process.env.AMBER_SHOT) {
         win.webContents.once('did-finish-load', () => {
             setTimeout(async () => {
                 try {
                     // **撮る前に、一手だけ打てる**（`AMBER_DO`）。開いた姿は
-                    // 一枚で分かるが、押して出るもの（工房や小窓）は押さないと
-                    // 写らない ── 押す道が無いせいで、目で確かめないまま
+                    // 1 つで分かるが、押して出るもの（工房やダイアログ）は押さないと
+                    // 写らない ── 押すパスが無いせいで、目で確かめないまま
                     // 出すことになるのがいちばん惜しい。
                     if (process.env.AMBER_DO) {
                         await win.webContents.executeJavaScript(process.env.AMBER_DO, true);
@@ -344,7 +344,7 @@ function makeWindow() {
 /// ノートのフォルダを見張る。
 ///
 /// **同じフォルダを二つの端末で触るのがこのアプリの前提**なのに、外から
-/// 書き換えたものは窓を開き直すまで出てこなかった ── iPhone で書いた一行が
+/// 書き換えたものはデスクトップ版を開き直すまで出てこなかった ── iPhone で書いた一行が
 /// Mac に現れず、「同期していない」ように見える（同期はしていて、見ていな
 /// かっただけ）。
 ///
@@ -370,8 +370,8 @@ const eyes = new Map();
 /// **どの版か**（依頼 602・本人「会社でビルドする際には、同期に関する
 /// 機能や表示はすべてクローズにしたい」）。
 ///
-/// `'office'` なら、外の網に触るもの（Google Drive の同期・Google
-/// カレンダー・グループ共有）を**画面ごと出さない。** 会社の端末は網に
+/// `'office'` なら、外のネットワークに触るもの（Google Drive の同期・Google
+/// カレンダー・グループ共有）を**画面ごと出さない。** 会社の端末はネットワークに
 /// 出られず、出られたとしても会社のノートを外へ上げる話は別の決裁が要る
 /// ── 押せない道具が並んでいるより、無いほうがいい。
 ///
@@ -380,8 +380,8 @@ const eyes = new Map();
 /// （`AMBER_EDITION`。手元で見比べるため）。環境変数が勝つ。
 ///
 /// `package.json` に混ぜないのは、**main.js から見た `./package.json` が
-/// 配った一枚の中では `gui/package.json`**（手元の開発用の写し）になるから
-/// ── そこに書いても読まれない。専用の一枚なら、在るか無いかで決まる。
+/// 配った1 つの中では `gui/package.json`**（手元の開発用の写し）になるから
+/// ── そこに書いても読まれない。専用の1 つなら、在るか無いかで決まる。
 function edition() {
     const want = String(process.env.AMBER_EDITION || '').trim();
     if (want) return want;
@@ -389,7 +389,7 @@ function edition() {
         const got = JSON.parse(fs.readFileSync(path.join(__dirname, 'edition.json'), 'utf8'));
         return String(got.edition || 'full');
     } catch {
-        return 'full';                        // 置いていない ＝ ふつうの一枚
+        return 'full';                        // 置いていない ＝ ふつうの1 つ
     }
 }
 
@@ -413,7 +413,7 @@ function watchOne(root) {
     if (!root || !fs.existsSync(root)) return { ok: false, why: 'そのフォルダがありません' };
     let hold = null;
     // **何が動いたかを憶えておく。** 名前を落として「何かが変わった」とだけ
-    // 言うと、受け取った側は棚を丸ごと数え直すしかない ── 自分がいま保存した
+    // 言うと、受け取った側はフォルダを丸ごと数え直すしかない ── 自分がいま保存した
     // 一本の報せでも、1002 本を数え直していた。
     let moved = new Set();
     try {
@@ -453,10 +453,10 @@ app.whenReady().then(() => {
     ipcMain.handle('amber:edition', () => edition());
     // 描く側が置き場所を決めたら、そこを見張る（一つでも並びでも）。
     ipcMain.handle('amber:watch', (_e, roots) => watch(roots));
-    /// 見本のノートを、言われた場所へ。**上書きはしない。**
+    /// サンプルのノートを、言われた場所へ。**上書きはしない。**
     ipcMain.handle('amber:welcome', (_e, root) => {
         const from = path.join(__dirname, '..', 'packaging', 'welcome');
-        if (!fs.existsSync(from)) throw new Error('見本が入っていません');
+        if (!fs.existsSync(from)) throw new Error('サンプルが入っていません');
         let put = 0;
         for (const at of walk(from)) {
             const to = path.join(root, path.relative(from, at));
@@ -467,10 +467,10 @@ app.whenReady().then(() => {
         }
         return { put };
     });
-    /// 見本のテンプレートを、置き場所の「テンプレート」フォルダへ（依頼 506）。上書きはしない。
+    /// サンプルのテンプレートを、置き場所の「テンプレート」フォルダへ（依頼 506）。上書きはしない。
     ipcMain.handle('amber:templates', (_e, root) => {
         const from = path.join(__dirname, '..', 'packaging', 'templates');
-        if (!fs.existsSync(from)) throw new Error('見本のテンプレートが入っていません');
+        if (!fs.existsSync(from)) throw new Error('サンプルのテンプレートが入っていません');
         const dir = path.join(root, 'テンプレート');
         fs.mkdirSync(dir, { recursive: true });
         let put = 0;
@@ -486,12 +486,12 @@ app.whenReady().then(() => {
 
     // ── Google Drive との繋ぎ（`drive.js`）── サインインだけ。運ぶのは次。
     //
-    // 鍵は `safeStorage` で暗号化して `userData` に置く（mac はキーチェーン）。
-    // 暗号化が使えない機械（Linux の一部）では、鍵を置かない ── 平文で置く
+    // キーは `safeStorage` で暗号化して `userData` に置く（mac はキーチェーン）。
+    // 暗号化が使えない環境（Linux の一部）では、キーを置かない ── 平文で置く
     // くらいなら、毎回サインインしてもらうほうがよい。
     // **試験のときは、偽の Drive を指す**（`scripts/fake-drive.js`・`walk.sh`）。
     // `AMBER_DRIVE_URL` があれば Google の代わりにそこへ、`AMBER_DRIVE_TOKEN` が
-    // あればサインイン無しでその鍵を使う。人が使う道には出ない。
+    // あればサインイン無しでそのキーを使う。人が使うパスには出ない。
     const fakeAt = process.env.AMBER_DRIVE_URL || '';
     const drive = createDrive({
         open: (url) => shell.openExternal(url),
@@ -502,13 +502,13 @@ app.whenReady().then(() => {
         vault: {
             dir: app.getPath('userData'),
             encrypt: (text) => {
-                if (!safeStorage.isEncryptionAvailable()) throw new Error('この機械では鍵を安全に置けません');
+                if (!safeStorage.isEncryptionAvailable()) throw new Error('この環境ではキーを安全に置けません');
                 return safeStorage.encryptString(text);
             },
             decrypt: (buf) => safeStorage.decryptString(Buffer.from(buf)),
         },
     });
-    // ── グループカレンダー（依頼 525）── 鍵は Drive と同じ一本。
+    // ── グループカレンダー（依頼 525）── キーは Drive と同じ一本。
     const gcal = createCal({
         token: () => drive.token(),
         ...(fakeAt ? { apiUrl: fakeAt + '/cal' } : {}),
@@ -608,7 +608,7 @@ app.whenReady().then(() => {
         try { shell.showItemInFolder(at); return true; } catch { return false; }
     });
 
-    // 名乗りの下書き。**この機械が既に知っていることを、もう一度打たせない。**
+    // 名乗りの下書き。**この環境が既に知っていることを、もう一度打たせない。**
     ipcMain.handle('amber:userName', () => {
         try { return os.userInfo().username || ''; } catch { return ''; }
     });
@@ -643,8 +643,8 @@ app.whenReady().then(() => {
     });
     /// 読める形の中のリンクを、既定のブラウザで開く。
     ///
-    /// **窓の中で開かせない。** `<a href>` をそのまま踏ませると、窓が
-    /// ノートから離れて別の頁になり、戻る道が無い（題字は窓の中に描いて
+    /// **デスクトップ版の中で開かせない。** `<a href>` をそのまま踏ませると、デスクトップ版が
+    /// ノートから離れて別のページになり、戻るパスが無い（題文字はデスクトップ版の中に描いて
     /// いるので、ブラウザの戻るボタンも無い）。開くのは `http`/`https`
     /// だけ ── ノートは人が書いたもので、`file:` や独自の scheme を
     /// 押しただけで何かが起きるのは、ノートに許して良い力ではない。
@@ -661,14 +661,14 @@ app.whenReady().then(() => {
     /// **一本の Web ページを取りに行く**（依頼 421・乙）。
     ///
     /// 描く側（renderer）ではなく、ここで取る ── あちらから外へ出ると、
-    /// ノートの中の字が外へ出ていく道を一つ増やすことになる。ここなら
-    /// **人が打った URL のときしか動かない**（呼ぶ道が一つしかない）。
+    /// ノートの中の文字が外へ出ていくパスを一つ増やすことになる。ここなら
+    /// **人が打った URL のときしか動かない**（呼ぶパスが一つしかない）。
     ///
-    /// `http`/`https` だけ。`file:` を許すと、ノートの中に書いた道で
-    /// 機械の中のファイルを読み出せることになる。
+    /// `http`/`https` だけ。`file:` を許すと、ノートの中に書いたパスで
+    /// 環境の中のファイルを読み出せることになる。
     ///
-    /// **大きすぎるものは途中でやめる。** 取り込むのは読む字で、
-    /// 何十 MB もあるページはたいてい読む字ではない。
+    /// **大きすぎるものは途中でやめる。** 取り込むのは読む文字で、
+    /// 何十 MB もあるページはたいてい読む文字ではない。
     ipcMain.handle('amber:fetchPage', async (_e, url, want) => {
         let u;
         try {
@@ -724,7 +724,7 @@ app.whenReady().then(() => {
         }
     });
     /// 選んでもらったファイルの中身。**開く側が選んだものだけ** ──
-    /// 描く側から好きな道を読ませない（ノートは人が書いたもので、その中身が
+    /// 描く側から好きなパスを読ませない（ノートは人が書いたもので、その中身が
     /// ファイルを読む力を持つ理由は無い）。
     ipcMain.handle('amber:fileBytes', async (_e, file) => {
         try {
@@ -737,8 +737,8 @@ app.whenReady().then(() => {
     /// ゴミ箱へ入れる。
     ///
     /// **`core` の `delete` は消してしまう**（`remove_file`）。机のある
-    /// ところでは、消したものが戻せないのは強すぎる ── 電話には
-    /// ゴミ箱が無いので core は消すが、窓はここを通す。ディレクトリも
+    /// ところでは、消したものが戻せないのは強すぎる ── iPhone には
+    /// ゴミ箱が無いので core は消すが、デスクトップ版はここを通す。ディレクトリも
     /// そのまま入る。
     /// **なぜ駄目なのかを返す。**
     ///
@@ -749,17 +749,17 @@ app.whenReady().then(() => {
     ///
     /// 返す形は増やすだけにする（`true` / `false` はそのまま）── 同梱して
     /// いる側は真偽で受けているので、そこを壊さない。
-    /// **この機械の予定表**（依頼 462・mac だけ）。
+    /// **この環境の予定表**（依頼 462・mac だけ）。
     ///
     /// 小さな道具（`amber-cal`）に一言だけ言って、一行の答えを受ける。
     /// **Electron から EventKit は呼べない**ので、口を分けてある ──
-    /// 中身は電話とまったく同じ枠組みなので、同じ予定表を窓と電話から
+    /// 中身はiPhone とまったく同じ枠組みなので、同じ予定表をデスクトップ版と iPhone から
     /// 見ても、同じ予定が同じ日に並ぶ。
     ///
-    /// mac 以外では「この機械には予定表が無い」と答える ── Windows の
-    /// 予定表は、まだ道が決まっていない。
+    /// mac 以外では「この環境には予定表が無い」と答える ── Windows の
+    /// 予定表は、まだパスが決まっていない。
     ipcMain.handle('amber:cal', async (_e, args) => {
-        if (process.platform !== 'darwin') return { error: 'この機械には予定表がありません' };
+        if (process.platform !== 'darwin') return { error: 'この環境には予定表がありません' };
         const exe = calPath();
         if (!exe) return { error: '予定表の道具が見つかりません' };
         return new Promise((done) => {
@@ -784,11 +784,11 @@ app.whenReady().then(() => {
         }
     });
 
-    /// 字をファイルに書き出す。**行き先は人が選ぶ** ── 描く側が道を
+    /// 文字をファイルに書き出す。**行き先は人が選ぶ** ── 描く側がパスを
     /// 決められると、ノートの中身が好きなところへ書ける口になる。
     /// 読むだけの一本を、その場に置く。
     ///
-    /// **前の姿を「見てから決める」ために要る。** 保存の小窓を出すのは
+    /// **前の姿を「見てから決める」ために要る。** 保存のダイアログを出すのは
     /// 違う ── 見たいだけなのに、どこに置くかを訊かれる。ノートの外の
     /// 一時置き場なので、索引にも見張りにも入らない。
     ipcMain.handle('amber:scratch', async (_e, name, text) => {
@@ -808,12 +808,12 @@ app.whenReady().then(() => {
 
     /// 読める形を PDF にする。
     ///
-    /// **窓そのものを刷らない。** `win.webContents.printToPDF` は三列ごと
-    /// 刷ってしまう（左の一覧まで PDF に入る）。見えない窓をもう一つ建てて、
+    /// **ウィンドウそのものを刷らない。** `win.webContents.printToPDF` は三列ごと
+    /// 刷ってしまう（左の一覧まで PDF に入る）。見えないデスクトップ版をもう一つ建てて、
     /// 読める形だけを入れて刷る。
     ///
     /// data: の URL ではなく一時ファイルを読ませる ── Chromium は data: を
-    /// 最上位の遷移として渡すと黙って空の頁にすることがある。
+    /// 最上位の遷移として渡すと黙って空のページにすることがある。
     ipcMain.handle('amber:savePDF', async (_e, name, html) => {
         const r = await dialog.showSaveDialog(win, { defaultPath: String(name) });
         if (r.canceled || !r.filePath) return null;
@@ -839,7 +839,7 @@ app.whenReady().then(() => {
 
     /// 期日の来た通知を、走っている間だけ鳴らす。
     ///
-    /// **仕掛けるのは窓でもできるが、鳴らすのは電話の仕事。** 窓は閉じて
+    /// **仕掛けるのはデスクトップ版でもできるが、鳴らすのはiPhone の仕事。** デスクトップ版は閉じて
     /// いる時間のほうが長く、閉じている間の時刻は誰も見ていない ── ここで
     /// 鳴るのは「開いているうちに来た分」だけだと、はっきり言っておく。
     ipcMain.handle('amber:ring', (_e, title, body) => {
@@ -859,8 +859,8 @@ app.whenReady().then(() => {
             if (img.isEmpty()) throw new Error(`読めません: ${DOCK_ICON}`);
             app.dock.setIcon(img);
         } catch (e) {
-            // 印が出ないのは不便だが、そのために窓が開かない理由はない。
-            console.error('印を置けませんでした:', e.message);
+            // マークが出ないのは不便だが、そのためにデスクトップ版が開かない理由はない。
+            console.error('マークを置けませんでした:', e.message);
         }
     }
     makeWindow();

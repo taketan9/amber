@@ -1,16 +1,16 @@
 @echo off
-rem amber の窓を、ソースから走らせる（Windows）。
+rem amber のデスクトップ版を、ソースから走らせる（Windows）。
 rem
 rem     gui\run.bat
 rem
-rem `run.sh` と同じことをする。片方だけ直すと、片方の機械でだけ動かなく
+rem `run.sh` と同じことをする。片方だけ直すと、片方の環境でだけ動かなく
 rem なるので、**足すときは両方に足す**。
 rem
 rem エンジンを先に建てるのは、`cargo test` が bin を更新しないから ──
 rem 「直したのに効かない」の半分はこれ。
 rem
 rem `vendor\` も見る。Monaco も vim も図もそこに置いてあり、git には
-rem 入れていない。無いまま起動すると窓は開くが中身が真っ白で、原因が
+rem 入れていない。無いまま起動するとデスクトップ版は開くが中身が真っ白で、原因が
 rem 「落としていない」だと画面のどこにも書いていない。
 setlocal
 cd /d "%~dp0.."

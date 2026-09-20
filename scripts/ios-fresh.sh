@@ -31,7 +31,7 @@ fi
 # **`find` を一度で済ませる。** 二度に分けて `grep -v '^$'` で繋いだ回は、
 # 何も新しくないときに grep が 1 を返し、`set -e` がそこで script を
 # 黙って殺した ── 検査は「落ちた」のではなく「何も言わずに失敗した」
-# ので、画面には何も出ないまま電話のビルドだけが止まる。
+# ので、画面には何も出ないままiPhone のビルドだけが止まる。
 NEWER=$(find crates/amber-core/src crates/amber-ffi/src -name '*.rs' -newer "$FW")
 STAMPS=$(find Cargo.toml crates/amber-core/Cargo.toml crates/amber-ffi/Cargo.toml \
               -newer "$FW")

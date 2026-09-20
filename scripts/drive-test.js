@@ -3,13 +3,13 @@
  *
  *     node scripts/drive-test.js
  *
- * 偽の Google（鍵を交換する口・誰かを答える口）を手元に立て、「ブラウザで
+ * 偽の Google（キーを交換する口・誰かを答える口）を手元に立て、「ブラウザで
  * 開く」の代わりに折り返し先へ自分で戻る。見るのは:
  *
  *   一。折り返しに `state` が付いていて、違う `state` は受けないこと
- *   二。鍵の交換に **PKCE の合言葉（code_verifier）** が付いていること
- *   三。鍵が置かれ、切れたら refresh で黙って新しくなること
- *   四。やめると鍵が消え、取り消しの口が叩かれること
+ *   二。キーの交換に **PKCE の合言葉（code_verifier）** が付いていること
+ *   三。キーが置かれ、切れたら refresh で黙って新しくなること
+ *   四。やめるとキーが消え、取り消しの口が叩かれること
  */
 'use strict';
 const http = require('node:http');
@@ -82,7 +82,7 @@ const ok = (yes, what, got) => {
     let page = null;
     /// 「ブラウザ」── 許可の画面の URL を受け取って、折り返し先へ自分で戻る。
     /// **待たない**（本物のブラウザも別の生き物）── 折り返しへの返事は、
-    /// 鍵の交換が済んでから来る。
+    /// キーの交換が済んでから来る。
     const open = async (url) => {
         lastAuth = new URL(url);
         const back = new URL(lastAuth.searchParams.get('redirect_uri'));
@@ -95,23 +95,23 @@ const ok = (yes, what, got) => {
     console.log('サインイン');
     const got = await drive.signIn();
     ok(got.ok === true, 'サインインできる', got);
-    ok((await page).includes('サインインできました'), 'ブラウザには、交換が済んでから「できました」の一枚が出る');
+    ok((await page).includes('サインインできました'), 'ブラウザには、交換が済んでから「できました」の1 つが出る');
     ok(lastAuth.searchParams.get('code_challenge_method') === 'S256', '許可の URL に PKCE の要約が付く');
-    ok(lastAuth.searchParams.get('access_type') === 'offline' && lastAuth.searchParams.get('prompt') === 'consent', '戻す鍵をもらう頼み方');
+    ok(lastAuth.searchParams.get('access_type') === 'offline' && lastAuth.searchParams.get('prompt') === 'consent', '戻すキーをもらう頼み方');
     ok(lastAuth.searchParams.get('scope') === 'https://www.googleapis.com/auth/drive.file', 'スコープは drive.file だけ');
     const ex = seen.token[0] || {};
-    ok(ex.grant_type === 'authorization_code' && ex.code === 'the-code', '折り返しの code で鍵を交換する', ex);
+    ok(ex.grant_type === 'authorization_code' && ex.code === 'the-code', '折り返しの code でキーを交換する', ex);
     ok(typeof ex.code_verifier === 'string' && ex.code_verifier.length >= 43, '交換に PKCE の合言葉が付く', ex.code_verifier);
     ok(!('client_secret' in ex), 'シークレットの置き場所が無ければ、送らない');
     ok(got.who && got.who.email === 'taro@example.com', '誰としてか分かる', got.who);
-    ok(fs.existsSync(drive.tokenFile), '鍵が置かれる');
-    ok(String(fs.readFileSync(drive.tokenFile)).startsWith('v1:'), '鍵は暗号化の口を通して置かれる');
+    ok(fs.existsSync(drive.tokenFile), 'キーが置かれる');
+    ok(String(fs.readFileSync(drive.tokenFile)).startsWith('v1:'), 'キーは暗号化の口を通して置かれる');
     const acct = drive.account();
     ok(acct.signedIn && acct.who.email === 'taro@example.com', '様子を訊ける', acct);
 
     console.log('鍵');
     ok(await drive.token() === 'acc-1', 'まだ切れていなければ、そのまま');
-    // 切れた鍵に書き換えて、黙って新しくなるか。
+    // 切れたキーに書き換えて、黙って新しくなるか。
     const kept = JSON.parse(vault.decrypt(fs.readFileSync(drive.tokenFile)));
     kept.until = Date.now() - 1000;
     fs.writeFileSync(drive.tokenFile, vault.encrypt(JSON.stringify(kept)));
@@ -137,8 +137,8 @@ const ok = (yes, what, got) => {
 
     console.log('やめる');
     const out = await drive.signOut();
-    ok(out.ok === true && !fs.existsSync(drive.tokenFile), '鍵が消える');
-    ok(seen.revoke.length === 1 && seen.revoke[0] === 'ref-1', 'Google 側の許可も取り消す（戻す鍵で）', seen.revoke);
+    ok(out.ok === true && !fs.existsSync(drive.tokenFile), 'キーが消える');
+    ok(seen.revoke.length === 1 && seen.revoke[0] === 'ref-1', 'Google 側の許可も取り消す（戻すキーで）', seen.revoke);
     ok(drive.account().signedIn === false, 'やめたあとの様子');
 
     console.log('PKCE');
@@ -148,10 +148,10 @@ const ok = (yes, what, got) => {
 
     console.log('グループカレンダー（依頼 525）');
     {
-        // **鍵は Drive と同じ一本。** サインインを二度させない。
+        // **キーは Drive と同じ一本。** サインインを二度させない。
         const cal = createCal({ token: () => Promise.resolve('acc-1'), apiUrl: at + '/cal' });
         const made = await cal.make('ambər グループ');
-        ok(!!made.id && made.name === 'ambər グループ', '一枚作れる', made);
+        ok(!!made.id && made.name === 'ambər グループ', '1 つ作れる', made);
         const again = await cal.get(made.id);
         ok(again && again.id === made.id, '作ったものを訊ける', again);
         await cal.rename(made.id, '家の予定');
@@ -175,12 +175,12 @@ const ok = (yes, what, got) => {
         // 無いので、二度押せば二枚できる ── 憶えるのは呼ぶ側の仕事。
         const a = await cal.make('同じ名前');
         const b = await cal.make('同じ名前');
-        ok(a.id !== b.id, '同じ名前でも別の一枚（憶えるのは呼ぶ側）', [a.id, b.id]);
+        ok(a.id !== b.id, '同じ名前でも別の1 つ（憶えるのは呼ぶ側）', [a.id, b.id]);
 
-        // 鍵が無ければ、**人の言葉で**断る。
+        // キーが無ければ、**人の言葉で**断る。
         const none = createCal({ token: () => Promise.resolve(null), apiUrl: at + '/cal' });
         const why = await none.make('x').then(() => '', (e) => e.message);
-        ok(why.includes('サインイン'), '鍵が無いときは人の言葉で断る', why);
+        ok(why.includes('サインイン'), 'キーが無いときは人の言葉で断る', why);
 
         // 許可が足りないときも、「HTTP 403」で終わらせない。
         const deny = createCal({
@@ -227,18 +227,18 @@ const ok = (yes, what, got) => {
         const seen = await d3.list();
         ok(seen.length === 2, '二本並ぶ', seen);
         const fam = seen.find((x) => x.rel === '家族/週末.md');
-        ok(fam && fam.id === b.id && fam.tag === 'p2' && fam.by === '試しの Mac', '入れ子の道と、誰が上げたかが札に', fam);
+        ok(fam && fam.id === b.id && fam.tag === 'p2' && fam.by === '試しの Mac', '入れ子のパスと、誰が上げたかがラベルに', fam);
         const dirs = [...fd.files().values()].filter((f) => f.appProperties.amber === 'dir');
         ok(dirs.length === 1 && dirs[0].appProperties.rel === '家族', 'Drive の上にもフォルダができる', dirs.map((x) => x.appProperties));
-        ok(await d3.download(a.id) === '# 買い物\n\n- 牛乳\n', '下ろすと同じ字');
+        ok(await d3.download(a.id) === '# 買い物\n\n- 牛乳\n', '下ろすと同じ文字');
         const c = await d3.upload({ rel: '買い物.md', text: '# 買い物\n\n- 牛乳 2本\n', print: 'p3', id: a.id });
         ok(c.id === a.id && (await d3.list()).find((x) => x.rel === '買い物.md').tag === 'p3', '上書きすると同じ id で指紋が変わる');
         await d3.trash(b.id);
         ok((await d3.list()).length === 1, 'ゴミ箱に入れると一覧から消える');
-        // 改名（依頼 492）── 同じ ID のまま名前と道が変わり、フォルダが変われば親も付け替わる。
+        // 改名（依頼 492）── 同じ ID のまま名前とパスが変わり、フォルダが変われば親も付け替わる。
         await d3.rename({ id: a.id, rel: '家族/買いもの.md' });
         const moved = (await d3.list()).find((x) => x.id === a.id);
-        ok(moved && moved.rel === '家族/買いもの.md' && moved.tag === 'p3', '改名しても同じ id で、道が変わる', moved);
+        ok(moved && moved.rel === '家族/買いもの.md' && moved.tag === 'p3', '改名しても同じ id で、パスが変わる', moved);
         const raw = fd.files().get(a.id);
         const famDir = [...fd.files().values()].find((f) => f.appProperties.amber === 'dir' && f.appProperties.rel === '家族');
         ok(raw.name === '買いもの.md' && famDir && raw.parents.length === 1 && raw.parents[0] === famDir.id, 'Drive の名前と親フォルダも付け替わる', { name: raw.name, parents: raw.parents });
@@ -249,9 +249,9 @@ const ok = (yes, what, got) => {
         const back = await d3.downloadBytes(pic.id);
         ok(Buffer.isBuffer(back) && back.equals(png), '画像は bytes のまま往復する（改行や境界に似た bytes があっても）', back && back.length);
         const raw2 = fd.files().get(pic.id);
-        ok(raw2.mimeType === 'image/png' && raw2.appProperties.rel === 'attachments/画像.png', '画像の種類と道が札に', raw2 && raw2.mimeType);
+        ok(raw2.mimeType === 'image/png' && raw2.appProperties.rel === 'attachments/画像.png', '画像の種類とパスがラベルに', raw2 && raw2.mimeType);
         const got = await fetch(fd.url + '/_get?rel=' + encodeURIComponent('家族/買いもの.md')).then((r) => r.json());
-        ok(got.text === '# 買い物\n\n- 牛乳 2本\n', '向こうの端末を演じる口からも同じ字が見える');
+        ok(got.text === '# 買い物\n\n- 牛乳 2本\n', '向こうの端末を演じる口からも同じ文字が見える');
         fd.close();
     }
 

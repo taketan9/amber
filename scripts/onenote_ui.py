@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""押して選ぶだけの小さい窓（依頼 610）。
+"""押して選ぶだけの小さいウィンドウ（依頼 610）。
 
     py -3 scripts\\onenote2md.py            ← 何も渡さなければ、これが出る
     onenote2md.bat をダブルクリック          ← 同じ
@@ -7,13 +7,13 @@
 **バッチをダブルクリックした人は、引数を渡せない。** そこで使い方を出して
 終わるのは道具ではない ── 押す場所を出す。
 
-**`tkinter` だけで組む。** Python に最初から入っていて、網に出られない
-会社の端末でも何も足さずに動く（本人の端末は網の外・依頼 586）。
+**`tkinter` だけで組む。** Python に最初から入っていて、ネットワークに出られない
+会社の端末でも何も足さずに動く（本人の端末はネットワークの外・依頼 586）。
 見た目より、**入っていることのほうが値打ちがある。**
 
-**変換は別の糸で走らせる。** 同じ糸でやると、窓が固まって「落ちた」ように
+**変換は別の糸で走らせる。** 同じ糸でやると、デスクトップ版が固まって「落ちた」ように
 見える ── `.onepkg` 一本で数分かかることがある（本人の端末で実測）。
-窓へ書き戻すのは主の糸だけ（Tk の決まり）なので、経過は箱に入れて渡す。
+ウィンドウへ書き戻すのは主の糸だけ（Tk の決まり）なので、経過は箱に入れて渡す。
 """
 
 from __future__ import annotations
@@ -58,24 +58,24 @@ def _guess_in() -> str:
 
 
 def command(where: str, out: str) -> list:
-    """走らせる一行。**窓の外に出しておく** ── Tk の要る機械でしか
+    """走らせる一行。**デスクトップ版の外に出しておく** ── Tk の要る環境でしか
     確かめられない形にすると、押したときに何が走るのかを誰も試せない。
 
-    `sys.executable` を使う ── `py` や `python` を探し直すと、窓を出した
+    `sys.executable` を使う ── `py` や `python` を探し直すと、デスクトップ版を出した
     Python と**別の Python** で走りかねない（会社の端末には何本か入っている）。
     """
     return [sys.executable, str(HERE / "onenote2md.py"), "--out", out, where]
 
 
 def ask_and_run(args) -> int:
-    """窓を出して、押されたら走らせる。**閉じられたら 0**（やめただけ）。"""
+    """デスクトップ版を出して、押されたら走らせる。**閉じられたら 0**（やめただけ）。"""
     try:
         import tkinter as tk
         from tkinter import filedialog, ttk
     except Exception as e:                                   # noqa: BLE001
         # tkinter の入っていない Python はある（Linux の一部）。
         # **黙って何もしないのではなく、代わりの打ち方を出す。**
-        print("窓を出せません:", e)
+        print("デスクトップ版を出せません:", e)
         print("コマンドで:  py -3 scripts\\onenote2md.py --out <出力先> <.onepkg>")
         return 1
 
@@ -132,7 +132,7 @@ def ask_and_run(args) -> int:
 
     # **回っているだけの棒は置かない**（依頼 617）。本人の端末では一度も
     # 動かず、「止まっている」ようにしか見えなかった ── 測っていないものを
-    # 測っている顔で見せるくらいなら、**何本目を写しているかを字で出す。**
+    # 測っている顔で見せるくらいなら、**何本目を写しているかを文字で出す。**
     foot = ttk.Frame(frm)
     foot.grid(row=4, column=0, columnspan=3, sticky="e", **pad)
     go = ttk.Button(foot, text="取り込む")
@@ -153,7 +153,7 @@ def ask_and_run(args) -> int:
         """別の糸で走らせる ── **子process で。**
 
         同じ process の中で呼ぶと、`logging` の出しどころを横取りすることに
-        なるうえ、途中で落ちたときに窓ごと道連れになる。
+        なるうえ、途中で落ちたときにウィンドウごと道連れになる。
         """
         cmd = command(where, out)
         try:
@@ -174,7 +174,7 @@ def ask_and_run(args) -> int:
                 if kind == "行":
                     put(what)
                     # **いま何本目かは、本体が `[3/12]` と言う。** そこだけ
-                    # 取り出して上の一行に出す ── 箱の字は流れて消える。
+                    # 取り出して上の一行に出す ── 箱の文字は流れて消える。
                     got = re.search(r"\[(\d+)/(\d+)\]\s*(.*)", what)
                     if got:
                         say.set(f"写しています（{got.group(1)}/{got.group(2)}）… "

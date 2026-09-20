@@ -3,10 +3,10 @@
 """
 onenote2md.py ── OneNote が書き出したものを Markdown に（ambər の保存ディレクトリ向け）
 
-**押すのは一回。** `onenote2md.bat` をダブルクリックすると小さい窓が出て、
-取り込むものと出力先を選んで押すだけ（`.onepkg` をバッチに放り込めば窓も出ない）。
+**押すのは一回。** `onenote2md.bat` をダブルクリックすると小さいデスクトップ版が出て、
+取り込むものと出力先を選んで押すだけ（`.onepkg` をバッチに放り込めばデスクトップ版も出ない）。
 
-  py -3 scripts\\onenote2md.py                         窓を出す
+  py -3 scripts\\onenote2md.py                         デスクトップ版を出す
   py -3 scripts\\onenote2md.py --out <出力先> <.onepkg>   コマンドで
   py -3 scripts\\onenote2md.py --peek <フォルダ>          形式を数えるだけ
 
@@ -23,7 +23,7 @@ onenote2md.py ── OneNote が書き出したものを Markdown に（ambər �
               <サブページ>.md
 
 要るもの ── **Python だけ。**
-  Office も pywin32 も 32 bit の Python も要らない。網にも出ない。
+  Office も pywin32 も 32 bit の Python も要らない。ネットワークにも出ない。
   mac でも Linux でも動く（`.one` はただのバイナリで、読むのはこちら側）。
 
   **前は OneNote に直接繋いでいた**（COM）。本人の会社の端末ではどうやっても
@@ -42,17 +42,17 @@ onenote2md.py ── OneNote が書き出したものを Markdown に（ambər �
 
 繰り返し走らせるための決まり
   1. **同じページは同じファイルに書く。** 同じ親フォルダの同じ名前 → 同じ
-     ファイル。題がぶつかったら `名前 (2).md` にずらす（上書きすると字が消える）。
+     ファイル。題がぶつかったら `名前 (2).md` にずらす（上書きすると文字が消える）。
   2. **改行は LF。** Windows の `write_text` は CRLF にするので `newline="\\n"`。
   3. **名前は SharePoint / WebDAV でも通るものに。** `\\ / : * ? " < > |` に加えて
-     `# % & ~ { }` と先頭の `_vti_`、末尾の `.` と空白を避ける。一段 120 字まで、
-     道ぜんたいで 200 字を超えそうなら詰める（WebDAV の 256 字の壁）。
+     `# % & ~ { }` と先頭の `_vti_`、末尾の `.` と空白を避ける。一段 120 文字まで、
+     道ぜんたいで 200 文字を超えそうなら詰める（WebDAV の 256 文字の壁）。
   4. **画像は `attachments/`**（ambər の決まり）。ノートの隣のフォルダで、名前は
      `<ページ名>-001.png`（**ハイフン** ── `note::attach` と同じ形で、ambər は
-     「幹 + ハイフン」で自分の画像を見分ける）。幹は 60 字（`note::file_stem`）。
+     「幹 + ハイフン」で自分の画像を見分ける）。幹は 60 文字（`note::file_stem`）。
   5. **一度に一本だけ**（OS の鎖）。本数が多いと数分かかるので、終わる前に
      次の回が始まると二本が同じファイルを奪い合う。
-  6. **`--log`。** 窓を出さずに回すと画面には誰もいない。落ちたことが残らなければ、
+  6. **`--log`。** デスクトップ版を出さずに回すと画面には誰もいない。落ちたことが残らなければ、
      落ちていないのと見分けがつかない。
   7. **片道。** ambər 側で直したページは、次に取り込んだとき上書きされる。
 
@@ -78,13 +78,13 @@ from pathlib import Path
 
 XS_2013 = 2           # XMLSchema.xs2013
 ATTACH = "attachments"   # ambər の画像の置き場所（ノートの隣・この名前）
-PATH_LIMIT = 200         # WebDAV の道の長さの壁（256）に余裕を見た数
+PATH_LIMIT = 200         # WebDAV のパスの長さの壁（256）に余裕を見た数
 
 log = logging.getLogger("onenote2md")
 
 
 def use_utf8():
-    """画面に出す字を UTF-8 で。
+    """画面に出す文字を UTF-8 で。
 
     日本語 Windows の既定は cp932 で、**画面に直に出すぶんには平気だが、
     ファイルへ向けた瞬間に cp932 になる。** `--probe` が失敗した行に付ける
@@ -194,9 +194,9 @@ def _cstr(d, i):
 
 
 def cab_name(raw, attribs):
-    """目録の名前を字にする。**UTF-8 を先に試す。**
+    """目録の名前を文字にする。**UTF-8 を先に試す。**
 
-    仕様は「`_A_NAME_IS_UTF`（0x80）が立っていれば UTF-8、でなければ機械の
+    仕様は「`_A_NAME_IS_UTF`（0x80）が立っていれば UTF-8、でなければ環境の
     符号」だが、**OneNote は旗を立てずに UTF-8 で書く**（本人の端末で出た ──
     セクションの名前だけが読めない漢字に化け、数字はそのまま出ていた。これは
     UTF-8 の並びを cp932 で読んだときの顔）。
@@ -302,9 +302,9 @@ def _folder_stream(d, folder, cb_data, sink):
 
 
 def _safe_parts(name):
-    """入れ物の中の道を、**外へ出られない形**に。
+    """入れ物の中のパスを、**外へ出られない形**に。
 
-    `..` と絶対の道は落とす ── 入れ物が作った道をそのまま信じて書くと、
+    `..` と絶対のパスは落とす ── 入れ物が作ったパスをそのまま信じて書くと、
     出力先の外に書ける（`..\\..\\` を入れた CAB を渡されたとき）。
     """
     parts = []
@@ -312,7 +312,7 @@ def _safe_parts(name):
         x = x.strip()
         if not x or x in (".", ".."):
             continue
-        if len(x) > 1 and x[1] == ":":        # C:\... は道ではなく名前として扱う
+        if len(x) > 1 and x[1] == ":":        # C:\... はパスではなく名前として扱う
             x = x.replace(":", "_")
         parts.append(x)
     return parts
@@ -379,7 +379,7 @@ def unpack_onepkg(at, into):
     # **フォルダごとにほどいて、ほどいた端から切り出す。**
     #
     # ファイルは「フォルダの中の位置」で置かれているので、まず一続きに戻す。
-    # ノートブック一冊で数百 MB になるから**丸ごと持たない** ── 一時ファイルへ
+    # ノートブックノートブックで数百 MB になるから**丸ごと持たない** ── 一時ファイルへ
     # 流して、その中を seek で切り出し、**そのフォルダを配り終えたら捨てる。**
     # 全部ほどいてから配ると、置き場所が一時と出力先で二重に要る。
     out = []
@@ -425,7 +425,7 @@ def unpack_onepkg(at, into):
 
 
 def load_beside(name):
-    """隣の `<name>.py` を読む。**道を名指しする。**
+    """隣の `<name>.py` を読む。**パスを名指しする。**
 
     `import` に頼ると、**走らせる場所によって通らない**（`sys.path` に
     `scripts/` が入るとは限らない）── 現場で `ModuleNotFoundError` になった。
@@ -447,19 +447,19 @@ def load_beside(name):
 
 
 def load_onestore():
-    """`.one` を読む隣の一枚。**道を名指しで読む**（`load_beside`）。"""
+    """`.one` を読む隣の1 つ。**パスを名指しで読む**（`load_beside`）。"""
     return load_beside("onestore")
 
 
 def opened_sections(pkg, entries):
     """開いた `.onepkg` の中身を、**入れ物の中の道ごと**返す。
 
-    `[(ノートブック, 道の並び, ファイル, セクション名)]` ── 道の並びが
+    `[(ノートブック, パスの並び, ファイル, セクション名)]` ── パスの並びが
     セクショングループ。前の版は `rglob` で `.one` を集めるだけで**どの
     フォルダに居たかを捨てていた**ので、`400_打合せ/水曜日打合せ` のような
     多層が一段に潰れ、取りこぼしに見えた（現場で気づかれた・依頼 597）。
 
-    いまは CAB の目録に書いてある道をそのまま使う ── 名前も階層も、
+    いまは CAB の目録に書いてあるパスをそのまま使う ── 名前も階層も、
     `expand` の手に渡さないので壊れない（依頼 617）。
     """
     out = []
@@ -479,7 +479,7 @@ def from_files(where, args, out_root):
     受け取るのは `.onepkg`（入れ物）か `.one`（セクション一本）か、その両方が
     入ったフォルダ。`.onepkg` は**こちらでほどいて**から中の `.one` を読む。
 
-    フォルダの形は COM の道と同じ ── **セクション＝フォルダ、ページ＝`.md`、
+    フォルダの形は COM のパスと同じ ── **セクション＝フォルダ、ページ＝`.md`、
     画像はノートの隣の `attachments/`**。下流（前書き・差分・`--prune`）も同じ。
     """
     onestore = load_onestore()
@@ -512,7 +512,7 @@ def from_files(where, args, out_root):
     stats = {"pages": 0, "written": 0, "skipped_pages": 0, "images": 0, "errors": 0,
              "skipped_sections": 0, "filtered_sections": 0, "pruned": 0, "pruned_images": 0}
     written: set = set()
-    # **どこまで進んだかを数で言う。** 窓には回っているだけの棒が出ていたが、
+    # **どこまで進んだかを数で言う。** デスクトップ版には回っているだけの棒が出ていたが、
     # あれは何も測っていなかった（本人「ローディングバーは全く動かなかった」）。
     # 動かない棒より、`[3/12]` のほうが正直で、役に立つ（依頼 617）。
     for n, (book, groups, at, name) in enumerate(sections, 1):
@@ -549,8 +549,8 @@ def from_files(where, args, out_root):
             title = (pg["title"] or "").strip() or "Untitled"
             level = max(1, pg["level"])
             parent = levels.get(level - 1, sec_dir) if level > 1 else sec_dir
-            # **同じ題のページが二枚あると、上書きで字が消える。**
-            # COM の道の `place_for` と同じ考えで、`名前 (2).md` にずらす。
+            # **同じ題のページが二枚あると、上書きで文字が消える。**
+            # COM のパスの `place_for` と同じ考えで、`名前 (2).md` にずらす。
             base = sanitize(title)
             n = 1
             while True:
@@ -583,7 +583,7 @@ def from_files(where, args, out_root):
                     if not kind:
                         # **絵として名乗らないものは置かない。** 前はここで
                         # プロパティ集合の生バイトを `.png` として書いていて、
-                        # 一枚も開けない画像がノートごとに並んだ。
+                        # 1 つも開けない画像がノートごとに並んだ。
                         log.debug("絵として読めない中身を飛ばした（%d バイト）", len(raw))
                         stats["skipped_images"] = stats.get("skipped_images", 0) + 1
                         continue
@@ -622,8 +622,8 @@ def from_files(where, args, out_root):
 def peek(where):
     """`.one` を探して、**どちらの形式かだけ**数える。
 
-    散らばっているものを一つずつ開いて道を打ち直すのは、人にやらせる仕事では
-    ない ── フォルダを一つ指せば、機械が歩いて数える。
+    散らばっているものを一つずつ開いてパスを打ち直すのは、人にやらせる仕事では
+    ない ── フォルダを一つ指せば、環境が歩いて数える。
     """
     root = Path(where)
     if not root.exists():
@@ -636,7 +636,7 @@ def peek(where):
         found = [q for q in root.rglob("*")
                  if q.is_file() and q.suffix.lower() in kinds]
     # **`.onepkg` は入れ物。** 中を見ないと、形式は分からない。
-    # **開いたら、中の道をそのまま出す。** 階層が合っているかは、人が見れば
+    # **開いたら、中のパスをそのまま出す。** 階層が合っているかは、人が見れば
     # 一目で分かる ── 数だけ出しても、どこが潰れたのかは分からない。
     opened = []
     for q in [q for q in found if q.suffix.lower() == ".onepkg"]:
@@ -691,7 +691,7 @@ def peek(where):
     elif ok:
         print(f"→ 公開仕様は {ok}/{total} 本。混ざっています。")
     else:
-        print("→ **一本も公開仕様ではありません。** ファイルから直に読む道は重くなります。")
+        print("→ **一本も公開仕様ではありません。** ファイルから直に読むパスは重くなります。")
     return 0
 
 
@@ -789,7 +789,7 @@ def only_one(out_root: Path):
 # ---------------------------------------------------------------------------
 # 名前 ── SharePoint / WebDAV / Windows のどこでも通るもの
 # ---------------------------------------------------------------------------
-# Windows で使えない字 + SharePoint が断る字（# % & ~ { }）+ 制御文字
+# Windows で使えない文字 + SharePoint が断る文字（# % & ~ { }）+ 制御文字
 _INVALID = re.compile(r'[\\/:*?"<>|#%&~{}\x00-\x1f]+')
 
 
@@ -807,9 +807,9 @@ def amber_stem(title):
     画像が付いてこない（あちらは「幹 + ハイフン」で自分の画像を見分ける）。
     だから走査で、同じ答えになることを確かめている。
 
-      * 使えない字（`/ \\ : * ? " < > |` と制御文字）は落とし、続いた一続きは
+      * 使えない文字（`/ \\ : * ? " < > |` と制御文字）は落とし、続いた一続きは
         `-` 一つに潰す。**先頭には置かない**（`?? notes` は `notes`）
-      * 60 字まで
+      * 60 文字まで
       * 前後の空白・`.`・全角空白は落とす
       * 予約名なら頭に `_`
     """
@@ -841,7 +841,7 @@ def sanitize(name, fallback="untitled"):
     # Windows の予約名（CON・PRN・AUX・NUL・COM1〜・LPT1〜）。
     if re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])", name):
         name = name + "_"
-    # **60 字で切る。** ambər の `file_stem` が 60 で切るので、ここを 120 の
+    # **60 文字で切る。** ambər の `file_stem` が 60 で切るので、ここを 120 の
     # ままにすると**長い題のページだけ、画像の幹がずれる** ── そのノートは
     # 改名・移動したときに画像が付いてこない。
     return name[:60] or fallback
@@ -906,7 +906,7 @@ def chosen(sec_path: str, args) -> bool:
     （`ノートブック/グループ/セクション`）── 出力先の名前ではない。
 
     `--flatten-groups` は出力の名前を「グループ › セクション」に畳むが、
-    **絞りはいつも OneNote で見えている道に当たる** ── 畳んだ名前に当てると、
+    **絞りはいつも OneNote で見えているパスに当たる** ── 畳んだ名前に当てると、
     同じ `--only` が旗の有無で違うものを拾う。
 
     `--only` は「どれか一つにでも当たれば写す」、`--skip` は「どれか一つにでも
@@ -934,13 +934,13 @@ def build_parser():
     ap.add_argument("files", nargs="?", metavar="ファイル",
                     help=".onepkg / .one / それが入ったフォルダ")
     ap.add_argument("--only", action="append", metavar="道",
-                    help="このセクションだけ写す。`ノートブック/グループ/セクション` の道に部分一致（複数指定可）")
+                    help="このセクションだけ写す。`ノートブック/グループ/セクション` のパスに部分一致（複数指定可）")
     ap.add_argument("--skip", action="append", metavar="道",
                     help="このセクションは写さない。--only より強い（複数指定可）")
     ap.add_argument("--peek", metavar="道",
                     help=".one を探して、どちらの形式かだけ数える（中身は読まない）")
     ap.add_argument("--ui", action="store_true",
-                    help="小さい窓を出して、押して選ぶ（何も渡さずに走らせたときは、これが既定）")
+                    help="小さいデスクトップ版を出して、押して選ぶ（何も渡さずに走らせたときは、これが既定）")
     ap.add_argument("--dry-run", action="store_true", help="どこに何を書くか並べるだけ。書き込みなし")
     ap.add_argument("--no-images", action="store_true", help="画像を出力しない")
     ap.add_argument("--log", metavar="ファイル", help="経過をこのファイルにも書き足す")
@@ -963,12 +963,12 @@ def main():
         fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
         logging.getLogger().addHandler(fh)
 
-    # **何も渡されなければ、窓を出す。** バッチをダブルクリックした人は
+    # **何も渡されなければ、デスクトップ版を出す。** バッチをダブルクリックした人は
     # 引数を渡せない ── そこで使い方を出して終わるのは、道具ではない。
     if args.ui or not (args.files or args.peek):
-        # **隣の一枚は、道を名指しして読む**（`load_onestore` と同じ理由）──
+        # **隣の1 つは、パスを名指しして読む**（`load_onestore` と同じ理由）──
         # `import` に頼ると、走らせる場所によって `sys.path` に `scripts/` が
-        # 入らず `ModuleNotFoundError` になる。窓が出ないのが「落ちた」と
+        # 入らず `ModuleNotFoundError` になる。デスクトップ版が出ないのが「落ちた」と
         # 見分けられない形で出る。
         return load_beside("onenote_ui").ask_and_run(args)
 

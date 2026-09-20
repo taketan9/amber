@@ -1,16 +1,16 @@
 #!/bin/zsh
-# **mac の Dock に、ambər を一枚置く**（依頼 446）。
+# **mac の Dock に、ambər を1 つ置く**（依頼 446）。
 #
 #     scripts/dock.sh          # ~/Applications/ambər.app を作る（作り直す）
 #
 # 押すたびに**そのときの最新**が起きる ── 中身を写すのではなく、この
 # repo の `gui/` をそのまま指しているから。エンジンも起動のたびに
-# `cargo build` を通すので、午前に直した op が午後の窓に無い、が起きない
+# `cargo build` を通すので、午前に直した op が午後のデスクトップ版に無い、が起きない
 # （`gui/engine.js` は**新しいほうを採る**ので、debug で足りる）。
 #
 # 作り方は electron-packager と同じ ── Electron の一式を写して、名前と
 # 絵と中身だけ差し替える。**署名し直すのを忘れない** ── Apple Silicon は
-# 中身をいじった束ねを黙って起動しない。
+# 中身をいじったまとめを黙って起動しない。
 set -e
 here="${0:A:h}"
 root="${here:h}"
@@ -46,8 +46,8 @@ set_it CFBundleName "ambər"
 set_it CFBundleDisplayName "ambər"
 set_it CFBundleIdentifier "com.taketan.amber"
 set_it CFBundleIconFile "amber.icns"
-# **なぜ予定表が要るのかを、その場で言う**（依頼 462）── mac はこの字を
-# そのまま小窓に出す。無いと「アクセスします」だけの小窓になる。
+# **なぜ予定表が要るのかを、その場で言う**（依頼 462）── mac はこの文字を
+# そのまま小デスクトップ版に出す。無いと「アクセスします」だけの小デスクトップ版になる。
 /usr/libexec/PlistBuddy -c 'Delete :NSCalendarsFullAccessUsageDescription' "$plist" >/dev/null 2>&1 || true
 /usr/libexec/PlistBuddy -c 'Add :NSCalendarsFullAccessUsageDescription string この Mac の予定表を、ambər のカレンダーに並べます。予定を足すときにも使います。' "$plist"
 set_it CFBundleShortVersionString "$(node -p "require('$root/gui/package.json').version" 2>/dev/null || echo 0)"

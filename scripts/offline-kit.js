@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
  * **持ち込む一式をまとめる**（依頼 550）── ネットに出られない会社の Windows で
- * amber を組むために、家で用意しておくもの。
+ * amber をビルドするために、家で用意しておくもの。
  *
  *     node scripts/offline-kit.js --out dist [--zip]
  *
@@ -13,9 +13,9 @@
  *         gui/vendor/                       ← **git に入っていないので、ここで足す**
  *       electron-v33.4.11-win32-x64/        ← Electron の一式
  *       amber-server-win-x64.exe            ← エンジン（CRT ごと静的・置くだけで動く）
- *       rcedit-x64.exe                      ← exe の画像と名前を焼く道具（任意）
+ *       rcedit-x64.exe                      ← exe の画像と名前を埋め込む道具（任意）
  *
- * **ここは網に出る。** 出られない側でやることを、出られる側に寄せるための
+ * **ここはネットワークに出る。** 出られない側でやることを、出られる側に寄せるための
  * 道具なので、足りないものは黙って飛ばさず、**どこから取るかを言って止まる**
  * ── 半端な一式を持ち込んで、会社で気づくのがいちばん高くつく。
  */
@@ -99,7 +99,7 @@ const electronName = path.basename(electron);
 copy(electron, path.join(kit, electronName));
 
 // ── 四. エンジン ────────────────────────────────────────────────
-// **CRT ごと静的に組んである一枚**（release.yml の註）── 置くだけで動く。
+// **CRT ごと静的に組んである1 つ**（release.yml の註）── 置くだけで動く。
 let engine = arg('engine') || arg('server');
 if (!engine) {
     const at = path.join(out, 'amber-server-win-x64.exe');
@@ -121,7 +121,7 @@ if (rcedit && rcedit !== true && fs.existsSync(rcedit)) {
 
 // ── 六. 組み方 ──────────────────────────────────────────────────
 // **そのまま打てる一行にする。** 註を行の中に混ぜると、貼り付けたときに
-// そこで壊れる ── 註は下に置く（実際に混ぜてしまい、打てない字になった）。
+// そこで壊れる ── 註は下に置く（実際に混ぜてしまい、打てない文字になった）。
 const line = ['node scripts\\pack.js --out dist --platform win32',
     '  --electron ..\\' + electronName,
     '  --engine ..\\amber-server-win-x64.exe',
@@ -131,9 +131,9 @@ fs.writeFileSync(path.join(kit, '組み方.txt'), [
     'ambər ' + version + ' を、ネットに出られない Windows で組む',
     '',
     'いるもの: この一式と、Node.js（node --version が通ること）だけ。',
-    '網には一度も出ません。',
+    'ネットワークには一度も出ません。',
     '',
-    '1. この一式を丸ごと、その機械のどこかに置く（例: C:\\amber-kit）',
+    '1. この一式を丸ごと、その環境のどこかに置く（例: C:\\amber-kit）',
     '2. コマンドプロンプトで amber のフォルダに入る',
     '',
     '   cd C:\\amber-kit\\amber',
@@ -153,7 +153,7 @@ fs.writeFileSync(path.join(kit, '組み方.txt'), [
     '困ったら:',
     '  「gui/vendor/ がありません」 … この一式の amber\\gui\\vendor が',
     '                                 欠けています。持ち込み直してください。',
-    '  「Windows のエンジンがありません」 … --engine の道が違います。',
+    '  「Windows のエンジンがありません」 … --engine のパスが違います。',
     '',
 ].join('\r\n'));
 

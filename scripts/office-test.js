@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* 会社向けの一枚から、外の網に触るものが本当に消えているか（依頼 602）。
+/* 会社向けの1 つから、外のネットワークに触るものが本当に消えているか（依頼 602）。
  *
  *     node scripts/office-test.js
  *
@@ -8,12 +8,12 @@
  * 会社の環境では見えなくて良い」「Asset にアップしてもらう資材には
  * 見えないまたは機能を削ぎ落としたものにしてほしい」。
  *
- * **「献立から消えた」では足りない。** amber には ⌘⇧P があり、そこは
- * 名前で探す道 ── 献立にだけ蓋をすると、打てば出てくる。だから消える
- * ところは一か所（`canRun`）にして、**両方の道がそこを通る**ことを見る。
+ * **「メニューから消えた」では足りない。** amber には ⌘⇧P があり、そこは
+ * 名前で探す道 ── メニューにだけ蓋をすると、打てば出てくる。だから消える
+ * ところは一か所（`canRun`）にして、**両方のパスがそこを通る**ことを見る。
  *
- * **残すものも見る。** カレンダーの面そのものと、チームの CSV は会社の
- * ための道具（会社の Outlook が書き出した一枚を読むだけで、外へは
+ * **残すものも見る。** カレンダーの画面そのものと、チームの CSV は会社の
+ * ための道具（会社の Outlook が書き出した1 つを読むだけで、外へは
  * 何も出さない）── 一緒に消すと、いちばん要るものが消える。
  */
 'use strict';
@@ -52,7 +52,7 @@ function commands(office) {
         + 'const OFFICE = ' + (office ? 'true' : 'false') + ';\n'
         // **ぜんぶ出る状態から始める。** ノートを開いていない・グループを
         // 持っていない机では、閉じる前から出ていない命令がある ── それを
-        // 「閉じられた」と数えると、検査が黙る。
+        // 「閉じられた」と数えると、検査が報告しない。
         + 'const state = { open: { path: \'x\' } };\n'
         + 'const groupCal = { id: \'g\' };\n'
         + cmdsSrc + '\n' + canRunSrc + '\n'
@@ -60,34 +60,34 @@ function commands(office) {
         + '} })')(anything);
 }
 
-console.log('会社向けの一枚では、外へ運ぶものが出ない');
+console.log('会社向けの1 つでは、外へ運ぶものが出ない');
 {
     const full = commands(false);
     const office = commands(true);
     // **外へ運ぶもの** ── Google Drive の同期、iCal の購読（＝カレンダーの
     // 同期）、グループでの共有。
     for (const id of ['sync', 'sub', 'unsub', 'toshare', 'groupdrop']) {
-        ok(full.includes(id), 'ふつうの一枚には「' + id + '」がある', full);
-        ok(!office.includes(id), '会社向けの一枚に「' + id + '」は無い', office);
+        ok(full.includes(id), 'ふつうの1 つには「' + id + '」がある', full);
+        ok(!office.includes(id), '会社向けの1 つに「' + id + '」は無い', office);
     }
-    // **残すもの** ── カレンダーの面と、チームの CSV（会社の Outlook のため
+    // **残すもの** ── カレンダーの画面と、チームの CSV（会社の Outlook のため
     // の道具で、読むだけ・外へは何も出さない）と、ふだんの道具。
     for (const id of ['cal', 'calset', 'team', 'teamoff', 'places', 'new', 'refresh']) {
-        ok(office.includes(id), '会社向けの一枚にも「' + id + '」は残る', office);
+        ok(office.includes(id), '会社向けの1 つにも「' + id + '」は残る', office);
     }
     // 閉じるのは、閉じると決めたものだけ。
     const gone = full.filter((id) => !office.includes(id));
     ok(gone.length === 5, '閉じたのは五つだけ', gone);
 }
 
-console.log('版の札の読み方');
+console.log('版のラベルの読み方');
 {
     // `main.js` は `edition.json` を隣から読む。**環境変数が勝つ**
     // （手元で見比べるため）。ここは、その二行が居ることだけ見る ──
     // Electron を立ち上げずに `edition()` は呼べない。
     const main = fs.readFileSync(path.join(__dirname, '..', 'gui', 'main.js'), 'utf8');
-    // **本物の `edition()` を通す。** 字が在ることだけ見ていた版は、
-    // 説明の中の `AMBER_EDITION` を数えて通っていた（黙る検査、七度目）。
+    // **本物の `edition()` を通す。** 文字が在ることだけ見ていた版は、
+    // 説明の中の `AMBER_EDITION` を数えて通っていた（報告しない検査、七度目）。
     const cut = main.indexOf('function edition()');
     const end = main.indexOf('\n}', cut) + 2;
     if (cut < 0 || end < 2) { console.error('gui/main.js から edition を切り出せません'); process.exit(2); }
@@ -96,21 +96,21 @@ console.log('版の札の読み方');
     )({ env }, { readFileSync: () => { if (札 === null) throw new Error('ありません'); return 札; } },
       { join: (...a) => a.join('/') }, '/どこか')();
 
-    ok(editionWith({}, null) === 'full', '札が無ければ、ふつうの一枚');
+    ok(editionWith({}, null) === 'full', 'ラベルが無ければ、ふつうの1 つ');
     ok(editionWith({}, '{"edition":"office"}') === 'office', '隣の edition.json を読む');
     ok(editionWith({ AMBER_EDITION: 'office' }, null) === 'office', '環境変数で上書きできる');
     // **環境変数が勝つ。** 手元で会社向けの見え方を確かめるための道。
     ok(editionWith({ AMBER_EDITION: 'full' }, '{"edition":"office"}') === 'full',
         '札より環境変数が勝つ');
-    ok(editionWith({}, 'こわれている') === 'full', '札が壊れていても落ちない');
+    ok(editionWith({}, 'こわれている') === 'full', 'ラベルが壊れていても落ちない');
     ok(/ipcMain\.handle\('amber:edition'/.test(main), '描く側から訊ける');
     const pre = fs.readFileSync(path.join(__dirname, '..', 'gui', 'preload.js'), 'utf8');
     ok(/amber:edition/.test(pre), '細い一本にも通してある');
-    // **組む側が書く。** 書かなければ、配る一枚はふつうの版のまま。
+    // **ビルドする側が書く。** 書かなければ、配る1 つはふつうの版のまま。
     const pack = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'pack.js'), 'utf8');
-    ok(/edition\.json/.test(pack), '組む側が版の札を置く');
+    ok(/edition\.json/.test(pack), '組む側が版のラベルを置く');
     ok(/'amber-win-x64' \+ \(edition === 'full' \? '' : '-' \+ edition\)/.test(pack),
-        '会社向けの一枚は、名前で見分けられる');
+        '会社向けの1 つは、名前で見分けられる');
 }
 
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');

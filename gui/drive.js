@@ -1,20 +1,20 @@
 'use strict';
-// Google Drive との繋ぎ ── **OS に触る側**（窓の主・Node）。
+// Google Drive との繋ぎ ── **OS に触る側**（デスクトップ版の主・Node）。
 //
-// ここにあるのは「サインインする・鍵を持つ・鍵を新しくする・やめる」だけ。
+// ここにあるのは「サインインする・キーを持つ・キーを新しくする・やめる」だけ。
 // 何を上げ下ろしするかの判断は core（`sync::plan`）で、ここは運ぶだけ
 // （`PLANS.ja.md` 一章「通信は core に入れない」）。
 //
 // # 使う人がやること
 //
 // 「Google でサインイン」を押す → いつものブラウザが開く → 「許可」を押す
-// → 窓に戻る。以上（本人が決めた・2026-09-11・案 甲）。URL を打たせない、
+// → デスクトップ版に戻る。以上（本人が決めた・2026-09-11・案 甲）。URL を打たせない、
 // Google の設定画面を触らせない。
 //
 // # 仕組み（OAuth 2.0・PKCE・折り返しは 127.0.0.1）
 //
 // amber は「公開クライアント」（RFC 8252）── 秘密を持てない前提の設計で、
-// 盗まれて困る鍵は **PKCE**（毎回その場で作る使い捨ての合言葉）に置き換わって
+// 盗まれて困るキーは **PKCE**（毎回その場で作る使い捨ての合言葉）に置き換わって
 // いる。クライアント ID は秘密ではない（Joplin も同じ形で焼き込んで配っている）。
 //
 //   1. 使い捨ての合言葉（verifier）と、その要約（challenge）を作る
@@ -23,7 +23,7 @@
 //   4. Google がブラウザを折り返し先へ戻す ── そこに「code」が付いている
 //   5. code と verifier を Google に渡して、鍵（token）と交換する
 //
-// # 鍵の置き場所
+// # キーの置き場所
 //
 // `userData/drive.token`。**暗号化して置く**（Electron の `safeStorage` ──
 // mac はキーチェーン、Windows は DPAPI）。ノートの隣には置かない ── あそこは
@@ -87,7 +87,7 @@ function authUrl({ clientId, redirect, challenge, state, authUrl, scope }) {
     return u.href;
 }
 
-/// ブラウザに見せる、折り返しの一枚。**普通の日本語で、一言だけ。**
+/// ブラウザに見せる、折り返しの1 つ。**普通の日本語で、一言だけ。**
 function landing(ok) {
     const say = ok
         ? 'サインインできました。ambər に戻ってください。このタブは閉じてかまいません。'
@@ -97,10 +97,10 @@ function landing(ok) {
         + '<p style="font-size:1.2rem">' + say + '</p></body>';
 }
 
-/// 繋ぎを作る。**OS の部品は外から渡す**（試験では偽物を渡せるように）。
+/// 繋ぎを作る。**OS のパーサーは外から渡す**（試験では偽物を渡せるように）。
 ///
-/// - `open(url)`      ── ブラウザで開く（窓では `shell.openExternal`）
-/// - `vault`          ── 鍵の置き場所（`{ dir, encrypt, decrypt }`）
+/// - `open(url)`      ── ブラウザで開く（デスクトップ版では `shell.openExternal`）
+/// - `vault`          ── キーの置き場所（`{ dir, encrypt, decrypt }`）
 /// - `secretFile`     ── クライアント シークレットの置き場所（無ければ無し）
 /// - `fetch`          ── 既定は Node の fetch
 function createDrive(opts) {
@@ -155,7 +155,7 @@ function createDrive(opts) {
         try { fs.unlinkSync(tokenFile); } catch { /* もう無い */ }
     }
 
-    /// Google と鍵を交換する（初回は code、以後は refresh）。
+    /// Google とキーを交換する（初回は code、以後は refresh）。
     async function exchange(body) {
         const form = new URLSearchParams({ client_id: clientId, ...body });
         const s = secret();
@@ -173,7 +173,7 @@ function createDrive(opts) {
         return j;
     }
 
-    /// **サインイン。** ブラウザを開き、折り返しを待ち、鍵を交換して仕舞う。
+    /// **サインイン。** ブラウザを開き、折り返しを待ち、キーを交換して仕舞う。
     /// 返すのは `{ ok: true, who }` か `{ error }`（人に見せる言い分）。
     async function signIn(want = {}) {
         const scope = want.scope || SCOPE;
@@ -181,8 +181,8 @@ function createDrive(opts) {
         const state = b64url(crypto.randomBytes(16));
         let settle;
         const got = new Promise((go) => { settle = go; });
-        // **ブラウザへの返事は、鍵の交換が済んでから。** 先に「できました」と
-        // 出しておいて交換で断られると、ブラウザは成功・窓は失敗の顔になる
+        // **ブラウザへの返事は、キーの交換が済んでから。** 先に「できました」と
+        // 出しておいて交換で断られると、ブラウザは成功・デスクトップ版は失敗の顔になる
         // （実際にそうなった・2026-09-11）。
         let browser = null;
         const tell = (ok) => {
@@ -234,7 +234,7 @@ function createDrive(opts) {
             tell(true);
             return { ok: true, who: kept.who };
         } catch (e) {
-            // 端末にも残す ── 窓の一言は消えるが、`run.sh` の端末には残る。
+            // 端末にも残す ── デスクトップ版の一言は消えるが、`run.sh` の端末には残る。
             console.error('[同期] サインインできません:', e.message);
             tell(false);
             return { error: e.message };
@@ -288,21 +288,21 @@ function createDrive(opts) {
                     : { signedIn: false };
     }
 
-    /// やめる ── Google 側の許可も取り消して、鍵を捨てる。
+    /// やめる ── Google 側の許可も取り消して、キーを捨てる。
     async function signOut() {
         const kept = load();
         forget();
         if (kept) {
             try {
                 await doFetch(revokeUrl + '?token=' + encodeURIComponent(kept.refresh || kept.access), { method: 'POST' });
-            } catch { /* 取り消せなくても、こちらの鍵は捨てた */ }
+            } catch { /* 取り消せなくても、こちらのキーは捨てた */ }
         }
         return { ok: true };
     }
 
     /* ── Drive を読み書きする（運ぶだけ。何を運ぶかは core が決める） ── */
 
-    /// Drive の API を一つ叩く。鍵が無ければ、人の言葉で断る。
+    /// Drive の API を一つ叩く。キーが無ければ、人の言葉で断る。
     async function api(pathAndQuery, init = {}) {
         const access = await token();
         if (!access) throw new Error('同期のサインインが切れています。⚙ の「同期」からもう一度サインインしてください');
@@ -315,7 +315,7 @@ function createDrive(opts) {
         const text = await r.text();
         if (!r.ok) {
             let why = 'HTTP ' + r.status;
-            try { why = JSON.parse(text).error.message || why; } catch { /* 字のまま */ }
+            try { why = JSON.parse(text).error.message || why; } catch { /* 文字のまま */ }
             throw new Error(why);
         }
         return init.raw ? text : (text ? JSON.parse(text) : null);
@@ -374,7 +374,7 @@ function createDrive(opts) {
                 const ap = f.appProperties || {};
                 if (!ap.rel) continue;
                 // **自分のものだけ。** appProperties は同じアプリなら人をまたいで見えるので、
-                // グループの人が共有してくれたノートまで「向こうにある」と数えてしまう ── 同じ道に
+                // グループの人が共有してくれたノートまで「向こうにある」と数えてしまう ── 同じパスに
                 // 下りてきて、こちらの上げは自分の ambər へ行く（二つに割れる）。グループと
                 // 分けるのは別の道（共有フォルダを保存ディレクトリにする・依頼 521 で）。
                 if (f.ownedByMe === false) continue;
@@ -393,7 +393,7 @@ function createDrive(opts) {
                  heic: 'image/heic', bmp: 'image/bmp', svg: 'image/svg+xml' }[e] || 'application/octet-stream';
     }
 
-    /// 一本上げる（`id` があれば上書き）。字（`text`）か、画像（`bytes`・依頼 497）。返すのは `{ id, tag }`。
+    /// 一本上げる（`id` があれば上書き）。文字（`text`）か、画像（`bytes`・依頼 497）。返すのは `{ id, tag }`。
     async function upload({ rel, text, bytes, print, id }) {
         const relDir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
         const parent = id ? null : await dir(relDir);
@@ -413,7 +413,7 @@ function createDrive(opts) {
         return { id: got.id, tag: print };
     }
 
-    /// 一本下ろす（字）。
+    /// 一本下ろす（文字）。
     async function download(id) {
         return api('/drive/v3/files/' + q(id) + '?alt=media', { raw: true });
     }

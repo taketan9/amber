@@ -1,25 +1,25 @@
 #!/usr/bin/env node
-/* 窓と電話が、**同じノートを同じ字に戻すか**（依頼 427）。
+/* デスクトップ版と iPhone が、**同じノートを同じテキストに戻すか**（依頼 427）。
  *
- *                     ┌─ 窓の糊（findPictures）──┐
+ *                     ┌─ デスクトップ版の糊（findPictures）──┐
  *     .md ─ to_html ─┤                           ├─ paperToMd ─ 戻った .md
- *                     └─ 電話の糊（Paper.swift）─┘
+ *                     └─ iPhone の糊（Paper.swift）─┘
  *                                                      ここが同じか
  *
- * **切り出しを共有している意味は、そこにある。** 字に戻す一本
+ * **切り出しを共有している意味は、そこにある。** テキストに戻す一本
  * （`paperToMd`／`blockToMd`）は両方が同じものを使うが、**その前後の糊は
- * 別々に書いてある** ── 窓は `gui/renderer.js`、電話は `ios/Cian/Paper.swift`
+ * 別々に書いてある** ── デスクトップ版は `gui/renderer.js`、iPhone は `ios/Cian/Paper.swift`
  * の中の JS。片方だけ足したり忘れたりすると、同じノートが端末によって
- * 別の字で保存される。
+ * 別の文字で保存される。
  *
- * 実際にそうなった（2026-09-08）: 窓は `<img>` を `<figure>` で包んで
- * 元の字を持たせていたが、**電話は包んでいなかった** ── 表示の面で一度
- * 打つだけで、電話でだけ画像が消えた。往復の試験（`round-test`）は窓の糊
+ * 実際にそうなった（2026-09-08）: デスクトップ版は `<img>` を `<figure>` で包んで
+ * 元の文字を持たせていたが、**iPhone は包んでいなかった** ── 表示の画面で一度
+ * 打つだけで、iPhone でだけ画像が消えた。往復の試験（`round-test`）はデスクトップ版の糊
  * しか通していないので、素通りしていた。
  *
  * 見るのは二つ:
- *   一。同じ `.md` が、両方の糊を通して同じ字に戻ること
- *   二。**電話の糊が、切り出しの関数を上書きしていないこと** ──
+ *   一。同じ `.md` が、両方の糊を通して同じテキストに戻ること
+ *   二。**iPhone の糊が、切り出しの関数を上書きしていないこと** ──
  *       同じ名前で書き直すと、片方だけ直した日に静かにずれる
  *
  *     node scripts/agree-test.js
@@ -59,14 +59,14 @@ if (!engine) {
 
 const src = fs.readFileSync(path.join(root, 'gui', 'renderer.js'), 'utf8');
 const from = src.indexOf('function richBlock(');
-const to = src.indexOf('/// この窓の「表示」の面を、上の切り出しに繋ぐ薄い包み。');
+const to = src.indexOf('/// このデスクトップ版の「表示」画面を、上の切り出しに繋ぐ薄い包み。');
 if (from < 0 || to < 0) {
-    console.error('gui/renderer.js から「表示」の面を切り出せません');
+    console.error('gui/renderer.js から「表示」画面を切り出せません');
     process.exit(2);
 }
 const slice = src.slice(from, to);
 
-/// 窓の糊 ── `drawRead` が組んだあとに呼ぶもの。
+/// デスクトップ版の糊 ── `drawRead` がビルドしたあとに呼ぶもの。
 const grab = (head) => {
     const at = src.indexOf(head);
     if (at < 0) { console.error(head + ' が見つかりません'); process.exit(2); }
@@ -74,7 +74,7 @@ const grab = (head) => {
 };
 const windowGlue = grab('function findPictures(');
 
-/// 電話の糊 ── `Paper.swift` の中の `window.show` が、札を配ったあとに
+/// iPhone の糊 ── `Paper.swift` の中の `window.show` が、ラベルを配ったあとに
 /// する画像の包み。**そこだけを抜く**（前後は Swift の文字列の中）。
 const swift = fs.readFileSync(path.join(root, 'ios', 'Cian', 'Paper.swift'), 'utf8');
 const phoneFrom = swift.indexOf("for (const img of box.querySelectorAll('img')) {\n        const alt");
@@ -89,19 +89,19 @@ const phoneGlue = swift.slice(phoneFrom, phoneTo + 9);
 
 let bad = 0;
 const names = [...slice.matchAll(/^function ([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
-// 電話の中の JS ぜんぶ（Swift の `page` の中身）。
+// iPhone の中の JS ぜんぶ（Swift の `page` の中身）。
 const phoneJs = swift.slice(swift.indexOf('static let page'));
 for (const n of names) {
-    // 切り出しと同じ名前を、電話が自分で書き直していないか。
+    // 切り出しと同じ名前を、iPhone が自分で書き直していないか。
     const again = new RegExp('(?:^|\\n)\\s*(?:function\\s+' + n + '\\s*\\(|const\\s+' + n + '\\s*=)');
     if (again.test(phoneJs)) {
         bad += 1;
-        console.log('✗ 電話が「' + n + '」を自分で書き直しています ── '
+        console.log('✗ iPhone が「' + n + '」を自分で書き直しています ── '
             + '切り出しと同じ名前は、片方だけ直した日に静かにずれます');
     }
 }
 
-/* ── 二。同じノートが、同じ字に戻るか ── */
+/* ── 二。同じノートが、同じテキストに戻るか ── */
 
 const dom = new JSDOM('<!doctype html><body><div id="paper"></div></body>');
 global.window = dom.window;
@@ -116,7 +116,7 @@ global.getSelection = () => dom.window.getSelection();
     + 'function fileURL(at) { return "file://" + at; }\n'
     + 'const dirOf = (at) => String(at || "").replace(/[^/\\\\]*$/, "");\n'
     + 'const escapeHtml = (s) => String(s);\n'
-    // 電話の糊は、そのままだと `box` を外から取る ── 包んで名前を付ける。
+    // iPhone の糊は、そのままだと `box` を外から取る ── 包んで名前を付ける。
     + 'function phonePictures(box) {\n' + phoneGlue + '\n}\n');
 const box = document.getElementById('paper');
 global.el = () => box;
@@ -165,13 +165,13 @@ const CASES = [
         const html = (await call('html', { text: md })).ok?.html;
         if (html === undefined) { console.log('✗ 組めません: ' + JSON.stringify(md)); bad += 1; continue; }
 
-        // 窓の順（`drawRead`）── 札を配ってから包む。
+        // デスクトップ版の順（`drawRead`）── ラベルを配ってから包む。
         box.innerHTML = html;
         armPaper(box, md, true);
         findPictures();
         const asWindow = paperToMd(box, '');
 
-        // 電話の順（`Paper.swift` の `window.show`）── 同じ順。
+        // iPhone の順（`Paper.swift` の `window.show`）── 同じ順。
         box.innerHTML = html;
         for (const img of box.querySelectorAll('img')) {
             const at = img.getAttribute('src') || '';
@@ -183,9 +183,9 @@ const CASES = [
 
         if (asWindow !== asPhone) {
             bad += 1;
-            console.log('✗ 窓と電話で字が違います: ' + JSON.stringify(md));
-            console.log('   窓　: ' + JSON.stringify(asWindow));
-            console.log('   電話: ' + JSON.stringify(asPhone));
+            console.log('✗ デスクトップ版と iPhone で文字が違います: ' + JSON.stringify(md));
+            console.log('   ウィンドウ　: ' + JSON.stringify(asWindow));
+            console.log('   iPhone: ' + JSON.stringify(asPhone));
         }
     }
 
@@ -195,5 +195,5 @@ const CASES = [
         console.log(CASES.length + ' 件中、' + bad + ' 件ずれています');
         process.exit(1);
     }
-    console.log('窓と電話は、同じ字に戻ります（' + CASES.length + ' 件）');
+    console.log('デスクトップ版と iPhone は、同じ文字に戻ります（' + CASES.length + ' 件）');
 })();

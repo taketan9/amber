@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-/* 「表示」の面が、打っても字を失わないか。
+/* 「表示」画面が、打っても文字を失わないか。
  *
- * **この面はいま二つの amber で動く。** 窓は `<div contenteditable>`、
+ * **この画面はいま二つの amber で動く。** デスクトップ版は `<div contenteditable>`、
  * iPhone は `WKWebView` の中の同じ `<div contenteditable>` ── 組み方も
  * 書き戻し方も同じ一組（`richBlock` … `inlineToMd`）を使う。書き戻しを
- * もう一組 Swift で書けば、**同じノートが端末によって別の字に保存される**。
- * 失うのはたいてい表と升と図で、気づくのは何回か保存したあと。
+ * もう一組 Swift で書けば、**同じノートが端末によって別の文字に保存される**。
+ * 失うのはたいてい表とセルと図で、気づくのは何回か保存したあと。
  *
- * ここは HTML → Markdown の一方向を見る。組む側（Markdown → HTML）は
+ * ここは HTML → Markdown の一方向を見る。ビルドする側（Markdown → HTML）は
  * core の `markdown::to_html` で、`cargo test` が見ている。
  *
  *     node scripts/paper-test.js
@@ -28,11 +28,11 @@ try {
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'gui', 'renderer.js'), 'utf8');
 // **`oneCell` から** ── 貼られたものを均すところ（`webClean`）まで、
-// 一続きで切り出す。Excel の升をどう扱うかも、この面の判断のうち。
+// 一続きで切り出す。Excel のセルをどう扱うかも、この画面の判断のうち。
 const from = src.indexOf('function oneCell(');
-const to = src.indexOf('/// この窓の「表示」の面を、上の切り出しに繋ぐ薄い包み。');
+const to = src.indexOf('/// このデスクトップ版の「表示」画面を、上の切り出しに繋ぐ薄い包み。');
 if (from < 0 || to < 0 || to < from) {
-    console.error('gui/renderer.js から「表示」の面を切り出せません'
+    console.error('gui/renderer.js から「表示」画面を切り出せません'
         + '（`richBlock` から `inlineToMd` までの並びが変わりました）');
     process.exit(2);
 }
@@ -43,11 +43,11 @@ global.document = dom.window.document;
 global.Node = dom.window.Node;
 // よそから来た HTML を掃除するところ（`webClean`）も見る。
 global.DOMParser = dom.window.DOMParser;
-// caret の居場所を見る道具も渡す ── 升の行の改行はここを見て決める。
+// caret の居場所を見る道具も渡す ── セルの行の改行はここを見て決める。
 global.getSelection = () => dom.window.getSelection();
 // eslint-disable-next-line no-eval
 (0, eval)(src.slice(from, to));
-// **貼られたものが絵そのものか**を見る一本は、面の外（受け口の隣）に居る。
+// **貼られたものが絵そのものか**を見る一本は、画面の外（受け口の隣）に居る。
 // eslint-disable-next-line no-eval
 (0, eval)(src.slice(src.indexOf('function justAPicture(data)'),
                     src.indexOf("document.addEventListener('paste'",
@@ -65,34 +65,34 @@ const round = (html, head = '') => {
     return paperToMd(box, head);
 };
 
-console.log('打った字が、そのまま戻るか');
+console.log('打った文字が、そのまま戻るか');
 ok(round('<p>ふつうの一行</p>') === 'ふつうの一行\n', '段落');
 ok(round('<h2>見出し</h2>') === '## 見出し\n', '見出し');
-ok(round('<p><strong>太字</strong>と<em>斜め</em></p>') === '**太字**と*斜め*\n', '飾り');
+ok(round('<p><strong>太字</strong>と<em>斜め</em></p>') === '**太字**と*斜め*\n', '書式');
 ok(round('<ul><li>ひとつ</li><li>ふたつ</li></ul>') === '- ひとつ\n- ふたつ\n', '箇条書き');
 ok(round('<blockquote><p>引いた言葉</p></blockquote>') === '> 引いた言葉\n', '引用');
 
-console.log('升は、押せる形のまま戻るか');
+console.log('セルは、押せる形のまま戻るか');
 {
-    // **押した升が消える**のは一度やった（`blockToMd` が画面を壊していた）。
+    // **押したセルが消える**のは一度やった（`blockToMd` が画面を壊していた）。
     const html = '<ul><li><button type="button" class="box" data-line="3"'
         + ' aria-pressed="true"></button>すんだこと</li>'
         + '<li><button type="button" class="box" data-line="4"'
         + ' aria-pressed="false"></button>まだのこと</li></ul>';
     const md = round(html);
     ok(md === '- [x] すんだこと\n- [ ] まだのこと\n', 'チェックリスト', md);
-    // 読んだあとも、升は画面に残っている。
-    ok(box.querySelectorAll('.box').length === 2, '読んでも升を壊さない');
+    // 読んだあとも、セルは画面に残っている。
+    ok(box.querySelectorAll('.box').length === 2, '読んでもセルを壊さない');
 }
 
-console.log('戻せないものは、元の字をそのまま返すか');
+console.log('戻せないものは、元の文字をそのまま返すか');
 {
     const md = round('<div class="mermaid" data-md="```mermaid\nflowchart LR\n  A --> B\n```">'
         + '<svg></svg></div>');
-    ok(md === '```mermaid\nflowchart LR\n  A --> B\n```\n', '図は元の字', md);
+    ok(md === '```mermaid\nflowchart LR\n  A --> B\n```\n', '図は元の文字', md);
     // **持っていないときは書き戻さない。** 空を返すと、そのかたまりが
     // 黙って消える。
-    ok(round('<div class="mermaid"><svg></svg></div>') === null, '元の字が無ければ諦める');
+    ok(round('<div class="mermaid"><svg></svg></div>') === null, '元の文字が無ければ諦める');
 }
 
 console.log('注記と表');
@@ -100,9 +100,9 @@ console.log('注記と表');
     const md = round('<div class="alert warning"><p class="alert-h">注意</p>'
         + '<p>気をつけて</p></div>');
     ok(md === '> [!WARNING]\n> 気をつけて\n', '注記', md);
-    const t = round('<table><thead><tr><th>面</th><th>いつ</th></tr></thead>'
+    const t = round('<table><thead><tr><th>画面</th><th>いつ</th></tr></thead>'
         + '<tbody><tr><td>表示</td><td>ふだん</td></tr></tbody></table>');
-    ok(t.includes('| 面 | いつ |') && t.includes('| 表示 | ふだん |'), '表', t);
+    ok(t.includes('| 画面 | いつ |') && t.includes('| 表示 | ふだん |'), '表', t);
 }
 
 console.log('前書きのあるノート');
@@ -112,10 +112,10 @@ console.log('前書きのあるノート');
     ok(round('<p>本文</p>', 'title: あ\n') === '\n本文\n', '一行空ける');
 }
 
-console.log('升の行で改行すると');
+console.log('セルの行で改行すると');
 {
     // **点・番号と同じ押し心地**（次も同じ、空ならそこで降りる）。
-    // 既定に任せると升の付かない `<li>` が出て、押した人は升を足した
+    // 既定に任せるとセルの付かない `<li>` が出て、押した人はセルを足した
     // つもりで点が出る。
     const task = (t, on) => '<li class="task"><button type="button" class="box"'
         + ' aria-pressed="' + (on ? 'true' : 'false') + '"></button>' + t + '</li>';
@@ -131,38 +131,38 @@ console.log('升の行で改行すると');
     box.innerHTML = '<ul>' + task('ひとつめ') + '</ul>';
     let li = box.querySelector('li');
     caret(li.lastChild, li.lastChild.length);
-    ok(checkEnter(li) === true, '字のある升で押すと、受ける');
-    ok(box.querySelectorAll('li > .box').length === 2, '次の行にも升が付く');
-    // **空の升は、字を打つまでファイルに出さない**（本人が決めた・2026-09-11・
-    // 網の決めごと 11）── 面には二つ見えているが、字は一つ。
-    ok(paperToMd(box, '') === '- [ ] ひとつめ\n', '字にすると、空の升はまだ書かれない',
+    ok(checkEnter(li) === true, '文字のあるセルで押すと、受ける');
+    ok(box.querySelectorAll('li > .box').length === 2, '次の行にもセルが付く');
+    // **空のセルは、文字を打つまでファイルに出さない**（本人が決めた・2026-09-11・
+    // ネットワークの決めごと 11）── 画面には二つ見えているが、文字は一つ。
+    ok(paperToMd(box, '') === '- [ ] ひとつめ\n', '文字にすると、空のセルはまだ書かれない',
        paperToMd(box, ''));
     {
         const second = box.querySelectorAll('li')[1];
         const typed = document.createTextNode('ふたつめ');
         second.append(typed);
-        ok(paperToMd(box, '') === '- [ ] ひとつめ\n- [ ] ふたつめ\n', '字を打った瞬間に、二つめが書かれる',
+        ok(paperToMd(box, '') === '- [ ] ひとつめ\n- [ ] ふたつめ\n', '文字を打った瞬間に、二つめが書かれる',
            paperToMd(box, ''));
-        typed.remove();     // 続きの試し（空の升で降りる）は、空のまま
+        typed.remove();     // 続きの試し（空のセルで降りる）は、空のまま
     }
 
     // 何も書かずにもう一度 ── 一覧から降りる。
     li = box.querySelectorAll('li')[1];
     caret(li, li.childNodes.length);
-    ok(checkEnter(li) === true, '空の升で押すと、受ける');
+    ok(checkEnter(li) === true, '空のセルで押すと、受ける');
     ok(box.querySelectorAll('li').length === 1, '空の行は消える');
     ok(box.lastElementChild.tagName === 'P', '素の行に降りる',
        box.lastElementChild.tagName);
 
-    // 真ん中で押したら、後ろの字は次の升へ ── 下の行は残る。
+    // 真ん中で押したら、後ろの文字は次のセルへ ── 下の行は残る。
     box.innerHTML = '<ul>' + task('あいうえお') + task('のこり') + '</ul>';
     li = box.querySelector('li');
     caret(li.lastChild, 2);
     checkEnter(li);
     ok(paperToMd(box, '') === '- [ ] あい\n- [ ] うえお\n- [ ] のこり\n',
-       '後ろの字は次の升へ', paperToMd(box, ''));
+       '後ろの文字は次のセルへ', paperToMd(box, ''));
 
-    // 真ん中の空の升で降りても、下の行は失わない。
+    // 真ん中の空のセルで降りても、下の行は失わない。
     box.innerHTML = '<ul>' + task('あたま') + task('') + task('おしり') + '</ul>';
     li = box.querySelectorAll('li')[1];
     caret(li, li.childNodes.length);
@@ -174,7 +174,7 @@ console.log('升の行で改行すると');
     box.innerHTML = '<ul><li>ただの点</li></ul>';
     li = box.querySelector('li');
     caret(li.firstChild, 3);
-    ok(checkEnter(li) === false, '升の無い行は、既定に任せる');
+    ok(checkEnter(li) === false, 'セルの無い行は、既定に任せる');
 }
 
 console.log('引用と注記から、空の行で降りる');
@@ -188,19 +188,19 @@ console.log('引用と注記から、空の行で降りる');
         sel.addRange(r);
     };
 
-    box.innerHTML = '<blockquote><p>引いてきた字</p><p><br></p></blockquote>';
+    box.innerHTML = '<blockquote><p>引いてきた文字</p><p><br></p></blockquote>';
     let line = box.querySelectorAll('blockquote > p')[1];
     caret(line, 0);
     ok(quitEnter(line) === true, '空の行で押すと、受ける');
-    ok(box.querySelector('blockquote > p').textContent === '引いてきた字', '引用は残る');
+    ok(box.querySelector('blockquote > p').textContent === '引いてきた文字', '引用は残る');
     ok(box.lastElementChild.tagName === 'P' && !box.lastElementChild.closest('blockquote'),
        '引用の外に降りる', box.lastElementChild.outerHTML);
 
-    // 字のある行では、既定のまま（引用が続く）。
-    box.innerHTML = '<blockquote><p>引いてきた字</p></blockquote>';
+    // 文字のある行では、既定のまま（引用が続く）。
+    box.innerHTML = '<blockquote><p>引いてきた文字</p></blockquote>';
     line = box.querySelector('blockquote > p');
     caret(line.firstChild, 3);
-    ok(quitEnter(line) === false, '字のある行は、既定に任せる');
+    ok(quitEnter(line) === false, '文字のある行は、既定に任せる');
 
     // 真ん中で降りても、後ろの行は失わない。
     box.innerHTML = '<blockquote><p>あたま</p><p><br></p><p>おしり</p></blockquote>';
@@ -210,23 +210,23 @@ console.log('引用と注記から、空の行で降りる');
     ok(box.querySelectorAll('blockquote').length === 2, '引用が二つに割れる');
     ok(paperToMd(box, '') === '> あたま\n\n> おしり\n', '後ろの行は残る', paperToMd(box, ''));
 
-    // 注記も同じ ── 種類の札は割った先にも付く。
+    // 注記も同じ ── 種類のラベルは割った先にも付く。
     box.innerHTML = '<div class="alert warning"><p class="alert-h">注意</p>'
         + '<p>気をつけて</p><p><br></p><p>あとの行</p></div>';
     line = box.querySelectorAll('.alert > p')[2];
     caret(line, 0);
     quitEnter(line);
     ok(paperToMd(box, '') === '> [!WARNING]\n> 気をつけて\n\n> [!WARNING]\n> あとの行\n',
-       '注記も割れて、札が付き直す', paperToMd(box, ''));
+       '注記も割れて、ラベルが付き直す', paperToMd(box, ''));
 
     // 種類の札そのものでは受けない。
     box.innerHTML = '<div class="alert note"><p class="alert-h">ノート</p><p>中身</p></div>';
     const label = box.querySelector('.alert-h');
     caret(label, 0);
-    ok(quitEnter(label) === false, '種類の札では受けない');
+    ok(quitEnter(label) === false, '種類のラベルでは受けない');
 }
 
-console.log('飾りの終わりから、外へ出る');
+console.log('書式の終わりから、外へ出る');
 {
     const caretIn = (node, at) => {
         const r = document.createRange();
@@ -236,23 +236,23 @@ console.log('飾りの終わりから、外へ出る');
         sel.removeAllRanges();
         sel.addRange(r);
     };
-    // **飾ったのは選んだ字で、これから打つ字ではない。**
+    // **飾ったのは選んだ文字で、これから打つ文字ではない。**
     box.innerHTML = '<p><b>ふとい</b>ふつう</p>';
     let b = box.querySelector('b');
     caretIn(b.firstChild, 3);
-    ok(outOfDress() === true, '飾りの終わりなら、出す');
+    ok(outOfDress() === true, '書式の終わりなら、出す');
     ok(window.getSelection().anchorNode === box.querySelector('p'), '出た先は段落の中',
        window.getSelection().anchorNode.nodeName);
 
-    // 途中なら出さない ── そこは中の字。
+    // 途中なら出さない ── そこは中の文字。
     caretIn(b.firstChild, 1);
-    ok(outOfDress() === false, '飾りの途中では、出さない');
+    ok(outOfDress() === false, '書式の途中では、出さない');
 
-    // 飾りの外なら、そもそも関わらない。
+    // 書式の外なら、そもそも関わらない。
     caretIn(box.querySelector('p').lastChild, 2);
-    ok(outOfDress() === false, '飾りの外では、何もしない');
+    ok(outOfDress() === false, '書式の外では、何もしない');
 
-    // 二重の飾りは、いちばん外まで出る。
+    // 二重の書式は、いちばん外まで出る。
     box.innerHTML = '<p><b><i>ふとくて斜め</i></b>あと</p>';
     caretIn(box.querySelector('i').firstChild, 6);
     outOfDress();
@@ -260,33 +260,33 @@ console.log('飾りの終わりから、外へ出る');
        '二重でも、いちばん外まで出る', window.getSelection().anchorNode.nodeName);
 }
 
-console.log('図の「元の字」は、行番号がずれても作り直さない');
+console.log('図の「元の文字」は、行番号がずれても作り直さない');
 {
     // **これが図を丸ごと消した。**
     //
-    // 組み直したときの行番号で本文を切って持たせていたが、`syncRead` は
-    // caret を飛ばさないために組み直さずに保存する ── 上に一行足した次の
-    // 保存から番号がずれ、切り直した「元の字」が別の場所の字になり、その
-    // 次の保存でそれが図の場所へ書き戻された。鍵盤では消していないのに
+    // ビルドし直したときの行番号で本文を切って持たせていたが、`syncRead` は
+    // caret を飛ばさないためにビルドし直さずに保存する ── 上に一行足した次の
+    // 保存から番号がずれ、切り直した「元の文字」が別の場所の文字になり、その
+    // 次の保存でそれが図の場所へ書き戻された。キーボードでは消していないのに
     // 図が消えるので、原因が画面のどこにも出ない。
     const was = '一行目。\n\n```mermaid\nflowchart LR\n  A --> B\n```\n';
     box.innerHTML = '<pre class="mermaid" data-line="2" data-span="4">A --&gt; B</pre>';
     armPaper(box, was, true);
     const first = box.firstElementChild.dataset.md;
     ok(first === '```mermaid\nflowchart LR\n  A --> B\n```',
-       '初めは、行番号のところの字を持つ', first);
+       '初めは、行番号のところの文字を持つ', first);
 
-    // 上に一行増えた。番号は組み直すまで古いまま。
+    // 上に一行増えた。番号はビルドし直すまで古いまま。
     const now = '一行目。\n足した行。\n\n```mermaid\nflowchart LR\n  A --> B\n```\n';
     armPaper(box, now, true);
     ok(box.firstElementChild.dataset.md === first,
-       'ずれても、持っている字は変わらない', box.firstElementChild.dataset.md);
+       'ずれても、持っている文字は変わらない', box.firstElementChild.dataset.md);
 }
 
-/* **よそから来た飾りは、持ち込まない**（依頼 616・本人「やや白いハイライト
+/* **よそから来た書式は、持ち込まない**（依頼 616・本人「やや白いハイライト
  * というかマーカーがついた文字で入力される」）。
  *
- * Excel は升に `style="background:white;color:black"` を付けて寄こす ──
+ * Excel はセルに `style="background:white;color:black"` を付けて寄こす ──
  * 琥珀の紙の上では、その白がマーカーを引いたように見える。
  */
 {
@@ -298,48 +298,48 @@ console.log('図の「元の字」は、行番号がずれても作り直さな�
         + '</table></body></html>';
     const cleanOne = webClean(one, '');
     const cleanMany = webClean(many, '');
-    ok(!/style=/.test(cleanMany.innerHTML), 'Excel の飾りを落とす', cleanMany.innerHTML.slice(0, 120));
+    ok(!/style=/.test(cleanMany.innerHTML), 'Excel の書式を落とす', cleanMany.innerHTML.slice(0, 120));
     ok(!/background/i.test(cleanMany.innerHTML), '白いマーカーを持ち込まない');
-    ok(/<td>名前<\/td>/.test(cleanMany.innerHTML), '升の字は残る', cleanMany.innerHTML.slice(0, 120));
+    ok(/<td>名前<\/td>/.test(cleanMany.innerHTML), 'セルの文字は残る', cleanMany.innerHTML.slice(0, 120));
     // **色だけは残す** ── ambər の記法（`note::first_color` が読む形）。
     const colored = webClean('<p><span style="color:#D9822B;background:white">橙</span></p>', '');
     ok(/style="color:#D9822B"/i.test(colored.innerHTML), '色は残す', colored.innerHTML);
     ok(!/background/i.test(colored.innerHTML), '色以外は落とす', colored.innerHTML);
-    // **黒は色ではない。** 既定の字に付いてくるので、残すとノートじゅうが span になる。
+    // **黒は色ではない。** 既定の文字に付いてくるので、残すとノートじゅうが span になる。
     const black = webClean('<p><span style="color:black">ふつう</span></p>', '');
     ok(!/style=/.test(black.innerHTML), '黒は色として残さない', black.innerHTML);
     const black6 = webClean('<p><span style="color:#000000">ふつう</span></p>', '');
     ok(!/style=/.test(black6.innerHTML), '#000000 も残さない', black6.innerHTML);
-    // **行き先と画像は残す** ── 落とすとリンクが字になる。
-    const link = webClean('<p><a href="https://x/a" target="_blank" class="u">字</a></p>', '');
+    // **行き先と画像は残す** ── 落とすとリンクが文字になる。
+    const link = webClean('<p><a href="https://x/a" target="_blank" class="u">文字</a></p>', '');
     ok(/href="https:\/\/x\/a"/.test(link.innerHTML), '行き先は残す', link.innerHTML);
     ok(!/target=|class=/.test(link.innerHTML), 'それ以外は落とす', link.innerHTML);
-    // **枠の言語は飾りではない** ── 落とすと、貼った枠から言語が消える。
+    // **枠の言語は書式ではない** ── 落とすと、貼った枠から言語が消える。
     const code = webClean('<pre><code class="hljs language-rust">fn main() {}</code></pre>', '');
     ok(/class="language-rust"/.test(code.innerHTML), '枠の言語は残す', code.innerHTML);
     ok(!/hljs/.test(code.innerHTML), 'ほかの class は落とす', code.innerHTML);
 
-    // **升ひとつは、表ではない**（本人「不思議なところで改行する」）。
-    ok(oneCell(cleanOne) === '売上', '升ひとつは字だけにする', oneCell(cleanOne));
-    ok(oneCell(cleanMany) === null, '升が二つ以上なら、表のまま', oneCell(cleanMany));
+    // **セルひとつは、表ではない**（本人「不思議なところで改行する」）。
+    ok(oneCell(cleanOne) === '売上', 'セルひとつは文字だけにする', oneCell(cleanOne));
+    ok(oneCell(cleanMany) === null, 'セルが二つ以上なら、表のまま', oneCell(cleanMany));
     ok(oneCell(webClean('<p>ただの段</p>', '')) === null, '表でなければ、触らない');
 
     // **Excel は絵も一緒に載せてくる**（本人「絵の扱いになっている」）。
-    // 見分けるのは字の有無 ── 画面を撮った回だけが、字を一つも載せない。
+    // 見分けるのは文字の有無 ── 画面を撮った回だけが、文字を一つも載せない。
     const clip = (html, plain) => ({ getData: (t) => (t === 'text/html' ? html : (t === 'text/plain' ? plain : '')) });
     ok(justAPicture(clip('', '')) === true, '画面写真は絵のまま');
     ok(justAPicture(clip('<img src="https://x/a.png">', '')) === true,
-       'ウェブの画像も絵のまま（字が無い）');
+       'ウェブの画像も絵のまま（文字が無い）');
     ok(justAPicture(clip(many, '名前\t値\nＣＰＵ\t8\n')) === false,
-       'Excel の範囲は絵ではない（字が載っている）');
-    ok(justAPicture(clip(one, '売上\n')) === false, '升ひとつも絵ではない');
-    ok(justAPicture(clip('<p>字のある HTML</p>', '')) === false,
-       '字のある HTML は絵ではない（字だけ別の欄に載らない道具もある）');
-    // **字だけ載せてくる道具もある**（HTML を作らない表計算・端末から写した字）。
-    // そこを見ないと、絵と一緒に来た字がぜんぶ画面写真になる。
-    ok(justAPicture(clip('', 'ただの字')) === false, '字だけでも絵ではない');
+       'Excel の範囲は絵ではない（文字が載っている）');
+    ok(justAPicture(clip(one, '売上\n')) === false, 'セルひとつも絵ではない');
+    ok(justAPicture(clip('<p>文字のある HTML</p>', '')) === false,
+       '文字のある HTML は絵ではない（文字だけ別の欄に載らない道具もある）');
+    // **文字だけ載せてくる道具もある**（HTML を作らない表計算・端末から写した文字）。
+    // そこを見ないと、絵と一緒に来た文字がぜんぶ画面写真になる。
+    ok(justAPicture(clip('', 'ただの文字')) === false, '文字だけでも絵ではない');
 
-    // **枠の中の字は、元の字から**（依頼 614）── 画面の枠は色が付いたあとの
+    // **枠の中の文字は、元の文字から**（依頼 614）── 画面の枠は色が付いたあとの
     // 姿で、改行が `<br>`、空白が `&nbsp;` になっている。
     const pre = document.createElement('pre');
     pre.dataset.md = '```python\ndef 短い():\n    return 1\n```';
@@ -347,7 +347,7 @@ console.log('図の「元の字」は、行番号がずれても作り直さな�
     ok(codeOf(pre) === 'def 短い():\n    return 1', '囲みを外して、改行のまま返す', codeOf(pre));
     const pasted = document.createElement('pre');
     pasted.innerHTML = '<code>a\u00a0b\n</code>';
-    ok(codeOf(pasted) === 'a b', '元の字が無ければ、字から拾って &nbsp; を戻す', codeOf(pasted));
+    ok(codeOf(pasted) === 'a b', '元の文字が無ければ、文字から拾って &nbsp; を戻す', codeOf(pasted));
 }
 
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');

@@ -6,7 +6,7 @@
  *
  * 喋るのは amber が使うぶんだけ（`gui/drive.js` が叩く形そのまま）:
  *
- *   POST  /token                                   鍵の交換（サインインの試験）
+ *   POST  /token                                   キーの交換（サインインの試験）
  *   GET   /about                                   誰か
  *   GET   /drive/v3/files?q=…                      一覧（appProperties で絞る）
  *   POST  /drive/v3/files                          フォルダを作る（JSON）
@@ -18,7 +18,7 @@
  * それと、**向こうの端末を演じる口**（Google には無い）:
  *
  *   POST /_put   { rel, text, by }   向こうが一本置いた（あれば上書き）
- *   GET  /_get?rel=…                 いま向こうにある字
+ *   GET  /_get?rel=…                 いま向こうにある文字
  *   GET  /_list                      ぜんぶ
  *   POST /_trash { rel }             向こうで消した
  *   POST /_move  { rel, to }         向こうで名前を変えた（ID はそのまま）
@@ -88,7 +88,7 @@ function start(port = 0) {
                          : json(404, { error: 'ありません' });
             }
             if (u.pathname === '/_put') {
-                // `text`（字）か `b64`（画像）。
+                // `text`（文字）か `b64`（画像）。
                 const { rel, text, b64, by } = JSON.parse(body || '{}');
                 const bytes = b64 ? Buffer.from(b64, 'base64') : null;
                 const content = bytes || Buffer.from(String(text || ''), 'utf8');
@@ -119,7 +119,7 @@ function start(port = 0) {
             }
 
             // ── Drive の API（使うぶんだけ） ──
-            // 繋がらない体 ── 返事をせずに切る（窓には fetch failed に見える）。
+            // 繋がらない体 ── 返事をせずに切る（デスクトップ版には fetch failed に見える）。
             if (broken) { req.socket.destroy(); return; }
             if (req.method === 'GET' && u.pathname === '/drive/v3/files') {
                 const q = u.searchParams.get('q') || '';

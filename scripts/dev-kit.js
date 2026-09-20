@@ -8,7 +8,7 @@
  *
  * 配るものは二つに分けてある（本人が決めた・2026-09-19）:
  *
- *   * `amber-src.zip`（10MB・依頼 639）── **組むだけ。** ふだん運ぶのはこちら
+ *   * `amber-src.zip`（10MB・依頼 639）── **ビルドするだけ。** ふだん運ぶのはこちら
  *   * `amber-dev.zip`（40MB ほど・これ）── **直せる。** 判断の側（Rust）まで
  *
  * 中身:
@@ -16,19 +16,19 @@
  *   amber-dev/
  *     はじめに読んでください.txt   ← Rust の落とし先と、叩く一行
  *     amber/                       ← ソース一式（画面も判断の側も・試験ごと）
- *       .cargo/config.toml         ← 依存は下の vendor から取る（網に出ない）
+ *       .cargo/config.toml         ← 依存は下の vendor から取る（ネットワークに出ない）
  *       vendor/                    ← 依存の実体（`cargo vendor`）
- *       amber-server-win-x64.exe   ← 出来合いのエンジン（組む前でも画面を動かせる）
+ *       amber-server-win-x64.exe   ← 出来合いのエンジン（ビルドする前でも画面を動かせる）
  *
  * **Rust 本体（375MB）は入れない**（依頼 641・本人が決めた・2026-09-20）。
  * あれは amber の版が変わっても 1バイトも変わらないので、版ごとに置き直すと
- * 同じ 375MB が札の数だけ積み上がる（v3.1.2〜v3.1.7 で実際に 1.66GB 積んで、
+ * 同じ 375MB がラベルの数だけ積み上がる（v3.1.2〜v3.1.7 で実際に 1.66GB 積んで、
  * 消した）。代わりに `はじめに読んでください.txt` へ**版を焼き込んだ URL**を
- * 一行書く ── 網の外なのは会社の端末で、**落とす人の手元は外に出られる**。
+ * 一行書く ── ネットワークの外なのは会社の端末で、**落とす人の手元は外に出られる**。
  * 落とすのは一度だけで、次からは USB のものを使い回せる。
  *
  * **Linux でしか使わない依存は捨てる**（`linux-raw-sys` ほか・18MB）── あの
- * 機械では一度も開かれない。
+ * 環境では一度も開かれない。
  */
 'use strict';
 const fs = require('node:fs');
@@ -52,12 +52,12 @@ function die(why) {
 
 /// **Rust 本体の落とし先。** 版を焼き込んである ── rust が 1.99 になっても、
 /// ここに置かれた 1.98.0 はそのまま残る（rust-lang.org は古い版を消さない）。
-/// CI が組むのに使った版をそのまま渡すので、**会社で入る Rust と、ここで
+/// CI がビルドするのに使った版をそのまま渡すので、**会社で入る Rust と、ここで
 /// 「組めた」を見た Rust が同じものになる。**
 const rustMsi = (v) =>
     `https://static.rust-lang.org/dist/rust-${v}-x86_64-pc-windows-gnu.msi`;
 
-/// あの機械では開かれない依存。**Windows で組むのに要らないもの**だけを挙げる
+/// あの環境では開かれない依存。**Windows でビルドするのに要らないもの**だけを挙げる
 /// ── 迷ったら残す（捨てて足りないほうが、重いより高くつく）。
 const NOT_ON_WINDOWS = [
     'linux-raw-sys',   // Linux の system call の型（18MB）
@@ -65,9 +65,9 @@ const NOT_ON_WINDOWS = [
 
 /// ソース一式は **git が知っているものだけ**（依頼 640）。
 ///
-/// 前は「この名前は飛ばす」という引き算で選んでいて、**組んだ場所に転がって
+/// 前は「この名前は飛ばす」という引き算で選んでいて、**ビルドした場所に転がって
 /// いたものまで入った** ── CI では `vendor/`（依存 100MB）と `rustdist/`
-/// （Rust の一枚 358MB）が根に置かれていて、それを二度包み、746MB になった。
+/// （Rust の1 つ 358MB）が根に置かれていて、それを二度包み、746MB になった。
 /// 足し算で選べば、知らないものは入りようがない。
 function tracked() {
     const out = execFileSync('git', ['-C', ROOT, 'ls-files', '-z'], { encoding: 'buffer' });
@@ -103,7 +103,7 @@ function main() {
 
     const rows = [];
     // 一、ソース一式（画面も判断の側も、試験も台帳も）。**git が知っている
-    // ものだけ** ── 組んだ場所に転がっているものを巻き込まない。
+    // ものだけ** ── ビルドした場所に転がっているものを巻き込まない。
     for (const rel of tracked()) {
         const at = path.join(ROOT, rel);
         if (fs.existsSync(at) && fs.statSync(at).isFile()) {
@@ -124,10 +124,10 @@ function main() {
     // 三、出来合いのエンジン（Rust 本体は包まない ── 上の注を見よ）。
     rows.push({ at: engine, rel: 'amber-dev/amber/amber-server-win-x64.exe' });
 
-    // 四、依存の在り処を Cargo に教える一枚。**網に出さない**ための札でもある。
+    // 四、依存の在り処を Cargo に教える1 つ。**ネットワークに出さない**ためのラベルでもある。
     const conf = [
         '# 依存は、隣の vendor から取る（依頼 640）。',
-        '# **網には出ない** ── 会社の端末は外に出られないので、取りに行かせない。',
+        '# **ネットワークには出ない** ── 会社の端末は外に出られないので、取りに行かせない。',
         '[source.crates-io]',
         'replace-with = "vendored-sources"',
         '',
@@ -156,7 +156,7 @@ function main() {
         '    Rust 本体は 375MB あり、ambər の版が変わっても中身は同じです。',
         '    毎回運ぶ意味がないので、入れていません（依頼 641）。',
         '',
-        '    網につながる端末で下の一枚を落として、この一式と一緒に USB へ入れて',
+        '    ネットワークにつながる端末で下の1 つを落として、この一式と一緒に USB へ入れて',
         '    ください。落とすのは一度だけで、次からは同じものを使い回せます。',
         '',
         `        ${rustMsi(rustVersion)}`,
@@ -164,7 +164,7 @@ function main() {
         `    落とした rust-${rustVersion}-x86_64-pc-windows-gnu.msi をダブルクリックして、`,
         '    そのまま進む。',
         '',
-        '    Visual Studio は要りません（この一枚に、組むのに要るものが全部入っています）。',
+        '    Visual Studio は要りません（この1 つに、組むのに要るものが全部入っています）。',
         '    入ったか見る:  cargo --version',
         '',
         '■ 直して、組む',
@@ -179,7 +179,7 @@ function main() {
         '',
         '    cargo test --workspace                 判断の側ぜんぶ（242 件ほど）',
         '    python scripts\\requests.py             台帳（依頼が守られているか）',
-        '    node scripts\\win-test.js               窓の形',
+        '    node scripts\\win-test.js               デスクトップ版の形',
         '',
         '    ※ jsdom を使う試験（paper-test など）は、npm が要るので会社では回りません。',
         '',
@@ -187,7 +187,7 @@ function main() {
         '',
         '    node scripts\\build-win.js --electron C:\\electron-v33.4.11-win32-x64',
         '',
-        '■ 網には出ません',
+        '■ ネットワークには出ません',
         '',
         '    依存は amber\\vendor\\ から取ります（amber\\.cargo\\config.toml がそう指しています）。',
         '    cargo が外を見にいくことはありません。',

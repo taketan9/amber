@@ -3,7 +3,7 @@
 
     名前<TAB>入れるときの識別子<TAB>組むときの識別子<TAB>機種<TAB>困りごと
 
-**名前で突き合わせない。** `devicectl list devices` を字で読むと、名前の
+**名前で突き合わせない。** `devicectl list devices` を文字で読むと、名前の
 「の」が `?` になって `xcodebuild -showdestinations` 側の名前と一致しない
 ── それで一台が黙って飛ばされた（2026-09-13）。JSON で訊けば、**入れる
 ときの識別子（identifier）と、組むときの識別子（udid）が両方**そのまま

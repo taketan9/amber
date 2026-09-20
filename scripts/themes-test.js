@@ -5,7 +5,7 @@
  *     node scripts/themes-test.js --write  # cian から `gui/palettes.js` を作り直す
  *
  * 本人が決めたこと（2026-09-12）: 「全テーマを全く同一に合わせたい」。cian は
- * 十八の配色（`cian-core/src/theme.rs` の `PRESETS`）と窓の三つの装い（白磁・
+ * 十八の配色（`cian-core/src/theme.rs` の `PRESETS`）とデスクトップ版の三つの装い（白磁・
  * 陰翳・端末譲り・`gui/index.html`）を持つ。amber は cian を知らない（依存は
  * cian → amber の一方向）ので、**表を写して持ち、ここで写しが古くなっていないか
  * を見る**。cian 側で色が一つ変わった日に、ここが鳴る。
@@ -17,8 +17,8 @@ const path = require('node:path');
 const here = path.dirname(__dirname);
 const cian = path.join(path.dirname(here), 'cian');
 const OUT = path.join(here, 'gui', 'palettes.js');
-/// 電話の側の写し（Swift）。窓の変数に組み替えた**あと**の色を持つ ── 組み替えの
-/// 算数は `palettes.js` の `amberVarsOf` 一つ（窓と電話で答えがずれない）。
+/// iPhone の側の写し（Swift）。デスクトップ版の変数に組み替えた**あと**の色を持つ ── 組み替えの
+/// 算数は `palettes.js` の `amberVarsOf` 一つ（デスクトップ版と iPhone で答えがずれない）。
 const OUT_SWIFT = path.join(here, 'ios', 'Cian', 'Palettes.swift');
 const LABELS = { hakuji: '白磁', inei: '陰翳', terminal: '端末譲り' };
 
@@ -46,7 +46,7 @@ function readPalettes() {
     return out;
 }
 
-/// cian の窓の三つの装い（`index.html` の `:root` と `[data-look=…]`）。
+/// cian のデスクトップ版の三つの装い（`index.html` の `:root` と `[data-look=…]`）。
 function readLooks() {
     const src = fs.readFileSync(path.join(cian, 'gui/index.html'), 'utf8');
     const block = (start) => {
@@ -82,13 +82,13 @@ const CIAN_PALETTES = [
 ${palettes.map(row).join('\n')}
 ];
 
-/// 窓の三つの装い（白磁・陰翳・端末譲り）── cian の \`index.html\` の変数そのまま。
+/// デスクトップ版の三つの装い（白磁・陰翳・端末譲り）── cian の \`index.html\` の変数そのまま。
 const CIAN_LOOKS = {
 ${['hakuji', 'inei', 'terminal'].map(look).join('\n')}
 };
 
 /* ── cian の色を、amber の十五の変数に組み替える ──
- * **ここが唯一の算数。** 窓（renderer.js）も電話（Palettes.swift を作るとき）も
+ * **ここが唯一の算数。** ウィンドウ（renderer.js）もiPhone（Palettes.swift を作るとき）も
  * これを通る ── 二か所に書くと、片方だけ直した日に同じ配色が二つの顔になる。 */
 
 /// 明るい色か（cian-core の \`is_light\` と同じ・Rec. 601）。
@@ -123,7 +123,7 @@ function amberVarsOf(name) {
     const p = CIAN_PALETTES.find((x) => x.name === name);
     if (!p) return null;
     const light = lightColor(p.bg);
-    // 明るい紙では、リンクや升に乗る濃い側を字のほうへ寄せて読めるようにする。
+    // 明るい紙では、リンクやセルに乗る濃い側を文字のほうへ寄せて読めるようにする。
     const deep = light ? mixColor(p.accent, p.fg, 0.3) : p.accent;
     return { light, vars: {
         '--paper': p.bg, '--rail': p.popup, '--list': mixColor(p.bg, p.popup, 0.5),
@@ -139,7 +139,7 @@ if (typeof module !== 'undefined') module.exports = { CIAN_PALETTES, CIAN_LOOKS,
 `;
 }
 
-/// 電話の写し。名前・出す名前・明るいか・十五の変数（組み替え済み）。
+/// iPhone の写し。名前・出す名前・明るいか・十五の変数（組み替え済み）。
 function renderSwift(js) {
     const names = ['hakuji', 'inei', 'terminal', ...js.CIAN_PALETTES.map((p) => p.name)];
     const rows = names.map((n) => {
@@ -151,10 +151,10 @@ function renderSwift(js) {
 //
 //     node scripts/themes-test.js --write
 //
-// で隣の cian から作り直す（窓の \`gui/palettes.js\` と同じ元・同じ算数）。
-// 窓の十五の変数に組み替えたあとの色を持つ。並びは cian と同じ。
+// で隣の cian から作り直す（デスクトップ版の \`gui/palettes.js\` と同じ元・同じ算数）。
+// デスクトップ版の十五の変数に組み替えたあとの色を持つ。並びは cian と同じ。
 
-/// 一つの配色。\`vars\` は面（WKWebView）の CSS 変数にそのまま差す。
+/// 一つの配色。\`vars\` は画面（WKWebView）の CSS 変数にそのまま差す。
 struct Palette {
     let name: String
     let label: String
@@ -198,10 +198,10 @@ const ok = (cond, what, extra) => {
     ok(mine === render(palettes, looks), 'gui/palettes.js は cian の写しのまま（違えば --write で作り直す）');
     const swift = fs.readFileSync(OUT_SWIFT, 'utf8');
     ok(swift === renderSwift(require(OUT)), 'ios/Cian/Palettes.swift は同じ元から作られたまま');
-    // 窓の側が全部を出しているか。
+    // デスクトップ版の側が全部を出しているか。
     const renderer = fs.readFileSync(path.join(here, 'gui/renderer.js'), 'utf8');
-    for (const p of palettes) ok(renderer.includes("'" + p.name + "'") || renderer.includes('CIAN_PALETTES'), '窓に ' + p.name + ' がある');
-    for (const k of ['hakuji', 'inei', 'terminal']) ok(renderer.includes("'" + k + "'"), '窓に装い ' + k + ' がある');
+    for (const p of palettes) ok(renderer.includes("'" + p.name + "'") || renderer.includes('CIAN_PALETTES'), 'デスクトップ版に ' + p.name + ' がある');
+    for (const k of ['hakuji', 'inei', 'terminal']) ok(renderer.includes("'" + k + "'"), 'デスクトップ版に装い ' + k + ' がある');
     console.log(bad ? '\n' + bad + ' 件ちがいます' : '\ncian と同じです（18 配色・3 装い）');
     process.exit(bad ? 1 : 0);
 })();

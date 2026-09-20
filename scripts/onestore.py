@@ -4,7 +4,7 @@
 
 **COM が駄目でも写せるように。** 会社の端末では OneNote の COM に繋がらず
 （登録も実体も取り次ぎ側も白いのに、呼ぶと落ちる ── 依頼 589）、そこは
-こちらでは直せなかった。**書き出したファイルを直に読む**のがこの一枚。
+こちらでは直せなかった。**書き出したファイルを直に読む**のがこの1 つ。
 
 **読めるのは公開仕様のほうだけ**（`guidFileFormat` が
 `{109ADD3F-911B-49F5-A5D0-1791EDC8AED8}`）。SharePoint に置かれている `.one` は
@@ -148,10 +148,10 @@ def read_props(d, o):
     return got
 
 
-# ── 木を組む ────────────────────────────────────────────────────────
+# ── 木をビルドする ────────────────────────────────────────────────────────
 #
 # **`.one` は改訂の履歴を丸ごと持つ。** 同じページの古い版が何度も入っている
-# ので、素直に歩くと題が何度も出る（見本では `This is impo` →（五回）→
+# ので、素直に歩くと題が何度も出る（サンプルでは `This is impo` →（五回）→
 # `Section3HeaderTitle` という書き換えの跡がそのまま並んだ）。
 # **空間＝ページ、その最後の改訂が「いま」。**
 
@@ -173,7 +173,7 @@ P_UNDER, P_STRIKE    = 0x1C06, 0x1C07
 P_LIST_NODES = 0x1C26                    # ListNodes（参照の列 ── 在れば箇条書き）
 P_NUM_FORMAT = 0x1C1A                    # NumberListFormat（在れば番号）
 P_COL_WIDTHS = 0x1D66                    # TableColumnWidths
-# **表は参照でたどる**（依頼 620）。表 → 行 → 升 → 中身は、どれも
+# **表は参照でたどる**（依頼 620）。表 → 行 → セル → 中身は、どれも
 # `ElementChildNodes`（参照の列）で繋がっている ── 正本は Tika の
 # `OneNotePropertyEnum`（`ElementChildNodesOfTable(0x24001C20)`・型 9）。
 P_KIDS       = 0x1C20                    # ElementChildNodes（参照の列）
@@ -190,7 +190,7 @@ P_FILE_BLOB  = 0x1D9B                    # EmbeddedFileContainer（参照）
 P_IMG_NAME   = 0x1DD7                    # ImageFilename
 P_IMG_ALT    = 0x1E58                    # ImageAltText
 P_FILE_NAME  = 0x1D9C                    # EmbeddedFileName
-P_TAG_SHAPE  = 0x3464                    # NoteTagShape（チェックの升）
+P_TAG_SHAPE  = 0x3464                    # NoteTagShape（チェックのセル）
 P_IS_TITLE   = 0x1CB4                    # IsTitleText
 P_IS_DATE    = 0x1CB5                    # IsTitleDate
 P_IS_TIME    = 0x1C87                    # IsTitleTime
@@ -248,7 +248,7 @@ def spaces(d):
 
 
 def text_of(p):
-    """本文の字。**`TextExtendedAscii` は 1 バイト文字**（名前のとおり）。
+    """本文の文字。**`TextExtendedAscii` は 1 バイト文字**（名前のとおり）。
 
     UTF-16 で読むと `桔獩椠` になる ── 一度それで「本文が取れない」と誤診した。
     """
@@ -266,7 +266,7 @@ def current(revs):
     """改訂の並びから、**いまの版**を選ぶ。
 
     `.one` は改訂の履歴を丸ごと持つので、素直に歩くと同じページが何度も出る
-    （見本では題が `This is impo` →（五回）→ `Section3HeaderTitle` と
+    （サンプルでは題が `This is impo` →（五回）→ `Section3HeaderTitle` と
     書き換わった跡がそのまま並んだ）。**最後が「いま」。**
     """
     return revs[max(revs)] if revs else []
@@ -343,7 +343,7 @@ def line_of(p, style=None):
 
     かたまりの意味（見出し・引用・コード）は `ParagraphStyleId` が持っていて、
     **名前は OneNote の XML と同じ**（`h1`〜`h6` `p` `cite` `code`）── COM の
-    道で書いた変換と、同じ言葉で話せる。
+    パスで書いた変換と、同じ言葉で話せる。
     """
     text = text_of(p)
     if text is None:
@@ -381,9 +381,9 @@ def line_of(p, style=None):
 
 
 def linked(body, line):
-    """リンクを巻く。**いちばん内側**（依頼 608）── `**[字](url)**` の順。
+    """リンクを巻く。**いちばん内側**（依頼 608）── `**[文字](url)**` の順。
 
-    外に出すと `[**字**](url)` になり、太字の印がリンクの中に入る。
+    外に出すと `[**文字**](url)` になり、太字のマークがリンクの中に入る。
     """
     url = line.get("link")
     return f"[{body}]({url})" if url else body
@@ -392,14 +392,14 @@ def linked(body, line):
 def colored(body, line):
     """色を巻く。**いちばん外側**（ambər の書き方 ── `note::first_color`）。
 
-    印の中に入れると `**<span…>字</span>**` になり、色の札が印に挟まれる。
+    マークの中に入れると `**<span…>文字</span>**` になり、色のラベルがマークに挟まれる。
     """
     c = line.get("color")
     return f'<span style="color:{c}">{body}</span>' if c else body
 
 
 def as_markdown(line):
-    """一行を Markdown に。**印は外側から。**"""
+    """一行を Markdown に。**マークは外側から。**"""
     body = linked(line["text"].strip(), line)
     if line.get("bold"):
         body = f"**{body}**"
@@ -417,7 +417,7 @@ def as_markdown(line):
     if line.get("list") == "bullet":
         return f"{pad}- {body}"
     if style.startswith("h") and style[1:].isdigit():
-        # 見出しは印を重ねない（`# **字**` は二重）が、色とリンクは残す。
+        # 見出しはマークを重ねない（`# **文字**` は二重）が、色とリンクは残す。
         head = colored(linked(line["text"].strip(), line), line)
         return "#" * min(int(style[1:]), 6) + f" {head}"
     if style == "cite":
@@ -483,7 +483,7 @@ def pictures(d, objs):
     も `EmbeddedFileContainer` も**参照**（型 8）── 正本は Tika の
     `OneNotePropertyEnum`（`PictureContainer(0x20001C3F)`）。
     前はここで**画像オブジェクト自身のバイト列**を書き出していたので、
-    出てくる `.png` はプロパティ集合の生バイトで、**一枚も開けなかった**
+    出てくる `.png` はプロパティ集合の生バイトで、**1 つも開けなかった**
     （現場で「絵や図が出力されていない」と出た顔）。
     """
     look = by_oid(objs)
@@ -506,7 +506,7 @@ def pictures(d, objs):
 
 
 def by_oid(objs):
-    """OID から実体を引く一枚（参照をたどるのに要る・依頼 608）。"""
+    """OID から実体を引く1 つ（参照をたどるのに要る・依頼 608）。"""
     return {o["oid"]: o for o in objs}
 
 
@@ -519,9 +519,9 @@ def kids_of(p):
 
 
 def _under(d, look, oid, seen):
-    """そのオブジェクトの下にある**本文の字**を、順に集める。
+    """そのオブジェクトの下にある**本文の文字**を、順に集める。
 
-    升の中は `升 → アウトライン要素 → 本文` と下がるので、**字に当たるまで
+    セルの中は `セル → アウトライン要素 → 本文` と下がるので、**文字に当たるまで
     降りる。** 輪になっている指し先で回らないように、通った先は憶える。
     """
     o = look.get(oid)
@@ -541,8 +541,8 @@ def _under(d, look, oid, seen):
 def table_texts(d, objs):
     """**表の中に居る本文**の集まり（`id()` で持つ）。
 
-    本文に二度出さないための一枚 ── 升をたどるときに拾うので、ここで
-    拾うと同じ字が表の外にも並ぶ。
+    本文に二度出さないための1 つ ── セルをたどるときに拾うので、ここで
+    拾うと同じ文字が表の外にも並ぶ。
     """
     look = by_oid(objs)
     inside = set()
@@ -565,18 +565,18 @@ def table_texts(d, objs):
 
 
 def tables(d, objs):
-    """表を組む ── `[{"rows": [[升の字, …], …], "y": 上からの位置}]`。
+    """表を組む ── `[{"rows": [[セルの文字, …], …], "y": 上からの位置}]`。
 
-    **指し先でたどる**（依頼 620）。表 → 行 → 升 → 中身は
+    **指し先でたどる**（依頼 620）。表 → 行 → セル → 中身は
     `ElementChildNodes`（参照の列）で繋がっている ── 正本は Tika の
     `OneNotePropertyEnum`（`ElementChildNodesOfTable(0x24001C20)`）。
 
     前は**並んでいる順**で「表が始まった／行が始まった」と数えていた。
-    作り物の見本では通るが、**本物は改訂をまたぐと順が入れ替わる** ──
+    作り物のサンプルでは通るが、**本物は改訂をまたぐと順が入れ替わる** ──
     現場で「表もぐちゃぐちゃ」と出た顔がこれ。
 
-    Markdown の表に改行は入らないので、**升の中の複数行は空白で繋ぐ**
-    （`<br>` は ambər の画面に字として出る）。
+    Markdown の表に改行は入らないので、**セルの中の複数行は空白で繋ぐ**
+    （`<br>` は ambər の画面に文字として出る）。
 
     **指し先の無い表は、並び順で拾い直す** ── 古い OneNote が書いた
     `.one` でそうなることがある。出ないよりは、順で組んだほうがまし。
@@ -638,7 +638,7 @@ def _tables_in_order(d, objs):
 
 
 def table_markdown(t):
-    """表を Markdown に。**升の数は行ごとに揃える** ── 揃っていない表は崩れる。"""
+    """表を Markdown に。**セルの数は行ごとに揃える** ── 揃っていない表は崩れる。"""
     rows = t["rows"]
     if not rows:
         return []
@@ -646,7 +646,7 @@ def table_markdown(t):
     rows = [[c.replace("|", "\\|") for c in r] + [""] * (width - len(r)) for r in rows]
     # **見出しの行があるとは限らない。** OneNote は旗で持つが、`.one` からは
     # 素直に引けない ── 1 行目を見出しにすると**そのデータが一行消える**ので、
-    # 空の見出しを置く（COM の道で同じ形に決めた・依頼 578）。
+    # 空の見出しを置く（COM のパスで同じ形に決めた・依頼 578）。
     out = ["|" + "  |" * width, "|" + " --- |" * width]
     for r in rows:
         out.append("| " + " | ".join(r) + " |")
@@ -654,13 +654,13 @@ def table_markdown(t):
 
 
 def _content(d, objs):
-    """オブジェクトの並びから、**一枚ぶんの中身**を組む。"""
-    # **表の中の字は、本文に二度出さない。** 升をたどるときに拾うので、
-    # ここで拾うと同じ字が表の外にも並ぶ。
+    """オブジェクトの並びから、**1 つぶんの中身**を組む。"""
+    # **表の中の文字は、本文に二度出さない。** セルをたどるときに拾うので、
+    # ここで拾うと同じ文字が表の外にも並ぶ。
     #
     # **どれが表の中かは、指し先でたどる**（依頼 620）── 前は「表が出たら
     # 次のアウトラインまで」と並び順で数えていたので、順が入れ替わると
-    # 表の外の字まで消したり、表の字が二度出たりした。
+    # 表の外の文字まで消したり、表の文字が二度出たりした。
     look = by_oid(objs)
     skip = table_texts(d, objs)
     if not skip:
@@ -683,9 +683,9 @@ def _content(d, objs):
             lines.append(one)
     # **ページの上にある順に並べる。** OneNote は箱をどこにでも置けるので、
     # 出てきた順は書いた順ではない ── 上から下、同じ高さなら左から右
-    # （COM の道と同じ潰し方）。
+    # （COM のパスと同じ潰し方）。
     lines.sort(key=lambda l: (l["y"], l["x"]))
-    # **同じ場所の同じ字は一つ。** 改訂を重ねて拾ったときに、同じ行が
+    # **同じ場所の同じ文字は一つ。** 改訂を重ねて拾ったときに、同じ行が
     # 二つ並ぶことがある（依頼 617）。位置まで同じなら、それは同じ行。
     seen, uniq = set(), []
     for l in lines:
@@ -716,7 +716,7 @@ def _has_body(pg):
 
 
 def _empty(pg):
-    """**空っぽの一枚か。** 題も本文も表も絵も無ければ、写しても何も残らない。"""
+    """**空っぽの1 つか。** 題も本文も表も絵も無ければ、写しても何も残らない。"""
     return not (_has_body(pg) or (pg["title"] or "").strip())
 
 
@@ -731,7 +731,7 @@ def pages(d):
         # **中身のないノートがセクションごとに一本できる。**
         # ページの空間には `Page`（0x0B）が入っている。
         #
-        # **その札が最後の改訂にあるとは限らない**（依頼 617）── 直していない
+        # **そのラベルが最後の改訂にあるとは限らない**（依頼 617）── 直していない
         # ものは前の改訂に置きっぱなしになるので、最後だけを見ていると
         # **ページまるごと取りこぼす。** 見分けは改訂ぜんぶを重ねたほうで。
         whole = merged(revs)
@@ -740,7 +740,7 @@ def pages(d):
         pg = _content(d, current(revs))
         if not _has_body(pg):
             # **最後の改訂は「変えたところ」しか持っていなかった。** 本文を
-            # 直していなければ、字は前の改訂に置きっぱなしになる ── 題だけが
+            # 直していなければ、文字は前の改訂に置きっぱなしになる ── 題だけが
             # 新しい改訂にあると、**題しか入っていないノート**が出来上がる
             # （現場で「中身もほぼほぼ入っていない」と出た顔）。重ねて拾い直す。
             deep = _content(d, whole)

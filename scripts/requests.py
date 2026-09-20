@@ -62,7 +62,7 @@ def rows() -> list[dict]:
             })
             continue
         num, date, asked, what, check = cells
-        # **道に空白を許す。** ノートの名前に空白は当たり前で、
+        # **パスに空白を許す。** ノートの名前に空白は当たり前で、
         # `packaging/welcome/amber へようこそ.md` が書けなかった。
         # 切れ目は「空白に挟まれた `~` / `!~`」の最初の一つ。
         m = re.match(r"`(.+?)\s+(!?~)\s+(.+)`$", check)

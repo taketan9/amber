@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-/* よそから来た HTML が、ノートの字になるか（依頼 421）。
+/* よそから来た HTML が、ノートの文字になるか（依頼 421）。
  *
- *     ブラウザの clipboard の text/html ──▶ webToMd（js）──▶ .md の字
+ *     ブラウザの clipboard の text/html ──▶ webToMd（js）──▶ .md の文字
  *
  * **二本目の変換器を書かない**のがこの機能の芯なので、ここで見張るのも
- * そこ ── `webToMd` は「均す」だけで、字にするのは面の書き戻しと同じ
- * `blockToMd`。均しが足りなければ、見出しも一覧も一行の字になって出る。
+ * そこ ── `webToMd` は「均す」だけで、文字にするのは画面の書き戻しと同じ
+ * `blockToMd`。均しが足りなければ、見出しも一覧も一行の文字になって出る。
  *
  * 見るのは七つ:
  *   一。要らない札（script、nav、隠してあるもの）が落ちること
  *   二。入れ物（div、section）がほどけて、中の形が残ること
- *   三。相対の行き先が、絶対の道になること
+ *   三。相対の行き先が、絶対のパスになること
  *   四。画像が `![](…)` として残り、数取りの 1px は落ちること
  *   五。枠（`<pre>`）が ``` で囲まれること
  *   六。ページの題から、サイト名の尻尾が落ちること（`clipTitle`）
@@ -18,8 +18,8 @@
  *
  * **六と七も、切り出しの中で見る。** ここは切り出し（`richBlock` から
  * 「薄い包み」まで）だけを読んで動かしているので、`clipTitle` と
- * `bestPart` が切り出しの外へ出た日にはこの検査が落ちる ── 電話は
- * この二つを窓と同じ一組から呼んでいて、外へ出た瞬間に電話だけ
+ * `bestPart` が切り出しの外へ出た日にはこの検査が落ちる ── iPhone は
+ * この二つをデスクトップ版と同じ一組から呼んでいて、外へ出た瞬間にiPhone だけ
  * 取り込めなくなる（実際にそうなった）。
  *
  *     node scripts/web-test.js
@@ -40,9 +40,9 @@ try {
 
 const src = fs.readFileSync(path.join(root, 'gui', 'renderer.js'), 'utf8');
 const from = src.indexOf('function richBlock(');
-const to = src.indexOf('/// この窓の「表示」の面を、上の切り出しに繋ぐ薄い包み。');
+const to = src.indexOf('/// このデスクトップ版の「表示」画面を、上の切り出しに繋ぐ薄い包み。');
 if (from < 0 || to < 0 || to < from) {
-    console.error('gui/renderer.js から「表示」の面を切り出せません');
+    console.error('gui/renderer.js から「表示」画面を切り出せません');
     process.exit(2);
 }
 const dom = new JSDOM('<!doctype html><body></body>');
@@ -70,7 +70,7 @@ const CASES = [
         '<div><div><h3>朝</h3><ul><li>一つめ</li><li>二つめ</li></ul></div></div>',
         '### 朝\n\n- 一つめ\n- 二つめ'],
 
-    ['要らない札は落ちる',
+    ['要らないラベルは落ちる',
         '<nav>案内</nav><p>本文</p><script>alert(1)</script><style>p{}</style><footer>ここは footer</footer>',
         '本文'],
 
@@ -78,13 +78,13 @@ const CASES = [
         '<p>見える</p><p hidden>隠し</p><p aria-hidden="true">読み上げ用</p>',
         '見える'],
 
-    ['相対の行き先が、絶対の道になる',
+    ['相対の行き先が、絶対のパスになる',
         '<p><a href="../ほか">ほか</a></p>',
         '[ほか](https://example.com/ほか)'],
 
-    ['行き先の無いリンクは、字だけ残る',
-        '<p><a>ただの字</a>と<a href="#中">中へ</a></p>',
-        'ただの字と中へ'],
+    ['行き先の無いリンクは、文字だけ残る',
+        '<p><a>ただの文字</a>と<a href="#中">中へ</a></p>',
+        'ただの文字と中へ'],
 
     ['画像はリンクのまま残る',
         '<p><img src="/絵/a.png" alt="図"></p>',
@@ -139,15 +139,15 @@ const TITLES = [
 /// [名前, 入れる HTML まるごと, 本文として出てほしい .md]
 const PARTS = [
     ['article が名乗っていれば、それを信じる',
-        '<nav>案内</nav><header><h1>ここは飾り</h1></header>'
+        '<nav>案内</nav><header><h1>ここは書式</h1></header>'
         + '<article><h1>本題</h1><p>' + 'あ'.repeat(300) + '</p></article>'
         + '<footer>足</footer>',
         '# 本題\n\n' + 'あ'.repeat(300)],
-    ['名乗りが無ければ、いちばん字の多いかたまり',
+    ['名乗りが無ければ、いちばん文字の多いかたまり',
         '<div><p>案内</p></div><div><h2>本題</h2><p>' + 'い'.repeat(200)
         + '</p><p>' + 'ろ'.repeat(200) + '</p></div>',
         '## 本題\n\n' + 'い'.repeat(200) + '\n\n' + 'ろ'.repeat(200)],
-    ['長い台本は、字の量で本文に勝てない',
+    ['長い台本は、文字の量で本文に勝てない',
         '<script type="application/ld+json">' + 'x'.repeat(2000)
         + '</script><div><h2>本題</h2><p>' + 'は'.repeat(200)
         + '</p><p>' + 'に'.repeat(200) + '</p></div>',
@@ -156,15 +156,15 @@ const PARTS = [
 
 // **切り出しが caret の憶えを持っていること**（依頼 461）。
 //
-// 電話の「表示」の面は、絵文字を入れる前にここへ caret を戻す ── 窓の
-// 走査は実際に押して見張っているが、電話は押せないので、**一組が
+// iPhone の「表示」画面は、絵文字を入れる前にここへ caret を戻す ── デスクトップ版の
+// 走査は実際に押して見張っているが、iPhone は押せないので、**一組が
 // 切り出しの中に居ること**だけでも見ておく（`clipTitle` が外へ出て
-// 電話だけ取り込めなくなった、と同じ形を防ぐ）。
+// iPhone だけ取り込めなくなった、と同じ形を防ぐ）。
 let bad = 0;
 for (const name of ['markCaret', 'caretBack']) {
     if (typeof globalThis[name] !== 'function') {
         bad += 1;
-        console.log('✗ 切り出しに ' + name + ' がありません（電話が caret を戻せません）');
+        console.log('✗ 切り出しに ' + name + ' がありません（iPhone が caret を戻せません）');
     }
 }
 for (const [name, html, want] of CASES) {

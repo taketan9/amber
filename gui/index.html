@@ -5,14 +5,14 @@
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'self' 'unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; font-src 'self'; connect-src 'self'">
 <!-- `worker-src` を足したのは Monaco のため。**無いと色分けが本体スレッドで
-     走る** ── 動くので気づかないが、長いノートで窓が固まる。`script-src` が
+     走る** ── 動くので気づかないが、長いノートでデスクトップ版が固まる。`script-src` が
      `worker-src` の代わりに使われ、Monaco は自分の worker を `blob:` で
      組み立てるので弾かれていた（`console-message` を端末へ流して初めて
-     見えた）。通すのは `blob:` だけで、外の道は開けない。 -->
+     見えた）。通すのは `blob:` だけで、外のパスは開けない。 -->
 <title>ambər</title>
 <style>
 /* ── 色 ──
-   既定は「琥珀」── アイコンと同じ色（packaging/amber-master.png）。窓と
+   既定は「琥珀」── アイコンと同じ色（packaging/amber-master.png）。デスクトップ版と
    アプリで別の琥珀にすると、同じものに見えなくなる。
 
    **明暗を切り替えるのは OS。** 琥珀だけは `prefers-color-scheme` に従い、
@@ -118,27 +118,27 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   background: var(--rail); border-right: 1px solid var(--line);
   overflow-y: auto; padding-bottom: 12px;
 }
-/* **名前だけ置く。印は置かない。**
-   長いあいだここは空だった ── アプリの名前は窓の外（Dock・タスクバー・
+/* **名前だけ置く。マークは置かない。**
+   長いあいだここは空だった ── アプリの名前はデスクトップ版の外（Dock・タスクバー・
    ⌘Tab）が既に言っていて、中で二度言うとそのぶんノートが下がるので
    （依頼 175）。戻したのは、名前に**姿**ができたから ── 外したのは
    「アイコン＋ただの名前」で、あれは確かに二度言っているだけだった。
    `ambər` の綴りは、外のどこにも出ていない。
 
-   **印は置かない**（本人の言葉で「くどい」）── 絵と字を並べると、
+   **マークは置かない**（本人の言葉で「くどい」）── 絵と文字を並べると、
    同じことを二つの形で言うことになる。
 
    mac では**高さが変わらない**: 34px は信号機のぶんで既に空けてある。
    Windows と Linux は 14px しか無いので 30px へ伸ばす ── そこだけは
    一覧が 16px 下がる。承知のうえで本人が選んだ（Ｗ１）。
 
-   帯そのものは掴んで動かす場所なので、字も一緒に掴める（`drag`）。 */
+   帯そのものは掴んで動かす場所なので、文字も一緒に掴める（`drag`）。 */
 #railtop {
   height: 30px; flex: none; -webkit-app-region: drag;
   display: flex; align-items: center; padding: 0 14px;
 }
 /* 信号機（`hiddenInset`）は x=20 から並んで右端が 74 あたり ──
-   その右に置く。詰めると、閉じるつもりの指が字に当たる。 */
+   その右に置く。詰めると、閉じるつもりの指が文字に当たる。 */
 body.mac #railtop { height: 34px; padding-left: 88px; }
 #railtop .wm {
   font-size: 13px; font-weight: 600; color: var(--ink-3); letter-spacing: .01em;
@@ -147,9 +147,9 @@ body.mac #railtop { height: 34px; padding-left: 88px; }
 #railtop .wm .s { color: var(--brand-s); }
 /* **一つだけの、押させたいボタン ── ただし塊にはしない。**
    前は琥珀のべた塗りに階調と、琥珀色に光る影を二枚。古く見えていたのは
-   色ではなく**塊であること**で、階調と影はその塊を立体に見せるための飾り
+   色ではなく**塊であること**で、階調と影はその塊を立体に見せるための書式
    だった。塊をやめ、琥珀は 22px の丸だけに残す ── 面積が小さいぶん色は
-   強く効き、字も高さも列の他の行と揃うので、左の列が一本の並びとして
+   強く効き、文字も高さも列の他の行と揃うので、左の列が一本の並びとして
    読める。押せることは丸の形が言うので、地も枠も要らない。 */
 #new {
   display: flex; align-items: center; gap: 9px; width: 100%;
@@ -182,14 +182,14 @@ body.mac #railtop { height: 34px; padding-left: 88px; }
 .dest.on { background: var(--sel); color: var(--ink); font-weight: 600; }
 .dest .n { margin-left: auto; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 /* **カレンダー・新しいノート・すべてのノートは、同じ大きさ・同じ色**（本人・2026-09-12）
-   ── 字は `#new` と同じ太さと大きさ、印はアクセント色で 18px。 */
+   ── 文字は `#new` と同じ太さと大きさ、マークはアクセント色で 18px。 */
 .dest[data-kind="cal"], .dest[data-kind="all"] {
   color: var(--ink); font-weight: 600; padding: 7px 14px; gap: 9px;
 }
 .dest[data-kind="cal"] .mk, .dest[data-kind="all"] .mk { width: 18px; height: 18px; color: var(--amber-deep); }
 .dest[data-kind="cal"].on .mk, .dest[data-kind="all"].on .mk { color: var(--amber-deep); }
 /* 行き先の印。**形で分ける** ── 色を付けたフォルダにだけ四角が出ていた
-   頃は、色の無いフォルダとブックマークの棚が字の形しか違わなかった。
+   頃は、色の無いフォルダとブックマークのフォルダが文字の形しか違わなかった。
    色は形の上に載せる（色だけで分けない）。 */
 .dest .mk { width: 15px; height: 15px; flex: none; color: var(--ink-3); }
 .dest.on .mk { color: var(--amber-deep); }
@@ -198,7 +198,7 @@ body.mac #railtop { height: 34px; padding-left: 88px; }
 .dest[data-depth="1"] { padding-left: 28px; }
 .dest[data-depth="2"] { padding-left: 42px; }
 .dest[data-depth="3"] { padding-left: 56px; }
-/* 保存ディレクトリの行（依頼 511）── フォルダの親。字は少し濃く、右に
+/* 保存ディレクトリの行（依頼 511）── フォルダの親。文字は少し濃く、右に
    同期先の札（Drive のときだけ）。読めていないものは薄く。 */
 .dest[data-kind="place"] { color: var(--ink); font-weight: 600; }
 .dest[data-kind="place"] .mk { color: var(--ink-2); }
@@ -223,7 +223,7 @@ body.mac #railtop { height: 34px; padding-left: 88px; }
   border: 3px solid transparent; background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--ink-3); background-clip: content-box; }
-/* **角の四角は出さない。** 縦と横が交わるところに地の色の升が出て、
+/* **角の四角は出さない。** 縦と横が交わるところに地の色のセルが出て、
    そこだけ板が残って見える。 */
 ::-webkit-scrollbar-corner { background: transparent; }
 
@@ -363,14 +363,14 @@ body.mac #listhead { padding-top: 30px; }
 }
 #drawer .span button.on { border-color: var(--amber-deep); background: var(--sel); color: var(--ink); }
 #drawer .span .x { color: var(--ink-3); padding: 2px 5px; border: none; }
-/* 色の献立の丸。**名前の隣に、その色そのものを置く** ── 「ベルガモット」が
+/* 色のメニューの丸。**名前の隣に、その色そのものを置く** ── 「ベルガモット」が
    どれかを覚えている人はいない。 */
 #more .dot {
   width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid; flex: none;
 }
 /* 工房の色の選び口 ── 選んだ色で、選び口そのものを塗る。 */
 /* **色の列も、ほかの列と同じ左揃え。** ここだけ真ん中に寄っていて、
-   上下に並んだ選び口の字がそこだけ揃わなかった。 */
+   上下に並んだ選び口の文字がそこだけ揃わなかった。 */
 #studio .paint select { text-align: left; }
 /* 段の見出しの ＋ */
 .head { display: flex; align-items: center; }
@@ -433,7 +433,7 @@ body.mac #listhead { padding-top: 30px; }
   border-radius: 999px; background: color-mix(in srgb, #3FA05C 20%, transparent);
   color: #2c7742; vertical-align: 1px;
 }
-/* 控えの札。**行から消さずに貼る** ── 消すと中身を助け出す道が無くなる。 */
+/* 控えの札。**行から消さずに貼る** ── 消すと中身を助け出すパスが無くなる。 */
 .row .clashmark {
   margin-left: 6px; font-size: 10px; font-weight: 700; padding: 1px 6px;
   border-radius: 999px; background: color-mix(in srgb, #D07A2E 22%, transparent);
@@ -445,7 +445,7 @@ body.mac #listhead { padding-top: 30px; }
 }
 .row:hover { background: var(--hover); }
 .row.on { background: var(--sel); }
-/* **まとめて選んでいる行。** 升は出さない ── ふだんの一覧の形が変わると、
+/* **まとめて選んでいる行。** セルは出さない ── ふだんの一覧の形が変わると、
    選びはじめた瞬間に行がずれて、押そうとしていた行が逃げる。地色と、
    左の縁の一本だけ。開いている行（`.on`）とは別の色にする ── 同じ色だと
    「いま見ている一本」と「選んだ二十本」が同じ顔になる。 */
@@ -548,8 +548,8 @@ body.zen #strip { display: none; }
 
 /* ── 右: 中身 ── */
 #pane { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--paper); }
-/* **帯には、幅の要るものだけ置く。** 1180px（既定の窓）だと中の列が
-   636px しかなく、面の札とボタンを並べただけで一杯になる ── 右端の字数と
+/* **帯には、幅の要るものだけ置く。** 1180px（既定のウィンドウ）だと中の列が
+   636px しかなく、画面のラベルとボタンを並べただけで一杯になる ── 右端の文字数と
    状態は縮んで消えていた（「保存しました」が見えるのに押したボタンが動く、
    の裏側はこれ）。目次（☰）と拡大（⤢）は名前の付いた命令として
    「ノート ▾」へ移した ── 名無しの記号二つより、名前のほうが見つかる。 */
@@ -559,18 +559,18 @@ body.zen #strip { display: none; }
   -webkit-app-region: drag;
 }
 body.mac #top { padding-top: 30px; }
-/* **題は、一文字まで縮まない。** 帯には面の札も字数もタグも並ぶので、
+/* **題は、一文字まで縮まない。** 帯には画面のラベルも文字数もタグも並ぶので、
    題だけが `min-width: 0` だと、そこが全部のしわ寄せを引き受けて
    「amber へようこそ」が「a」になる（実際になった）。題に床を敷き、
    縮むのは右端の meta のほうにする。 */
 #title {
   font-size: 17px; font-weight: 700; flex: 1 1 auto; min-width: 9ch;
-  /* **帯から自分を切り抜く。** `#top` は窓ごと引きずる四角
+  /* **帯から自分を切り抜く。** `#top` はウィンドウごと引きずる四角
      （`-webkit-app-region: drag`）で、そこから抜けるには **`no-drag` と
      書くしかない** ── 何も書かないと `none` になるが、`none` は
      「引きずらない」ではなく「切り抜かない」で、親の四角に含まれたまま。
      OS が先に押しを取るので `onclick` は一度も鳴らず、題を押しても
-     窓が動くだけで字が打てなかった（実際にそうなっていた・依頼 477）。 */
+     デスクトップ版が動くだけで文字が打てなかった（実際にそうなっていた・依頼 477）。 */
   -webkit-app-region: no-drag;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   /* 押せば直せる。**ふだんはボタンに見せない** ── 帯の題は読むものが先で、
@@ -586,14 +586,14 @@ body.mac #top { padding-top: 30px; }
 }
 /* ノートを開いていないときは、帯に ⚙ だけが残る ── 右端に寄せる。 */
 #title[hidden] ~ #gear { margin-left: auto; }
-/* **字数と状態は、幅の決まった枠に住む。**
+/* **文字数と状態は、幅の決まった枠に住む。**
    前はどちらも中身の長さぶんの幅を取っていた ── 「保存しました」が出た
    瞬間に帯じゅうが左へずれ、いま押したボタンがカーソルの下から逃げる。
    取り消しを続けて二回押せないのはこれで、一覧の行が一度で開けなかった
    のと同じ「押した先が動く」不具合。**枠を先に取っておけば動かない。** */
 #meta {
   /* **幅は中身で決まらない。** `0 1 132px` は「132px から、足りなければ
-     縮む」── 縮むかどうかは窓の広さで決まり、中の字の長さでは決まらない。
+     縮む」── 縮むかどうかはデスクトップ版の広さで決まり、中の文字の長さでは決まらない。
      だから「保存しました」が出てもボタンは動かない。 */
   flex: 0 1 112px; min-width: 0; display: flex; flex-direction: column;
   align-items: flex-end; gap: 1px; -webkit-app-region: no-drag; overflow: hidden;
@@ -604,7 +604,7 @@ body.mac #top { padding-top: 30px; }
 #state {
   font-size: 11.5px; color: var(--ink-3);
 }
-/* いま何字か。**題の隣ではなく右端** ── 書いている間ずっと動く数字が
+/* いま何文字か。**題の隣ではなく右端** ── 書いている間ずっと動く数字が
    題のとなりにあると、視線が題に戻るたびに数字を読んでしまう。 */
 /* **⋯ と ⚙ の区別を、形ではなく言葉で付ける。**
    前は点三つと歯車が並んでいて、どちらがノートの話でどちらがアプリの話か
@@ -615,7 +615,7 @@ body.mac #top { padding-top: 30px; }
 }
 #tocbtn { font-size: 15px }
 #dots { font-size: 12.5px; font-weight: 600; }
-/* 歯車は絵なので、字と同じ大きさだと小さく見える。 */
+/* 歯車は絵なので、文字と同じ大きさだと小さく見える。 */
 #gear { font-size: 23px; padding: 0 8px; line-height: 1; }
 #tocbtn:hover, #dots:hover, #gear:hover { background: var(--hover); color: var(--ink); }
 
@@ -632,7 +632,7 @@ body.mac #top { padding-top: 30px; }
 #back[hidden], #fwd[hidden], #bell[hidden] { display: none !important; }
 #back svg, #fwd svg, #bell svg { width: 19px; height: 19px; }
 #bell:hover { background: var(--hover); color: var(--ink); }
-/* 仕掛けてあるノートは、鐘が琥珀になる ── 開くたびに献立を開いて
+/* 仕掛けてあるノートは、鐘が琥珀になる ── 開くたびにメニューを開いて
    確かめなくていい。 */
 #bell.on { color: var(--amber-deep); }
 #back:hover:not(:disabled), #fwd:hover:not(:disabled) {
@@ -640,7 +640,7 @@ body.mac #top { padding-top: 30px; }
 }
 #back:disabled, #fwd:disabled { opacity: .3; }
 
-/* 書く面の画像。**字は消さず、行の下に空きを作って置く** ── 消して画像に
+/* 編集画面の画像。**文字は消さず、行の下に空きを作って置く** ── 消して画像に
    すると、パスを一文字直したいだけのときに直しようがない。 */
 .zoneimg {
   display: flex; align-items: center; padding: 6px 0 6px 34px;
@@ -654,15 +654,15 @@ body.mac #top { padding-top: 30px; }
   font-size: 12px; color: #C4564E; padding-left: 34px;
 }
 
-/* ── 読む面で書く ── */
-/* **面ぜんぶが入力欄。** 置いて打てる ── 押して開く一手は挟まない。 */
+/* ── 表示画面で書く ── */
+/* **画面ぜんぶが入力欄。** 置いて打てる ── 押して開く一手は挟まない。 */
 #read { outline: none; caret-color: var(--amber-deep); cursor: text; }
 #read:focus { outline: none; }
 /* 触れないかたまりだけ、指を乗せると分かるようにする ── そこは押すと
-   書く面へ行く（打てるのに保存されない、を作らないため）。 */
+   編集画面へ行く（打てるのに保存されない、を作らないため）。 */
 /* **注記と表は、ここから外した。** どちらも「表示」で直せるようになった
-   のに、指の形と枠だけが「触れないもの」のまま残っていた ── 押すと書く面
-   へ飛ぶ印が出ているところを、打てると思う人はいない（実際に「注記は表示
+   のに、指の形と枠だけが「触れないもの」のまま残っていた ── 押すと編集画面
+   へ飛ぶマークが出ているところを、打てると思う人はいない（実際に「注記は表示
    モードで直せなかった」と言われた）。顔ぶれは `richBlock()` と揃える。 */
 #read pre, #read figure, #read .mermaid { cursor: pointer; }
 #read pre:hover, #read figure:hover, #read .mermaid:hover {
@@ -700,7 +700,7 @@ body.mac #top { padding-top: 30px; }
 #fontbtns button:disabled { opacity: .35; }
 #views button.on { background: var(--paper); color: var(--ink); font-weight: 700;
   box-shadow: 0 1px 2px rgba(0,0,0,.06); }
-/* 書く面と読む面。**同じ場所に重ねず、横に並べる** ── 重ねると
+/* 編集画面と表示画面。**同じ場所に重ねず、横に並べる** ── 重ねると
    Monaco の `automaticLayout` が幅ゼロのまま測り、戻したとき行が折り返し
    直されるまで一瞬崩れる。 */
 #work { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -710,12 +710,12 @@ body.mac #top { padding-top: 30px; }
 
    直したのは三つ。
 
-   1. **一行の長さ。** 前は面の幅いっぱいに流していた。窓を広げるほど一行が
+   1. **一行の長さ。** 前は画面の幅いっぱいに流していた。デスクトップ版を広げるほど一行が
       長くなり、行を折り返すたびに目が左端を探す ── 読みにくさの半分はこれ
-      で、字体や色の話ではない。34em（およそ日本語 40〜45字）で止める。
+      で、字体や色の話ではない。34em（およそ日本語 40〜45文字）で止める。
    2. **見出しの上下。** 前は上下が同じだけ空いていたので、見出しがどちらの
       段落のものか決まらなかった。**上を厚く、下を薄く** ── 見出しは次の
-      かたまりの持ち物。
+      かたまりの自前の型。
    3. **画像。** 前は裸で置いていた。地と同じ白い画像を貼ると、どこからが画像なのか
       分からない。細い枠と丸みと薄い影を付け、`alt` があれば下に添える。 */
 #read {
@@ -727,7 +727,7 @@ body.mac #top { padding-top: 30px; }
    ノートに書かない**ので、来た行がどれかは画面が色で言う。
 
    **淡く敷く（案二）。** 柱ではなく地色にしたのは本人が選んだ形 ──
-   目が勝手に行く。濃く敷くと字が沈むので、地は琥珀の淡いほう。 */
+   目が勝手に行く。濃く敷くと文字が沈むので、地は琥珀の淡いほう。 */
 #band {
   display: flex; align-items: center; gap: 9px; flex: none;
   padding: 9px 15px; font-size: 12.5px; color: var(--ink);
@@ -771,7 +771,7 @@ body.locked #marks { opacity: .5; }
 #band .k.go:hover { background: var(--amber-deep); border-color: var(--amber-deep); }
 #band .fld { flex-basis: 100%; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
 #band .fld b { color: var(--amber-deep); }
-/* ぶつかった場所の、その場の選び口。**字ではない**（書き戻さない）。 */
+/* ぶつかった場所の、その場の選び口。**文字ではない**（書き戻さない）。 */
 #read .gadget {
   display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   margin: 10px 0 2px; padding: 5px 10px; font-size: 12px; line-height: 1.6;
@@ -787,7 +787,7 @@ body.locked #marks { opacity: .5; }
 #read .gadget button:hover { background: var(--hover); border-color: var(--ink-3); }
 #read .gadget button.go:hover { background: var(--amber-deep); border-color: var(--amber-deep); }
 #read .gadget .hint { color: var(--ink-2); }
-/* 来た行。**地色だけ** ── 字も並びも動かさない。 */
+/* 来た行。**地色だけ** ── 文字も並びも動かさない。 */
 #read .came { background: color-mix(in srgb, var(--amber) 12%, transparent); }
 /* 同じ場所を二人が書いて、両方残したところ。**ここだけ強くする** ──
    人が読んで、要らないほうを消すしかない場所なので。 */
@@ -797,14 +797,14 @@ body.locked #marks { opacity: .5; }
 }
 
 /* **柱は一本。左端で揃える。**
-   `34em` は要素ごとの字の大きさで効くので、同じ「34em」でも
+   `34em` は要素ごとの文字の大きさで効くので、同じ「34em」でも
    見出し・本文・罫線が**全部ちがう幅**になっていた ── 実測で
    H1 が左から 32px、本文が 169px、罫線に至っては 300px で、
    230px の棒が真ん中に浮いていた。**左端がガタガタ**だった。
 
-   `rem` なら画面の字（16px）で一度だけ決まるので、どのかたまりも
+   `rem` なら画面の文字（16px）で一度だけ決まるので、どのかたまりも
    同じ幅・同じ左端になる。そして**真ん中に寄せない** ── 「並べて」も
-   「コード」も字は左から始まるので、面を替えるたびに柱が横へ跳ぶ。 */
+   「コード」も文字は左から始まるので、画面を替えるたびに柱が横へ跳ぶ。 */
 #read > * { max-width: 34rem; margin-left: 0; margin-right: 0; }
 #read > :first-child { margin-top: 0; }
 body.split #read { border-left: 1px solid var(--line-2); }
@@ -860,8 +860,8 @@ body.split #read { border-left: 1px solid var(--line-2); }
   max-width: 100%; position: relative;
 }
 /* 押すだけで写せる（依頼 614）。**乗せるまで出さない** ── いつも出して
-   おくと、読んでいるあいだじゅう字の上に札が浮く。焦点が来ても出す
-   （鍵盤だけの人にも届く）。 */
+   おくと、読んでいるあいだじゅう文字の上にラベルが浮く。焦点が来ても出す
+   （キーボードだけの人にも届く）。 */
 #read pre .cp {
   position: absolute; top: 7px; right: 7px; z-index: 1;
   font: inherit; font-size: 11.5px; line-height: 1;
@@ -873,15 +873,15 @@ body.split #read { border-left: 1px solid var(--line-2); }
 #read pre .cp:hover { background: var(--hover); color: var(--ink); border-color: var(--ink-3); }
 #read pre .cp.done { color: var(--brand-s); border-color: var(--brand-s); opacity: 1; }
 #read pre code { background: none; border: 0; padding: 0; font-size: .86em; }
-/* **枠の中に、琥珀の字**（依頼 437）。` ```amber ` と書いた枠だけ、この色で
+/* **枠の中に、琥珀の文字**（依頼 437）。` ```amber ` と書いた枠だけ、この色で
    出す ── 初めて開いた人に見せる絵のため。Monaco はこの語彙を知らないので
-   色を付けず、書いた字がそのまま残る。**メモ帳でも GitHub でも、ただの枠と
+   色を付けず、書いた文字がそのまま残る。**メモ帳でも GitHub でも、ただの枠と
    して読める**（色は amber で開いた人のぶん）── ノートに入るのは囲みの中の
-   字だけで、覚える記法は増えない。 */
+   文字だけで、覚える記法は増えない。 */
 #read pre > code.language-amber {
   color: var(--amber);
   /* **行間をゼロに。** 絵は半分の高さの記号（▀▄█）で描いてあるので、
-     行が離れていると縦の棒が繋がらず、字が横縞に割れて読めない
+     行が離れていると縦の棒が繋がらず、文字が横縞に割れて読めない
      （実際にそう出た）。ここだけ詰める。 */
   display: block; line-height: 1; letter-spacing: 0;
 }
@@ -900,9 +900,9 @@ body.split #read { border-left: 1px solid var(--line-2); }
 }
 #read a:hover { text-decoration-color: currentColor; }
 
-/* 原寸で見る窓（依頼 637）。**地を暗くする** ── 紙の上に紙を重ねると、
+/* 原寸で見るウィンドウ（依頼 637）。**地を暗くする** ── 紙の上に紙を重ねると、
    どちらを見ているのか分からない。大きい画像はそのまま置いて、はみ出したぶんは
-   この窓を転がして見る（縮めない ── 縮めるなら開く意味が無い）。 */
+   このデスクトップ版を転がして見る（縮めない ── 縮めるなら開く意味が無い）。 */
 #lens {
   position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
   background: rgba(20, 16, 10, .82);
@@ -938,8 +938,8 @@ body.split #read { border-left: 1px solid var(--line-2); }
   margin-top: .55em; font-size: 12px; color: var(--ink-3); line-height: 1.6;
 }
 
-/* **表も、文の幅に従わない**（依頼 614 と同じ理由）── 升は折り返せるが、
-   升の数は折り返せない。四列あれば 34rem では必ず横棒が出る。 */
+/* **表も、文の幅に従わない**（依頼 614 と同じ理由）── セルは折り返せるが、
+   セルの数は折り返せない。四列あれば 34rem では必ず横棒が出る。 */
 #read table {
   border-collapse: collapse; margin: 1.1em 0; display: block;
   overflow-x: auto; max-width: 100%; font-size: .95em;
@@ -951,18 +951,18 @@ body.split #read { border-left: 1px solid var(--line-2); }
 
 /* **図は、文の幅に従わない。** 34em は目が一行を追える長さの話で（`#read`
    の頭に書いた理由）、図はそもそも行ではない。狭い枠に押し込むと
-   `useMaxWidth` が全体を縮め、年表の札の字が 14px から 8px になって
+   `useMaxWidth` が全体を縮め、年表のラベルの文字が 14px から 8px になって
    読めなくなった ── 図は図の幅で描かせ、はみ出すぶんだけ横に流す。 */
 #read .mermaid {
   margin: 1.4em 0; overflow-x: auto; text-align: center;
   max-width: min(100%, 52em);
 }
 #read .mermaid svg { max-width: 100%; height: auto; }
-/* 描けなかった図は、書いた字のまま残す ── 消すと直しようがない。 */
+/* 描けなかった図は、書いた文字のまま残す ── 消すと直しようがない。 */
 #read pre.bad { border-color: #C4564E; }
 
 /* **折りたたみ**（依頼 619）。閉じている姿で「何が畳んであるか」が読める
-   ように、見出しは字として出す（三角だけでは分からない）。
+   ように、見出しは文字として出す（三角だけでは分からない）。
    **押すところを広く** ── 指でもマウスでも、行のどこを押しても開く。 */
 #read details {
   margin: 1.1em 0; border: 1px solid var(--line-2); border-radius: 10px;
@@ -981,7 +981,7 @@ body.split #read { border-left: 1px solid var(--line-2); }
   transition: transform .12s;
 }
 #read details[open] > summary::before { transform: rotate(90deg); }
-/* 中身は枠の内側に。**畳みの中でも、枠は面いっぱい**（依頼 614 と同じ理由）。 */
+/* 中身は枠の内側に。**畳みの中でも、枠は画面いっぱい**（依頼 614 と同じ理由）。 */
 #read details > :not(summary) { margin: .8em 14px; }
 #read details > :not(summary):last-child { margin-bottom: 12px; }
 
@@ -1015,12 +1015,12 @@ body.zen #rail, body.zen #list { display: none; }
    狭いときに先に要らなくなるのは「どこにいるか」のほう。 */
 body.norail #rail { display: none; }
 body.nolist #list { display: none; }
-/* **狭めるのは字であって、巻物ではない。**
+/* **狭めるのは文字であって、巻物ではない。**
    `#read` は自分で縦に巻く箱なので、箱ごと 760px に狭めて真ん中に置くと
-   **巻物の摘みも真ん中に来る** ── 広い窓では画面のまんなかに棒が浮いて
-   見えた。読む面の字はもともと `#read > *` が 34em に収めているので、
+   **巻物の摘みも真ん中に来る** ── 広いデスクトップ版では画面のまんなかに棒が浮いて
+   見えた。表示画面の文字はもともと `#read > *` が 34em に収めているので、
    箱を狭める意味は初めから無かった（狭めていたのは棒の居場所だけ）。
-   書く面（Monaco）は行が箱の端まで伸びて折り返すので、あちらは箱ごと
+   編集画面（Monaco）は行が箱の端まで伸びて折り返すので、あちらは箱ごと
    狭めるのが行の長さそのもの ── こちらは残す。 */
 body.zen #ed { max-width: 760px; margin: 0 auto; width: 100%; }
 
@@ -1054,13 +1054,13 @@ body.vim #vim { display: block; }
 }
 /* **名前だけ。絵は置かない**（2026-09-08）── 一度は絵だけにしたが、
    「ビギナーには何がなんだか分からない」で戻した。分かることを、訳の
-   都合で捨てない。外へ配る日は、字をその国の言葉に置き換えればいい。 */
+   都合で捨てない。外へ配る日は、文字をその国の言葉に置き換えればいい。 */
 #marks button:hover { background: var(--hover); border-color: var(--line-2); }
 #marks button:active { background: var(--sel); }
 #marks button.on { background: var(--sel); color: var(--ink); }
 #marks .sep { flex: none; width: 1px; background: var(--line); margin: 3px 3px; }
-/* **読む面でも道具の帯は出す。** 記号を覚えていない人の道具なので、
-   記号の見えない面でこそ要る。 */
+/* **表示画面でも道具の帯は出す。** 記号を覚えていない人の道具なので、
+   記号の見えない画面でこそ要る。 */
 
 
 #blank {
@@ -1069,11 +1069,11 @@ body.vim #vim { display: block; }
 }
 #blank img { width: 54px; height: 54px; opacity: .5; }
 
-/* ── 小窓 ── 命令を選ぶ・字を打つ・一つ選ぶ、を一つで賄う ──
+/* ── ダイアログ ── 命令を選ぶ・文字を打つ・一つ選ぶ、を一つで賄う ──
    別々に作ると、三つの微妙に違う「Esc で閉じる」ができる。 */
 #veil {
-  /* **小窓は、何よりも上。** カレンダー（60）や「使われていない画像」
-     （60）から呼ばれた小窓が下に開くと、暗幕の裏で開いたまま押せない
+  /* **ダイアログは、何よりも上。** カレンダー（60）や「使われていない画像」
+     （60）から呼ばれたダイアログが下に開くと、暗幕の裏で開いたまま押せない
      ── 画面の上では「押しても何も起きない」にしか見えない
      （実際に「予定を登録する」がそうなっていた・依頼 477）。 */
   position: fixed; inset: 0; z-index: 80; display: flex;
@@ -1084,7 +1084,7 @@ body.vim #vim { display: block; }
   -webkit-app-region: no-drag;
 }
 #veil[hidden] { display: none !important; }
-/* 予定を登録する小窓（依頼 493）── 小窓と同じ高さ・同じ紙。 */
+/* 予定を登録するダイアログ（依頼 493）── ダイアログと同じ高さ・同じ紙。 */
 #evform, #newform {
   position: fixed; inset: 0; z-index: 80; display: flex; justify-content: center;
   align-items: flex-start; padding-top: 12vh; background: rgba(0,0,0,.28);
@@ -1101,7 +1101,7 @@ body.vim #vim { display: block; }
   padding: 9px 10px; font-size: 13px; color: var(--ink-2); background: var(--paper); }
 #evform .pick2 button:hover { background: var(--hover); }
 /* だれの用事か（依頼 544）── 色の丸を添えて、選んだものだけ色を付ける。
-   札の形は「新しいノート」の小窓と同じ ── 同じものは同じ形にする。 */
+   ラベルの形は「新しいノート」のダイアログと同じ ── 同じものは同じ形にする。 */
 #evform .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 #evform #evtags .chip {
   display: inline-flex; align-items: center; gap: 6px; --c: var(--ink-3);
@@ -1166,7 +1166,7 @@ body.vim #vim { display: block; }
 }
 /* **名前を名前として見せる、ただ一つの場所。**
    ここだけは題でも行でもなく「名札」なので、綴りに琥珀を一点差せる
-   ── ホーム画面の名札も窓の題名も OS が描くので色を持てず、
+   ── ホーム画面の名札もデスクトップ版の題名も OS が描くので色を持てず、
    README は GitHub が色を落とす。 */
 #sheet .brand { padding: 16px 15px 13px; }
 #sheet .brand .nm { font-size: 27px; font-weight: 600; color: var(--ink); line-height: 1.2; }
@@ -1176,7 +1176,7 @@ body.vim #vim { display: block; }
    薄れて沈む ── 地の明暗で入れ替える（`--amber-deep` は既にその色）。 */
 #sheet .brand .s { color: var(--brand-s); }
 #sheet .hd { padding: 11px 15px 0; font-size: 12px; color: var(--ink-3); }
-/* 名札が題を兼ねる小窓では、題は空になる ── 空のまま置くと余白だけが残る。 */
+/* 名札が題を兼ねるダイアログでは、題は空になる ── 空のまま置くと余白だけが残る。 */
 #sheet .hd:empty { display: none; }
 #sheet input {
   margin: 7px 12px 10px; padding: 8px 11px; border-radius: 9px; font: inherit;
@@ -1184,7 +1184,7 @@ body.vim #vim { display: block; }
   color: var(--ink); outline: none;
 }
 #sheet input:focus { border-color: var(--amber); }
-/* はい／いいえのときは、欄を見せない（鍵盤は受け続ける）。 */
+/* はい／いいえのときは、欄を見せない（キーボードは受け続ける）。 */
 #sheet.bare input {
   height: 0; margin: 0; padding: 0; border: 0; opacity: 0; pointer-events: none;
 }
@@ -1198,8 +1198,8 @@ body.vim #vim { display: block; }
 }
 #sheet .it .k { margin-left: auto; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
 /* **添え書きは、はみ出さずに省く**（依頼 603・本人「保存ディレクトリの
-   見た目が横に長くなりすぎない？」）。小窓の幅は 560px で決め打ちなので、
-   長い道を入れた行は**中で横にはみ出して**、名前ごと右へ押し出されていた。
+   見た目が横に長くなりすぎない？」）。ダイアログの幅は 560px で決め打ちなので、
+   長いパスを入れた行は**中で横にはみ出して**、名前ごと右へ押し出されていた。
    名前は縮めず（それが行の顔）、添え書きだけを `…` で畳む。
    `min-width: 0` が要る ── flex の子は既定で中身より縮まない。 */
 #sheet .it .sub { font-size: 11.5px; color: var(--ink-3);
@@ -1218,12 +1218,12 @@ body.vim #vim { display: block; }
   border-top: 1px solid var(--line-2); white-space: pre-line; }
 
 /* ── 図の工房 ── 左に表、右に図。**直したそばから見える** ──
-   見えないまま字を直させるのが、mermaid をいちばん難しくしていた。 */
+   見えないまま文字を直させるのが、mermaid をいちばん難しくしていた。 */
 #studio {
   position: fixed; inset: 0; z-index: 32; display: flex;
   align-items: center; justify-content: center; padding: 4vh 4vw;
   background: rgba(0,0,0,.34);
-  /* **窓を掴む場所を、ここでは切る。** `#top` は窓ごと引きずるための帯
+  /* **デスクトップ版を掴む場所を、ここでは切る。** `#top` はウィンドウごと引きずるための帯
      （`-webkit-app-region: drag`）で、上に重ねたものより先に押しを取る ──
      重ね順は効かない。工房は上から 4vh に出るので帯とちょうど重なり、
      切らないと「この形にする」も「やめる」も押せない（実際に押せなかった）。 */
@@ -1290,7 +1290,7 @@ body.vim #vim { display: block; }
 }
 #studiobox .row.hd .sp { flex: 0 0 84px; }
 #studiobox .row.hd .sp.wide { flex: 0 0 140px; }
-/* 深さは、字下げそのもので見せる ── 「2」と書くより、ずれている形の
+/* 深さは、インデントそのもので見せる ── 「2」と書くより、ずれている形の
    ほうが枝に見える。 */
 #studiobox .row .deep {
   color: var(--ink-3); font-size: 11px; text-align: right;
@@ -1347,7 +1347,7 @@ body.vim #vim { display: block; }
 }
 #studiobox .err[hidden] { display: none !important; }
 
-/* ── ⋯ の献立 ── */
+/* ── ⋯ のメニュー ── */
 #more {
   position: fixed; z-index: 25; min-width: 200px; padding: 5px;
   background: var(--paper); border: 1px solid var(--line); border-radius: 11px;
@@ -1383,7 +1383,7 @@ body.vim #vim { display: block; }
   padding: 4px 0; border-radius: 6px; font-size: 19px; line-height: 1.25;
 }
 #emojigrid button:hover { background: var(--sel); }
-/* 見つからないときの一行。**盤の幅いっぱいに置く** ── 升の一つに
+/* 見つからないときの一行。**盤の幅いっぱいに置く** ── セルの一つに
    見えると、押せるものだと思われる。 */
 #emojigrid .none { grid-column: 1 / -1; padding: 14px 4px; text-align: center;
   font-size: 12px; color: var(--ink-3); }
@@ -1399,8 +1399,8 @@ body.vim #vim { display: block; }
 #more button .k { margin-left: auto; font-size: 11px; color: var(--ink-3); }
 /* いまどうなっているかは**右端に揃える** ── 名前のすぐ後ろに置くと、
    命令ごとに違う位置で始まって、目が毎回探しに行く。 */
-/* **予定の中身を出す小窓**（依頼 574）── 件名は折り返して全部出す。
-   切れた札を読むための小窓なので、ここで切ったら意味が無い。 */
+/* **予定の中身を出すダイアログ**（依頼 574）── 件名は折り返して全部出す。
+   切れたラベルを読むためのダイアログなので、ここで切ったら意味が無い。 */
 #more .evh { display: block; white-space: normal; line-height: 1.35; max-width: 22rem;
   font-weight: 700; }
 #more button:disabled { opacity: 1; color: var(--ink-2); cursor: default }
@@ -1436,9 +1436,9 @@ body.vim #vim { display: block; }
 body.mac.guest #guestbar { padding-top: 30px; }
 #guestbar[hidden] { display: none !important; }
 #guestbar .what { font-weight: 700; color: var(--ink); flex: none; }
-/* **末尾から削らない。** 道は後ろのほうが効くので、`direction: rtl` で
-   逃げると `/` の位置まで入れ替わって別の道に見える（一度そうなった）。
-   長い道は真ん中を落として渡す（`shortPath`）。 */
+/* **末尾から削らない。** パスは後ろのほうが効くので、`direction: rtl` で
+   逃げると `/` の位置まで入れ替わって別のパスに見える（一度そうなった）。
+   長いパスは真ん中を落として渡す（`shortPath`）。 */
 #guestwhere {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; font-variant-numeric: tabular-nums;
@@ -1537,15 +1537,15 @@ body.dropping::after {
 /* ── カレンダー（依頼 453）──
    月の表と、その日の中身。**ノートを組んだまま出せるのが、この道具で
    カレンダーを持つ意味** ── 予定表とノートが別のアプリなら作れない。 */
-/* **カレンダーは面の一つ**（依頼 478）── ノートと同じ場所に、同じ広さで
-   出す。小窓として重ねていたころは左右が狭く、全画面にしても広がらな
+/* **カレンダーは画面の一つ**（依頼 478）── ノートと同じ場所に、同じ広さで
+   出す。ダイアログとして重ねていたころは左右が狭く、全画面にしても広がらな
    かった（予定を眺めるのは「ちょっと開く」ではなく「しばらく居る」）。 */
 #cal { flex: 1; min-height: 0; min-width: 0; display: flex; }
 #calbox { flex: 1; min-width: 0; display: flex; flex-direction: column;
   background: var(--paper); color: var(--ink); overflow: hidden; }
-/* **字は割らせず、帯のほうを折る**（依頼 529）。幅が足りないとき、既定だと
-   ボタンが縮んで中の字が二行に割れる（「自分だ／け」）── 読めない。
-   窓の幅はいくらでも狭くなりうるので、溢れたら段を足すほうを選ぶ。 */
+/* **文字は割らせず、帯のほうを折る**（依頼 529）。幅が足りないとき、既定だと
+   ボタンが縮んで中の文字が二行に割れる（「自分だ／け」）── 読めない。
+   デスクトップ版の幅はいくらでも狭くなりうるので、溢れたら段を足すほうを選ぶ。 */
 #calbox .hd button, #calbox .hd .seg { white-space: nowrap; flex: none }
 #calbox .hd { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
   padding: .6rem .9rem; border-bottom: 1px solid var(--line); }
@@ -1595,7 +1595,7 @@ body.dropping::after {
    ものが同じ顔をしていると、押してから分かることになる。 */
 #calbox .d .ev.away { border-left-color: #3b78c9;
   background: color-mix(in srgb, #3b78c9 24%, var(--paper)) }
-/* **この機械の予定表のものは、直せる。** よそ（読むだけ）と、自分の
+/* **この環境の予定表のものは、直せる。** よそ（読むだけ）と、自分の
    ノート（琥珀）と、三つを見分けられるように。 */
 #calbox .d .ev.here { border-left-color: var(--cal-here, #2f8a52);
   background: color-mix(in srgb, var(--cal-here, #2f8a52) 24%, var(--paper)) }
@@ -1639,7 +1639,7 @@ body.dropping::after {
 #calbox .seg button.on { background: var(--sel); color: var(--ink); }
 /* 何を出しているか（依頼 529）。**光り方は見方と同じ** ── 別の色にして
    みたら、配色によっては紙に混ざって見えなくなった（白磁で消えた）。
-   二つの切り替えは字（自分だけ／グループ／両方 と 日／週／月／並べて）で
+   二つの切り替えは文字（自分だけ／グループ／両方 と 日／週／月／並べて）で
    見分けが付くので、光りまで変える必要が無い。太字だけ足す。 */
 #calbox .seg.side button.on { font-weight: 600; }
 #calbox .hours { flex: 1; display: flex; flex-direction: column; min-height: 0;
@@ -1669,18 +1669,18 @@ body.dropping::after {
 /* **時間帯の外にある予定**（依頼 562）── 端に寄せて置くので、位置が本当
    ではないことを形で言う。落とすと「その日は空いている」と読めてしまう。 */
 #calbox .blk.out { border-left-style: dotted; opacity: .8 }
-/* **並べて表示の札は二段**（依頼 562・本人）── 時刻を上、件名を下。横に
+/* **並べて表示のラベルは二段**（依頼 562・本人）── 時刻を上、件名を下。横に
    並べると「13:00」に幅を取られて、三十分の会議の件名が三文字で切れる。 */
 #calbox .crowd .chip.two { display: flex; flex-direction: column; align-items: flex-start;
   line-height: 1.25; white-space: normal; }
 #calbox .crowd .chip.two i { font-size: .82em; }
 #calbox .crowd .chip.two b { font-weight: 600; max-width: 100%;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* 一日の帯は、幅が足りるときだけ時刻を出す。字は少し小さく ── 三十分の
+/* 一日の帯は、幅が足りるときだけ時刻を出す。文字は少し小さく ── 三十分の
    会議で一文字でも多く入れるため。**二行まで回す**（依頼 574・本人「日を
    並べて表示してもまだ見えない」）── 三十分の幅に六文字は入らないが、
    二行なら入る。三行目からは切る（段の高さが札ごとに変わらないように）。
-   それでも切れるものは、押せば小窓で全部読める。 */
+   それでも切れるものは、押せばダイアログで全部読める。 */
 #calbox .crowd .bar { font-size: .84em; padding: 1px 5px; line-height: 1.2;
   white-space: normal; display: -webkit-box; -webkit-box-orient: vertical;
   -webkit-line-clamp: 2; overflow: hidden; }
@@ -1719,7 +1719,7 @@ body.dropping::after {
    横に時間（または日付）、縦に人 ── 一日を画面幅に押し込むと三十分の
    会議が線になるので、幅は決め打ちにして横に流す。 */
 #calbox .crowdbtn { margin-left: .2rem }
-/* グループのボタン（依頼 527）── 印と字を並べる。印は左の列の共有と同じ形。 */
+/* グループのボタン（依頼 527）── マークと文字を並べる。マークは左の列の共有と同じ形。 */
 #calbox .groupbtn { display: inline-flex; align-items: center; gap: 5px; }
 #calbox .groupbtn svg { width: 13px; height: 13px; flex: none; color: var(--amber-deep); }
 #calbox .crowdbtn.on { background: var(--sel); border-color: var(--amber); color: var(--ink) }
@@ -1745,8 +1745,8 @@ body.dropping::after {
 /* **名前は左に貼りつける。** 横に流したときに誰の段か分からなくなる
    のが、この表でいちばん困る壊れ方。 */
 /* **名前の欄は、名前の長さで広がってはいけない。**
-   flex の中では `min-width: auto` が効いていて、折り返さない字は
-   その字の幅より細くならない ── 長い名前の段だけ欄が広がり、その段の
+   flex の中では `min-width: auto` が効いていて、折り返さない文字は
+   その文字の幅より細くならない ── 長い名前の段だけ欄が広がり、その段の
    目盛りだけ右へずれていた（実際にずれた）。`min-width: 0` で床を外す。 */
 #calbox .crowd .who { flex: 0 0 10rem; width: 10rem; min-width: 0;
   position: sticky; left: 0; z-index: 1;
@@ -1781,13 +1781,13 @@ body.dropping::after {
 #calbox .crowd .bar.team { border-left-color: #8e5cb3;
   background: color-mix(in srgb, #8e5cb3 28%, var(--paper)) }
 /* **人ごとに色を変える**（依頼 498・本人「花木は青、山田はピンク、佐藤は黄」）。
-   段（`.ln`）が `--lane` を持ち、その段の帯・札・名前の印はぜんぶその色。
+   段（`.ln`）が `--lane` を持ち、その段の帯・札・名前のマークはぜんぶその色。
    種類の色（この Mac・よそ・チーム）より、人の色が勝つ。 */
 /* **地の色は `background-color` で置く。`background` の一括指定を使わない**
    （依頼 561）── あれは `background-image` も道連れに `none` へ戻す。ここは
    段の色を塗るだけのつもりだったのに、**縞（中身の見えない予定）を消して
    いた**。しかもこちらのほうが強い（`[style*=…]` のぶん）ので、縞を後ろに
-   動かしても直らない ── 付いている札を DOM で見て、やっと分かった。 */
+   動かしても直らない ── 付いているラベルを DOM で見て、やっと分かった。 */
 #calbox .crowd .ln[style*="--lane"] .bar, #calbox .crowd .ln[style*="--lane"] .chip {
   border-left-color: var(--lane); background-color: color-mix(in srgb, var(--lane) 30%, var(--paper)); }
 #calbox .crowd .ln[style*="--lane"] .who::before { background-color: var(--lane) }
@@ -1800,7 +1800,7 @@ body.dropping::after {
   white-space: nowrap; cursor: pointer; line-height: 1.6;
   border-left: 2px solid color-mix(in srgb, var(--ink-3) 55%, transparent); }
 /* **`overflow` は帯に付けない。** 付けるとその帯が「スクロールする箱」に
-   なってしまい、中の貼りつく字がどこにも貼りつかなくなる。 */
+   なってしまい、中の貼りつく文字がどこにも貼りつかなくなる。 */
 /* 貼りつく先は**名前の欄の右**。`0` にすると、名前の欄の下に潜って
    見えなくなる（あちらも貼りついていて、下地を持っている）。 */
 #calbox .crowd .span b { position: sticky; left: 10rem; display: block;
@@ -1840,7 +1840,7 @@ body.dropping::after {
 /* ── **予定の「確かさ」は、出どころの色より後ろに書く**（依頼 561）──────
    ここより上の `.chip.team` などは `background:` の一括指定なので、
    **同じ強さなら後ろが勝つ** ── 前に置いた縞は `background-image: none` に
-   戻されていて、画面では一度も出ていなかった（付いている札を DOM で見て
+   戻されていて、画面では一度も出ていなかった（付いているラベルを DOM で見て
    気づいた）。`.ev.lo` で踏んだのと同じ罠（依頼 478）。 */
 
 /* 中身の見えない予定は、**縞にする** ── 「取れなかった」ではなく
@@ -1901,7 +1901,7 @@ body.dropping::after {
     <div id="top" hidden>
       <div id="title"></div>
       <button id="savenow" hidden title="書きかけを保存する（自動保存を切っているとき）">保存</button>
-      <!-- 押せるものは no-drag の箱に入れる（帯は窓を引きずる四角）。 -->
+      <!-- 押せるものは no-drag の箱に入れる（帯はデスクトップ版を引きずる四角）。 -->
       <span id="zenwrap"><button id="zenbtn" title="ノートだけを大きく（F12）">⤢</button></span>
       <div id="views">
         <button data-view="read" title="表示（⌘E で入れ替え）">表示</button>
@@ -1914,8 +1914,8 @@ body.dropping::after {
         <button id="fontdown" title="文字を小さく">A−</button>
         <button id="fontup" title="文字を大きく">A＋</button>
       </div>
-      <!-- **目次はボタンで出す。** 一度、帯の幅を空けるために献立へ引っ込めた
-           ことがある（依頼 297）── 献立の中では見つからず、「消えた」と
+      <!-- **目次はボタンで出す。** 一度、帯の幅を空けるためにメニューへ引っ込めた
+           ことがある（依頼 297）── メニューの中では見つからず、「消えた」と
            言われた。幅は `#meta` を固定してから空いている。 -->
       <button id="tocbtn" title="目次（⌘⇧O）">☰</button>
       <button id="dots" title="このノートにすること（右押しでも同じ）">ノート ▾</button>
@@ -1932,7 +1932,7 @@ body.dropping::after {
       <div id="blankmark"></div>
       <div>左からノートを選ぶか、<b>新しいノート</b>で書きはじめてください</div>
     </div>
-    <!-- **机（タブ）。** 題の帯の下、ノートの上 ── 電話と同じ並び。
+    <!-- **机（タブ）。** 題の帯の下、ノートの上 ── iPhone と同じ並び。
          一本しか開いていないときは出ない（ふだんの画面を、タブのために
          一段ぶん狭くしない）。 -->
     <div id="stripwrap" hidden>
@@ -1944,13 +1944,13 @@ body.dropping::after {
       <button class="go all" id="stripall" title="開いているノートの一覧"></button>
     </div>
     <div id="work" hidden>
-      <!-- **入ってきたものの報せ。** 面の上に置く ── 「並べて」でも
-           「コード」でも同じことが起きているので、片方の面の中に入れると
-           面を替えたときに消えたように見える。 -->
+      <!-- **入ってきたものの報せ。** 画面の上に置く ── 「並べて」でも
+           「コード」でも同じことが起きているので、片方の画面の中に入れると
+           画面を替えたときに消えたように見える。 -->
       <div id="band" hidden></div>
       <!-- **錠**（依頼 629・本人「間違って更新しなくなるように 1 手間いれる
            ような仕組みを期待しているんだが」）。報せの帯と同じ場所・同じ形で、
-           色だけ変える ── 面を替えても消えない。 -->
+           色だけ変える ── 画面を替えても消えない。 -->
       <div id="lockbar" hidden>
         <span class="k">🔒</span>
         <span class="t"></span>
@@ -1965,8 +1965,8 @@ body.dropping::after {
       <div id="marks"></div>
       <div id="vim"></div>
     </div>
-  <!-- **カレンダー**（依頼 453・478）。ノートと同じ場所に、面として出す
-       ── 小窓として重ねていたころは左右が狭く、全画面にしても広がらな
+  <!-- **カレンダー**（依頼 453・478）。ノートと同じ場所に、画面として出す
+       ── ダイアログとして重ねていたころは左右が狭く、全画面にしても広がらな
        かった。右のその日の欄は落とした（同じことが表の中に出ている）。 -->
   <div id="cal" hidden><div id="calbox">
     <div class="hd">
@@ -1996,7 +1996,7 @@ body.dropping::after {
            ── IT に明るくない人に「設定を開いてください」と言わないため
            （`PLANS.ja.md` の前提）。まだ無ければ「作る」、あれば「招待」。 -->
       <button class="groupbtn"></button>
-      <!-- **予定を登録する道は、いつも見えているところに。** 前は右の欄の
+      <!-- **予定を登録するパスは、いつも見えているところに。** 前は右の欄の
            いちばん下にあって、日を選ばないと出てこなかった。 -->
       <button class="add">＋ 予定を登録する</button>
       <span class="grow"></span>
@@ -2005,8 +2005,8 @@ body.dropping::after {
       <!-- **日を替えても読み直さない**（依頼 476）── 読むのは、ここを
            押したときと、毎時十分。 -->
       <button class="teamnow" title="いま読みにいきます" hidden>更新</button>
-      <!-- カレンダーの字の大きさ（依頼 623）。**ノートの大きさとは別に憶える** ──
-           月の升は狭く、ノートと同じだけ大きくすると予定が升からはみ出す。 -->
+      <!-- カレンダーの文字の大きさ（依頼 623）。**ノートの大きさとは別に憶える** ──
+           月のセルは狭く、ノートと同じだけ大きくすると予定がセルからはみ出す。 -->
       <span class="seg fontseg">
         <button class="fdown" title="カレンダーの文字を小さく">A−</button>
         <button class="fup" title="カレンダーの文字を大きく">A＋</button>
@@ -2033,14 +2033,14 @@ body.dropping::after {
     </div>
   </div></div>
   </div>
-  <!-- **予定を登録する小窓**（依頼 493）。題と、終日か、開始と終了の時刻。時刻は
+  <!-- **予定を登録するダイアログ**（依頼 493）。題と、終日か、開始と終了の時刻。時刻は
        打たせず選ばせる。 -->
   <div id="evform" hidden><div class="box">
     <div class="hd"></div>
     <!-- **どこに入れるかを、いちばん先に選ばせる**（依頼 544・本人が決めた丙）。
          どちらも選ばれていない状態で開き、選ぶまで登録できない ── 既定を
          持たせると、その既定のまま押した予定が出る。出す・出さないは、
-         押し間違えたときに戻す道が無いほうの話なので、毎回選ばせる。
+         押し間違えたときに戻すパスが無いほうの話なので、毎回選ばせる。
          グループカレンダーが無ければ、選ぶものが無いので出さない。 -->
     <div class="f" id="evwhere" hidden><span>どこに入れる</span>
       <div class="pick2">
@@ -2060,7 +2060,7 @@ body.dropping::after {
     <div class="err" id="everr" hidden></div>
     <div class="acts"><button id="evcancel">やめる</button><button id="evok" class="go">登録する</button></div>
   </div></div>
-  <!-- **新しいノートの小窓**（依頼 513・電話と同じ三つ）。何も入れずに「作成」でも作れる。 -->
+  <!-- **新しいノートのダイアログ**（依頼 513・iPhone と同じ三つ）。何も入れずに「作成」でも作れる。 -->
   <div id="newform" hidden><div class="box">
     <div class="hd">新しいノート</div>
     <label class="f"><span>タイトル</span><input id="nntitle" type="text" spellcheck="false" placeholder="例: 買い物メモ（空のままでもかまいません）"></label>
@@ -2076,7 +2076,7 @@ body.dropping::after {
   <!-- **画像を原寸で見る**（依頼 637・本人「OneNote の画像サイズが、
        インポートするとものすごく縮小されて…画像をクリックしたら、実際の
        画像サイズに拡大してポップアップ表示する、みたいなことはできないかなぁ」）。
-       紙の幅に合わせて描いているので、字の入った画面写真は縮むと読めない。 -->
+       紙の幅に合わせて描いているので、文字の入った画面写真は縮むと読めない。 -->
   <div id="lens" hidden>
     <div id="lensbox"><img alt=""></div>
     <div id="lensbar">

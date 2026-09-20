@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* 初めて開いた人が見るもの（`first-run.sh` が呼ぶ）。
  *
- * **窓へ送る字の中に、逆引用符と円記号を書かないこと** ── そこで
+ * **ウィンドウへ送る文字の中に、逆引用符と円記号を書かないこと** ── そこで
  * テンプレートが閉じる（`walk.mjs` の頭と同じ罠）。
  */
 import { existsSync, readdirSync } from 'node:fs';
@@ -12,7 +12,7 @@ const HOME_DIR = process.env.HOME_DIR || '';
 
 const tabs = await (await fetch(`http://127.0.0.1:${PORT}/json`)).json();
 const page = tabs.find((x) => x.type === 'page');
-if (!page) { console.error('窓が見つかりません'); process.exit(2); }
+if (!page) { console.error('デスクトップ版が見つかりません'); process.exit(2); }
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((go, no) => { ws.onopen = go; ws.onerror = no; });
 
@@ -68,14 +68,14 @@ await sleep(2500);
 await ok('置き場所が決まる',
     `return state.root.endsWith('/Documents/amber');`, true);
 
-// 二。見本が入る ── 空の窓を見せない。
-await ok('見本のノートが入っている',
+// 二。サンプルが入る ── 空のデスクトップ版を見せない。
+await ok('サンプルのノートが入っている',
     `return state.notes.length > 0;`, true);
 await ok('「ようこそ」がある',
     `return state.notes.some((n) => /ようこそ/.test(n.title || ''));`, true);
 
 // 三。読める形で出る ── 組めずに白いまま、を許さない。
-await ok('見本が読める形で出る', `
+await ok('サンプルが読める形で出る', `
     const one = state.notes.find((n) => /ようこそ/.test(n.title || ''));
     if (!one) return 'ようこそがありません';
     await openNote(one.path);
@@ -85,15 +85,15 @@ await ok('見本が読める形で出る', `
     if (!box.querySelector('h1, h2')) return '見出しが組めていません';
     if (!box.querySelector('table')) return '表が組めていません';
     return true;`, true);
-await ok('見本が字に戻せる', `
+await ok('サンプルが文字に戻せる', `
     return paperToMd(el('read'), state.head) === null ? '戻せません' : true;`, true);
 
-// 四。絵も付いてくる（見本は絵を一枚使っている）。
+// 四。絵も付いてくる（サンプルは絵を1 つ使っている）。
 if (HOME_DIR) {
     const notes = join(HOME_DIR, 'Documents', 'amber');
     const shot = join(notes, 'attachments');
     if (!existsSync(shot) || !readdirSync(shot).length) {
-        bad.push({ name: '見本の絵', why: ['attachments が空です（絵が付いてきていません）'] });
+        bad.push({ name: 'サンプルの絵', why: ['attachments が空です（絵が付いてきていません）'] });
     }
 }
 
@@ -106,7 +106,7 @@ await ok('二度置いても増えない', `
 
 console.log('');
 if (!bad.length) {
-    console.log('初めて開いた人の道は、通っています');
+    console.log('初めて開いた人のパスは、通っています');
     ws.close();
     process.exit(0);
 }
