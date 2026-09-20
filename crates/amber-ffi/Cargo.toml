@@ -13,8 +13,8 @@ description = "amber — Markdown のノートを、C ABI の向こうへ。エ�
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-# **机の機能は入れない。** 電話にゴミ箱は無く、いつもそれを欲しがる core は
-# 電話向けに建たない。
+# **机の機能は入れない。** iPhone にゴミ箱は無く、いつもそれを欲しがる core は
+# iPhone 向けに建たない。
 amber-core = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }

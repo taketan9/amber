@@ -5,7 +5,7 @@ members = [
     "crates/amber-ffi",
     "crates/amber-onenote",
     "crates/amber-server",
-    # 借り物の写し（依頼 636）── `crates/vendor/onenote_parser/PATCHES.ja.md`。
+    # 外部クレートの写し（依頼 636）── `crates/vendor/onenote_parser/PATCHES.ja.md`。
     "crates/vendor/onenote_parser",
 ]
 
@@ -39,7 +39,7 @@ strip = "symbols"
 #     中のものより何世代も新しく、Apple の `nm` すら読めない
 #     （"Unknown attribute kind"）。リンカも同じ年代
 #
-# 最適化はそのまま: これが電話に載るビルド。
+# 最適化はそのまま: これがiPhone に載るビルド。
 [profile.ios]
 inherits = "release"
 lto = false
