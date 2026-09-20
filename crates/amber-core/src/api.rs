@@ -1,12 +1,12 @@
-//! 訊かれたことに答える一枚。**扉が二つあっても、答えは一つ。**
+//! リクエストに答える 1 か所。**入口が 2 つあっても、答えは 1 つ。**
 //!
-//! iPhone は C ABI（`amber-ffi`）から、窓は標準入出力（`amber-server`）から
-//! ここへ来る。前は電話しか居なかったので dispatcher は ffi の中にあったが、
-//! **窓が増えるときに写すと、そこから二つの答えが育つ** ── 「同じ操作なのに
+//! iPhone は C ABI（`amber-ffi`）から、デスクトップ版は標準入出力（`amber-server`）
+//! から、ここへ来る。以前は iPhone しか無かったので dispatcher は ffi の中にあったが、
+//! **デスクトップ版を足すときにコピーすると、そこから 2 つの答えが育つ** ── 「同じ操作なのに
 //! Mac と iPhone で結果が違う」は、一度の編集で作れてしまう。
 //!
-//! 約束: `call` は JSON を受けて JSON を返す。失敗は `Err` で、扉の側が
-//! `{"error": "…"}` に包む。**扉は包むだけで、判断しない。**
+//! 取り決め: `call` は JSON を受けて JSON を返す。失敗は `Err` で返し、入口側が
+//! `{"error": "…"}` に包む。**入口は包むだけで、判断しない。**
 
 
 
@@ -16,12 +16,12 @@ fn arg(p: &serde_json::Value, key: &str) -> String {
 
 /// 錠がかかっていないか（依頼 629）。**書くところだけで訊く。**
 ///
-/// 印を足す・タグを付ける・分ける、といった操作は字を返すだけで、ファイルに
+/// 書式を付ける・タグを付ける・分割する、といった操作は文字列を返すだけで、ファイルに
 /// 落ちるのは必ず `write` ── **門は一つでいい**。二つ目の門を作ると、
 /// 片方だけ直した日にそこから書けてしまう。
 ///
 /// `unlock: true` は「今だけ編集する」を押した人。押していないのに前端が
-/// 勝手に添えることはない（窓も電話も、押されたときだけ添える）。
+/// 勝手に添えることはない（デスクトップ版も iPhone も、操作されたときだけ添える）。
 fn keep_out(p: &serde_json::Value, path: &std::path::Path) -> anyhow::Result<()> {
     crate::lock::keep_out(path, p["unlock"].as_bool().unwrap_or(false))
 }
@@ -104,15 +104,15 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         // deriving it there is how the two answers drift.
                         "search": crate::note::haystack(n),
                         // **家族と分けてあるか。** 判断は core に一つ ──
-                        // 窓と電話で二度書くと、片方だけ「共有」の印が
+                        // デスクトップ版と iPhone に 2 つ書くと、片方だけ「共有」の表示が
                         // 出るノートができる。
                         "shared": crate::notebook::shared(
                             &shares,
                             f.rel.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
                         ),
                         // **クラウドが作った控えなら、そう言う。**
-                        // 一覧から消さない ── 消すと、中身を助け出す道が
-                        // どこにも無くなる。並べたうえで札を貼る。
+                        // 一覧から消さない ── 消すと、中身を取り戻す手段が
+                        // どこにも無くなる。一覧に出したうえで目印を付ける。
                         "clash": n.path.file_name()
                             .and_then(|f| f.to_str())
                             .and_then(crate::cloud::shape)
@@ -134,15 +134,15 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .map(|r| r.rel.clone())
                 .collect();
             books.sort();
-            // 錠のかかったフォルダ（依頼 629）。**同じ歩きから拾う** ── 窓が
-            // フォルダごとに訊き直すと、一覧を組むたびに何十回も往復する。
+            // ロックされたフォルダ（依頼 629）。**同じ走査から拾う** ── デスクトップ版が
+            // フォルダごとに問い合わせ直すと、一覧を作るたびに何十回も往復する。
             // ルート自身も見る（保存ディレクトリまるごとの錠）。
             let locks: Vec<String> = std::iter::once(String::new())
                 .chain(books.iter().cloned())
                 .filter(|rel| dir.join(rel).join(crate::lock::MARK).exists())
                 .collect();
             // **まだ落ちてきていないノート。** iCloud は中身を消して
-            // `.買い物リスト.md.icloud` という札を置くので、名前が違って
+            // `.買い物リスト.md.icloud` というプレースホルダを置くので、名前が違って
             // 一覧に出ない ── 黙っていると「ノートが消えた」にしか
             // 見えないが、待てば戻ってくるだけ。
             let waiting: Vec<serde_json::Value> = crate::cloud::waiting(&dir, &walk.rows)
@@ -150,7 +150,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .map(|at| {
                     serde_json::json!({
                         "of": at.file_name().and_then(|f| f.to_str()).unwrap_or(""),
-                        // 本来の道 ── 電話はこれを iOS に渡して「落として
+                        // 本来のパス ── iPhone はこれを iOS に渡して「ダウンロードして
                         // きて」と頼む。
                         "at": at.to_string_lossy(),
                     })
@@ -158,8 +158,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .collect();
             Ok(serde_json::json!({
                 "root": dir.display().to_string(),
-                // **一つとは限らない。** 家族用と仕事用の棚が両方あって
-                // いい ── 印はフォルダごとに置くので、数を決める理由が無い。
+                // **1 つとは限らない。** 家族用と仕事用のフォルダが両方あって
+                // いい ── 共有の目印はフォルダごとに置くので、数を制限する理由が無い。
                 "shares": shares.iter().map(|s| serde_json::json!({
                     "at": s,
                     "by": crate::notebook::share_mark(&dir.join(s))
@@ -167,12 +167,12 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 })).collect::<Vec<_>>(),
                 "waiting": waiting,
                 "books": books,
-                // 錠のかかったフォルダ（ルートからの道。空はルート自身）。
+                // ロックされたフォルダ（ルートからの相対パス。空はルート自身）。
                 "locks": locks,
                 "stars": shelves,
                 "colors": book.colors,
                 // 共有へ入れたノートが、もといたフォルダ。**一覧と一緒に
-                // 渡す** ── 献立に「どこへ戻すか」を出すのに要る（訊きに
+                // 渡す** ── メニューに「どこへ戻すか」を出すのに要る（問い合わせに
                 // 行くと、押す前に消費してしまう）。
                 "came": book.came,
                 "notes": notes,
@@ -229,7 +229,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             // the phone writes one it has only just made.
             let mut f = crate::text::read(&path).unwrap_or_default();
             // **「今だけ編集する」で錠が落ちない**（依頼 629）── 保存は前書きごと
-            // 書き直すので、`locked: true` の行が消えた字を書くと錠まで外れる。
+            // 書き直すので、`locked: true` の行が消えた内容を書くとロックまで外れる。
             // 外すのは「ロックをやめる」だけ、と本人が決めた（2026-09-18）。
             let text = if crate::lock::note_locked(&path) {
                 crate::note::set_field(&text, "locked", Some("true"))
@@ -310,7 +310,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     Block::Image { alt, link } => {
                         serde_json::json!({ "kind": "image", "alt": alt, "link": link })
                     }
-                    // **升は `runs` を持って渡す。** 表の中にも太字は書かれる
+                    // **セルは `runs` を持って渡す。** 表の中にも太字は書かれる
                     // し、引く側が自分で `**` を剥がしはじめると、二つ目の
                     // Markdown の読み手がそこに生える。
                     Block::Table { head, align, rows } => serde_json::json!({
@@ -341,9 +341,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
 
         // 書く道具の一押し。**押したときに何が起きるかは、ここが決める。**
         //
-        // 渡すのは**選んだ字だけ**で、位置は渡さない ── JS は UTF-16 の桁で
+        // 渡すのは**選択された文字列だけ**で、位置は渡さない ── JS は UTF-16 の桁で
         // 数え、Rust は文字で数えるので、絵文字が一つ混ざれば境目がずれる。
-        // 返ってきた字を、選んだところに置き換えてもらう。
+        // 返した文字列で、選択範囲を置き換えてもらう。
         "mark" => {
             let text = arg(p, "text");
             let with = arg(p, "with");
@@ -390,13 +390,14 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
 
         // 読める形。**組み方は core、見た目は前端。**
         //
-        // `blocks` の隣にもう一つ扉を開けるのは、窓と iPhone で描き方が違う
-        // から ── iPhone は SwiftUI の View を積むので `blocks` が要り、窓は
+        // `blocks` の隣にもう 1 つ口を開けているのは、デスクトップ版と iPhone で
+        // 描き方が違うから ── iPhone は SwiftUI の View を構築するので `blocks` が要り、
+        // デスクトップ版は
         // HTML を流し込むほうが速い。**解釈は一つ**（どちらも
         // `note::blocks` と同じ行単位の読み方を通る）で、分かれるのは
         // 最後の組み立てだけ。
         //
-        // 逃がし（`javascript:` を落とす、`onclick` も `class` も字にする、
+        // エスケープ（`javascript:` を落とす、`onclick` も `class` も文字として出す、
         // 色は検査済みの6桁だけ通す）は `markdown::to_html` の中にある。
         // **ここで足すと二か所になる。**
         "html" => {
@@ -520,7 +521,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "steps": steps }))
         }
 
-        // **題に合わせて改名する**（依頼 492）。改名したら新しい道を返す。いつ
+        // **タイトルに合わせて改名する**（依頼 492）。改名したら新しいパスを返す。いつ
         // 呼ぶかは呼ぶ側（題の欄から出た・ノートから離れた）。
         "settle" => {
             let root = std::path::PathBuf::from(arg(p, "path"));
@@ -574,7 +575,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "renamed": done }))
         }
 
-        // 一本の指紋（`sync::fingerprint`）── 上げるときに向こうへ札として付ける。
+        // 1 件の指紋（`sync::fingerprint`）── アップロード時に向こうへメタデータとして付ける。
         "syncprint" => {
             let bytes = std::fs::read(arg(p, "path")).unwrap_or_default();
             Ok(serde_json::json!({ "print": crate::sync::fingerprint(&bytes) }))
@@ -658,7 +659,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 }
             }
             crate::sync::remember(&root, who, &done, &gone)?;
-            // 伝え終わった改名（`movethere` を運んだ道）は忘れる。
+            // 伝え終わった改名（`movethere` を実行したパス）は記録から消す。
             let moved: Vec<String> = p["moved"]
                 .as_array()
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
@@ -681,12 +682,12 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "kept": done.len(), "dropped": gone.len() }))
         }
 
-        // 共有の棚にする（`off` で、やめる）。
+        // 共有フォルダにする（`off` で解除）。
         //
         // **分けるのはクラウドの仕事。** amber がするのは、そのフォルダに
-        // 印を一枚置くことだけ ── それだけで「このノートを共有する」が
+        // ファイルを 1 つ置くことだけ ── それだけで「このノートを共有する」が
         // そのフォルダへ移すことになり、いまあるフォルダの仕組みがそのまま
-        // 効く。そして印はフォルダと一緒に旅をするので、**受け取った人は
+        // 効く。そしてそのファイルはフォルダと一緒に移動するので、**受け取った人は
         // 何も教えなくていい**。
         //
         // フォルダが無ければ作る ── 「共有する」を押した人に、その前に
@@ -740,7 +741,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // ── 前の姿 ──────────────────────────────────────────────
         //
         // **判断はここ。** いつ一世代にするか、何世代残すか、いつ落とすかは
-        // 窓と電話で同じでなければならない ── 同じフォルダを二つの端末で
+        // デスクトップ版と iPhone で同じでなければならない ── 同じフォルダを 2 つの端末で
         // 触るので、片方の決まりで消したものを、もう片方が残っていると思う。
 
         // いまの姿を一つ残す。`gap` 秒たっていなければ何もしない。
@@ -789,7 +790,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "text": text }))
         }
 
-        // 「残す」の印を付ける／外す。
+        // 「残す」の指定を付ける／外す。
         "keepmark" => {
             let root = std::path::PathBuf::from(arg(p, "root"));
             let note = std::path::PathBuf::from(arg(p, "path"));
@@ -798,11 +799,11 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "ok": true }))
         }
 
-        // フォルダに付けられる色。**並びは core が持つ** ── 窓と電話に
+        // フォルダに付けられる色。**定義は core が持つ** ── デスクトップ版と iPhone に
         // 同じ表を書いていた頃、十一色のうち六色がずれていた。
         // **予定のメモ欄のタグ**（依頼 523）── 誰の用事かは、メモの
-        // いちばん最後のタグだけの行に置く。**読むのも書くのもここ一枚**で、
-        // 窓（`amber-cal` 越し）と電話（EventKit）が同じ答えになる。
+        // いちばん最後のタグだけの行に置く。**読むのも書くのもここ 1 か所**なので、
+        // デスクトップ版（`amber-cal` 経由）と iPhone（EventKit）が同じ答えになる。
         "caltag" => {
             // **まとめて訊けるようにする**（依頼 539）── 月の表には予定が
             // 何十本も並ぶ。一本ずつ訊くと、その数だけ行き来することになる。
@@ -827,7 +828,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         }
 
         // タグを書き換えた**メモ欄ぜんぶ**を返す。人の文章には触らない。
-        // 書き戻すのは呼ぶ側（`amber-cal notes <id> <字>` / EventKit）。
+        // 書き戻すのは呼び出し側（`amber-cal notes <id> <テキスト>` / EventKit）。
         "caltagset" => {
             let notes = p["notes"].as_str().unwrap_or_default();
             let tags: Vec<String> = p["tags"]
@@ -849,7 +850,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         })),
 
         // 同じノートを二人が書いたときに、混ぜる。**繋がない** ── 三つの
-        // 姿を渡されて、混ざった字と「どの行が向こうから来たか」を返すだけ。
+        // 内容を渡されて、マージ結果と「どの行が向こうから来たか」を返すだけ。
         // ファイルに書き戻すのは呼ぶ側（通信も保存も I/O）。
         "merge" => {
             let m = crate::merge::merge(&arg(p, "was"), &arg(p, "ours"), &arg(p, "theirs"));
@@ -935,8 +936,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // list that is already in the phone's memory does not.
         "terms" => {
             // 前端は **見出しごとに探し分ける**（題だけ・タグだけ・
-            // フォルダだけ）。字だけを渡していた頃は、`tag:定型` と打っても
-            // 「tag:定型」という字を本文から探していた。
+            // フォルダだけ）。文字列だけを渡していた頃は、`tag:定型` と打っても
+            // 「tag:定型」という文字列を本文から探していた。
             let groups: Vec<serde_json::Value> = crate::note::terms(&arg(p, "q"))
                 .into_iter()
                 .map(|g| {
@@ -1003,7 +1004,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let cap = p["limit"].as_u64().unwrap_or(200) as usize;
             let cancel = std::sync::atomic::AtomicBool::new(false);
             // 判断は core に。**借りていた cian の grep をやめた** ── あちらは
-            // 打った文字列をそのまま含むかを見るだけで、窓の `/` 絞り込みの
+            // 入力した文字列をそのまま含むかを見るだけで、デスクトップ版の `/` 絞り込みの
             // AND / OR が効かなかった。同じ言葉で探して同じものが出る、が
             // 二つの前端の間で成り立つようになる。一本につき一行なのは前と同じ。
             let hits: Vec<serde_json::Value> = crate::note::find(
@@ -1050,7 +1051,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         }
 
         // 画像の大きさを、押して選べるように書き換える（依頼 420）。
-        // **決めるのはここ一か所** ── 窓と電話が別々に文字列をいじると、
+        // **決めるのはここ 1 か所** ── デスクトップ版と iPhone が別々に文字列をいじると、
         // 片方で付けた大きさをもう片方が読めない形になる。
         "imgsize" => {
             let width = p["width"].as_str();
@@ -1060,10 +1061,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         }
 
         // 絵文字の表（依頼 418）。**一度受け取れば、あとは前端の仕事。**
-        // 外の何かを取りに行かない ── 会社の窓に閉じた機械でも出る。
+        // 外部から取りに行かない ── 会社の閉じた端末でも動く。
         // **ノートから使われていない画像。**（依頼 449）
         //
-        // 数えるだけで、消さない ── 消すのは呼んだ側（窓はゴミ箱へ入れる）。
+        // 数えるだけで、消さない ── 消すのは呼び出し側（デスクトップ版はゴミ箱へ入れる）。
         // 読めなかったノートがあれば `unsure` で言う: 「使われていない」は
         // ぜんぶ読み切って初めて言えることで、黙って少なく数えるのが
         // いちばん危ない。
@@ -1129,7 +1130,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
         // **よその予定表を読む**（依頼 456）。取りに行くのは呼んだ側
-        // （窓は `fetchPage`、電話は `URLSession`）── 核は網に触らない。
+        // （デスクトップ版は `fetchPage`、iPhone は `URLSession`）── core はネットワークに触らない。
         // 返す形は `month` と同じなので、画面は混ぜて並べるだけでよい。
         "ics" => {
             let text = arg(p, "text");
@@ -1156,14 +1157,14 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         }
         // **人ごとに並べる予定表を、CSV から読む**（依頼 471）。
         //
-        // 取りに行かない ── 別の道具が置いた一枚を読むだけ。取り決めは
+        // 取りに行かない ── 別のツールが置いたファイルを読むだけ。取り決めは
         // `docs/team-csv.ja.md`。**読めなくても、理由を返して終わる** ──
-        // 会社の網の中にしかない紙なので、家では必ず読めない。
+        // 会社のネットワークの中にしか無いファイルなので、自宅では必ず読めない。
         "team" => {
             let at = std::path::PathBuf::from(arg(p, "path"));
-            // **月を言わなければ、一枚ぜんぶ**（依頼 476）。
+            // **月を指定しなければ、ファイル全体**（依頼 476）。
             //
-            // この紙は「今日から何日ぶん」の一枚で、月ごとに分かれて
+            // このファイルは「今日から何日ぶん」のもので、月ごとに分かれて
             // いない ── 月を替えるたびに読み直すと、同じ紙を何度も
             // 開くことになるうえ、**途中で置き換わると月によって時点の
             // 違うものが並ぶ**。呼ぶ側が一度読んで、持っておく。
@@ -1206,7 +1207,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // 同じ中身のノートをもう一つ（依頼 412）。
         "copy" => {
             let at = std::path::PathBuf::from(arg(p, "path"));
-            // `dir` を渡されたら、そこへ写す（テンプレートから作る道）。
+            // `dir` を渡されたら、そこへコピーする（テンプレートから作る経路）。
             let into = p["dir"].as_str().map(std::path::PathBuf::from);
             keep_out(p, into.as_deref().map(|d| d.join("写し.md")).as_deref().unwrap_or(&at))?;
             let made = crate::note::duplicate(&at, into.as_deref(), &crate::note::today())?;
@@ -1215,7 +1216,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
 
         // Move a note into another notebook, pictures and all.
         //
-        // `root` を渡されたら、履歴の棚・共有から戻る場所・同期の憶えも連れて行く
+        // `root` を渡されたら、履歴のディレクトリ・共有から戻る場所・同期の記録も一緒に移す
         // （依頼 496）── 同期は「消して新しく上げる」ではなく「名前が変わった」として運ぶ。
         "move" => {
             let note = std::path::PathBuf::from(arg(p, "path"));
@@ -1232,7 +1233,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "path": at.display().to_string() }))
         }
 
-        // 共有の棚へ入れたノートの、**もといたフォルダ**を憶える／思い出す。
+        // 共有フォルダへ入れたノートの、**移動前のフォルダ**を記録する／読み出す。
         //
         // 「共有をやめる」を押した人が探しているのは、そのノートが前に居た
         // ところ ── いままではいちばん上へ戻していて、フォルダに分けている
@@ -1240,7 +1241,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         //
         // **ノートには書かない。** ノートはただの Markdown で、家族に渡った
         // ノートに「元は くらし に居た」と書いてあっても相手には意味が無い。
-        // 棚の帳面（`.amber/settings.json`）に一行持つ。
+        // 設定ファイル（`.amber/settings.json`）に 1 行持つ。
         //
         // 憶えは `notes` が一覧と一緒に渡すので、ここは**書くだけ** ──
         // `from` があれば憶える、`forget` なら忘れる。戻したあとも憶えて
@@ -1449,9 +1450,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "ok": true }))
         }
 
-        // OneNote を取り込む（依頼 621）。**机の上だけ** ── 電話の束ねには
+        // OneNote を取り込む（依頼 621）。**デスクトップ版だけ** ── iPhone のバンドルには
         // 読み手が入っていないので、訊かれたら「ここには無い」と答える。
-        // 窓はこれを**別のエンジン**に訊く（大きい一冊を読む間、ノートの
+        // デスクトップ版はこれを**別のエンジン**に投げる（大きいノートブックを読むあいだ、ノートの
         // 一覧や保存を待たせない）。
         #[cfg(feature = "desktop")]
         "onenote_find" => {
@@ -1586,8 +1587,8 @@ mod tests {
         d
     }
 
-    /// 錠（依頼 629）。**門は `write` 側に一つ** ── 印を足す・タグを付けるは
-    /// 字を返すだけなので、そこを通しても錠は破れない。
+    /// ロック（依頼 629）。**ゲートは `write` 側に 1 つ** ── 書式を付ける・タグを付けるは
+    /// 文字列を返すだけなので、そこを通してもロックは破れない。
     #[test]
     fn 錠のかかったノートは書けない() {
         let d = note_dir();
@@ -1659,7 +1660,7 @@ mod tests {
         // 挟む・外す
         assert_eq!(m("wrap", "**", "太字"), "**太字**");
         assert_eq!(m("wrap", "**", "**太字**"), "太字");
-        // 選んでいないときは印だけ ── 中に入って打てるように。
+        // 選択が無いときは記号だけ ── 中にカーソルを置いて打てるように。
         assert_eq!(m("wrap", "`", ""), "``");
 
         // 行頭。**すべてに付いていれば外れる。**
@@ -1667,7 +1668,7 @@ mod tests {
         assert_eq!(m("line", "- ", "- あ\n- い"), "あ\nい");
         // 一つでも無ければ、揃える。
         assert_eq!(m("line", "- ", "- あ\nい"), "- あ\n- い");
-        // 別の印は付け替える ── `> - もの` はたいてい望んだことではない。
+        // 別の記号は付け替える ── `> - もの` はたいてい意図した結果ではない。
         assert_eq!(m("line", "> ", "- あ"), "> あ");
         // チェックは `[x]` でも「付いている」。
         assert_eq!(m("line", "- [ ] ", "- [x] 済み"), "済み");
@@ -1693,12 +1694,12 @@ mod tests {
         let h = r["html"].as_str().unwrap();
         assert!(h.contains("<h1"), "見出しが組まれていない: {h}");
         assert!(!h.contains("title: x"), "前書きが漏れている: {h}");
-        // チェックは行番号を積んで渡る ── 何番目の升かを数えると、
+        // チェックは行番号を持って渡る ── 何番目のチェックボックスかを数えると、
         // 前書きのあるノートでずれる。
         assert!(h.contains("data-line="), "チェックに行番号が無い: {h}");
 
         // 逃がしは `markdown::to_html` の中にある。**ここでも効くこと**を
-        // 見ておかないと、扉を増やしたときに素通りする道ができる。
+        // 見ておかないと、口を増やしたときに素通りする経路ができる。
         let bad = call("html", &serde_json::json!({
             "text": "<script>alert(1)</script>\n\n[押す](javascript:alert(1))\n",
         })).unwrap();
@@ -1950,7 +1951,7 @@ mod tests {
     #[test]
     fn the_tag_line_of_an_event_goes_in_and_comes_back() {
         // **口が繋がっていることを見る。** 判断（`caltag`）の試験は
-        // あちらにある ── ここで見たいのは、窓と電話が呼ぶ名前で
+        // あちらにある ── ここで見たいのは、デスクトップ版と iPhone が呼ぶ名前で
         // 同じ答えが返ってくることだけ。
         let memo = "保険証を忘れずに。\n\n#太郎 #次郎";
         let got = call("caltag", &serde_json::json!({ "notes": memo })).unwrap();
@@ -2000,7 +2001,7 @@ mod tests {
         let note = root.join("仕事").join("週報.md");
         std::fs::write(&note, "---\ntitle: 週報\n---\n本文。\n").unwrap();
 
-        // 棚に載せても、ノートは 仕事 フォルダから動かない。
+        // お気に入りに入れても、ノートは 仕事 フォルダから動かない。
         let text = std::fs::read_to_string(&note).unwrap();
         let out = call("star", &serde_json::json!({ "text": text, "shelf": "買い物/週次" })).unwrap();
         std::fs::write(&note, out["text"].as_str().unwrap()).unwrap();
@@ -2009,7 +2010,7 @@ mod tests {
         let n = &all["notes"].as_array().unwrap()[0];
         assert_eq!(n["book"], "仕事", "実体のフォルダは変わらない");
         assert_eq!(n["star"], "買い物/週次");
-        // 途中の棚も存在する。
+        // 途中のフォルダも存在する。
         let stars: Vec<String> = all["stars"]
             .as_array()
             .unwrap()
@@ -2018,7 +2019,7 @@ mod tests {
             .collect();
         assert_eq!(stars, vec!["買い物".to_string(), "買い物/週次".to_string()]);
 
-        // 空の棚は、設定ファイルが憶えている。
+        // 空のフォルダは、設定ファイルが記録している。
         call("shelf", &serde_json::json!({ "path": root.display().to_string(), "name": "あとで" })).unwrap();
         let all = call("notes", &serde_json::json!({ "path": root.display().to_string() })).unwrap();
         assert!(all["stars"].as_array().unwrap().iter().any(|v| v == "あとで"));
@@ -2087,8 +2088,8 @@ mod tests {
 
     /// 四つの範囲が、**それぞれ違うものを包む**か。
     ///
-    /// 窓は長いあいだ `scope: "all"` を決め打ちで渡していて、四つあることは
-    /// エンジンしか知らなかった ── 電話にできて窓にできない、が起きていた。
+    /// デスクトップ版は長いあいだ `scope: "all"` を決め打ちで渡していて、4 つあることは
+    /// エンジンしか知らなかった ── iPhone にできてデスクトップ版にできない、が起きていた。
     #[test]
     fn 範囲の四つは_それぞれ違うものを包む() {
         let d = tempfile::tempdir().unwrap();
@@ -2176,16 +2177,16 @@ mod tests {
         // 向こうに無かったものは、そのまま。
         assert_eq!(std::fs::read_to_string(to.join("知らない.md")).unwrap(), "触るな\n");
         assert_eq!(std::fs::read_to_string(to.join("日記/9月.md")).unwrap(), "晴れ\n");
-        // 同じ棚の別の紙も、そのまま。
+        // 同じフォルダの別のファイルも、そのまま。
         assert_eq!(std::fs::read_to_string(to.join("仕事/c.md")).unwrap(), "いまの c\n");
         // 向こうにしか無かったものは、構造ごと入る。
         assert_eq!(std::fs::read_to_string(to.join("仕事/b.md")).unwrap(), "むかしの b\n");
     }
 
-    /// 一枚だけの zip も、フォルダだけの zip も、同じ場所へ戻せるか。
+    /// ファイル 1 つだけの zip も、フォルダだけの zip も、同じ場所へ戻せるか。
     ///
     /// 全体の zip は `ノート/…` という一つの山の下にあるので頭を外すが、
-    /// **一枚だけの zip は山になっていない** ── そこで同じ外し方をすると
+    /// **ファイル 1 つだけの zip には共通の親フォルダが無い** ── そこで同じ剥がし方をすると
     /// ファイル名そのものが外れて、何も戻らない。
     #[test]
     fn 一枚だけの_zip_も戻せる() {
@@ -2219,7 +2220,7 @@ mod tests {
         })).unwrap();
         assert_eq!(std::fs::read_to_string(to2.join("仕事/週報.md")).unwrap(), "今週の\n");
 
-        // 札そのものは、ノート帳に置いていかない。
+        // ラベル自体は、ノートフォルダに展開しない。
         assert!(!to2.join(crate::zipbox::LABEL).exists());
     }
 
@@ -2262,7 +2263,7 @@ mod tests {
         assert_eq!(count(), 2);
     }
 
-    /// 古いものは落ちるか。**印を付けたものは残るか。**
+    /// 古いものは削除されるか。**「残す」を付けたものは残るか。**
     #[test]
     fn 五十を超えたら落ちる_ただし印のあるものは残る() {
         let d = tempfile::tempdir().unwrap();
@@ -2280,7 +2281,7 @@ mod tests {
             let f = std::fs::File::options().write(true).open(&at).unwrap();
             f.set_modified(old).unwrap();
         }
-        // 一つだけ「残す」の印を付ける（いちばん古いもの）。
+        // 1 つだけ「残す」を指定する（いちばん古いもの）。
         let oldest = "2026-01-01T00-00-00";
         std::fs::rename(shelf.join(format!("{oldest}.md")),
                         shelf.join(format!("{oldest}.keep.md"))).unwrap();
@@ -2295,9 +2296,9 @@ mod tests {
             "root": root.display().to_string(), "path": note.display().to_string(),
         })).unwrap();
         let v = rows["versions"].as_array().unwrap();
-        // 印の無いものは新しい五十まで（＋いま足した一つ）。
+        // 指定の無いものは新しい 50 件まで（＋いま追加した 1 件）。
         assert!(v.len() <= crate::history::KEEP_GENS + 2, "{} 件", v.len());
-        // **印のあるものは、どれだけ古くても残る。**
+        // **「残す」が付いたものは、どれだけ古くても残る。**
         assert!(v.iter().any(|x| x["stamp"] == oldest && x["kept"] == true),
                 "印のいちばん古い姿が消えました");
     }
@@ -2446,7 +2447,7 @@ mod tests {
         }))
         .unwrap();
 
-        // **印はフォルダの中に置く** ── 設定ではなく、フォルダ自身が言う。
+        // **共有の目印はフォルダの中に置く** ── 設定ではなく、フォルダ自身が持つ。
         assert!(d.path().join("共有").join(crate::notebook::SHARE_MARK).is_file());
         let mark = crate::notebook::share_mark(&d.path().join("共有")).unwrap();
         assert_eq!(mark.by, "Taketan");
@@ -2454,7 +2455,7 @@ mod tests {
         let out = call("notes", &root).unwrap();
         assert_eq!(out["shares"][0]["at"], "共有");
         assert_eq!(out["shares"][0]["by"], "Taketan");
-        // **題ではなく道で確かめる** ── 題は一行目から決まるので、
+        // **タイトルではなくパスで確かめる** ── タイトルは 1 行目から決まるので、
         // `- [ ] 牛乳` で始まるノートの題は「牛乳」になる（そこはこの
         // 試験の話ではない）。
         let shared: Vec<&str> = out["notes"]
@@ -2495,7 +2496,7 @@ mod tests {
     fn クラウドの置き土産を_一覧が言う() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("買い物リスト.md"), "- [ ] 牛乳\n").unwrap();
-        // 落ちてきていない札（隠しファイル）。
+        // ダウンロードされていないプレースホルダ（隠しファイル）。
         std::fs::write(d.path().join(".週報.md.icloud"), "").unwrap();
         // クラウドが作った控え ── **ノートとしては並ぶ**。
         std::fs::write(
@@ -2518,7 +2519,7 @@ mod tests {
         assert_eq!(clash[0]["clash"]["of"], "買い物リスト.md");
         assert_eq!(clash[0]["clash"]["by"], "Taketan");
 
-        // ふつうのノートに札は付かない。
+        // 通常のノートにプレースホルダは付かない。
         let plain: Vec<&serde_json::Value> =
             notes.iter().filter(|n| n["clash"].is_null()).collect();
         assert_eq!(plain.len(), 1);
@@ -2581,7 +2582,7 @@ mod tests {
         let out = call("split", &serde_json::json!({ "text": text })).unwrap();
         assert_eq!(out["head"], "---\ntitle: x\ntags: [a]\n---\n");
         assert_eq!(out["body"], "\n本文。\n");
-        // くっつけると元に戻る ── ここがずれると、書いた字が消える。
+        // 連結すると元に戻る ── ここがずれると、書いた内容が消える。
         let back = format!("{}{}", out["head"].as_str().unwrap(), out["body"].as_str().unwrap());
         assert_eq!(back, text);
 
