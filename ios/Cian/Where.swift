@@ -350,7 +350,7 @@ struct Where: View {
 
                 Section {
                     // **窓の「テーマ」と同じ一つの表**（本人「文言を窓版に合わせて」・2026-09-12）
-                    // ── 琥珀の三つ（iPhone に合わせる・明るい・暗い）と、cian と同じ二十一。
+                    // ── 琥珀の3 つ（iPhone に合わせる・明るい・暗い）と、cian と同じ二十一。
                     // 琥珀を選ぶと `look`、配色を選ぶと `palette`（明暗はその配色に従う）。
                     Picker("テーマ", selection: themeKey) {
                         Text("琥珀 ── OS に合わせる").tag("")

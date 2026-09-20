@@ -86,7 +86,7 @@ contextBridge.exposeInMainWorld('amber', {
     /// まるごと消える（実際に消えた）。
     appVersion: () => ipcRenderer.invoke('amber:appVersion'),
 
-    /// どの版か（`'full'` / `'office'`）。会社向けの1 つでは、外のネットワークに
+    /// どの版か（`'full'` / `'office'`）。会社向けのビルドでは、外のネットワークに
     /// 触るもの（同期・カレンダー）を画面ごと出さない。
     edition: () => ipcRenderer.invoke('amber:edition'),
 

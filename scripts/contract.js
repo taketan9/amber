@@ -90,14 +90,14 @@ console.log('サンプルのノートの在りか');
     ok(notes.length > 0, 'packaging/welcome に .md がある（' + notes.length + ' 枚）',
         '同梱する側の「サンプルのノートを入れる」が、ここを写します');
     ok(read('.github/workflows/release.yml').includes('packaging/gui_zip.py'),
-        '配る1 つは gui_zip.py が組む（サンプルを入れて、開いて数える）',
+        '配布物は gui_zip.py が作る（サンプルを入れて、開いて数える）',
         'zip コマンドは UTF-8 のマークを立てないので、日本語の名前が Windows で化けます');
-    // **配る1 つは、タグからビルドし直せること。** `npm install` は lock を
+    // **配布物は、タグからビルドし直せること。** `npm install` は lock を
     // 書き直すことがあり、書き直されたものがそのまま zip に入る ──
-    // 配る1 つの中に、どのコミットにも無いファイルが混ざる。
+    // 配布物の中に、どのコミットにも無いファイルが混ざる。
     ok(/npm ci /.test(read('.github/workflows/release.yml')),
         '配るときは npm ci（lock を書き換えない）',
-        'npm install だと lock がずれ、同じタグから同じ1 つが出なくなります');
+        'npm install だと lock がずれ、同じタグから同じ 1 つが出なくなります');
 }
 
 /* ── 四 ── 画面の組み立て手順 ──────────────────────────────── */
@@ -113,7 +113,7 @@ console.log('画面の組み立て');
         ok(/npm install/.test(s) && /vendor\.js/.test(s),
             what + ' の走らせ方が npm install → node vendor.js を通る');
     }
-    // Monaco・vim・図の三つ。どれが欠けても「デスクトップ版は開くが中身が無い」。
+    // Monaco・vim・図の3 つ。どれが欠けても「デスクトップ版は開くが中身が無い」。
     for (const need of ['monaco/vs/loader.js', 'monaco-vim/monaco-vim.umd.js',
                         'mermaid/mermaid.min.js']) {
         ok(vendor.includes(need), '積むもの: ' + need);

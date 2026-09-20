@@ -24,7 +24,7 @@ struct Syntax: View {
         ("画像", "![説明](画像の場所)", "頭に ! を付けるとリンクではなく画像"),
         ("引用", "> 引用する文章", "行の頭に > と空白"),
         ("注記", "> [!NOTE]\n> 覚えておくこと", "NOTE / TIP / IMPORTANT / WARNING / CAUTION"),
-        ("区切り線", "---", "ハイフン三つだけの行"),
+        ("区切り線", "---", "ハイフン3 つだけの行"),
         ("表", "| a | b |\n|---|---|\n| 1 | 2 |", "縦棒で区切る"),
         ("図", "```mermaid\nflowchart LR\n  A --> B\n```", "mermaid の書き方で図になる"),
     ]
@@ -48,7 +48,7 @@ struct Syntax: View {
 
 /// amber について（電話）。
 ///
-/// **不具合を伝えるときの三つ**（窓の `cmdAbout` と同じ顔ぶれ）── 画面の
+/// **不具合を伝えるときの3 つ**（窓の `cmdAbout` と同じ顔ぶれ）── 画面の
 /// 版、エンジンの版、ノートの保存場所。これが無いと、どちらの amber の
 /// どの版の話なのかが分からないまま話が始まる。
 struct About: View {
@@ -98,7 +98,7 @@ struct About: View {
                 LabeledContent("エンジン", value: engine)
                 LabeledContent("ノートの保存場所", value: store?.rootName ?? "（この画面からは見えません）")
             } footer: {
-                Text("不具合を伝えるときは、この三つを添えてください。")
+                Text("不具合を伝えるときは、この3 つを添えてください。")
             }
         }
         .navigationTitle("ambər について")

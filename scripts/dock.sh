@@ -1,5 +1,5 @@
 #!/bin/zsh
-# **mac の Dock に、ambər を1 つ置く**（依頼 446）。
+# **mac の Dock に、ambər を 1 つ置く**（依頼 446）。
 #
 #     scripts/dock.sh          # ~/Applications/ambər.app を作る（作り直す）
 #

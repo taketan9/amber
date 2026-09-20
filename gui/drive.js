@@ -87,7 +87,7 @@ function authUrl({ clientId, redirect, challenge, state, authUrl, scope }) {
     return u.href;
 }
 
-/// ブラウザに見せる、折り返しの1 つ。**普通の日本語で、一言だけ。**
+/// ブラウザに見せる、折り返しのページ。**普通の日本語で、一言だけ。**
 function landing(ok) {
     const say = ok
         ? 'サインインできました。ambər に戻ってください。このタブは閉じてかまいません。'

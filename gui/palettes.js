@@ -31,7 +31,7 @@ const CIAN_PALETTES = [
     { name: "finder", bg: "#ffffff", fg: "#1d1d1f", dim: "#86868b", border: "#d8d8dc", accent: "#0a84ff", sel: "#0a84ff", visual: "#d6e9ff", mark: "#ff9500", popup: "#f7f7f9", status: "#ececee", blue: "#2f7de0", yellow: "#9a6b00", cyan: "#0a7f8c", magenta: "#a63aa6", red: "#c0392b", green: "#2f8a3e", doc: "#3a3a3c" },
 ];
 
-/// デスクトップ版の三つの装い（白磁・陰翳・端末譲り）── cian の `index.html` の変数そのまま。
+/// デスクトップ版の3 つの装い（白磁・陰翳・端末譲り）── cian の `index.html` の変数そのまま。
 const CIAN_LOOKS = {
     hakuji: { "bg": "#f7f8f8", "pane": "#ffffff", "pane-off": "#f3f5f5", "line": "#e3e7e6", "text": "#2b3333", "dim": "#8b9493", "dir": "#17706a", "accent": "#0e9e8f", "accent-dim": "#e6f1ef", "on-accent": "#ffffff", "sel-strong": "#c8e4df", "row-hover": "#eef2f1", "mark": "#bf6b34" },
     inei: { "bg": "#14110f", "pane": "#1c1714", "pane-off": "#161211", "line": "#2b2320", "text": "#d9d0c5", "dim": "#7c6f64", "dir": "#c9a227", "accent": "#e8b84b", "accent-dim": "#2e2519", "on-accent": "#1a1409", "sel-strong": "#3d3120", "row-hover": "#241d19", "mark": "#c8703c" },

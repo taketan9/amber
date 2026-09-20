@@ -482,7 +482,7 @@ fn date(s: &str) -> Option<NaiveDate> {
     let b: u32 = parts[1].trim().parse().ok()?;
     let c: u32 = parts[2].trim().parse().ok()?;
     // **四桁のほうが年。** アメリカ式の `9/10/2026` と日本式の `2026/9/10`
-    // は、どちらも三つ組で来る ── 年がどちらにあるかで見分ける。
+    // は、どちらも3 つ組で来る ── 年がどちらにあるかで見分ける。
     if parts[0].trim().len() == 4 || a > 31 {
         NaiveDate::from_ymd_opt(a, b, c)
     } else {

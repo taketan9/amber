@@ -8,7 +8,7 @@
  * 実物では落ちる、が何度もあった ── 落ちるのはたいてい「押したときに
  * しか通らない道」で、そこは単体の試験が触れない。
  *
- * 見ているのは三つ:
+ * 見ているのは3 つ:
  *   一。例外が飛ばないこと（`Runtime.exceptionThrown`）
  *   二。`console.error` / `warning` が出ないこと
  *   三。**触ったあと、そのノートがまだテキストに戻せること**（`paperToMd`）──
@@ -234,14 +234,14 @@ await step('タブ：50 枚を超えたら、古いものから閉じる', `
     const left = tabs.length;
     const kept = tabs.some((t) => t.path === window.__dirty);
     const still = tabs.some((t) => t.path === here);
-    // いちばん古い（seen が小さい）ものから消えているか。書きかけの1 つは
+    // いちばん古い（seen が小さい）ものから消えているか。書きかけの 1 つは
     // 飛ばすので、その次に古い二枚が代わりに消えていること。
     const next2 = ['/偽/58.md', '/偽/57.md'].some((p) => tabs.some((t) => t.path === p));
     const young = tabs.some((t) => t.path === '/偽/0.md');
     tabs = real; showing = here;
     drawStrip();
     if (left !== 50) return '50 枚に戻っていません（' + left + '）';
-    if (!kept) return '書きかけのタブを閉じました（いちばん古い1 つ）';
+    if (!kept) return '書きかけのタブを閉じました（いちばん古い 1 つ）';
     if (!still) return 'いま出しているタブを閉じました';
     if (next2) return '古いほうが残っています';
     if (!young) return '新しいほうを閉じています';
@@ -569,7 +569,7 @@ await step('選んでメニューを出す', `
     unpickAll();
     return out > 2;`, true);
 
-// 十三の二。**テーマぜんぶ**（依頼 495）── 琥珀の三つと、cian と同じ二十一。
+// 十三の二。**テーマぜんぶ**（依頼 495）── 琥珀の3 つと、cian と同じ二十一。
 // どれを着せても文字と紙の色が分かれていて、着せ替えで例外が飛ばないこと。
 await step('テーマ：二十四の配色ぜんぶ着せられる', `
     const was = theme;
@@ -823,7 +823,7 @@ if (patience === undefined) delete process.env.PATIENCE; else process.env.PATIEN
 
 /* ── 十六の三。**ノートから使われていない画像**（依頼 449） ── */
 
-await step('使われていない画像：指されている1 つは巻き込まない', `
+await step('使われていない画像：指されている 1 つは巻き込まない', `
     const got = await window.amber.call('spare', { path: state.root });
     const names = (got.pictures || []).map((p) => p.rel);
     if (names.some((n) => n.includes('1788000001'))) return '使っている画像が出ています';
@@ -1088,7 +1088,7 @@ await step('カレンダー：予定を足すダイアログは、空のまま�
 await step('カレンダー：予定を足すと、ノートが一本できる', `
     const was = state.notes.length;
     calDay = '2026-09-11';
-    // 小デスクトップ版は1 つ（依頼 493）── タイトルを打ち、開始を選び、登録を押す。
+    // 小デスクトップ版は 1 つ（依頼 493）── タイトルを打ち、開始を選び、登録を押す。
     setTimeout(() => {
         el('evtitle').value = '走査の予定';
         el('evstart').value = '11:00';
@@ -1288,7 +1288,7 @@ if (process.env.TEAMCSV) {
         const 元 = { order: calOrder.slice(), hide: calHide.slice() };
         const all = crowdLanes(weekOf(calDay), true).map((l) => l.key);
         if (all.length < 3) return '段が ' + all.length + ' 本です';
-        // まん中を引っ込めて、三つ目を一つ上へ ── 見えている並びでは二つ目。
+        // まん中を引っ込めて、3 つ目を一つ上へ ── 見えている並びでは二つ目。
         calHide = [all[1]];
         await drawCal();
         const seen = crowdLanes(weekOf(calDay)).map((l) => l.key);
@@ -1391,7 +1391,7 @@ if (process.env.TEAMCSV) {
 
     await step('チームの予定表：日を替えても読み直さない', `
         // **前の月へ戻ったら紙が入れ替わっていた**、が画面の上でいちばん
-        // 分かりにくい壊れ方（依頼 476）。日を替えても、持っている1 つから
+        // 分かりにくい壊れ方（依頼 476）。日を替えても、持っているデータから
         // 選び直すだけ ── ファイルは開かない。
         const sheet = teamPlans;
         const was = teamAt;
@@ -1895,7 +1895,7 @@ await step('大きいノート：目次も出る', `
 /* ── 二十。**同じノートを二か所から書き換える**（依頼 433）──
  *
  * クラウドで同じフォルダを触っていると起きること。amber は**どちらも捨てない**
- * ── 分かれる前・こちら・向こうの三つを core に渡して混ぜる。ここまでは
+ * ── 分かれる前・こちら・向こうの3 つを core に渡して混ぜる。ここまでは
  * core の試験が見ているが、**デスクトップ版を通した本物**は誰も通していなかった。
  *
  * 走査が「向こうの端末」の役をやる: デスクトップ版が開いたままのノートを、横から

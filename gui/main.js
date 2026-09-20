@@ -1,7 +1,7 @@
 'use strict';
 // amber のウィンドウ。
 //
-// **持っているのは三つだけ**: ウィンドウ、エンジンの子、憶えごとの1 つ。
+// **持っているのは3 つだけ**: ウィンドウ、エンジンの子、憶えごとの 1 つ。
 // ファイラの土台（ペイン・シェル・アーカイブ）は持ってこない ── amber は
 // 2画面ファイラではないので、要らないものを継ぐと、そこから太る。
 
@@ -236,7 +236,7 @@ function seedWelcome() {
     }
 }
 
-/// 下まで見て、`.md` が1 つでもあるか。
+/// 下まで見て、`.md` が 1 つでもあるか。
 function hasNotes(dir) {
     for (const at of walk(dir)) if (at.toLowerCase().endsWith('.md')) return true;
     return false;
@@ -380,8 +380,8 @@ const eyes = new Map();
 /// （`AMBER_EDITION`。手元で見比べるため）。環境変数が勝つ。
 ///
 /// `package.json` に混ぜないのは、**main.js から見た `./package.json` が
-/// 配った1 つの中では `gui/package.json`**（手元の開発用の写し）になるから
-/// ── そこに書いても読まれない。専用の1 つなら、在るか無いかで決まる。
+/// 配布物の中では `gui/package.json`**（手元の開発用の写し）になるから
+/// ── そこに書いても読まれない。専用のファイルなら、在るか無いかで決まる。
 function edition() {
     const want = String(process.env.AMBER_EDITION || '').trim();
     if (want) return want;
@@ -389,7 +389,7 @@ function edition() {
         const got = JSON.parse(fs.readFileSync(path.join(__dirname, 'edition.json'), 'utf8'));
         return String(got.edition || 'full');
     } catch {
-        return 'full';                        // 置いていない ＝ ふつうの1 つ
+        return 'full';                        // 置いていない ＝ 通常のビルド
     }
 }
 

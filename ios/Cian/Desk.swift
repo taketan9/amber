@@ -818,7 +818,7 @@ struct DeskView: View {
                     Label("フォルダへ移動", systemImage: "folder")
                 }
                 if let note = here?.note {
-                    // 窓と同じ三つ（依頼 516）── Markdown はそのまま、HTML は一枚で完結、PDF は刷ったもの。
+                    // 窓と同じ3 つ（依頼 516）── Markdown はそのまま、HTML は一枚で完結、PDF は刷ったもの。
                     Menu {
                         ShareLink(item: URL(fileURLWithPath: note.path)) {
                             Label("Markdown", systemImage: "doc.plaintext")

@@ -52,7 +52,7 @@ cian や crmaine と同じ形。**持ち込むのは 1 ファイルだけ、会�
 node scripts\build-win.js --electron C:\electron-v33.4.11-win32-x64
 ```
 
-`dist\` に**三つ**できる:
+`dist\` に**3 つ**できる:
 
 | | |
 |---|---|

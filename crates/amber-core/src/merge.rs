@@ -36,7 +36,7 @@
 //!
 //! # 時刻を見ない
 //!
-//! どちらが新しいかは決めない。**三つの姿を比べるだけ** ── 分かれる前
+//! どちらが新しいかは決めない。**3 つの姿を比べるだけ** ── 分かれる前
 //! （`was`）・こちら（`ours`）・向こう（`theirs`）。時計のずれた端末が
 //! 毎回勝つ、という負け方をしない。
 //!
@@ -93,7 +93,7 @@ impl Merged {
 /// 直したとき、文字単位でマージすると「どちらの文でもない一文」ができる。行ごと
 /// 両方残せば、読んだ人が選べる。
 pub fn merge(was: &str, ours: &str, theirs: &str) -> Merged {
-    // 前書きは鍵ごと ── 三つとも前書きを持っているときだけ。
+    // 前書きは鍵ごと ── 3 つとも前書きを持っているときだけ。
     if let (Some(a), Some(b), Some(c)) = (head_of(was), head_of(ours), head_of(theirs)) {
         if let Some(out) = merge_with_head(was, ours, theirs, a, b, c) {
             return out;
@@ -933,7 +933,7 @@ mod tests {
         let ours = "---\ntags: [家, 仕事]\n---\n\n本文\n";
         let theirs = "---\ntags: [家, 急ぎ]\n---\n\n本文\n";
         let m = merge(was, ours, theirs);
-        assert_eq!(m.text, ours, "本文にはこちらの値。同じ鍵を二行並べない");
+        assert_eq!(m.text, ours, "本文にはこちらの値。同じキーを二行並べない");
         assert_eq!(m.fields, vec![Field {
             key: "tags".into(), ours: "[家, 仕事]".into(), theirs: "[家, 急ぎ]".into(),
         }]);
@@ -1064,7 +1064,7 @@ mod tests {
         }
         // **ぜんぶ同じであること。** 揃え方の癖は Myers を同じにしてあるので
         // 揃うはず ── 違いが出たら、それは癖ではなく作りの違い。
-        assert!(differ.is_empty(), "{} / {} 件が Git と違います。最初の三つ:\n{}",
+        assert!(differ.is_empty(), "{} / {} 件が Git と違います。最初の3 つ:\n{}",
             differ.len(), total, differ.iter().take(3).cloned().collect::<Vec<_>>().join("\n----\n"));
     }
 
@@ -1091,7 +1091,7 @@ mod tests {
             // マーカーは本文の中を指す。
             let n = out.len();
             for &k in m.came.iter().chain(m.both.iter()) {
-                assert!(k < n, "印が本文の外: {k} / {n}");
+                assert!(k < n, "マークが本文の外: {k} / {n}");
             }
             for s in &m.spots {
                 assert!(s.ours.0 + s.ours.1 <= n && s.theirs.0 + s.theirs.1 <= n);

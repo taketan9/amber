@@ -95,7 +95,7 @@ const ok = (yes, what, got) => {
     console.log('サインイン');
     const got = await drive.signIn();
     ok(got.ok === true, 'サインインできる', got);
-    ok((await page).includes('サインインできました'), 'ブラウザには、交換が済んでから「できました」の1 つが出る');
+    ok((await page).includes('サインインできました'), 'ブラウザには、交換が済んでから「できました」の 1 つが出る');
     ok(lastAuth.searchParams.get('code_challenge_method') === 'S256', '許可の URL に PKCE の要約が付く');
     ok(lastAuth.searchParams.get('access_type') === 'offline' && lastAuth.searchParams.get('prompt') === 'consent', '戻すキーをもらう頼み方');
     ok(lastAuth.searchParams.get('scope') === 'https://www.googleapis.com/auth/drive.file', 'スコープは drive.file だけ');
@@ -172,10 +172,10 @@ const ok = (yes, what, got) => {
            'もう無いものを消しても、落ちずに「もう無かった」と返す', again2);
 
         // **名前から探し直さない。** `calendar.app.created` に一覧を読む力は
-        // 無いので、二度押せば二枚できる ── 憶えるのは呼ぶ側の仕事。
+        // 無いので、二度押せば2 つできる ── 憶えるのは呼ぶ側の仕事。
         const a = await cal.make('同じ名前');
         const b = await cal.make('同じ名前');
-        ok(a.id !== b.id, '同じ名前でも別の1 つ（憶えるのは呼ぶ側）', [a.id, b.id]);
+        ok(a.id !== b.id, '同じ名前でも別の 1 つ（憶えるのは呼ぶ側）', [a.id, b.id]);
 
         // キーが無ければ、**人の言葉で**断る。
         const none = createCal({ token: () => Promise.resolve(null), apiUrl: at + '/cal' });

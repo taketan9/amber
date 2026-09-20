@@ -3,7 +3,7 @@
 
     python3 packaging/gui_zip.py out/amber-gui.zip
 
-入れるのは三つ。
+入れるのは3 つ。
 
   * `gui/**` ── 画面そのもの（`node_modules` は入れない。あそこには
     Electron 本体が居て、同梱する側は自分の Electron の中で動かす）

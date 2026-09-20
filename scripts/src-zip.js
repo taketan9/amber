@@ -5,7 +5,7 @@
  *     node scripts/src-zip.js --engine dist/amber-server-win-x64.exe --out out/amber-src.zip
  *
  * 会社の端末はネットワークの外（依頼 586）で、Rust も npm も無い。だから**ビルドするのに
- * 要るものを、ぜんぶ1 つに入れて持ち込む**:
+ * 要るものを、ぜんぶ 1 つに入れて持ち込む**:
  *
  *   * `gui/`        ── 画面。`vendor/`（Monaco・mermaid）も入れる ＝ `npm` が要らない
  *   * `packaging/`  ── 印・サンプルのノート・テンプレート
@@ -61,7 +61,7 @@ function rows(engine, version) {
         out.push({ at: path.join(ROOT, 'scripts', t), rel: 'amber-src/scripts/' + t });
     }
     out.push({ at: engine, rel: 'amber-src/amber-server-win-x64.exe' });
-    // **許諾も持っていく**（`amber-gui.zip` の中に入る1 つ）── 同梱する側が
+    // **許諾も持っていく**（`amber-gui.zip` の中に入る 1 つ）── 同梱する側が
     // 配るものの中に、こちらの許諾が無いことになる。
     const lic = path.join(ROOT, 'LICENSE');
     if (fs.existsSync(lic)) out.push({ at: lic, rel: 'amber-src/LICENSE' });
@@ -88,7 +88,7 @@ function readme(version) {
         'できるもの（dist の下）:',
         '',
         '    amber-gui.zip                  同梱する側へ渡す画面一式',
-        '    amber-server-win-x64.exe.zip   エンジン1 つ',
+        '    amber-server-win-x64.exe.zip   エンジン 1 つ',
         `    amber-win-x64-office-${version}.zip   会社向けの ambər 本体`,
         '',
         'ふつうの版（同期やカレンダーの同期が入ったもの）も要るときは --full を足します。',
@@ -132,9 +132,9 @@ function main() {
     }
     const notes = list.filter((r) => r.rel.startsWith('amber-src/packaging/welcome/')
         && r.rel.endsWith('.md')).length;
-    if (notes < 1) die('サンプルのノートが1 つもありません（packaging/welcome）');
+    if (notes < 1) die('サンプルのノートが 1 つもありません（packaging/welcome）');
 
-    // 読む1 つは、その場で作って入れる（実物のファイルは持たない）。
+    // 読む 1 つは、その場で作って入れる（実物のファイルは持たない）。
     const tmp = path.join(path.dirname(out), 'はじめに読んでください.txt');
     fs.writeFileSync(tmp, readme(version));
     list.push({ at: tmp, rel: 'amber-src/はじめに読んでください.txt' });

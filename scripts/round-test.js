@@ -17,7 +17,7 @@
  * して飛ぶ。**一つずつの形は `paper-test.js` が通っていた。落ちたのは
  * 往復と、組み合わせ。**
  *
- * 見方は三つ（`PAPER.ja.md` 二章）:
+ * 見方は3 つ（`PAPER.ja.md` 二章）:
  *   強い一致 ── 文字がそのまま戻る。ここを目指す
  *   弱い一致 ── 末尾の空行の数だけ違う。許す（`sameNote` と同じ考え）
  *   落第     ── それ以外。「たぶん同じ意味」で通さない
@@ -102,7 +102,7 @@ global.el = () => box;
 global.state = { open: { path: '/notes/試し.md' } };
 global.window.amber = { fileBytes: async () => null };
 
-/* ── エンジンに組んでもらう ── */
+/* ── エンジンに組み立ててもらう ── */
 
 const child = spawn(engine, [], { stdio: ['pipe', 'pipe', 'inherit'] });
 let buf = '';

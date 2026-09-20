@@ -78,7 +78,7 @@ struct Calendaring: View {
     /// 直している、この iPhone の予定。
     @State private var editing: Slot?
     @State private var editTitle = ""
-    /// 月／週／日（依頼 515・窓と同じ三つ）。
+    /// 月／週／日（依頼 515・窓と同じ3 つ）。
     @State private var mode = CalPrefs.view
     @State private var settings = false
     /// 表示設定を変えたら描き直すための数。
@@ -106,7 +106,7 @@ struct Calendaring: View {
     /// 「時間内に型検査できません」で組めなくなる（実際になった）。
     private var inside: some View {
         VStack(spacing: 0) {
-            // 月／週／日の切り替え（依頼 515）── 窓の表の上の三つと同じ。
+            // 月／週／日の切り替え（依頼 515）── 窓の表の上の3 つと同じ。
             // **何を出すかは、その右に一つ**（依頼 531・本人が絵を見て案ウ）──
             // 段をもう一つ足すと月の表が 85pt 下がる（画面の一割）。電話は
             // 縦が命なので、横に置いて段を増やさない。
@@ -242,7 +242,7 @@ struct Calendaring: View {
     ///
     /// 回る順は **両方 → 自分だけ → グループ → 両方**（本人）。
     /// 回る形の弱いところは「ほかに何が選べるか」が押すまで分からないこと
-    /// なので、**長押しで三つ出す** ── 押し先が一つで済む軽さは残したまま、
+    /// なので、**長押しで3 つ出す** ── 押し先が一つで済む軽さは残したまま、
     /// 全部を見る道も残す。
     /// **一人なら、その色。二人以上なら、帯を分ける**（依頼 547・窓の
     /// `tagPaint` と同じ決まり）── 二人の用事は二人のものなので、どちらか
@@ -288,7 +288,7 @@ struct Calendaring: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            // **長押しで三つ出す。** 回る形だけだと、選べるものが分からない。
+            // **長押しで3 つ出す。** 回る形だけだと、選べるものが分からない。
             ForEach(Self.sides, id: \.self) { k in
                 Button { setSide(k) } label: {
                     if k == side { Label(sideWord(k), systemImage: "checkmark") }
@@ -799,7 +799,7 @@ struct Calendaring: View {
     }
 }
 
-/// カレンダーが訊く三つ（読めません・足す・直す）。
+/// カレンダーが訊く3 つ（読めません・足す・直す）。
 ///
 /// 画面から出したのは、**一つの `body` に積むと型検査が終わらない**から
 /// ── 見た目の都合ではなく、組めるかどうかの都合。

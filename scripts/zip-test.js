@@ -48,7 +48,7 @@ const work = fs.mkdtempSync(path.join(os.tmpdir(), 'amber-zip-'));
 const src = path.join(work, 'amber-win-x64');
 fs.mkdirSync(path.join(src, 'resources', 'app'), { recursive: true });
 
-// 日本語の名前、よく縮む文字、縮まない出鱈目、空の1 つ ── 四つとも通りパスが違う。
+// 日本語の名前、よく縮む文字、縮まない出鱈目、空の 1 つ ── 四つとも通りパスが違う。
 const letter = 'ambər 2.13.0（Windows x64）\r\namber.exe をダブルクリック\r\n';
 fs.writeFileSync(path.join(src, 'はじめにお読みください.txt'), letter);
 fs.writeFileSync(path.join(src, 'resources', 'app', 'squash.txt'), 'あ'.repeat(5000));
@@ -155,7 +155,7 @@ ok(!!bin && bin.csize === bin.usize, '縮まないものは、素のまま入っ
 ok(!!bin && bin.text && Buffer.compare(bin.text, noise) === 0, '出鱈目な中身がそのまま戻る');
 
 const empty = found.get('amber-win-x64/empty.txt');
-ok(!!empty && empty.usize === 0, '空の1 つも入る');
+ok(!!empty && empty.usize === 0, '空の 1 つも入る');
 
 ok([...found.keys()].every((k) => k.startsWith('amber-win-x64/')),
    'いちばん上のフォルダごと入っている');

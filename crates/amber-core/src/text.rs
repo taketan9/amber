@@ -62,7 +62,7 @@ impl Encoding {
 pub enum Eol {
     Lf,
     Crlf,
-    /// 昔の Mac。滅多に無いが、二つ運ぶなら三つ目もほぼ只。
+    /// 昔の Mac。滅多に無いが、二つ運ぶなら3 つ目もほぼ只。
     Cr,
 }
 

@@ -132,7 +132,7 @@ pub fn settle(root: &Path, note: &Path) -> anyhow::Result<Option<(PathBuf, bool)
             return Ok(None);
         }
     }
-    let Some(dir) = note.parent() else { anyhow::bail!("道がありません") };
+    let Some(dir) = note.parent() else { anyhow::bail!("パスがありません") };
     let to = dir.join(free_name(dir, &wanted, note));
     let rewrote = relocate(root, note, &to, true)?;
     Ok(Some((to, rewrote)))
@@ -148,9 +148,9 @@ pub fn relocate(root: &Path, from: &Path, to: &Path, record_move: bool) -> anyho
         anyhow::bail!("{} はもうあります", to.display());
     }
     if from.parent().is_none() {
-        anyhow::bail!("道がありません")
+        anyhow::bail!("パスがありません")
     }
-    let Some(to_dir) = to.parent() else { anyhow::bail!("道がありません") };
+    let Some(to_dir) = to.parent() else { anyhow::bail!("パスがありません") };
     std::fs::create_dir_all(to_dir)?;
 
     // ── 画像と、本文のリンク ──
@@ -383,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn 使えない字は_全角に置き換わる() {
+    fn 使えない文字は_全角に置き換わる() {
         // 本人が決めた（決めごと 3）── 潰すのではなく、読めるように置き換える。
         assert_eq!(title_name("A/B:C*D?E\"F<G>H|I\\J"), Some("A／B：C＊D？E＂F＜G＞H｜I＼J".into()));
         assert_eq!(title_name(".隠れる"), Some("隠れる".into()));
@@ -560,7 +560,7 @@ mod tests {
         // 依頼 492 の「画像も付いてくる」── **ノートから画像が見え続ける**こと。
         let link = crate::spare::points_at(&std::fs::read_to_string(&to).unwrap(), r);
         assert!(link.iter().any(|p| p.is_file()), "ノートから画像が見えない: {link:?}");
-        assert!(crate::history::shelf(r, &to).unwrap().is_dir(), "履歴の棚が付いてこない");
+        assert!(crate::history::shelf(r, &to).unwrap().is_dir(), "履歴のフォルダが付いてこない");
         assert_eq!(crate::notebook::read(r).came.get("旅.md").map(String::as_str), Some("くらし"));
         let was = crate::sync::recall(r, "drive");
         assert_eq!(was.len(), 1);
@@ -582,7 +582,7 @@ mod tests {
         let to = crate::note::move_to(&at, &r.join("仕事")).unwrap();
         carry(r, &at, &to, true);
         assert_eq!(to, r.join("仕事/旅.md"));
-        assert!(crate::history::shelf(r, &to).unwrap().is_dir(), "履歴の棚が付いてこない");
+        assert!(crate::history::shelf(r, &to).unwrap().is_dir(), "履歴のフォルダが付いてこない");
         let was = crate::sync::recall(r, "drive");
         assert_eq!(was[0].rel, "仕事/旅.md");
         assert_eq!(crate::sync::moves(r, "drive"), vec![("仕事/旅.md".to_string(), "旅.md".to_string())]);

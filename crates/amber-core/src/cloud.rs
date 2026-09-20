@@ -162,7 +162,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn まだ落ちてきていない札を見分ける() {
+    fn まだ落ちてきていないラベルを見分ける() {
         let s = shape(".買い物リスト.md.icloud").unwrap();
         assert_eq!(s.kind, Kind::Waiting);
         // **もとの名前を返す。** 「.買い物リスト.md.icloud が無い」と言われても
@@ -200,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn 落ちてきていない札を_歩き直さずに拾う() {
+    fn 落ちてきていないラベルを_歩き直さずに拾う() {
         let d = tempfile::tempdir().unwrap();
         let sub = d.path().join("仕事");
         std::fs::create_dir_all(&sub).unwrap();
@@ -231,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn 当てずっぽうで本物のノートに札を貼らない() {
+    fn 当てずっぽうで本物のノートにラベルを貼らない() {
         // **これがこの module でいちばん大事な試験。**
         // 見逃した控えはただのノートとして読めるが、貼られた本物は
         // 「消していいもの」に見える。

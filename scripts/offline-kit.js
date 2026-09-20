@@ -99,7 +99,7 @@ const electronName = path.basename(electron);
 copy(electron, path.join(kit, electronName));
 
 // ── 四. エンジン ────────────────────────────────────────────────
-// **CRT ごと静的に組んである1 つ**（release.yml の註）── 置くだけで動く。
+// **CRT ごと静的にリンクしてある 1 つ**（release.yml の註）── 置くだけで動く。
 let engine = arg('engine') || arg('server');
 if (!engine) {
     const at = path.join(out, 'amber-server-win-x64.exe');
@@ -128,7 +128,7 @@ const line = ['node scripts\\pack.js --out dist --platform win32',
     ...(rceditName ? ['  --rcedit ..\\' + rceditName] : []),
     '  --zip'].join(' ^\r\n');
 fs.writeFileSync(path.join(kit, '組み方.txt'), [
-    'ambər ' + version + ' を、ネットに出られない Windows で組む',
+    'ambər ' + version + ' を、ネットに出られない Windows でビルドする',
     '',
     'いるもの: この一式と、Node.js（node --version が通ること）だけ。',
     'ネットワークには一度も出ません。',

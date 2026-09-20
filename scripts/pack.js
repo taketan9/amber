@@ -57,10 +57,10 @@ const engineArg = () => arg('server') || arg('engine');
 /// **どの版をビルドするか**（依頼 602・本人「会社でビルドする際には、同期に関する
 /// 機能や表示はすべてクローズにしたい」）。
 ///
-/// `--edition office` を渡すと、配る1 つの中に `gui/edition.json` を置く
+/// `--edition office` を渡すと、配布物の中に `gui/edition.json` を置く
 /// ── 画面はそれを見て、外のネットワークに触るもの（Google Drive の同期・iCal の
 /// 購読・グループ共有）を**出さないし、走らせない。**
-/// 渡さなければ、その1 つは置かない ＝ ふつうの版。
+/// 渡さなければ、その 1 つは置かない ＝ ふつうの版。
 const edition = (() => {
     const want = String(arg('edition', '') || '').trim();
     if (!want || want === 'full') return 'full';
@@ -143,7 +143,7 @@ function fillApp(appDir, serverExe, exeName, calBin) {
     }
     copy(path.join(ROOT, 'packaging', 'welcome'), path.join(appDir, 'packaging', 'welcome'));
     copy(path.join(ROOT, 'packaging', 'templates'), path.join(appDir, 'packaging', 'templates'));
-    // **会社向けの1 つだけ、版のラベルを置く**（依頼 602）。無ければふつうの版。
+    // **会社向けのビルドだけ、版のラベルを置く**（依頼 602）。無ければふつうの版。
     if (edition !== 'full') {
         fs.writeFileSync(path.join(appDir, 'gui', 'edition.json'),
             JSON.stringify({ edition }, null, 2));
@@ -188,7 +188,7 @@ function mac(out) {
     const server = engineArg() || path.join(ROOT, 'target', 'release', 'amber-server');
     if (!fs.existsSync(server)) { console.error('amber-server がありません: ' + server + '（cargo build --release -p amber-server）'); process.exit(1); }
     const cal = path.join(ROOT, 'target', 'mac', 'amber-cal');
-    if (!fs.existsSync(cal)) console.error('注意: amber-cal がありません（scripts/mac-build.sh）── この Mac の予定表は読めない1 つになります');
+    if (!fs.existsSync(cal)) console.error('注意: amber-cal がありません（scripts/mac-build.sh）── この Mac の予定表は読めない 1 つになります');
     const app = path.join(out, 'ambər.app');
     fs.rmSync(app, { recursive: true, force: true });
     fs.mkdirSync(out, { recursive: true });

@@ -123,7 +123,7 @@ global.el = () => box;
 global.state = { open: { path: '/notes/試し.md' } };
 global.window.amber = { fileBytes: async () => null };
 
-/// 一件ずつエンジンに組んでもらう。
+/// 一件ずつエンジンに組み立ててもらう。
 const child = spawn(engine, [], { stdio: ['pipe', 'pipe', 'inherit'] });
 let buf = '';
 const pending = new Map();

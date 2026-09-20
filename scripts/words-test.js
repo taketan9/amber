@@ -11,7 +11,7 @@
  *
  * **2026-09-16、iPhone の表は無くなった**（依頼 609）── あれは死んだ画面
  * （`Reading`）の中にあり、iPhone の「表示」画面は前から核の `to_html` を
- * そのまま出している。**三つ目の表が無いほうが強い約束**なので、
+ * そのまま出している。**3 つ目の表が無いほうが強い約束**なので、
  * 「iPhone は自分の表を持たない」を検査のほうに移した ── また生えたら鳴る。
  *
  * 見るのは形ではなく**文字そのもの**。増やすときは、二か所とも直すことになる。
@@ -60,7 +60,7 @@ function phoneHasItsOwn() {
     const found = [];
     for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.swift'))) {
         const s = fs.readFileSync(path.join(dir, name), 'utf8');
-        // 三つ以上そろって初めて「表」── 一語だけなら、ただの文字。
+        // 3 つ以上そろって初めて「表」── 一語だけなら、ただの文字。
         const hit = KINDS.filter((k) => new RegExp('"' + k + '"\\s*:\\s*\\("').test(s));
         if (hit.length >= 3) found.push(name + '（' + hit.join('・') + '）');
     }

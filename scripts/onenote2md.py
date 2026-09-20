@@ -447,7 +447,7 @@ def load_beside(name):
 
 
 def load_onestore():
-    """`.one` を読む隣の1 つ。**パスを名指しで読む**（`load_beside`）。"""
+    """`.one` を読む隣の 1 つ。**パスを名指しで読む**（`load_beside`）。"""
     return load_beside("onestore")
 
 
@@ -966,7 +966,7 @@ def main():
     # **何も渡されなければ、デスクトップ版を出す。** バッチをダブルクリックした人は
     # 引数を渡せない ── そこで使い方を出して終わるのは、道具ではない。
     if args.ui or not (args.files or args.peek):
-        # **隣の1 つは、パスを名指しして読む**（`load_onestore` と同じ理由）──
+        # **隣の 1 つは、パスを名指しして読む**（`load_onestore` と同じ理由）──
         # `import` に頼ると、走らせる場所によって `sys.path` に `scripts/` が
         # 入らず `ModuleNotFoundError` になる。デスクトップ版が出ないのが「落ちた」と
         # 見分けられない形で出る。

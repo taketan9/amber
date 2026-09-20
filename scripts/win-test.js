@@ -7,7 +7,7 @@
  *
  *   * パスの区切りを `/` だと思っていた ── Windows のパスは `C:\Users\…` で、
  *     `split('/')` は道まるごとを返す。書き出したファイルの名前がパスになり、
- *     画像の在りかは空になって**画像が1 つも出なくなった**
+ *     画像の在りかは空になって**画像が 1 つも出なくなった**
  *   * Enter は一つだと思っていた ── フルサイズのキーボード（会社の机にたいてい
  *     載っている）は右の Enter を `NumpadEnter` として送る。点と番号は
  *     画面が勝手に続けるので、**セルだけが出ない**という形で現れた
@@ -59,7 +59,7 @@ console.log('Windows のパスを、切り分けられるか');
     const win = 'C:\\Users\\t502960\\Documents\\amber\\買い物.md';
     ok(baseOf(win) === '買い物.md', '名前だけを取る', baseOf(win));
     ok(dirOf(win) === 'C:\\Users\\t502960\\Documents\\amber\\', '在りかを取る', dirOf(win));
-    // **在りかが空になると、画像が1 つも出ない。** 実際にそうなった。
+    // **在りかが空になると、画像が 1 つも出ない。** 実際にそうなった。
     ok(dirOf(win) !== '', '在りかが空にならない', dirOf(win));
 
     const nix = '/Users/x/Documents/amber/買い物.md';
@@ -187,7 +187,7 @@ console.log('パスを、一行に収まる形にできるか');
 // 押されるキーで、そこで素通りすると「効かない」として出る。
 console.log('F5 で読み直せるか');
 {
-    // **受け口は一つではない。** `keydown` を聞く場所は三つあり、
+    // **受け口は一つではない。** `keydown` を聞く場所は3 つあり、
     // 最初に見つかったものは ⌘S のほう ── 頭から探すと別の関数を切り出す。
     const head = src.indexOf("const inField = e.target === el('find');");
     const stop = src.indexOf("if (e.code === 'Escape')", head);

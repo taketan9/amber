@@ -122,7 +122,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 })
                 .collect();
             // フォルダの一覧も同じ走査から。**ノートからではなくディレクトリから
-            // 導く** ── 作ったばかりのノートブックは空なので、中のノートから組んだ
+            // 導く** ── 作ったばかりのノートブックは空なので、中のノートから作った
             // 一覧には出てこない。それは「フォルダが作られなかった」と見分けが
             // つかない。
             //
@@ -356,7 +356,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     &text,
                     with.parse::<usize>().unwrap_or(1),
                 ),
-                other => anyhow::bail!("知らない印です: {other}"),
+                other => anyhow::bail!("知らないマークです: {other}"),
             };
             Ok(serde_json::json!({ "text": out }))
         }
@@ -849,7 +849,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .collect::<Vec<_>>(),
         })),
 
-        // 同じノートを二人が書いたときに、混ぜる。**繋がない** ── 三つの
+        // 同じノートを二人が書いたときに、混ぜる。**繋がない** ── 3 つの
         // 内容を渡されて、マージ結果と「どの行が向こうから来たか」を返すだけ。
         // ファイルに書き戻すのは呼ぶ側（通信も保存も I/O）。
         "merge" => {
@@ -1687,7 +1687,7 @@ mod tests {
     }
 
     #[test]
-    fn 窓に渡す読める形は_前書きを出さず_危ないものを字にする() {
+    fn デスクトップ版に渡す読める形は_前書きを出さず_危ないものを文字にする() {
         let r = call("html", &serde_json::json!({
             "text": "---\ntitle: x\ntags: [仕事]\n---\n# 題\n- [ ] やること\n",
         })).unwrap();
@@ -2143,7 +2143,7 @@ mod tests {
     /// **別のノートが入っている場所へ戻したら、どうなるか。**
     ///
     /// 戻すのは「消えたものを取り返す」ためで、いま書いているものを消して
-    /// いいという意味ではない。三つとも確かめる ──
+    /// いいという意味ではない。3 つとも確かめる ──
     /// 知らないノートは残る／同じ名前は今のが勝つ／構造が違っても入る。
     #[test]
     fn 戻すとき_いまあるものを消さない() {
@@ -2189,7 +2189,7 @@ mod tests {
     /// **ファイル 1 つだけの zip には共通の親フォルダが無い** ── そこで同じ剥がし方をすると
     /// ファイル名そのものが外れて、何も戻らない。
     #[test]
-    fn 一枚だけの_zip_も戻せる() {
+    fn ファイル一つだけの_zip_も戻せる() {
         let d = tempfile::tempdir().unwrap();
         let root = d.path().join("ノート");
         std::fs::create_dir_all(root.join("仕事")).unwrap();
@@ -2265,7 +2265,7 @@ mod tests {
 
     /// 古いものは削除されるか。**「残す」を付けたものは残るか。**
     #[test]
-    fn 五十を超えたら落ちる_ただし印のあるものは残る() {
+    fn 五十を超えたら落ちる_ただしマークのあるものは残る() {
         let d = tempfile::tempdir().unwrap();
         let root = d.path().to_path_buf();
         let note = root.join("a.md");

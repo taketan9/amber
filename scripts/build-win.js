@@ -5,10 +5,10 @@
  *
  *     node scripts\build-win.js --electron C:\electron-v33.4.11-win32-x64
  *
- * 出来上がるのは三つ（`--out`、既定は `dist`）:
+ * 出来上がるのは3 つ（`--out`、既定は `dist`）:
  *
  *   * `amber-gui.zip`                    ── 同梱する側（crmaine）へ渡す画面一式
- *   * `amber-server-win-x64.exe.zip`     ── エンジン1 つ（持ち込んだものを包み直す）
+ *   * `amber-server-win-x64.exe.zip`     ── エンジン 1 つ（持ち込んだものを包み直す）
  *   * `amber-win-x64-office-<版>.zip`    ── 会社向けの ambər 本体
  *
  * **ビルドするだけ。取りに行かない。** 会社の端末はネットワークの外（依頼 586）なので、
@@ -71,7 +71,7 @@ function engine() {
     return at;
 }
 
-/// 同梱する側へ渡す1 つ（`amber-gui.zip`）。**中身は `packaging/gui_zip.py`
+/// 同梱する側へ渡す 1 つ（`amber-gui.zip`）。**中身は `packaging/gui_zip.py`
 /// と同じ顔ぶれ** ── 画面と、マークと、サンプルのノート。会社の端末に python は
 /// 無いことのほうが多いので、こちらは Node だけでビルドする（`scripts/zip.js`）。
 function guiZip(out) {
@@ -131,14 +131,14 @@ function main() {
     const n = guiZip(gui);
     console.log('組みました: ' + gui + '（' + n + ' 枚）');
 
-    // 二、エンジンを包み直す。**中は1 つ、名前はそのまま** ── 取り出した人が
+    // 二、エンジンを包み直す。**中は 1 つ、名前はそのまま** ── 取り出した人が
     // 名前を直さずに置ける（リリースの並びと同じ形）。
     const engZip = path.join(outDir, 'amber-server-win-x64.exe.zip');
     zipFiles([{ at: eng, rel: 'amber-server-win-x64.exe' }], engZip);
     console.log('組みました: ' + engZip);
 
     // 三、本体。**ビルドするのは `pack.js`** ── 会社でもリリースでも同じ道具が
-    // ビルドする（二つ書くと、配った1 つと手元の1 つが別物になりうる）。
+    // ビルドする（二つ書くと、配布物と手元の 1 つが別物になりうる）。
     const pack = (edition, into) => {
         const args = [
             path.join(__dirname, 'pack.js'), '--out', into, '--platform', 'win32',
@@ -153,7 +153,7 @@ function main() {
     if (has('full')) pack('full', outDir);
 
     // **出口で数える。** ビルドしたつもりで無い、を配らないため（`pack.js` も
-    // 中身を数えるが、こちらは「三つ揃ったか」を見る）。
+    // 中身を数えるが、こちらは「3 つ揃ったか」を見る）。
     const want = [
         'amber-gui.zip',
         'amber-server-win-x64.exe.zip',

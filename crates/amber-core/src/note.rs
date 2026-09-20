@@ -1615,7 +1615,7 @@ mod tests {
         // 古い日本語（Shift_JIS・CRLF）── Windows のメモ帳が置いていく形。
         let body = "---\r\ntitle: 日本語\r\ntags: [仕事]\r\n---\r\n\r\n# 日本語\r\n\r\n本文です。\r\n";
         let (bytes, _, bad) = encoding_rs::SHIFT_JIS.encode(body);
-        assert!(!bad, "試しの字が Shift_JIS で書けません");
+        assert!(!bad, "試しの文字が Shift_JIS で書けません");
         std::fs::write(dir.path().join("日本語.md"), &bytes[..]).unwrap();
 
         // BOM 付き（古いメモ帳・Excel が置いていく形）。
@@ -1926,7 +1926,7 @@ mod tests {
     /// ── そこは変えない。けれど「書いたのに探せない」は別の話で、
     /// 小見出しやセルの中身は、書いた本人にとっては書いたことそのもの。
     #[test]
-    fn 見出しと表の升は探せるが_一覧の二行目には出ない() {
+    fn 見出しと表のセルは探せるが_一覧の二行目には出ない() {
         let dir = tempfile::tempdir().unwrap();
         let at = dir.path().join("a.md");
         std::fs::write(
@@ -1947,7 +1947,7 @@ mod tests {
         // **枠の中の見出しは、見出しではない。** 「Markdown の書き方」を
         // 書いたノートが、中の例文ぜんぶで当たるようになる。
         assert!(!h.contains("枠の中の見出し"), "コード枠の中の見出しは入れない: {h}");
-        assert!(!h.contains("枠の中の升"), "コード枠の中の表も入れない: {h}");
+        assert!(!h.contains("枠の中のセル"), "コード枠の中の表も入れない: {h}");
         assert!(!h.contains("**"), "飾りは落とす: {h}");
     }
 
@@ -1957,7 +1957,7 @@ mod tests {
     /// 一覧に山括弧が並ぶ（実機で出た）。**見出しは残す** ── あれは
     /// 畳んだ中身に人が付けた名前で、文として読める。
     #[test]
-    fn 折りたたみの札は抜粋に出さず_見出しは残す() {
+    fn 折りたたみのラベルは抜粋に出さず_見出しは残す() {
         let dir = tempfile::tempdir().unwrap();
         let at = dir.path().join("a.md");
         std::fs::write(
@@ -1980,7 +1980,7 @@ mod tests {
     /// 解釈しなかったときの見た目そのもの。デスクトップ版は `to_html` で解釈できていたので、
     /// **同じノートが二つの amber で別のものに見えていた。**
     #[test]
-    fn 表は升に切って渡す() {
+    fn 表はセルに切って渡す() {
         let b = blocks("| 面 | いつ |\n|---|:---:|\n| **表示** | ふだん |\n| コード | 直すとき |\n");
         let Block::Table { head, align, rows } = &b[0] else {
             panic!("表になっていません: {:?}", b)

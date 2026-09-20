@@ -25,7 +25,7 @@ quit() {
 }
 trap quit EXIT INT TERM
 
-# 取り込みを見るための、手元の1 つ。**よそのページで試さない** ── 相手が
+# 取り込みを見るための、手元の 1 つ。**よそのページで試さない** ── 相手が
 # 変わった日に、何が原因か分からなくなる。
 rm -rf "$work"; mkdir -p "$work"
 cat > "$work/index.html" <<'PAGE'
@@ -38,7 +38,7 @@ cat > "$work/index.html" <<'PAGE'
 だからこの段落はわざと長く書いてあります。もっと長く。もっと長く。</p>
 </article><footer>足の文字。</footer></body></html>
 PAGE
-# よその予定表（依頼 456）── 走査が読む1 つ。
+# よその予定表（依頼 456）── 走査が読む 1 つ。
 printf 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:%s\r\nBEGIN:VEVENT\r\nDTSTART;TZID=Asia/Tokyo:20260904T183000\r\nSUMMARY:%s\r\nLOCATION:%s\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260921\r\nDTEND;VALUE=DATE:20260924\r\nSUMMARY:%s\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nDTSTART;TZID=Asia/Tokyo:20260907T200000\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:%s\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n' \
   '家の予定' '歯医者' '駅前' '旅行' 'ごみ出し' > "$work/away.ics"
 

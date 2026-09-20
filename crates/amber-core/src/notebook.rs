@@ -663,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    fn 色とブックマークと憶えは_同じ帳面に並んで残る() {
+    fn 色とブックマークと憶えは_同じ帳画面に並んで残る() {
         // どれか一つを書いたときに、ほかが消えない。
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

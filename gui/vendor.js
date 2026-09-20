@@ -28,7 +28,7 @@ const WANTED = [
     // 日本語だけ。英語は editor.main.js の中にある。
     ['monaco-editor/min/vs/nls.messages.ja.js', 'monaco/vs/nls.messages.ja.js'],
     ['monaco-editor/LICENSE', 'monaco-editor.LICENSE'],
-    // vim。**UMD の1 つだけ。** AMD の枝を通るので、Monaco のローダに
+    // vim。**UMD の 1 つだけ。** AMD の枝を通るので、Monaco のローダに
     // `monaco-vim` という名前で置けばそのまま読める（`renderer.js` の
     // `require.config`）。中で `monaco-editor/esm/…/editor.api` を要求して
     // くるが、そこは既に読んである `monaco` を返す偽物を先に定義して渡す。

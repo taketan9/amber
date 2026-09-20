@@ -791,7 +791,7 @@ for (const fx of FIXTURES) {
     }
 }
 
-// **行のどこで押しても同じ結果か**（六）── 三つの位置の結果を突き合わせる。
+// **行のどこで押しても同じ結果か**（六）── 3 つの位置の結果を突き合わせる。
 {
     const groups = new Map();
     for (const c of cases) {

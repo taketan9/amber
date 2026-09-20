@@ -152,7 +152,7 @@ function fresh() {
         ok(editor.getValue() === C.body, 'エディタは C のまま', editor.getValue());
     }
 
-    console.log('「コード」で打ったあと、組んだ時の文字へ戻さないか');
+    console.log('「コード」で打ったあと、描いた時の文字へ戻さないか');
     {
         fresh();
         open(A);

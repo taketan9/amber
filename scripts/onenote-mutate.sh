@@ -9,7 +9,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-# **壊す先は二枚ある。** 本体と、`.one` を読む1 つ（依頼 594）。
+# **壊す先は二枚ある。** 本体と、`.one` を読む 1 つ（依頼 594）。
 # どちらに当たるかは `mutate` が自分で探す ── 呼ぶ側に書かせると、
 # 足した日にどちらかだけ壊し忘れる。
 TARGETS=(scripts/onenote2md.py scripts/onestore.py scripts/onenote_ui.py)
@@ -151,7 +151,7 @@ mutate "最後の改訂でなく最初を採る" "いまの版は、最後の改
     'return revs[max(revs)] if revs else []' 'return revs[min(revs)] if revs else []'
 mutate "改訂が無いときに落ちる" "改訂が無ければ、空" \
     'return revs[max(revs)] if revs else []' 'return revs[max(revs)]'
-mutate "隣の1 つを import で頼る" "よその場所から走らせても、隣の1 つを読める" \
+mutate "隣の 1 つを import で頼る" "よその場所から走らせても、隣の 1 つを読める" \
     'at = Path(__file__).resolve().parent / f"{name}.py"' 'at = Path(f"{name}.py")'
 mutate "無いときに黙って進む" "隣に居なければ、そう言う（追跡ではなく）" \
     'if not at.is_file():

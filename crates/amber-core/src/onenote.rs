@@ -283,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn セクションごとに_一冊_セクションの下へ書く() {
+    fn セクションごとに_ノートブック_セクションの下へ書く() {
         let t = tempfile::tempdir().unwrap();
         let (key, sum) = open(&samples().join("fsshttp/New Section 1.one")).unwrap();
         assert_eq!(sum["units"][0]["name"], "New Section 1");
@@ -295,7 +295,7 @@ mod tests {
         let md = std::fs::read_to_string(w.dir.join("Test Page.md")).unwrap();
         assert!(md.starts_with("---\ntitle: Test Page\ncreated: 2020-10-27\n---\n\n"), "{md}");
         assert!(md.contains("![](attachments/Test-Page-001.jpg)"), "{md}");
-        assert!(!md.contains(amber_onenote::PIC_OPEN), "印が残った");
+        assert!(!md.contains(amber_onenote::PIC_OPEN), "マークが残った");
         let jpg = std::fs::read(w.dir.join("attachments/Test-Page-001.jpg")).unwrap();
         assert!(jpg.starts_with(b"\xff\xd8\xff"));
 
@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn 一冊の名前とセクションの名前がフォルダになる() {
+    fn ノートブックの名前とセクションの名前がフォルダになる() {
         let t = tempfile::tempdir().unwrap();
         let (key, sum) = open(&samples().join("notebook")).unwrap();
         assert_eq!(sum["units"].as_array().unwrap().len(), 2);

@@ -283,7 +283,7 @@ def t_from_files(tmp):
     # 空のフォルダなので、抜けていれば「.one がありません」まで行く。
     # 文字の無いことだけ見ていた版は、別の落ち方（パスが違う・ファイルが無い）を
     # 素通りさせた。
-    check("よその場所から走らせても、隣の1 つを読める",
+    check("よその場所から走らせても、隣の 1 つを読める",
           "の下に .one がありません" in (r.stdout + r.stderr), (r.stdout + r.stderr)[-200:])
     # **隣に居ないときは、そう言う。** 取り込みが半端なまま走らせた人に
     # `FileNotFoundError` の追跡を見せても、何をすればいいか分からない。
@@ -313,7 +313,7 @@ def t_from_files(tmp):
             {"title": "9月の定例", "level": 1,
              "lines": [{"text": "決めたこと", "indent": 0},
                        {"text": "宿題", "indent": 1}]},
-            {"title": "9月の定例", "level": 1, "lines": [{"text": "別の1 つ", "indent": 0}]},
+            {"title": "9月の定例", "level": 1, "lines": [{"text": "別の 1 つ", "indent": 0}]},
             {"title": "補足", "level": 2, "lines": [{"text": "サブページ", "indent": 0}]},
         ]
         args = _parse(["--out", str(out), str(src)])
@@ -471,7 +471,7 @@ def t_style(tmp):
 
     # **色の決まり**（MS-ONE の COLORREF）── 最後が 0x00 のときだけ色。
     check("自動（最後が 0xFF）は色を付けない", ost._color(b"\x00\x00\x00\xff") is None)
-    check("最後が 0x00 なら、前の三つが色", ost._color(b"\x76\x76\x76\x00") == "#767676")
+    check("最後が 0x00 なら、前の3 つが色", ost._color(b"\x76\x76\x76\x00") == "#767676")
     check("赤・緑・青の順", ost._color(b"\x12\x34\x56\x00") == "#123456")
     check("短すぎる・欄が無いときは色なし",
           ost._color(b"\x01\x02") is None and ost._color(None) is None)

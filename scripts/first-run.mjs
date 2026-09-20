@@ -88,7 +88,7 @@ await ok('サンプルが読める形で出る', `
 await ok('サンプルが文字に戻せる', `
     return paperToMd(el('read'), state.head) === null ? '戻せません' : true;`, true);
 
-// 四。絵も付いてくる（サンプルは絵を1 つ使っている）。
+// 四。絵も付いてくる（サンプルは絵を 1 つ使っている）。
 if (HOME_DIR) {
     const notes = join(HOME_DIR, 'Documents', 'amber');
     const shot = join(notes, 'attachments');

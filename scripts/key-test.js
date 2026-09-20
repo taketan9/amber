@@ -6,7 +6,7 @@
  *
  *     もとの .md ──▶ 画面 ──▶ キーを押す ──▶ paperToMd ──▶ 文字
  *
- * 決めごとは `PAPER.ja.md` 六章の乙（鍵）。芯は三つ:
+ * 決めごとは `PAPER.ja.md` 六章の乙（鍵）。芯は3 つ:
  *
  *   1. 画面の上の一打は、文字の上の一つの記号に対応する
  *      （行頭の Backspace は記号が一つ外れ、Tab は一段深くなる。
@@ -519,7 +519,7 @@ async function press(md, where, at, hit) {
     say('空の注記に、打てる一行（本人が決めた・2026-09-10）');
     {
         await draw('> [!NOTE]\n\n次。');
-        ok(!box.querySelector('.alert > p:not(.alert-h)'), '組んだ直後は中身の行が無い');
+        ok(!box.querySelector('.alert > p:not(.alert-h)'), '描いた直後は中身の行が無い');
         fillAlerts(box);
         ok(!!box.querySelector('.alert > p:not(.alert-h)'), '打てる一行が置かれる');
         ok(paperToMd(box, '') === '> [!NOTE]\n\n次。\n', '空のままなら文字に出ない（札だけ）', paperToMd(box, ''));
@@ -529,9 +529,9 @@ async function press(md, where, at, hit) {
     {
         await draw('- [ ] やること\n- [x] やった');
         caretAt(find('やること'), 4);
-        pasteLines(box, ['一つめ', '二つめ', '三つめ']);
+        pasteLines(box, ['一つめ', '二つめ', '3 つめ']);
         // 一行目の `insertText` は軽い DOM に無いので、増えた項目だけ見る。
-        ok(paperToMd(box, '') === '- [ ] やること\n- [ ] 二つめ\n- [ ] 三つめ\n- [x] やった\n', 'セルの項目にはセルつきで増える', paperToMd(box, ''));
+        ok(paperToMd(box, '') === '- [ ] やること\n- [ ] 二つめ\n- [ ] 3 つめ\n- [x] やった\n', 'セルの項目にはセルつきで増える', paperToMd(box, ''));
     }
 
     say('行末の Delete ── 次が記号付きの行なら、何も起きない（本人が決めた・2026-09-11）');

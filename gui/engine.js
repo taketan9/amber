@@ -6,7 +6,7 @@
 // 打鍵より遅くなった瞬間に、その順序は崩れる。
 //
 // cian の `gui/engine.js` と同じ形。**写したのは配管だけで、判断は写して
-// いない** ── 答えるのは `amber_core::api` の1 つだけ。
+// いない** ── 答えるのは `amber_core::api` の 1 つだけ。
 
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');

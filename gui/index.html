@@ -502,7 +502,7 @@ body.mac #listhead { padding-top: 30px; }
 /* **見切れたタブへ行く道**（依頼 625・本人「タブが溢れかえっている時、見切れているタブに
    アクセスできず不便だ。右や左にスクロールまたはフリックして動かせるようにできないかい？」）。
    帯は前から横に動く作りだったが、**棒を隠していて、ふつうのマウスのホイールは縦にしか回らない**
-   ── Windows のマウスでは、見切れたタブへ行く手段が一つも無かった。三つ足した:
+   ── Windows のマウスでは、見切れたタブへ行く手段が一つも無かった。3 つ足した:
    ホイールで横に動く・掴んで引っ張る・端の ‹ › を押す（溢れているときだけ出る）。 */
 #stripwrap { display: flex; align-items: stretch; flex: none; min-width: 0;
   background: var(--list); border-bottom: 1px solid var(--line); }
@@ -607,7 +607,7 @@ body.mac #top { padding-top: 30px; }
 /* いま何文字か。**題の隣ではなく右端** ── 書いている間ずっと動く数字が
    題のとなりにあると、視線が題に戻るたびに数字を読んでしまう。 */
 /* **⋯ と ⚙ の区別を、形ではなく言葉で付ける。**
-   前は点三つと歯車が並んでいて、どちらがノートの話でどちらがアプリの話か
+   前は点3 つと歯車が並んでいて、どちらがノートの話でどちらがアプリの話か
    画面のどこにも書いていなかった。片方に名前を付ける。 */
 #tocbtn, #dots, #gear {
   flex: none; padding: 3px 8px; border-radius: 8px;
@@ -708,7 +708,7 @@ body.mac #top { padding-top: 30px; }
 #ed { flex: 1; min-width: 0; }
 /* ── 読める形 ──
 
-   直したのは三つ。
+   直したのは3 つ。
 
    1. **一行の長さ。** 前は画面の幅いっぱいに流していた。デスクトップ版を広げるほど一行が
       長くなり、行を折り返すたびに目が左端を探す ── 読みにくさの半分はこれ
@@ -1070,7 +1070,7 @@ body.vim #vim { display: block; }
 #blank img { width: 54px; height: 54px; opacity: .5; }
 
 /* ── ダイアログ ── 命令を選ぶ・文字を打つ・一つ選ぶ、を一つで賄う ──
-   別々に作ると、三つの微妙に違う「Esc で閉じる」ができる。 */
+   別々に作ると、3 つの微妙に違う「Esc で閉じる」ができる。 */
 #veil {
   /* **ダイアログは、何よりも上。** カレンダー（60）や「使われていない画像」
      （60）から呼ばれたダイアログが下に開くと、暗幕の裏で開いたまま押せない
@@ -1535,7 +1535,7 @@ body.dropping::after {
 }
 
 /* ── カレンダー（依頼 453）──
-   月の表と、その日の中身。**ノートを組んだまま出せるのが、この道具で
+   月の表と、その日の中身。**ノートを描いたまま出せるのが、この道具で
    カレンダーを持つ意味** ── 予定表とノートが別のアプリなら作れない。 */
 /* **カレンダーは画面の一つ**（依頼 478）── ノートと同じ場所に、同じ広さで
    出す。ダイアログとして重ねていたころは左右が狭く、全画面にしても広がらな
@@ -1596,7 +1596,7 @@ body.dropping::after {
 #calbox .d .ev.away { border-left-color: #3b78c9;
   background: color-mix(in srgb, #3b78c9 24%, var(--paper)) }
 /* **この環境の予定表のものは、直せる。** よそ（読むだけ）と、自分の
-   ノート（琥珀）と、三つを見分けられるように。 */
+   ノート（琥珀）と、3 つを見分けられるように。 */
 #calbox .d .ev.here { border-left-color: var(--cal-here, #2f8a52);
   background: color-mix(in srgb, var(--cal-here, #2f8a52) 24%, var(--paper)) }
 /* チームの予定は紫（日・週の表と揃える）。**月の表だけ色が無いと、
@@ -1660,7 +1660,7 @@ body.dropping::after {
   padding: 4px 0; }
 #calbox .hd.sat { color: #3b78c9 } #calbox .hd.sun { color: #cf4f45 }
 #calbox .hd.today { color: var(--amber); font-weight: 700 }
-/* 縦の表の帯も二段に組む（依頼 562）── 高さが足りるものだけ時刻を出す。 */
+/* 縦の表の帯も2 段に組む（依頼 562）── 高さが足りるものだけ時刻を出す。 */
 #calbox .blk.two { display: flex; flex-direction: column; }
 #calbox .blk i { font-style: normal; font-size: .85em; opacity: .75;
   font-variant-numeric: tabular-nums }
@@ -2060,7 +2060,7 @@ body.dropping::after {
     <div class="err" id="everr" hidden></div>
     <div class="acts"><button id="evcancel">やめる</button><button id="evok" class="go">登録する</button></div>
   </div></div>
-  <!-- **新しいノートのダイアログ**（依頼 513・iPhone と同じ三つ）。何も入れずに「作成」でも作れる。 -->
+  <!-- **新しいノートのダイアログ**（依頼 513・iPhone と同じ3 つ）。何も入れずに「作成」でも作れる。 -->
   <div id="newform" hidden><div class="box">
     <div class="hd">新しいノート</div>
     <label class="f"><span>タイトル</span><input id="nntitle" type="text" spellcheck="false" placeholder="例: 買い物メモ（空のままでもかまいません）"></label>

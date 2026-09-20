@@ -5,7 +5,7 @@
  *     node scripts/themes-test.js --write  # cian から `gui/palettes.js` を作り直す
  *
  * 本人が決めたこと（2026-09-12）: 「全テーマを全く同一に合わせたい」。cian は
- * 十八の配色（`cian-core/src/theme.rs` の `PRESETS`）とデスクトップ版の三つの装い（白磁・
+ * 十八の配色（`cian-core/src/theme.rs` の `PRESETS`）とデスクトップ版の3 つの装い（白磁・
  * 陰翳・端末譲り・`gui/index.html`）を持つ。amber は cian を知らない（依存は
  * cian → amber の一方向）ので、**表を写して持ち、ここで写しが古くなっていないか
  * を見る**。cian 側で色が一つ変わった日に、ここが鳴る。
@@ -46,7 +46,7 @@ function readPalettes() {
     return out;
 }
 
-/// cian のデスクトップ版の三つの装い（`index.html` の `:root` と `[data-look=…]`）。
+/// cian のデスクトップ版の3 つの装い（`index.html` の `:root` と `[data-look=…]`）。
 function readLooks() {
     const src = fs.readFileSync(path.join(cian, 'gui/index.html'), 'utf8');
     const block = (start) => {
@@ -82,7 +82,7 @@ const CIAN_PALETTES = [
 ${palettes.map(row).join('\n')}
 ];
 
-/// デスクトップ版の三つの装い（白磁・陰翳・端末譲り）── cian の \`index.html\` の変数そのまま。
+/// デスクトップ版の3 つの装い（白磁・陰翳・端末譲り）── cian の \`index.html\` の変数そのまま。
 const CIAN_LOOKS = {
 ${['hakuji', 'inei', 'terminal'].map(look).join('\n')}
 };
@@ -192,7 +192,7 @@ const ok = (cond, what, extra) => {
         console.log('書きました: gui/palettes.js と ios/Cian/Palettes.swift（' + palettes.length + ' 配色・3 装い）');
         return;
     }
-    console.log('cian と同じか ── 十八の配色と三つの装い');
+    console.log('cian と同じか ── 十八の配色と3 つの装い');
     ok(palettes.length === 18, 'cian の配色は十八', palettes.length);
     const mine = fs.readFileSync(OUT, 'utf8');
     ok(mine === render(palettes, looks), 'gui/palettes.js は cian の写しのまま（違えば --write で作り直す）');

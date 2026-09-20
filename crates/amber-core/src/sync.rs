@@ -94,7 +94,7 @@ pub type Move = (String, String);
 
 /// 手順を組み立てる。
 ///
-/// 見るのは三つ ── いまこちらにあるもの、いま向こうにあるもの、前に合わせた
+/// 見るのは3 つ ── いまこちらにあるもの、いま向こうにあるもの、前に合わせた
 /// ときの姿。**時刻はどこにも出てこない**（時刻で比べると、時計のずれた
 /// 端末が毎回勝つか毎回負ける）。
 pub fn plan(here: &[Here], there: &[There], was: &[Was]) -> Vec<Step> {
@@ -676,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn 改名の憶えは_続けて改名しても最初の道を持つ() {
+    fn 改名の憶えは_続けて改名しても最初のパスを持つ() {
         let d = tempfile::tempdir().unwrap();
         let r = d.path();
         remember(r, "drive", &[Was { rel: "a.md".into(), hash: "1".into(), id: "i".into(), tag: "x".into() }], &[]).unwrap();
@@ -720,7 +720,7 @@ mod tests {
     }
 
     #[test]
-    fn たくさんあっても_道の順に並ぶ() {
+    fn たくさんあっても_パスの順に並ぶ() {
         let out = plan(
             &[h("z.md", "1"), h("a.md", "1")],
             &[t("m.md", "x")],

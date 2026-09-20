@@ -70,7 +70,7 @@ export async function syncWalk() {
         const r = await syncNow('手');
         return r && r.up === 0 && r.down === 0 && r.clash === 0 ? true : JSON.stringify(r);`, true);
 
-    // 向こうが絵を1 つ置いた → こちらに bytes のまま下りてくる（依頼 497）。
+    // 向こうが絵を 1 つ置いた → こちらに bytes のまま下りてくる（依頼 497）。
     const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     await drive('/_put', { rel: 'attachments/太郎の絵.png', b64: PNG1, by: '太郎の iPhone' });
     await step('同期：向こうが置いた絵が、こちらに bytes のまま下りてくる', `

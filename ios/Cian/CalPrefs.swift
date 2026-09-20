@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// **カレンダー表示設定**（依頼 515・窓の `cmdCalSettings` と同じ三つ）──
+/// **カレンダー表示設定**（依頼 515・窓の `cmdCalSettings` と同じ3 つ）──
 /// どの予定表を出すか・土日を出すか・個人カレンダーの色。
 ///
 /// 窓と同じ鍵（`me` / `here:<予定表>` / `away:<名前>`）で持つが、**この端末の中だけ**
@@ -32,7 +32,7 @@ enum CalPrefs {
         get { UserDefaults.standard.string(forKey: colorKey) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: colorKey) }
     }
-    /// 月／週／日（窓の `calView` と同じ三つ）。
+    /// 月／週／日（窓の `calView` と同じ3 つ）。
     static var view: String {
         get { UserDefaults.standard.string(forKey: viewKey) ?? "month" }
         set { UserDefaults.standard.set(newValue, forKey: viewKey) }
