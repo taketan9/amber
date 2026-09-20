@@ -39,10 +39,14 @@ const DIRS = ['crates/amber-core', 'crates/amber-ffi', 'crates/amber-server',
               'crates/amber-onenote', 'gui', 'ios/Cian', 'scripts', 'docs',
               'packaging', '.github'];
 
-/// 見ない場所。**`packaging/welcome/` は利用者が読む本文**で、コメントでは
-/// ない ── 本人が良いと言ったものだし、松陰の引用も入っている（依頼 642 で
-/// 触らないと決めた）。
-const SKIP = ['packaging/welcome/'];
+/// 見ない場所。
+///
+///   * `packaging/welcome/` ── **利用者が読む本文**で、コメントではない。
+///     本人が良いと言ったものだし、松陰の引用も入っている
+///   * このファイル自身 ── **使わないと決めた語を並べるのが仕事**なので、
+///     自分を見ると必ず鳴る。作った直後は追跡下に無くて通り、コミットした
+///     瞬間に鳴った（`git ls-files` は追跡しているものだけ返す）
+const SKIP = ['packaging/welcome/', 'scripts/plain-test.js'];
 
 /// 直さないと決めたもの。**一つずつ理由を書く** ── 理由の書けない例外は、
 /// 例外ではなく直し忘れ。
