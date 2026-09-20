@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Break one thing, watch the ledger notice, put it back.
+# 一か所だけ壊して、台帳が気づくのを見て、戻す。
 #
-# Every check added to `gui/REQUESTS.ja.md` has to be shown to *fail* on a
-# broken version before it is trusted — five times now a check has gone quiet
-# rather than gone green, and a quiet check is worse than no check.
+# **台帳（`REQUESTS.ja.md`）に足した検査は、壊した版で落ちるのを見るまで
+# 信じない。** これまでに五回、検査が「通った」のではなく**黙った**ことが
+# ある ── 黙る検査は、無い検査より悪い。画面の上では同じ顔をしていて、
+# こちらは守られているつもりでいるから。
 #
-# **Every occurrence, not the first.** A retyped `perl -0pi -e s///` without
-# the `/g` changed one of four `data-line=` and the check still matched, which
-# looked exactly like a check that does not work. That is the reason this is a
-# script and not something typed out each time.
+# **一つ目だけでなく、ぜんぶ置き換える。** その場で打ち直した
+# `perl -0pi -e s///` に `/g` が無く、4 つある `data-line=` のうち 1 つしか
+# 変わらなかったことがある。検査は当たったままで、**効かない検査と
+# 見分けがつかなかった** ── だからこれは、毎回打つものではなく台本にした。
 #
 #   scripts/mutate.sh crates/cian-core/src/note.rs 'pub fn spans(' 'pub fn colours('
 set -euo pipefail

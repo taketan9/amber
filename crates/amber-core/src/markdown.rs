@@ -345,7 +345,7 @@ pub fn fence_lang(line: &str) -> Option<String> {
     None
 }
 
-/// `- item` / `1. item` → `(marker, text, indent)`.
+/// `- もの` / `1. もの` → `(記号, 中身, インデント)`。
 pub fn list_item(raw: &str) -> Option<(String, String, usize)> {
     let indent = raw.len() - raw.trim_start().len();
     let t = raw.trim_start();
@@ -366,7 +366,7 @@ pub fn list_item(raw: &str) -> Option<(String, String, usize)> {
     None
 }
 
-/// `[ ] thing` / `[x] thing` → `(done, text)`.
+/// `[ ] やること` / `[x] やったこと` → `(済んだか, 中身)`。
 pub fn task_item(text: &str) -> Option<(bool, String)> {
     let t = text.trim_start();
     for (mark, done) in [("[ ] ", false), ("[x] ", true), ("[X] ", true)] {

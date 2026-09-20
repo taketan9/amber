@@ -472,9 +472,9 @@ final class NotesStore: ObservableObject {
 
     /// パスを名前の連なりにする。いまのものではない URL のため。
     ///
-    /// 末尾だけ。プロバイダのパスの前半は、あちらの管理情報だから。
-    /// bookkeeping — 「Google Drive › 仕事 › ノート」 is the answer;
-    /// `/private/var/mobile/Library/CloudStorage/…` is not.
+    /// **末尾だけ。** プロバイダのパスの前半は、あちらの管理のためのもの ──
+    /// 人が知りたいのは「Google Drive › 仕事 › ノート」であって、
+    /// `/private/var/mobile/Library/CloudStorage/…` ではない。
     /// フォルダ・色・憶え・共有のマークは**保存ディレクトリごと**（core の帳画面が
     /// そこにある）。見せるのは、いま開いている保存ディレクトリのぶん。
     private var booksBy: [String: [String]] = [:]

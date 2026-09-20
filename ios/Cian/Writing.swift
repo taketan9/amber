@@ -610,7 +610,7 @@ struct NoteView: View {
             .accessibilityLabel(name)
     }
 
-    // MARK: the edits
+    // MARK: 直すところ
 
     /// カーソルのある行に、`#` がいくつ付いているか。
     private var heads: Int {

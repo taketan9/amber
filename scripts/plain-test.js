@@ -59,13 +59,43 @@ const KEEP = [
     /窓口/, /葉に字を書いた/, /画面/, /文字/,
 ];
 
+/// **英語の説明文かどうか。** 語彙だけ直しても、英語のまま残っていては
+/// 「普通の日本語で書く」を果たしたことにならない ── 2026-09-20 に「英語は
+/// repo から消えた」と書いたが、消えていなかった（`ios-build.sh` の頭など
+/// 10 ファイルほどが英語のままだった）。**覚えているあいだしか効かない**
+/// ので、機械に見させる。
+///
+/// **打ち方の見本は英語のまま。** `node scripts/paper-test.js` を日本語に
+/// しても誰も打てない。CSS の選び方・記号の名前・引用したエラーの文面も
+/// 同じ ── あれは説明ではなく、そう打つもの・そう出るもの。
+function englishProse(line) {
+    let t = line.replace(/^\s*(\/\/\/|\/\/!|\/\/|#(?!!)|\*|<!--)\s*/, '').trim();
+    if (/[ぁ-んァ-ヶ一-龥]/.test(t)) return false;
+    // 打ち方の見本・パス・旗。
+    if (/^(node|npm|npx|cargo|python3?|bash|sh|zsh|git|gh|curl|scripts[\\/]|\.[\\/]|--|\||dist[\\/]|target[\\/]|package\.json|Error:|MARK:)/.test(t)) return false;
+    // CSS の選び方。
+    if (/[{};]\s*$|^[#.][\w-]+[\s,.:]|::before|::after|:hover|:not\(/.test(t)) return false;
+    // 矢印の入った対応表（`- もの` → `(記号, 中身)` のたぐい）。
+    if (/[→←]/.test(t)) return false;
+    // 逆引用符の中は書いてあるとおりのもの ── 数える前に外す。
+    t = t.replace(/`[^`]*`/g, ' ').replace(/"[^"]*"/g, ' ');
+    const words = t.match(/[A-Za-z][A-Za-z'-]{2,}/g) || [];
+    return words.length >= 4;
+}
+
+/// コメントの行を拾う。**囲みの中かどうかも一緒に返す** ── `.md` の
+/// 囲み（``` で挟んだところ）に入っているのは説明ではなく、そう打つもの。
+/// 語彙のほうは囲みの中も見る（書いてある言葉は言葉なので）が、英語の
+/// 地の文は見ない。
 function comments(file, text) {
     const out = [];
     const ext = path.extname(file);
     const mark = ext === '.py' || ext === '.sh' || ext === '.yml' || ext === '.toml'
         ? /^\s*#(?!!)/ : /^\s*(\/\/\/|\/\/!|\/\/|\*|<!--)/;
+    let fence = false;
     text.split('\n').forEach((line, i) => {
-        if (mark.test(line) || (ext === '.md' && line.trim())) out.push([i + 1, line]);
+        if (ext === '.md' && /^\s*(```|~~~)/.test(line)) { fence = !fence; return; }
+        if (mark.test(line) || (ext === '.md' && line.trim())) out.push([i + 1, line, fence]);
     });
     return out;
 }
@@ -81,15 +111,18 @@ function main() {
     const bad = [];
     for (const f of files) {
         const text = fs.readFileSync(path.join(ROOT, f), 'utf8');
-        for (const [n, line] of comments(f, text)) {
+        for (const [n, line, fence] of comments(f, text)) {
             if (KEEP.some((k) => k.test(line))) continue;
             for (const [word, instead] of PLAIN) {
                 if (line.includes(word)) bad.push({ f, n, word, instead, line: line.trim() });
             }
+            if (!fence && englishProse(line)) {
+                bad.push({ f, n, word: '英語のまま', instead: '日本語で書く', line: line.trim() });
+            }
         }
     }
     if (bad.length) {
-        console.error(`比喩が ${bad.length} か所あります（依頼 642 ── 普通の日本語で書く）:\n`);
+        console.error(`普通の日本語でないところが ${bad.length} か所あります（依頼 642）:\n`);
         for (const b of bad.slice(0, 20)) {
             console.error(`  ${b.f}:${b.n}  「${b.word}」→ ${b.instead}`);
             console.error(`      ${b.line.slice(0, 90)}`);
@@ -97,7 +130,7 @@ function main() {
         if (bad.length > 20) console.error(`  … ほか ${bad.length - 20} か所`);
         process.exit(1);
     }
-    console.log(`コメントは普通の日本語です（${files.length} ファイル・${PLAIN.length} 語を見ました）`);
+    console.log(`コメントは普通の日本語です（${files.length} ファイル・${PLAIN.length} 語と、英語の地の文を見ました）`);
 }
 
 main();

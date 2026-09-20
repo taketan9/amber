@@ -2387,8 +2387,8 @@ mod tests {
 
     #[test]
     fn ファイルシステムが拒む題は_受け付ける名前に直される() {
-        // スラッシュとコロンは、人がタイトルに何気なく打つ文字。
-        // — a date, a path, a ratio.
+        // スラッシュとコロンは、人がタイトルに何気なく打つ文字 ──
+        // 日付・パス・比。
         assert_eq!(file_stem("2026/09/02 の予定"), "2026-09-02 の予定");
         assert_eq!(file_stem("a:b*c?d"), "a-b-c-d");
         // 連続したものはダッシュ 1 つにまとめ、名前の先頭には置かない。
@@ -2660,7 +2660,7 @@ pub fn carry_out(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Every {
     Daily,
-    /// 0 = Monday, as `chrono::Weekday::num_days_from_monday` counts.
+    /// 0 が月曜（`chrono::Weekday::num_days_from_monday` の数え方に合わせる）。
     Weekly(u32),
     /// 月の何日か。31 日が無い月では末日に落とす。飛ばさない ── 2 月を黙って
     /// 飛ばす毎月の繰り返しは、1 日早く来るものより悪い。
@@ -2814,8 +2814,8 @@ pub fn due_since(
 /// 毎月の繰り返しが、その日に当たるか。
 ///
 /// 30 日しかない月の 31 日は、その月の末日に落とす ── そうしないと
-/// 「毎月31日」 quietly means 「7か月だけ」. One answer, asked by both the
-/// catching-up and the next-time-round.
+/// 「毎月31日」が黙って「7 か月だけ」になる。**答えは一つ** ── 取りこぼしを
+/// 拾うときも、次はいつかを訊くときも、ここに訊く。
 fn due_on(want: u32, d: chrono::NaiveDate) -> bool {
     use chrono::Datelike;
     d.day() == want.min(last_day(d.year(), d.month()))

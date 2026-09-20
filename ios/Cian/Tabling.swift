@@ -119,7 +119,7 @@ struct Tabling: View {
                 set: { if heads.indices.contains(i) { heads[i] = $0 } })
     }
 
-    /// The table, as Markdown.
+    /// この表を、Markdown の文字にする。
     ///
     /// 空のセルには全角空白を入れる。何も入れないと `|  |  |` の行は
     /// レンダラが落としうる形に潰れ、消えた表は「作り損ねた表」に

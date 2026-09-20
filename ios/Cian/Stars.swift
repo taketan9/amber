@@ -252,7 +252,7 @@ struct Colouring: View {
 }
 
 extension Colouring {
-    /// A dot of one colour, for a menu.
+    /// メニューに出す、色の丸 1 つ。
     ///
     /// **`.alwaysOriginal` を付けないとシアンになる。** メニューはほかの記号と
     /// 同じようにアクセント色で画像を染めるので、`systemImage:` で描いた

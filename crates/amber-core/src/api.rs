@@ -1298,7 +1298,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // `all` ── ノートのルート配下すべて。画像も含む。
         // `book` ── ノートブック 1 つとその配下。
         // `tag`  ── そのタグを持つノートすべて。どこにあっても。
-        // `note` — one file.
+        // `note` ── ノート 1 本。
         "backup" => {
             let root = std::path::PathBuf::from(arg(p, "path"));
             let scope = arg(p, "scope");

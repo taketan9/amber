@@ -43,17 +43,16 @@ def rows() -> list[dict]:
         if not line.startswith("|"):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        # A row whose first cell is a number is a data row. Anything else is
-        # the header or the separator, and those are walked past.
+        # 一つ目のセルが数字の行だけが中身の行。それ以外は見出しか区切りなので、
+        # 素通りする。
         if not cells or not cells[0].isdigit():
             continue
-        # **A data row with the wrong number of cells is broken, not absent.**
-        # Row 22 was written with `\|\|` in its check — a perfectly good
-        # regex, and two more pipes than a markdown table has room for. It
-        # split into seven cells, fell through the `continue` below, and the
-        # register said "24 件、すべて守られています" while holding 25 rows.
-        # A checker that answers a question it did not read is worse than one
-        # that refuses.
+        # **セルの数が合わない行は、「壊れている」のであって「無い」のではない。**
+        # 22 行目の検査に `\|\|` と書いたことがある ── 正規表現としては
+        # まったく正しく、markdown の表に入る `|` の数より 2 つ多い。7 セルに
+        # 割れて下の `continue` をすり抜け、**25 行あるのに台帳は「24 件、
+        # すべて守られています」と言った。** 読んでいない問いに答える検査は、
+        # 読めないと断る検査より悪い。
         if len(cells) != 5:
             out.append({
                 "n": cells[0],

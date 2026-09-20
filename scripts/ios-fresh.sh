@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Is the engine in the app older than the engine in the sources?
+# アプリの中のエンジンは、ソースより古くないか。
 #
-# Xcode links a prebuilt `AmberFFI.xcframework`; nothing in an Xcode build
-# rebuilds the Rust. So a build after a change to `amber-core` or `amber-ffi`
-# succeeds, installs, launches, and then answers 「知らない操作: remind」 the
-# first time you press the new button — at which point the evidence points at
-# the Swift, which is fine.
+# **Xcode は出来合いの `AmberFFI.xcframework` をリンクするだけで、Rust を
+# 組み直さない。** だから `amber-core` や `amber-ffi` を直したあとのビルドは
+# 何ごともなく通り、入って、立ち上がり、**新しいボタンを初めて押したときに
+# 「知らない操作: remind」と答える** ── そこで疑われるのは Swift のほうで、
+# そちらは何ともない。
 #
-# That happened. This is the check that would have said so at the moment the
-# app was built, in the one place that is looking.
+# 実際にそうなった。これは、**組んだその場で**そう言ってくれる検査 ──
+# 見ているのはここだけ。
 #
 # **名前は `AmberFFI`。** cian から分かれた日に `ios-build.sh` と pbxproj は
 # 新しい名前に変わったが、ここだけ `CianFFI` のまま残った ── この検査は

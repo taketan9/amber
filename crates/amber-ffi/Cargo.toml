@@ -7,9 +7,9 @@ license.workspace = true
 description = "amber — Markdown のノートを、C ABI の向こうへ。エンジンを走らせられない場所のために"
 
 [lib]
-# `staticlib` is what an Xcode target links; `rlib` is what `cargo test` needs,
-# and the tests here are the only place this code is ever run on a machine
-# that can run it.
+# `staticlib` は Xcode のターゲットがリンクするもの、`rlib` は `cargo test` が
+# 要るもの。**両方入れる** ── ここの試験は、このコードが「走らせられる端末で
+# 実際に走る」唯一の場所なので。
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
@@ -18,7 +18,7 @@ crate-type = ["staticlib", "rlib"]
 amber-core = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
-# Only for the two date fields the reminder methods hand across.
+# リマインダーが受け渡す 2 つの日付の欄のためだけ。
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 
 [dev-dependencies]
