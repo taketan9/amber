@@ -2553,7 +2553,23 @@ function codeOf(pre) {
 /// DOM を Markdown に戻す。
 function paperToMd(box, head) {
     const out = [];
-    for (const node of box.children) {
+    for (const node of box.childNodes) {
+        // **かたまりの外に、裸の文字が居ることがある。**
+        //
+        // まっさらなノートに打った一文字目は `<p>` に包まれず、箱の直下の
+        // 文字の節として入る（WebKit がそうする）。かたまり（`children`）
+        // だけを見ていたので、**打ったのに保存されなかった** ── iPhone の
+        // シミュレータで、新しいノートに打った字が一つも残らなかった
+        // （2026-09-21）。打ったのに保存されない、がいちばん悪い。
+        //
+        // かたまりとかたまりのあいだの改行や空白は、文字ではない ── 落とす。
+        if (node.nodeType !== 1) {
+            if (node.nodeType === 3) {
+                const t = edges(node.data);
+                if (t) out.push(t);
+            }
+            continue;
+        }
         // **画面の道具（選び口など）は文字ではない。** 書き戻さない。
         if (node.classList && node.classList.contains('gadget')) continue;
         if (richBlock(node)) {
@@ -3328,6 +3344,74 @@ function checkFenceReturn(box) {
     sel.removeAllRanges();
     sel.addRange(to);
     return true;
+}
+
+/// 選んだかたまりを、コードブロックにする（依頼 644・iPhone の道具の帯）。
+///
+/// **デスクトップ版と同じ答えを出すが、通り道が違う。** あちらは文字
+/// （`readSourceEdit`）を組み直して Monaco に戻すが、iPhone に Monaco は
+/// 無い ── 引用や箇条書き（`blockAs`）と同じように、画面のかたまりを
+/// 直に入れ替える。文字に戻すのは `blockToMd` の `PRE` なので、**出てくる
+/// Markdown は同じ**。
+///
+/// **かたまりごと包む。** 段落の途中だけ選んでも、その段落まるごとが枠に
+/// なる ── かたまりの種類を変える道具は、かたまりに効く。二つ以上に
+/// またがって選べば、まとめて 1 つの枠。
+///
+/// 選んでいなければ、caret のかたまりの下に空の枠を置く（依頼 618 ──
+/// 中身は空で出す。サンプルの文字を入れると、消すところから始まる）。
+///
+/// 戻せないかたまり（元の文字を持たない図）が混じっていたら、**何もしない**
+/// ── 包んだ拍子に図が消えるほうが、包めないより悪い。
+function fenceAs(box) {
+    const sel = getSelection();
+    const kids = [...box.children];
+    const blockOf = (n) => {
+        if (n && n.nodeType === 3) n = n.parentNode;
+        if (!n || !box.contains(n)) return null;
+        while (n && n.parentElement !== box) n = n.parentElement;
+        return n;
+    };
+    const pre = document.createElement('pre');
+    const code = document.createElement('code');
+    pre.appendChild(code);
+    const picked = sel && sel.rangeCount && !sel.isCollapsed && String(sel).trim();
+    if (picked) {
+        const r = sel.getRangeAt(0);
+        const from = blockOf(r.startContainer);
+        const to = blockOf(r.endContainer) || from;
+        const a = from ? kids.indexOf(from) : -1;
+        if (a >= 0) {
+            const b = Math.max(a, kids.indexOf(to));
+            const parts = kids.slice(a, b + 1)
+                .map((n) => (richBlock(n) ? n.dataset.md : blockToMd(n)));
+            if (parts.some((t) => t === undefined)) return false;
+            code.textContent = parts.filter((t) => t !== null).join('\n\n');
+            from.replaceWith(pre);
+            for (const n of kids.slice(a + 1, b + 1)) n.remove();
+            landInFence(pre);
+            return true;
+        }
+    }
+    const at = sel && sel.rangeCount ? blockOf(sel.getRangeAt(0).startContainer) : null;
+    // 打てる行を 1 つ持たせる ── 空の `<pre>` には caret の行き先が無い。
+    code.textContent = '\n';
+    if (at) at.after(pre);
+    else box.appendChild(pre);
+    landInFence(pre);
+    return true;
+}
+
+/// 枠の中の頭に caret を置く。
+function landInFence(pre) {
+    const code = pre.querySelector('code') || pre;
+    const r = document.createRange();
+    r.selectNodeContents(code);
+    r.collapse(true);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    pre.scrollIntoView({ block: 'nearest' });
 }
 
 /// 選んだ範囲（無ければ caret の行）が、そのラベルの中に居るか。

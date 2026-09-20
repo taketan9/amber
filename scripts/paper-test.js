@@ -410,5 +410,85 @@ console.log('コードブロックの中の Enter は、枠を割らずに改行
     ok(checkFenceReturn(box) === false, '枠の外では受けない');
 }
 
+console.log('かたまりの外に居る裸の文字を、落とさないか');
+{
+    // **まっさらなノートに打った一文字目は `<p>` に包まれない** ── 箱の直下の
+    // 文字の節として入る（WebKit がそうする）。`children` だけ見ていたので
+    // **打ったのに保存されず**、iPhone のシミュレータで新しいノートに打った字が
+    // 一つも残らなかった（2026-09-21）。打ったのに保存されない、がいちばん悪い。
+    box.innerHTML = '';
+    box.appendChild(document.createTextNode('打った文字'));
+    ok(paperToMd(box, '') === '打った文字\n', '裸の文字も文字', paperToMd(box, ''));
+
+    box.innerHTML = '<pre><code>1</code></pre>';
+    box.insertBefore(document.createTextNode('打った文字'), box.firstChild);
+    ok(paperToMd(box, '') === '打った文字\n\n```\n1\n```\n',
+       'かたまりと並んでいても落とさない', paperToMd(box, ''));
+
+    // **かたまりとかたまりのあいだの改行や空白は、文字ではない** ── 落とす。
+    // ここを拾うと、触っただけのノートに空行が増える。
+    box.innerHTML = '<p>あ</p>\n  \n<p>い</p>';
+    ok(paperToMd(box, '') === 'あ\n\nい\n', 'あいだの空白は落とす', paperToMd(box, ''));
+}
+
+console.log('iPhone の「コードブロック」が、選んだところを包むか');
+{
+    // jsdom に `scrollIntoView` は無い ── 画面を動かすだけのものなので、
+    // 何もしないものを置く。
+    dom.window.Element.prototype.scrollIntoView = function noop() {};
+    const pick = (a, b) => {
+        const r = document.createRange();
+        r.setStart(a.firstChild, 0);
+        r.setEnd((b || a).firstChild, (b || a).firstChild.data.length);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+    };
+    const caret = (a) => {
+        const r = document.createRange();
+        r.selectNodeContents(a);
+        r.collapse(false);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+    };
+
+    box.innerHTML = '<p>前の段落</p><p>後ろの段落</p>';
+    pick(box.querySelector('p'));
+    ok(fenceAs(box) === true, '選んだ段落を包む');
+    ok(paperToMd(box, '') === '```\n前の段落\n```\n\n後ろの段落\n',
+       '包んだのはその段落だけ', paperToMd(box, ''));
+
+    // **二つ以上にまたがって選べば、まとめて 1 つの枠。**
+    box.innerHTML = '<p>ひとつ</p><p>ふたつ</p><p>みっつ</p>';
+    const ps = box.querySelectorAll('p');
+    pick(ps[0], ps[1]);
+    fenceAs(box);
+    ok(paperToMd(box, '') === '```\nひとつ\n\nふたつ\n```\n\nみっつ\n',
+       'またがって選ぶと、まとめて 1 つ', paperToMd(box, ''));
+
+    // **選んでいなければ、下に空の枠。**（依頼 618 ── 中身は空で出す）
+    box.innerHTML = '<p>ここに打つ</p>';
+    caret(box.querySelector('p'));
+    fenceAs(box);
+    ok(paperToMd(box, '') === 'ここに打つ\n\n```\n\n```\n',
+       '選んでいなければ、下に空の枠', paperToMd(box, ''));
+    ok(box.querySelector('pre') === box.children[1], '枠は、その段落の次に入る');
+
+    // **戻せない図が混じっていたら、何もしない** ── 包んだ拍子に消えるほうが悪い。
+    box.innerHTML = '<p>文字</p><div class="mermaid">図</div>';
+    pick(box.querySelector('p'), null);
+    {
+        const r = document.createRange();
+        r.setStart(box.children[0].firstChild, 0);
+        r.setEnd(box.children[1], box.children[1].childNodes.length);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+    }
+    ok(fenceAs(box) === false, '元の文字を持たない図が混じったら、包まない');
+    ok(box.querySelectorAll('pre').length === 0, '断ったときは、画面を触らない');
+}
+
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');
 process.exit(bad ? 1 : 0);

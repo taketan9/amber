@@ -96,6 +96,11 @@ struct NoteView: View {
                     mark("斜体", "italic") { hand.mark("italic") }
                     mark("取り消し線", "strikethrough") { hand.mark("strike") }
                     mark("引用", "text.quote") { hand.mark("quote") }
+                    // **コードブロック**（依頼 644 の続き・本人「iPhone にも
+                    // コードブロックの道具を足してくれ」）。引用の隣に置く ──
+                    // どちらも「このかたまりの種類を変える」道具で、選んだ
+                    // ところに効く。デスクトップ版の道具の帯でも並びは同じ。
+                    mark("コードブロック", "chevron.left.forwardslash.chevron.right") { hand.mark("fence") }
                     // **新しい段落は、ここから。** iPhone の Return は改行に
                     // した（本人が決めた・2026-09-08「改行二回で段落」は
                     // 取らない）ので、段落を分ける手をどこかに置く必要がある。

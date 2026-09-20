@@ -490,6 +490,14 @@ struct Paper: UIViewRepresentable {
         if (!blockAs(box, what)) return;
       } else if (what === 'quote') {
         blockAs(box, 'blockquote');
+      } else if (what === 'fence') {
+        // **コードブロック**（依頼 644）── 選んだところを包む。選んでいな
+        // ければ、下に空の枠を置く。判断は切り出しの `fenceAs`（デスクトップ版と
+        // 一組）── ここに別の答えを書くと、同じノートが端末によって
+        // 別の文字になる。
+        // **包めなければ、何もしないで戻る。** 元の文字を持たない図が
+        // 混じっているときだけ ── 包んだ拍子に図が消えるほうが悪い。
+        if (!fenceAs(box)) return;
       } else if (what === 'check') check();
       else if (what === 'head') {
         // 押すたびに深くなる ── デスクトップ版と同じ（`#` → `##` → `###` → 無し）。
