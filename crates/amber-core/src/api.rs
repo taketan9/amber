@@ -2163,7 +2163,7 @@ mod tests {
         std::fs::write(to.join("a.md"), "いまの a\n").unwrap();          // 同じ名前
         std::fs::write(to.join("知らない.md"), "触るな\n").unwrap();     // 向こうに無い
         std::fs::create_dir_all(to.join("仕事")).unwrap();
-        std::fs::write(to.join("仕事/c.md"), "いまの c\n").unwrap();     // 同じ棚の別の紙
+        std::fs::write(to.join("仕事/c.md"), "いまの c\n").unwrap();     // 同じフォルダの別のファイル
         std::fs::write(to.join("日記/9月.md"), "晴れ\n").unwrap();       // 向こうに無い棚
 
         let back = call("restore", &serde_json::json!({
@@ -2300,7 +2300,7 @@ mod tests {
         assert!(v.len() <= crate::history::KEEP_GENS + 2, "{} 件", v.len());
         // **「残す」が付いたものは、どれだけ古くても残る。**
         assert!(v.iter().any(|x| x["stamp"] == oldest && x["kept"] == true),
-                "印のいちばん古い姿が消えました");
+                "「残す」を付けたいちばん古いものが消えました");
     }
 
     /// フォルダを訊くと、その中のノートの姿が**まとめて**時系列で出るか。

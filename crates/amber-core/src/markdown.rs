@@ -1390,8 +1390,8 @@ mod tests {
         let out = to_html(&lines(line));
         assert!(out.contains("<span style=\"color:#d9822b\">だいだいの字</span>"), "{out}");
         assert!(out.contains("<span style=\"color:#0e93a8\">シアン</span>"), "{out}");
-        assert!(!out.contains("e=&quot;color"), "span の途中から字が出ている: {out}");
-        assert!(out.contains("と、"), "間の字が食われた: {out}");
+        assert!(!out.contains("e=&quot;color"), "span の途中から文字が出ている: {out}");
+        assert!(out.contains("と、"), "間の文字が食われた: {out}");
     }
 
     #[test]
@@ -1400,8 +1400,8 @@ mod tests {
         for line in ["***両方***", "___両方___"] {
             let out = to_html(&lines(line));
             assert!(out.contains("<strong><em>両方</em></strong>"), "{line}: {out}");
-            assert!(!out.contains("*両方"), "印が字として出ている {line}: {out}");
-            assert!(!out.contains("_両方"), "印が字として出ている {line}: {out}");
+            assert!(!out.contains("*両方"), "記号が文字として出ている {line}: {out}");
+            assert!(!out.contains("_両方"), "記号が文字として出ている {line}: {out}");
         }
         assert_eq!(inline("***両方***"), vec![Inline::BoldItalic("両方".into())]);
     }
@@ -1478,7 +1478,7 @@ mod tests {
     #[test]
     fn 裸の_url_は押せるが_文字は変わらない() {
         let got = super::to_html(&["見て https://example.com/a 。".to_string()]);
-        assert!(got.contains("data-bare=\"1\""), "裸の印が要る: {got}");
+        assert!(got.contains("data-bare=\"1\""), "裸 URL の目印が要る: {got}");
         assert!(got.contains("href=\"https://example.com/a\""), "{got}");
         // **句点まで飲み込まない。** `…/a。` は開けない行き先になる。
         assert!(!got.contains("/a。"), "句点は URL の外: {got}");
@@ -1500,7 +1500,7 @@ mod tests {
         let glued = inline("xhttps://example.com/a");
         assert!(
             !glued.iter().any(|i| matches!(i, Inline::Bare(_))),
-            "字にくっついた綴りは URL ではない: {glued:?}"
+            "文字にくっついた綴りは URL ではない: {glued:?}"
         );
 
         // 閉じ括弧・鍵括弧で止まる（日本語の文の形）。
@@ -1525,11 +1525,11 @@ mod tests {
         let got = to_html(&lines(md));
         assert!(got.contains("<details"), "畳みにならない: {got}");
         assert!(got.contains("<summary>ながい <strong>コード</strong></summary>"),
-                "見出しの飾りが出ない: {got}");
+                "見出しの書式が出ない: {got}");
         // **中はふつうに組み直す** ── 畳みたいのは、たいてい長い枠。
         assert!(got.contains("<pre") && got.contains("const a = 1;"), "中の枠が出ない: {got}");
         // 山括弧が文字として出ていないこと（以前は `&lt;details&gt;` と出ていた）。
-        assert!(!got.contains("&lt;details"), "字のまま出ている: {got}");
+        assert!(!got.contains("&lt;details"), "文字のまま出ている: {got}");
 
         // 見出しを書かなかった人にも、押すところがあること。
         let bare = to_html(&lines("<details>\n\n中身\n\n</details>\n"));
@@ -1552,7 +1552,7 @@ mod tests {
 
         // **行全体がタグのときだけ。** 本文の途中に書いた山括弧は文字のまま。
         let mid = to_html(&lines("これは <details> という札です\n"));
-        assert!(mid.contains("&lt;details&gt;"), "字のまま出ない: {mid}");
+        assert!(mid.contains("&lt;details&gt;"), "文字のまま出ない: {mid}");
 
         // **段落の次の行でも畳みになる**（段落に飲み込まれない）。
         let after = to_html(&lines("まえの段。\n<details>\n\n中身\n\n</details>\n"));
@@ -1586,7 +1586,7 @@ mod tests {
         // 辿り着けなかった ── 操作できるチェックボックスが 1 つ出せないだけで、ノートの
         // 半分が触れなくなる。
         let out = super::to_html(&lines("- [ ] やること\n- [x] 済んだ\n"));
-        assert!(out.contains("<button type=\"button\" class=\"box\""), "升が押せない: {out}");
+        assert!(out.contains("<button type=\"button\" class=\"box\""), "チェックボックスが押せない: {out}");
         assert!(out.contains("aria-pressed=\"false\""), "入り切りが伝わらない: {out}");
         assert!(out.contains("aria-pressed=\"true\""), "入り切りが伝わらない: {out}");
         // 行番号は残す ── `note::set_check` が取るのはこれ。
@@ -1630,7 +1630,7 @@ mod tests {
         // 始まるので、素朴に「次の `>`」を探すと `</li data-line=…>` に
         // なる（一度そうなった）。
         let out = super::to_html(&lines("- あ\n- い\n"));
-        assert!(!out.contains("</li data-line"), "閉じ札に差さっている: {out}");
+        assert!(!out.contains("</li data-line"), "終了タグに挿入されている: {out}");
         assert!(out.contains("data-line=\"1\""), "二つ目に差さっていない: {out}");
 
         // 引用の中で数え直さない ── 中の行番号はファイルの行番号ではない。
@@ -1663,7 +1663,7 @@ mod tests {
     fn 行そのものが画像なら画像で出る() {
         let out = to_html(&lines("![猫](cat.jpg)\n"));
         assert!(out.contains("<img src=\"cat.jpg\" alt=\"猫\">"), "画像になっていない: {out}");
-        assert!(!out.contains("!<a"), "`!` が字のまま残っている: {out}");
+        assert!(!out.contains("!<a"), "`!` が文字のまま残っている: {out}");
 
         // 表示できない参照先は、隠さずに文字で残す。
         let out = to_html(&lines("![だめ](javascript:alert(1))\n"));

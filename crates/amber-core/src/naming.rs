@@ -482,7 +482,7 @@ mod tests {
         // どちらのノートも、**自分の隣**を見たまま。`..` は一本も生えない。
         for at in [&to, &other] {
             let text = std::fs::read_to_string(at).unwrap();
-            assert!(!text.contains(".."), "`..` の道が生えた: {text}");
+            assert!(!text.contains(".."), "`..` のパスが生えた: {text}");
             let here = at.parent().unwrap();
             let seen = crate::spare::points_at(&text, here);
             assert!(seen.iter().any(|p| p.is_file()), "{at:?} から画像が見えない: {seen:?}");

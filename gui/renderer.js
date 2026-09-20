@@ -2355,7 +2355,7 @@ function richBlock(node) {
 /// 止まる）。
 ///
 /// **切り出しの中に置く。** iPhone も同じ掛け替えをする ── 外に置いていた
-/// ときは、iPhone の束ねに `keepMark` が入っていなかった。
+/// ときは、iPhone のバンドルに `keepMark` が入っていなかった。
 function keepMark(from, to) {
     for (const k of ['line', 'span', 'md']) {
         if (from.dataset[k] !== undefined) to.dataset[k] = from.dataset[k];
@@ -3996,7 +3996,7 @@ function peel(node) {
 /// このデスクトップ版の「表示」画面を、上の切り出しに繋ぐ薄い包み。
 ///
 /// **切り出しの外に置く。** iPhone が持っていくのは上の切り出しだけで、ここは
-/// `el('read')` も `state` も見る ── 中に混ぜると、iPhone の束ねに
+/// `el('read')` も `state` も見る ── 中に混ぜると、iPhone のバンドルに
 /// 「呼べば落ちる関数」が入る。
 function armRead() {
     // 錠のノートは、画面を入力欄にしない（依頼 629）── 見た目で止めるのでは
@@ -5659,12 +5659,12 @@ function loadMermaid() {
     return new Promise((resolve, reject) => {
         // **Monaco のローダには渡さない。**
         //
-        // mermaid の束ねの中には、`define.amd` を見て自分から名乗り出る
+        // mermaid のバンドルの中には、`define.amd` を見て自分から名乗り出る
         // 小さなパーサーが入っている。ローダはその名乗りを「mermaid だ」と
         // 受け取るので、返ってくるのは `initialize` を持たない別物になる
         // （実際にそうなった。「mermaid が名乗りません」はそれ）。
         //
-        // だから **`define` を伏せてから素の `<script>` で読む。** 束ねは
+        // だから **`define` を伏せてから素の `<script>` で読む。** バンドルは
         // 最後に `globalThis.mermaid` へ自分を置く。
         //
         // **旗（`define.amd`）を下ろすだけでは足りない。** 中のパーサーは

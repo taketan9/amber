@@ -214,7 +214,7 @@ fn merge_with_head(
  * 手順も規則も `xdiff/xmerge.c`（`xdl_do_merge`・`xdl_append_merge`・
  * `xdl_refine_conflicts`・`xdl_simplify_non_conflicts`・`xdl_fill_merge_buffer`）
  * をそのまま Rust に写してある。`git merge-file` の既定（`XDL_MERGE_ZEALOUS_ALNUM`・
- * 印の大きさ以外の旗は無し）に合わせた。読み比べられるように、名前も
+ * マーカーの長さ以外のオプションは無し）に合わせた。読み比べられるように、名前も
  * 近いままにしてある。
  */
 
@@ -950,7 +950,7 @@ mod tests {
         assert_eq!(m.came.iter().map(|&n| rows[n]).collect::<Vec<_>>(), vec!["B"]);
     }
 
-    /* ── Git を正解として、機械で突き合わせる ── */
+    /* ── Git を正解として、自動で突き合わせる ── */
 
     /// 環境に Git があれば、`git merge-file -p` と同じ結果になるかを見る。
     /// **マーカー行（`<<<<<<<` `=======` `>>>>>>>`）を除いた Git の出力が、
