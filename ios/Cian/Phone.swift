@@ -4,7 +4,7 @@ import Foundation
 /// **この iPhone の予定表**（依頼 460）── 読み書きの両方。
 ///
 /// iOS の設定に足してあるカレンダー（Google でも iCloud でも会社のでも）を、
-/// そのまま読んで、そのまま書ける。**amber は鍵を一つも預からない** ──
+/// そのまま読んで、そのまま書ける。**amber はキーを一つも預からない** ──
 /// アカウントを持っているのは iPhone のほうで、amber はそれを借りるだけ。
 ///
 /// よその予定表（`Away`・iCal）との違いは一つ、**こちらは書ける**こと。
@@ -84,21 +84,21 @@ enum Phone {
         Calendaring.Slot(
             day: day, at: at,
             title: e.title ?? "（タイトルなし）",
-            // **ここでは道の代わりに、iOS の言う名札を持つ** ── あとで
+            // **ここではパスの代わりに、iOS の言う名札を持つ** ── あとで
             // その予定そのものを開く／直すときに要る。
             path: e.eventIdentifier ?? "",
             kind: "here",
             place: e.location ?? "",
             from: e.calendar?.title ?? "",
             // **メモ欄をそのまま持ってくる**（依頼 547）── どこがタグ行かの
-            // 判断はここでしない。切り出しは core に一枚だけ置く（写すと、
-            // 窓と電話で二つの読み方ができる）。
+            // 判断はここでしない。切り出しは core に1 つだけ置く（写すと、
+            // デスクトップ版と iPhone で二つの読み方ができる）。
             notes: e.notes ?? "")
     }
 
     /// 予定を登録する。**書ける先が無ければ、そう言う。**
     /// `into` に予定表の名前を渡すと、そこへ書く（依頼 545）──
-    /// グループカレンダーは端末に降りてきた一枚なので、**名前でしか指せない**。
+    /// グループカレンダーは端末に降りてきた1 つなので、**名前でしか指せない**。
     /// `notes` はメモ欄（誰の用事かのタグが、その最後の行に入る）。
     static func add(title: String, day: String, at: String?, end: String? = nil,
                     notes: String = "", into: String = "") throws {
@@ -119,7 +119,7 @@ enum Phone {
             e.isAllDay = true
             e.endDate = start
         } else if let end, let till = when(day, end), till > start {
-            // 終わりの時刻（窓と同じ・依頼 493）── 開始より前なら一時間後に。
+            // 終わりの時刻（デスクトップ版と同じ・依頼 493）── 開始より前なら一時間後に。
             e.endDate = till
         } else {
             e.endDate = start.addingTimeInterval(60 * 60)

@@ -10,7 +10,7 @@ struct CianApp: App {
     /// Light, dark, or whatever the phone is doing. **Three, not two** — a
     /// switch with only light and dark is a switch you can never put back.
     @AppStorage("cian.look") private var look = Look.auto
-    /// 字の大きさ。**窓と同じものを電話にも**（窓は ⌘+ / ⌘−）── 本人が
+    /// 文字の大きさ。**デスクトップ版と同じものをiPhone にも**（デスクトップ版は ⌘+ / ⌘−）── 本人が
     /// 「文字が全般的に小さくない？」（2026-09-08）。
     @AppStorage("amber.font") private var font = Size.system
     /// 配色（依頼 499）── cian と同じ二十一。空なら琥珀（明暗は `look`）。
@@ -22,7 +22,7 @@ struct CianApp: App {
             // **総ざらいのときは、画面を出さない**（依頼 448）── 出すと
             // 一覧が勝手に読み直して、走査の見ている姿が動く。
             content
-                // **選んでいないなら、iPhone の設定に従う。** 大きい字に
+                // **選んでいないなら、iPhone の設定に従う。** 大きい文字に
                 // している人の設定を、こちらが上書きしない ── 上書きすると
                 // 「iPhone を大きくしたのに amber だけ小さい」になる。
                 .modifier(Sized(size: font))
@@ -50,7 +50,7 @@ struct CianApp: App {
     }
 }
 
-/// 字の大きさ。**「iPhone に合わせる」を既定にする** ── 大きい字にして
+/// 文字の大きさ。**「iPhone に合わせる」を既定にする** ── 大きい文字にして
 /// いる人の設定を、こちらが黙って上書きしない。
 enum Size: String, CaseIterable, Identifiable {
     case small, system, big, bigger, biggest
@@ -64,7 +64,7 @@ enum Size: String, CaseIterable, Identifiable {
         case .biggest: return "いちばん大きく"
         }
     }
-    /// SwiftUI の字の段。`nil` は「触らない」（iPhone の設定のまま）。
+    /// SwiftUI の文字の段。`nil` は「触らない」（iPhone の設定のまま）。
     var step: DynamicTypeSize? {
         switch self {
         case .small: return .small
@@ -74,7 +74,7 @@ enum Size: String, CaseIterable, Identifiable {
         case .biggest: return .xxxLarge
         }
     }
-    /// 「表示」の面（`WKWebView`）の字。**あちらは SwiftUI の段を知らない**
+    /// 「表示」画面（`WKWebView`）の文字。**あちらは SwiftUI の段を知らない**
     /// ので、同じ増え方を px で渡す ── 一覧だけ大きくなって本文が小さい
     /// ままだと、「大きくした」が半分しか効いていない。
     var px: Int {
@@ -88,7 +88,7 @@ enum Size: String, CaseIterable, Identifiable {
     }
 }
 
-/// 選んだ段があるときだけ、字の大きさを差し替える薄い包み。
+/// 選んだ段があるときだけ、文字の大きさを差し替える薄い包み。
 struct Sized: ViewModifier {
     let size: Size
     func body(content: Content) -> some View {

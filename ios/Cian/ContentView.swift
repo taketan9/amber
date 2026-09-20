@@ -39,11 +39,11 @@ struct ContentView: View {
     @State private var into: String?
     @State private var outside = false
     @State private var needle = ""
-    /// 探す欄が出ているか。**ふだんは畳んでおく**（窓と同じ）。
+    /// 探す欄が出ているか。**ふだんは畳んでおく**（デスクトップ版と同じ）。
     @State private var seeking = false
     /// いま開いている絞り込みの引き出し。
     @State private var sifting: Sifting.Which?
-    /// これから共有の棚にするフォルダ（名乗りを訊いている間）。
+    /// これから共有のフォルダにするフォルダ（名乗りを訊いている間）。
     @State private var sharing: String?
     /// あなたの名乗り。**設定画面に置かない** ── 一度しか使わないものを、
     /// 毎日見る画面に置く値打ちは無い。要る瞬間に一度だけ訊いて憶える。
@@ -93,19 +93,19 @@ struct ContentView: View {
                     }
                 }
                 // **最上段は歯車だけ。** 前は新しいフォルダ・新しいノート・
-                // 並びの3 つが並んでいて、窓の左の列とは別のものになって
+                // 並びの3 つが並んでいて、デスクトップ版の左の列とは別のものになって
                 // いた。作るのは一覧の頭のボタン、並べ替えとフィルタはその下 ──
-                // 窓がそうしているので、二つの amber で同じ場所を探せる。
+                // デスクトップ版がそうしているので、二つの amber で同じ場所を探せる。
                 if store.up == nil {
                     ToolbarItem(placement: .topBarLeading) {
-                        // **印ではなく、名前。**
+                        // **マークではなく、名前。**
                         //
-                        // 前はここに `Mark()` を 26pt で置いていた ── 電話は
+                        // 前はここに `Mark()` を 26pt で置いていた ── iPhone は
                         // Dock も ⌘Tab も無く、外に「いま何のアプリか」を
                         // 言ってくれるものが無いから。名前に姿ができたので、
-                        // 綴りそのものを出す方に替えた（窓の掴む帯と同じ）。
+                        // 綴りそのものを出す方に替えた（デスクトップ版の掴む帯と同じ）。
                         //
-                        // **絵と字を並べない**（本人の言葉で「くどい」）──
+                        // **絵と文字を並べない**（本人の言葉で「くどい」）──
                         // 同じことを二つの形で言うことになる。
                         //
                         // 大きな題（34pt）にはしなかった: あれは巻けば縮む
@@ -217,7 +217,7 @@ struct ContentView: View {
         // **Said before it is done, and said in numbers.** There is no
         // wastepaper basket on a phone: this is the real thing, and 「中の
         // ノートごと」 is not a figure of speech.
-        // 確認文は窓と同じ形（本人・2026-09-12）── 電話にゴミ箱は無いので「削除」。
+        // 確認文はデスクトップ版と同じ形（本人・2026-09-12）── iPhone にゴミ箱は無いので「削除」。
         .alert("「\(dropping.map { $0.split(separator: "/").last.map(String.init) ?? $0 } ?? "")」を、中の \(dropping.map(store.under) ?? 0) 件ごと削除しますか", isPresented: Binding(
             get: { dropping != nil }, set: { if !$0 { dropping = nil } }
         )) {
@@ -249,7 +249,7 @@ struct ContentView: View {
         .onChange(of: store.notes) { _, _ in answer() }
         .task {
             store.restore()
-            // 同期（依頼 500）── 棚と机を渡して、サインインしていれば時計を回す。
+            // 同期（依頼 500）── フォルダと机を渡して、サインインしていれば時計を回す。
             Syncing.shared.store = store
             Syncing.shared.desk = desk
             Syncing.shared.load()
@@ -334,9 +334,9 @@ struct ContentView: View {
                 if let note = make(title, tags) {
                     // Straight into it, in the writing half — you asked for
                     // it in order to write in it.
-                    // **作ったノートも「表示」で開く。** 窓がそうなので
-                    // 電話も同じに ── 打ちたくなったら、面のどこを叩いても
-                    // その場で書く面に入る（`NoteView`）。
+                    // **作ったノートも「表示」で開く。** デスクトップ版がそうなので
+                    // iPhone も同じに ── 打ちたくなったら、画面のどこを叩いても
+                    // その場で編集画面に入る（`NoteView`）。
                     desk.open(note, store)
                     showing = true
                 }
@@ -459,8 +459,8 @@ struct ContentView: View {
                 }
                 .contextMenu {
                     // **新しいタブで開く。** 押しただけならいまのタブを
-                    // 差し替えるので（窓と同じ）、増やす道をここに置く ──
-                    // 電話に右押しは無いので、長押しがその手ぶり。窓の
+                    // 差し替えるので（デスクトップ版と同じ）、増やすパスをここに置く ──
+                    // iPhone に右押しは無いので、長押しがその手ぶり。デスクトップ版の
                     // 「⌥ 押し」と同じことをする。
                     Button {
                         desk.open(note, store)
@@ -482,7 +482,7 @@ struct ContentView: View {
                     } label: {
                         Label("複製", systemImage: "plus.square.on.square")
                     }
-                    // **このノートをテンプレートにする**（依頼 506・窓と同じ言葉）。
+                    // **このノートをテンプレートにする**（依頼 506・デスクトップ版と同じ言葉）。
                     Button {
                         do { _ = try store.toStencil(note) }
                         catch { store.trouble = error.localizedDescription }
@@ -514,24 +514,24 @@ struct ContentView: View {
                     // しない** ── 前書きに書くと、共有をやめた日に全部の
                     // ノートを書き換えることになる（同期先で全部が差分）。
                     Button {
-                        // やめるときは、**もといたフォルダへ戻す**（窓と
+                        // やめるときは、**もといたフォルダへ戻す**（デスクトップ版と
                         // 同じ）── いちばん上へ返していたので、フォルダに
                         // 分けている人ほど「どこへ行った」になっていた。
                         if note.shared { unshare(note) }
                         else if let sh = store.shares.first { share(note, sh.at) }
-                        else { sharing = "グループ" }   // 棚が無ければ、作るところから
+                        else { sharing = "グループ" }   // フォルダが無ければ、作るところから
                     } label: {
                         Label(note.shared ? unshareWords(note) : "グループと共有する",
                               systemImage: "person.2")
                     }
-                    // **長押しから履歴へ。** 窓は右押しで開く ── 電話に
+                    // **長押しから履歴へ。** デスクトップ版は右押しで開く ── iPhone に
                     // 右押しは無いので、同じ意味の手ぶりに割り当てる。
                     Button { past = .init(at: note.path, book: false) } label: {
                         Label("過去バージョン", systemImage: "clock.arrow.circlepath")
                     }
                     // **長押しからも消せる。** 消し方は横払いしか無く、
-                    // 「長押しの献立に無い＝消せない」と読める（実際に
-                    // そう読まれた）。窓の献立にも入っているもの。
+                    // 「長押しのメニューに無い＝消せない」と読める（実際に
+                    // そう読まれた）。デスクトップ版のメニューにも入っているもの。
                     Divider()
                     Button(role: .destructive) { dropping2 = note } label: {
                         Label("ゴミ箱へ入れる", systemImage: "trash")
@@ -675,11 +675,11 @@ struct ContentView: View {
             if needle.isEmpty {
                 // **並びは本人が決めた**（2026-09-12・依頼 505）: 探す（題の下の帯）→
                 // タグ／フォルダ／期間 → 同期の様子 → カレンダー → 新しいノート →
-                // すべてのノート → ブックマーク → フォルダ。**窓の左の列と同じ順**
-                // （依頼 247）── 窓もカレンダーをいちばん上にした。
+                // すべてのノート → ブックマーク → フォルダ。**デスクトップ版の左の列と同じ順**
+                // （依頼 247）── デスクトップ版もカレンダーをいちばん上にした。
                 Section {
                     if store.at.isEmpty {
-                        // 絞り込みの帯（窓と同じ3 つの引き出し）と、並び順。
+                        // 絞り込みの帯（デスクトップ版と同じ3 つの引き出し）と、並び順。
                         HStack(alignment: .center, spacing: 10) {
                             Sifting(store: store, open: $sifting)
                             Spacer(minLength: 0)
@@ -707,7 +707,7 @@ struct ContentView: View {
                                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
                                 .listRowSeparator(.hidden)
                         }
-                        // **同期の様子は一覧の頭に**（依頼 500・窓と同じ場所）。
+                        // **同期の様子は一覧の頭に**（依頼 500・デスクトップ版と同じ場所）。
                         SyncLine()
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
@@ -715,7 +715,7 @@ struct ContentView: View {
                         // **クラウドの置き土産。** 黙って足りない一覧を見せない
                         // ── 落ちてきていないノートも、同時に書いた控えも、
                         // amber の側では直せないが、言わないと「ノートが消えた」
-                        // にしか見えない（窓と同じ言い方）。
+                        // にしか見えない（デスクトップ版と同じ言い方）。
                     if !store.waiting.isEmpty {
                         band(.blue, "\(store.waiting.count) 件、まだ落ちてきていません",
                              store.waiting.prefix(3).joined(separator: "・")
@@ -731,9 +731,9 @@ struct ContentView: View {
                              + (store.clashes.count > 3 ? " ほか" : "")
                              + " ── クラウドが作ったもの。中身を見比べて、どちらにするか決めてください")
                     }
-                        // **カレンダー**（依頼 454）── 窓の左の列でもいちばん上。
-                        // **三つの段は同じ大きさ・同じ色**（本人・2026-09-12）── 印は 26pt の
-                        // 枠にアクセント色、字は 16pt の太め。「新しいノート」と揃える。
+                        // **カレンダー**（依頼 454）── デスクトップ版の左の列でもいちばん上。
+                        // **三つの段は同じ大きさ・同じ色**（本人・2026-09-12）── マークは 26pt の
+                        // 枠にアクセント色、文字は 16pt の太め。「新しいノート」と揃える。
                         Button { showCal = true } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "calendar")
@@ -746,7 +746,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 0, trailing: 16))
-                        // **一つだけの、押させたいボタン。** 窓と同じ形 ── 塊に
+                        // **一つだけの、押させたいボタン。** デスクトップ版と同じ形 ── 塊に
                         // せず、琥珀は丸だけに残す。
                         Button { naming = true } label: {
                             HStack(spacing: 10) {
@@ -792,7 +792,7 @@ struct ContentView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
-            // ブックマーク。**窓と同じ名前**（依頼 212 で「お気に入り」から
+            // ブックマーク。**デスクトップ版と同じ名前**（依頼 212 で「お気に入り」から
             // 改名した ── 「棚」も含めて、何のことか画面が説明して
             // いなかった）。ここだけ古い名前のままだと、同じものが
             // 二つの amber で違う名前で呼ばれる。
@@ -800,15 +800,15 @@ struct ContentView: View {
             // A note that silently jumps to the top is a note that moved for
             // no reason you can see.
             let stuck = treeing2 ? [] : store.pinnedHere(needle)
-            // **一つも無くても段は出す**（窓と同じ ── 依頼で「一つも無い
-            // ときに段ごと消えると、最初の一つを作る道がどこにも無くなる」）。
+            // **一つも無くても段は出す**（デスクトップ版と同じ ── 依頼で「一つも無い
+            // ときに段ごと消えると、最初の一つを作るパスがどこにも無くなる」）。
             // 「実装されていないのか、まだ無いだけなのか」は使う人には
             // 見分けられない。
             if !stuck.isEmpty || (needle.isEmpty && store.at.isEmpty && !store.flat) {
                 Section {
                     if stuck.isEmpty {
                         // **どうすれば登録できるかを言う。** 「まだありません」だけでは、
-                        // 登録する道が画面のどこにも書いていない（本人の指摘・
+                        // 登録するパスが画面のどこにも書いていない（本人の指摘・
                         // 2026-09-08）。横払いは長押しより手数が少ないので、
                         // そちらを先に言う。
                         Text("ブックマークには何も登録されていません。ノートを右へ払って ★ を押すと登録できます。")
@@ -866,7 +866,7 @@ struct ContentView: View {
             // is exactly what happened the first time, and reads as the list
             // having lost its mind rather than as two views agreeing.
             if !store.flat && needle.isEmpty && !treeing2 {
-                // 見出しを付ける ── 窓の左の列がそう呼んでいる。
+                // 見出しを付ける ── デスクトップ版の左の列がそう呼んでいる。
                 // The way out, and a place to drop things through it. cian's
                 // own panes have had a `..` row since the beginning, and it
                 // has always meant both: go up, and put this up there.
@@ -882,8 +882,8 @@ struct ContentView: View {
                     .listRowBackground(outside ? Color.accentColor.opacity(0.15) : nil)
                 }
                 Section {
-                  // **保存ディレクトリが二つ以上なら、切り替えの一行**（依頼 511）── 窓は
-                  // 左の列に親として並べるが、電話は一段ずつなので、フォルダの頭に一つ。
+                  // **保存ディレクトリが二つ以上なら、切り替えの一行**（依頼 511）── デスクトップ版は
+                  // 左の列に親として並べるが、iPhone は一段ずつなので、フォルダの頭に一つ。
                   // 押すと並びが出て、選んだ保存ディレクトリのフォルダに替わる。
                   if store.many, store.at.isEmpty {
                       Menu {
@@ -947,7 +947,7 @@ struct ContentView: View {
                     } isTargeted: { over in into = over ? b.path : nil }
                     .listRowBackground(into == b.path ? Color.accentColor.opacity(0.15) : nil)
                     .contextMenu {
-                        // **下の階層は、ここから作る**（窓と同じ）── 名前に「/」を
+                        // **下の階層は、ここから作る**（デスクトップ版と同じ）── 名前に「/」を
                         // 打たせるのは、書き方を知っている人にしか通じない。
                         Button { making = b.path } label: {
                             Label("この中にフォルダを作る", systemImage: "folder.badge.plus")
@@ -1028,7 +1028,7 @@ struct ContentView: View {
             // **タグの段は、絞り込みの帯へ移した。**
             //
             // 一覧の中にタグの段があり、その上に「タグ ▾」の引き出しもある
-            // ── 同じことを頼む道が二つあると、片方を直した日にもう片方が
+            // ── 同じことを頼むパスが二つあると、片方を直した日にもう片方が
             // 古いまま残る。段のほうを畳んだのは、**押すと一覧じゅうが
             // 動く**からでもある（絞った瞬間に段が消え、次に押した指が
             // 別の行に当たった）。
@@ -1104,7 +1104,7 @@ struct ContentView: View {
         .onChange(of: store.at, initial: true) { _, now in if walked != now { walked = now } }
         // **畳んでおく。** 絞り込みの帯と並べて置きっぱなしにすると、一覧の
         // 頭が毎回二段ぶん要る ── 言葉で探すのは、絞るより回数が少ない
-        // （窓も同じ形にした）。「ノートを探す」のボタンから開く。
+        // （デスクトップ版も同じ形にした）。「ノートを探す」のボタンから開く。
         .modifier(Seeking(needle: $needle, on: $seeking, tags: store.tagsHere))
         .onChange(of: needle) { _, now in
             store.read(now)
@@ -1138,18 +1138,18 @@ extension String: @retroactive Identifiable {
 /// か」であって、欄が場所を取るかどうかではない。`.navigationBarDrawer` は
 /// 一覧の頭に居座り、`displayMode: .automatic` にしても**上まで戻れば必ず
 /// 出てくる**。そこに自前の「ノートを探す」ボタンも並ぶと、同じことを頼む入口が
-/// 二つになる（この窓がいちばん嫌う形）。
+/// 二つになる（このデスクトップ版がいちばん嫌う形）。
 ///
 /// なので `searchable` そのものを付け外しする。閉じるとき（取り消しを押した
 /// とき）は `on` が false になり、この修飾ごと消える。
 /// **戻ってきたら、読み直す**（依頼 479）。
 ///
-/// 同じフォルダを窓と電話が触るので、電話を置いているあいだに向こうで
+/// 同じフォルダをデスクトップ版と iPhone が触るので、iPhone を置いているあいだに向こうで
 /// 書かれる ── 読み直さないと、開いた瞬間の一覧が古いまま出る。
 /// **「引き下げれば来る」では気づけない** ── そこに新しいものがあると
 /// 知らない人は、引き下げようと思わない。
 ///
-/// 直しかけを抱えているときは触らない ── 打っている字を下から
+/// 直しかけを抱えているときは触らない ── 打っている文字を下から
 /// 書き換えない。
 ///
 /// **一覧の本体には足さない。** あの `body` はもう型を追いきれる限界に
@@ -1168,7 +1168,7 @@ struct Waking: ViewModifier {
                 .publisher(for: UIApplication.willEnterForegroundNotification)
         ) { _ in
             // **打ちかけを抱えているときは触らない。** 一覧を読み直すと
-            // 開いている札まで組み直されて、打った字が消えることがある。
+            // 開いている札まで組み直されて、打った文字が消えることがある。
             if desk.tabs.contains(where: { $0.dirty }) { return }
             store.reload()
             Task { await Syncing.shared.now("戻った") }
@@ -1207,13 +1207,13 @@ struct SyncLine: View {
 
     var body: some View {
         if sync.store?.places.contains(where: { $0.sync == "drive" }) == false {
-            // **どの保存ディレクトリも「同期しない」なら、灰色の一行**（依頼 511・窓と同じ）。
+            // **どの保存ディレクトリも「同期しない」なら、灰色の一行**（依頼 511・デスクトップ版と同じ）。
             HStack(spacing: 6) {
                 Circle().fill(Color.secondary).frame(width: 7, height: 7)
                 Text("同期していません ・ どの保存ディレクトリも「同期しない」").font(.footnote).foregroundStyle(.secondary)
             }
         } else if !sync.signedIn, !sync.later {
-            // **始める前は色つきの列**（窓の `before` と同じ・本人が決めた案甲）。
+            // **始める前は色つきの列**（デスクトップ版の `before` と同じ・本人が決めた案甲）。
             VStack(alignment: .leading, spacing: 4) {
                 Text("まだ同期していません").font(.footnote.weight(.semibold)).foregroundStyle(Color("AccentColor"))
                 Text("ノートはこの iPhone だけにあります。ほかの端末やグループの人と同じノートを使うには、Google でサインインします。")
@@ -1231,7 +1231,7 @@ struct SyncLine: View {
             HStack(spacing: 6) {
                 Circle().fill(Color.secondary).frame(width: 7, height: 7)
                 Text("同期していません ・ ").font(.footnote).foregroundStyle(.secondary)
-                // 窓と同じく、押せるボタンを（本人・2026-09-12）。
+                // デスクトップ版と同じく、押せるボタンを（本人・2026-09-12）。
                 Button("同期をはじめる") { Task { _ = try? await sync.signIn() } }.font(.footnote.weight(.semibold))
             }
         } else if !sync.trouble.isEmpty {

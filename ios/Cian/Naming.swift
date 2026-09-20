@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 名乗り（電話）。
+/// 名乗り（iPhone）。
 ///
 /// **設定画面に置かない。** 一度しか使わないものを、毎日見る画面に置く
 /// 値打ちは無い ── 要る瞬間（初めて共有する瞬間）に一度だけ訊いて憶える。
@@ -38,7 +38,7 @@ struct Naming: View {
                 Section {
                     Text("「\(folder)」を、グループと分けるフォルダにします。")
                         .font(.footnote).foregroundStyle(.secondary)
-                    Text("このあと、フォルダそのものをクラウド側でグループの人に分けてください ── ambər が印を置いただけでは、まだ誰にも届きません。")
+                    Text("このあと、フォルダそのものをクラウド側でグループの人に分けてください ── ambər がマークを置いただけでは、まだ誰にも届きません。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -49,7 +49,7 @@ struct Naming: View {
                 ToolbarItem(placement: .topBarTrailing) { Button("共有する") { go() }.bold() }
             }
             .task {
-                // **この機械が既に知っていることを、もう一度打たせない。**
+                // **この環境が既に知っていることを、もう一度打たせない。**
                 if name.isEmpty { name = me.isEmpty ? UIDevice.current.name : me }
                 typing = true
             }

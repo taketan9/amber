@@ -3,16 +3,16 @@ import JavaScriptCore
 
 /// 図を、見ながら直す。
 ///
-/// **窓と同じ解析器を使う。** 八種類の形をもう一組 Swift で書けば、答えが
+/// **デスクトップ版と同じ解析器を使う。** 八種類の形をもう一組 Swift で書けば、答えが
 /// もう一組できて、食い違うのはマインドマップの深さや予定表の日付という、
 /// いちばん確かめにくいところになる。`gui/renderer.js` の読み書きを切り出して
 /// `JavaScriptCore` で走らせる ── `scripts/diagram-test.js` が同じ切り出し方で
-/// 往復を見ているので、電話が使うのは**試験の通ったものそのもの**。
+/// 往復を見ているので、iPhone が使うのは**試験の通ったものそのもの**。
 ///
 /// WebView ではなく `JSContext` なのは、これがただの関数だから ── 画面も
 /// DOM も要らない。図を描くほうは、いままでどおり `Drawing`。
 enum Mmd {
-    /// 図の字 → 表。読めなければ `nil`（そのときは字で直す面になる）。
+    /// 図の文字 → 表。読めなければ `nil`（そのときは文字で直す画面になる）。
     static func parse(_ src: String) -> [String: Any]? {
         guard let ctx = shared else { return nil }
         let out = ctx.objectForKeyedSubscript("mmdParse")?.call(withArguments: [src])
@@ -20,14 +20,14 @@ enum Mmd {
         return v.toDictionary() as? [String: Any]
     }
 
-    /// 表 → 図の字。
+    /// 表 → 図の文字。
     static func build(_ model: [String: Any]) -> String? {
         guard let ctx = shared else { return nil }
         let out = ctx.objectForKeyedSubscript("mmdBuild")?.call(withArguments: [model])
         return out?.toString()
     }
 
-    /// 種類ごとの、表の形（`DIAGRAM_FORM`）。窓と同じ欄・同じ名前。
+    /// 種類ごとの、表の形（`DIAGRAM_FORM`）。デスクトップ版と同じ欄・同じ名前。
     static func shape(_ kind: String) -> [String: Any]? {
         guard let ctx = shared else { return nil }
         return ctx.objectForKeyedSubscript("amberForm")?
@@ -47,16 +47,16 @@ enum Mmd {
         // グローバルに載るので `mmdParse` は引けるが、`const DIAGRAM_FORM` は
         // 別の棚（グローバル語彙環境）に居て `objectForKeyedSubscript` から
         // 見えない ── 表の形が空になり、「形は選べるのに名前を書く欄が無い」
-        // 画面ができた。あとから走らせる一行なら同じ棚を見られるので、
+        // 画面ができた。あとから走らせる一行なら同じフォルダを見られるので、
         // そこで載せ替える。
         ctx.evaluateScript("globalThis.amberForm = DIAGRAM_FORM;")
         return ctx
     }()
 }
 
-/// 図の工房（電話）。
+/// 図の工房（iPhone）。
 ///
-/// 窓は左に表・右に図の二段組みだが、402pt にそれは入らない ── **上に図、
+/// デスクトップ版は左に表・右に図の二段組みだが、402pt にそれは入らない ── **上に図、
 /// 下に表**。直すと上が描き直るので、「見ながら直す」は変わらない。
 struct Studio: View {
     let source: String
@@ -176,7 +176,7 @@ struct Studio: View {
         let cols = (shape()?["cols"] as? [[String: Any]]) ?? []
         HStack(spacing: 8) {
             if deep {
-                // 深さは字下げそのもので見せる ── 「2」と書くより、
+                // 深さはインデントそのもので見せる ── 「2」と書くより、
                 // ずれている形のほうが枝に見える。
                 let at = (rows[n]["at"] as? Int) ?? 0
                 if at > 0 {
@@ -190,16 +190,16 @@ struct Studio: View {
                     Text("四角").tag("box"); Text("丸み").tag("round"); Text("ひし形").tag("diamond")
                 }
                 .labelsHidden().pickerStyle(.menu)
-                // **箱の色も、電話から。** 窓は右押しと工房の両方から
-                // 変えられる ── 色を付けられるのが片方だけだと、電話で
+                // **箱の色も、iPhone から。** デスクトップ版は右押しと工房の両方から
+                // 変えられる ── 色を付けられるのが片方だけだと、iPhone で
                 // 直したノートから色が消えたように見える（消えはしないが、
-                // 「電話では変えられない」に気づけない）。
+                // 「iPhone では変えられない」に気づけない）。
                 Menu {
                     Button("色なし") { paint(n, nil) }
                     ForEach(Colouring.palette, id: \.0) { hex, name in
                         Button { paint(n, hex) } label: {
                             // **`systemImage:` では十一個とも同じ色になる** ──
-                            // 献立は記号を accent で塗る（`Colouring.dot` の註）。
+                            // メニューは記号を accent で塗る（`Colouring.dot` の註）。
                             Label { Text(name) } icon: { Image(uiImage: Colouring.dot(hex)) }
                         }
                     }
@@ -283,7 +283,7 @@ struct Studio: View {
         Binding(get: { String(describing: edges[n][k] ?? "") },
                 set: { edges[n][k] = $0; redraw() })
     }
-    /// 箱の色を決める。`nil` で外す ── **キーごと外す**（空の字を入れると、
+    /// 箱の色を決める。`nil` で外す ── **キーごと外す**（空の文字を入れると、
     /// 書き戻しで `style` の行が色なしで出る）。
     private func paint(_ n: Int, _ hex: String?) {
         if let hex { rows[n]["color"] = hex } else { rows[n].removeValue(forKey: "color") }
@@ -377,7 +377,7 @@ struct Studio: View {
 
     private func redraw() { live = text() }
 
-    /// いまの表（か字）から、図の字を。
+    /// いまの表（か文字）から、図の文字を。
     private func text() -> String {
         if byText || model == nil { return raw }
         var m = model ?? [:]

@@ -14,7 +14,7 @@ final class Desk: ObservableObject {
         var ours: [String]
         var theirs: [String]
     }
-    /// 前書きの鍵のぶつかり。
+    /// 前書きのキーのぶつかり。
     struct Field: Equatable {
         let key: String
         let ours: String
@@ -39,7 +39,7 @@ final class Desk: ObservableObject {
         var saved = ""
         var reading = true
         /// 錠（依頼 629）。**core が答えたそのまま** ── 前書きの `locked: true` か、
-        /// 上のフォルダの目印。窓と同じ判断を二度書かない。
+        /// 上のフォルダの目印。デスクトップ版と同じ判断を二度書かない。
         var locked = false
         /// 錠のわけ（`"note"` / `"folder"`）と、そのフォルダの名前。
         var lockWhy = ""
@@ -48,12 +48,12 @@ final class Desk: ObservableObject {
         var freed = false
         var blocks: [Block] = []
         var loaded = false
-        /// 一つ戻す道と、やり直す道。**窓と同じ持ち方**（`gui/renderer.js`
+        /// 一つ戻すパスと、やり直す道。**デスクトップ版と同じ持ち方**（`gui/renderer.js`
         /// の `backs` / `forwards` / `lastSaved`）。
         ///
-        /// UIKit の取り消しでは足りない ── あれは「打った字」の取り消しで、
-        /// 見出しや升のように**面を組み直したところで積み木ごと消える**。
-        /// しかも「表示」の面（`WKWebView`）にはそもそも届かない。窓が
+        /// UIKit の取り消しでは足りない ── あれは「打った文字」の取り消しで、
+        /// 見出しやセルのように**画面を組み直したところで積み木ごと消える**。
+        /// しかも「表示」画面（`WKWebView`）にはそもそも届かない。デスクトップ版が
         /// 自前に一本化したのと同じ理由で、ここもノートの姿を積む。
         var backs: [String] = []
         var forwards: [String] = []
@@ -67,22 +67,22 @@ final class Desk: ObservableObject {
         /// 保存できた時点の中身。動くのは**ファイルと確かに一致した瞬間**
         /// だけ。履歴用の控えを土台に使うと、自動保存が一度でも通ったあと
         /// 「こちらは何も更新していない」ことになり、向こうで丸ごと上書き
-        /// される（窓で実際にそうなった ── 依頼 355）。
+        /// される（デスクトップ版で実際にそうなった ── 依頼 355）。
         var base = ""
         /// 向こうから来た行と、両方残した行。**押すまで残る。**
         var came: [Int] = []
         var both: [Int] = []
         var eyes = false
-        /// 同じ行を両方で直したところ（依頼 501・窓の `incoming.spots` と同じ・
-        /// 行の中身で憶える）と、前書きの鍵のぶつかり、相手の名前。
+        /// 同じ行を両方で直したところ（依頼 501・デスクトップ版の `incoming.spots` と同じ・
+        /// 行の中身で憶える）と、前書きのキーのぶつかり、相手の名前。
         var spots: [Spot] = []
         var fields: [Field] = []
         var who = ""
         var clashing: Bool { !spots.isEmpty || !fields.isEmpty }
 
-        /// 「表示」の面で、いま見ている（打っている）**ファイルの行**。
-        /// **面を替えても同じ場所に居る**ために要る ── 替えたあとでは、
-        /// 前の面の caret も巻き位置も残っていない。まだ分からなければ -1。
+        /// 「表示」画面で、いま見ている（打っている）**ファイルの行**。
+        /// **画面を替えても同じ場所に居る**ために要る ── 替えたあとでは、
+        /// 前の画面の caret も巻き位置も残っていない。まだ分からなければ -1。
         var at = -1
 
         var id: String { note.path }
@@ -90,8 +90,8 @@ final class Desk: ObservableObject {
         var whole: String { head + text }
         var dirty: Bool { loaded && text != saved }
 
-        /// 書く面の caret が、**ファイルの何行目**にあるか（前書きを含む）。
-        /// core の行番号はファイルの行、この面が持っているのは本文だけ。
+        /// 編集画面の caret が、**ファイルの何行目**にあるか（前書きを含む）。
+        /// core の行番号はファイルの行、この画面が持っているのは本文だけ。
         var lineOfCaret: Int {
             let head2 = head.isEmpty ? 0 : head.components(separatedBy: "\n").count - 1
             let upto = (text as NSString).substring(to: min(pick.location, (text as NSString).length))
@@ -102,10 +102,10 @@ final class Desk: ObservableObject {
     }
 
     @Published var tabs: [Tab] = []
-    /// 目次から選ばれた行 ── 面がそこへ滑ったら `nil` に戻す。
+    /// 目次から選ばれた行 ── 画面がそこへ滑ったら `nil` に戻す。
     ///
-    /// **面は二つある**（`WKWebView` の「表示」と `UITextView` の「コード」）
-    /// ので、飛ぶ先を持つのは desk、飛ぶのはそれぞれの面。
+    /// **画面は二つある**（`WKWebView` の「表示」と `UITextView` の「コード」）
+    /// ので、飛ぶ先を持つのは desk、飛ぶのはそれぞれの画面。
     @Published var jumping: Int?
     /// Which tab is showing, by path — **not by index**. Closing a tab shifts
     /// every index after it, and a selection that is an index quietly starts
@@ -122,7 +122,7 @@ final class Desk: ObservableObject {
     /// 動かして分かりにくいと言ったので撤回した。** 見たものは残る。
     ///
     /// **もう机の上にあるなら、そのタブへ。** 同じノートが二枚並ぶと、
-    /// 片方に打った字がもう片方から見えない。
+    /// 片方に打った文字がもう片方から見えない。
     /// `store` はもう要らない（差し替えが無くなったので、置いていく
     /// 書きかけも無い）が、呼ぶ側の形は変えない。
     func open(_ note: Note, _ store: NotesStore? = nil, writing: Bool = false) {
@@ -132,7 +132,7 @@ final class Desk: ObservableObject {
             // **押したぶんだけ、タブが増える**（依頼 555・本人が依頼 522 を撤回）。
             // 前は「仮のタブ」があって、一覧から押しただけのものは次を開くと
             // 入れ替わっていた ── 実際に動かすと分かりにくい（本人）。
-            // 置く先はいまのすぐ右（窓と同じ）── たどった順と並びが合う。
+            // 置く先はいまのすぐ右（デスクトップ版と同じ）── たどった順と並びが合う。
             let t = Tab(note: note, reading: !writing)
             if let now = tabs.firstIndex(where: { $0.id == showing }) { tabs.insert(t, at: now + 1) } else { tabs.append(t) }
         }
@@ -161,7 +161,7 @@ final class Desk: ObservableObject {
         guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
         // 離れるノートの名前を、題に揃えてから（依頼 502）。
         if let store { settle(id, store) }
-        // 改名で札が差し替わっているので、取り直す。
+        // 改名でラベルが差し替わっているので、取り直す。
         guard let at = tabs.firstIndex(where: { $0.id == id }) ?? tabs.firstIndex(where: { $0.id == showing && showing != id }) else { return }
         tabs.remove(at: at)
         if showing == id {
@@ -181,7 +181,7 @@ final class Desk: ObservableObject {
         tabs[at].saved = body
         // **開いた姿を、戻る先の一段目にしておく。** 空のままだと最初の
         // 保存が「積むのではなく憶えるだけ」で終わり、開いてから最初の
-        // 一手だけ戻せない（窓の `openNote` も同じ場所で同じことをする）。
+        // 一手だけ戻せない（デスクトップ版の `openNote` も同じ場所で同じことをする）。
         tabs[at].lastSaved = body
         tabs[at].backs = []
         tabs[at].forwards = []
@@ -267,7 +267,7 @@ final class Desk: ObservableObject {
         // ぶんだけ、`unlock` を添えて通す。押していなければ core が断る。
         if tabs[at].locked && !tabs[at].freed { return nil }
         // 書き込む直前の姿を積む ── 書いたあとだと、戻る先が「いまの姿」に
-        // なる（窓の `save()` と同じ場所で同じことをしている）。
+        // なる（デスクトップ版の `save()` と同じ場所で同じことをしている）。
         keepStep(at)
         switch try store.save(tabs[at].note, text: tabs[at].whole, stamp: tabs[at].stamp,
                               force: force, unlock: tabs[at].freed) {
@@ -284,8 +284,8 @@ final class Desk: ObservableObject {
             // **どちらかを捨てない。混ぜる。**
             //
             // 前はここで「やめる／それでも上書き」と訊いていた ── どちらを
-            // 押しても片方の更新が消える。グループで同じ棚を触るのが前提の
-            // アプリで、それは強すぎる（窓と同じ直し・依頼 354）。
+            // 押しても片方の更新が消える。グループで同じフォルダを触るのが前提の
+            // アプリで、それは強すぎる（デスクトップ版と同じ直し・依頼 354）。
             let got = try store.merge(tabs[at].note, was: tabs[at].base, ours: tabs[at].whole)
             guard case .ok(let fresh) = try store.save(
                 tabs[at].note, text: got.text, stamp: tabs[at].stamp, force: true,
@@ -311,7 +311,7 @@ final class Desk: ObservableObject {
         }
     }
 
-    /// 同期が混ぜた印を、開いている札に付ける（依頼 500・501）。
+    /// 同期が混ぜたマークを、開いているラベルに付ける（依頼 500・501）。
     func incoming(_ path: String, _ got: NotesStore.Merged, who: String, _ store: NotesStore) {
         guard let at = tabs.firstIndex(where: { $0.note.path == path }) else { return }
         tabs[at].loaded = false
@@ -326,7 +326,7 @@ final class Desk: ObservableObject {
         keepIncoming(tabs[now])
     }
 
-    // ── ぶつかった場所を選ぶ（依頼 501・窓の chooseSpot / chooseField の写し）──
+    // ── ぶつかった場所を選ぶ（依頼 501・デスクトップ版の chooseSpot / chooseField の写し）──
 
     /// 改行を行に含めたまま、行に割る（core の `records` と同じ割り方）。
     nonisolated static func rowsOf(_ text: String) -> [String] {
@@ -339,7 +339,7 @@ final class Desk: ObservableObject {
         if !cur.isEmpty { out.append(cur) }
         return out
     }
-    /// ぶつかった場所を、いまの字の中で探す（末尾の改行は見ない）。見つからなければ -1。
+    /// ぶつかった場所を、いまの文字の中で探す（末尾の改行は見ない）。見つからなければ -1。
     nonisolated static func spotAt(_ rows: [String], _ spot: Spot) -> Int {
         let want = spot.ours + spot.theirs
         if want.isEmpty { return -1 }
@@ -353,7 +353,7 @@ final class Desk: ObservableObject {
         return -1
     }
 
-    /// 字を丸ごと差し替えて保存する（前書きも含めて）。
+    /// 文字を丸ごと差し替えて保存する（前書きも含めて）。
     private func putWhole(_ id: String, _ text: String, _ store: NotesStore) {
         guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
         let (head, body) = (try? store.split(text)) ?? ("", text)
@@ -390,7 +390,7 @@ final class Desk: ObservableObject {
         settleIncoming(id)
     }
 
-    /// 前書きの鍵を選ぶ。タグの「両方」は和集合。
+    /// 前書きのキーを選ぶ。タグの「両方」は和集合。
     func chooseField(_ id: String, _ n: Int, _ which: String, _ store: NotesStore) {
         guard let at = tabs.firstIndex(where: { $0.id == id }), tabs[at].fields.indices.contains(n) else { return }
         let f = tabs[at].fields[n]
@@ -426,7 +426,7 @@ final class Desk: ObservableObject {
         keepIncoming(tabs[at])
     }
 
-    // ── ファイル名は題に合わせる（依頼 502・窓の settleName の写し）──
+    // ── ファイル名は題に合わせる（依頼 502・デスクトップ版の settleName の写し）──
 
     /// 離れるときに、そのノートの名前を題に揃える（打ちかけなら触らない）。
     func settle(_ id: String, _ store: NotesStore) {
@@ -436,8 +436,8 @@ final class Desk: ObservableObject {
         store.reload()
     }
 
-    /// 入ってきたものの控え。**この機械の引き出しに置く** ── 「自分が
-    /// 確認したか」は人ごと・機械ごとのことで、フォルダに置くとグループの
+    /// 入ってきたものの控え。**この環境の引き出しに置く** ── 「自分が
+    /// 確認したか」は人ごと・環境ごとのことで、フォルダに置くとグループの
     /// 誰かが読んだ時点で全員のぶんが消える。ノートにも書かない。
     private static let seenKey = "amber.incoming"
 
@@ -470,7 +470,7 @@ final class Desk: ObservableObject {
         }
     }
 
-    /// 「確認した」を押された ── 印を消す。
+    /// 「確認した」を押された ── マークを消す。
     func seenIncoming(_ id: String) {
         guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
         tabs[at].came = []
@@ -482,7 +482,7 @@ final class Desk: ObservableObject {
         keepIncoming(tabs[at])
     }
 
-    /// 積める数。窓と同じ（`BACKS`）。
+    /// 積める数。デスクトップ版と同じ（`BACKS`）。
     private static let backs = 120
 
     /// いまの姿を積む。**戻している最中は積まない** ── 積むと、戻った先が
@@ -496,7 +496,7 @@ final class Desk: ObservableObject {
         if !tabs[at].lastSaved.isEmpty {
             tabs[at].backs.append(tabs[at].lastSaved)
             if tabs[at].backs.count > Self.backs { tabs[at].backs.removeFirst() }
-            // 新しく打ったら、先の道は消える ── 分かれた先を持っておくと
+            // 新しく打ったら、先のパスは消える ── 分かれた先を持っておくと
             // 「やり直し」が何を指すのか誰にも言えなくなる。
             tabs[at].forwards = []
         }
@@ -537,27 +537,27 @@ final class Desk: ObservableObject {
     }
 }
 
-/// **電話に置かないと決めたもの**（2026-09-06、本人と確認）。
+/// **iPhone に置かないと決めたもの**（2026-09-06、本人と確認）。
 ///
-/// 窓を正として揃えるにあたって、揃えないほうがよいものを先に決めた ──
+/// デスクトップ版を正として揃えるにあたって、揃えないほうがよいものを先に決めた ──
 /// 「まだ作っていない」と「作らないことにした」は画面の上では同じ顔を
 /// するので、どちらなのかをここに書いておく。
 ///
-/// * **並べて表示**（窓の ⌘P）── 393pt で「表示」と「コード」を左右に
-///   並べても、どちらも読めない。電話は切り替えのまま。**iPad を本気で
+/// * **並べて表示**（デスクトップ版の ⌘P）── 393pt で「表示」と「コード」を左右に
+///   並べても、どちらも読めない。iPhone は切り替えのまま。**iPad を本気で
 ///   やるときは欲しい**（本人・2026-09-12）。
-/// * **ノートだけを大きく**（F12 と、上の帯の ⤢）── 電話はもともと全画面。
-/// * **前に見たノート／次に見たノート** ── 2026-09-12 に**窓からも外した**
+/// * **ノートだけを大きく**（F12 と、上の帯の ⤢）── iPhone はもともと全画面。
+/// * **前に見たノート／次に見たノート** ── 2026-09-12 に**ウィンドウからも外した**
 ///   （本人「要らない」）。行き来は上の札（タブ）と「‹ 一覧」で足りる。
-/// * **字数・行数** ── 窓は帯の右端に出ているが、電話の帯には四つで
+/// * **文字数・行数** ── デスクトップ版は帯の右端に出ているが、iPhone の帯には四つで
 ///   すでに一杯（六つ並べたら iOS が黙って二つ落とした）。
-/// * **ショートカット一覧・vim・行番号・コマンド一覧** ── 鍵盤が無い。
+/// * **ショートカット一覧・vim・行番号・コマンド一覧** ── キーボードが無い。
 ///   命令は ⋯ と設定に名前で並んでいる（本人・2026-09-12「置かないでよい」）。
 /// * **チームの予定表（CSV）** ── 合言葉つきの隠しもので、パソコン版だけ
 ///   （本人・2026-09-12）。CSV は SharePoint の保存ディレクトリに置く予定。
 /// * **全部まとめて見る** ── 一覧の頭の「すべてのノート」と同じものだった
-///   ので、並び順の献立からは消した（本人・2026-09-12「同一機能は不要」）。
-///   「フォルダごと（ツリー）」は窓の左の列にあたるもので、電話だけに残す。
+///   ので、並び順のメニューからは消した（本人・2026-09-12「同一機能は不要」）。
+///   「フォルダごと（ツリー）」はデスクトップ版の左の列にあたるもので、iPhone だけに残す。
 ///
 /// The open notes, with a strip of tabs above them.
 struct DeskView: View {
@@ -578,7 +578,7 @@ struct DeskView: View {
     @State private var tabling = false
     /// ⋯ から開くもの。**一覧まで戻らずに、開いているノートへ。**
     @State private var shelving: Note?
-    /// このノート一枚の zip（共有シートに渡す）。
+    /// このノート1 つの zip（共有シートに渡す）。
     @State private var zipping: URL?
     @State private var pasting: String?
     @State private var dropping: Note?
@@ -739,12 +739,12 @@ struct DeskView: View {
         }
         // **一つ戻す／やり直すは、上の帯ではなく下の帯に。**
         //
-        // 窓は歯車の左に置いた（依頼 265）。電話でも同じ場所に置いてみたら、
+        // デスクトップ版は歯車の左に置いた（依頼 265）。iPhone でも同じ場所に置いてみたら、
         // iOS が**黙って二つ落とした** ── 題の隣に六つは入らず、消えたのは
         // 「表示／コード」とベルだった。落ちたことはどこにも出ないので、
         // 「無くなった」としか見えない。
         //
-        // 下の帯にしたのは幅のためだけではない。**電話の親指は下に居る** ──
+        // 下の帯にしたのは幅のためだけではない。**iPhone の親指は下に居る** ──
         // 打ちながら押すものは、打っている手の側にあるほうがいい。帯は
         // 「表示」にも「コード」にも出ているので、保存場所は一つで済む。
         ToolbarItem(id: "read", placement: .topBarTrailing) {
@@ -753,9 +753,9 @@ struct DeskView: View {
                 if here?.reading == false { desk.redraw(id, store) }
                 guard let n = desk.tabs.firstIndex(where: { $0.id == id }) else { return }
                 // **替える前に、どこに居たかを控える。** 替えたあとでは、
-                // 前の面の caret も巻き位置も残っていない ── 替えるたびに
-                // 頭へ飛ばされると、そのつど探し直すことになる（窓と同じ
-                // 直し・依頼 346）。飛ぶ先を持つのは desk、飛ぶのは面。
+                // 前の画面の caret も巻き位置も残っていない ── 替えるたびに
+                // 頭へ飛ばされると、そのつど探し直すことになる（デスクトップ版と同じ
+                // 直し・依頼 346）。飛ぶ先を持つのは desk、飛ぶのは画面。
                 let line = desk.tabs[n].reading
                     ? desk.tabs[n].at
                     : desk.tabs[n].lineOfCaret
@@ -768,12 +768,12 @@ struct DeskView: View {
                 // 読める。ここで替わるのは**組んだ姿と記号そのもの**で、
                 // 隠す話ではない（本人：「めっちゃわかりにくいね」・2026-09-08）。
                 //
-                // **字にしない。** いつか端末の言葉に合わせて配るときに、
+                // **文字にしない。** いつか端末の言葉に合わせて配るときに、
                 // 訳の要らないところを増やしておく ── `</>` は世界のどこでも
                 // コードで、`doc.richtext` は組んだ文書。押すと何になるかを
                 // 出す（いま「表示」なら `</>`）。
                 // 「表示」側は `doc.richtext` を試したが、実機では**「あ」の
-                // 入った札**に見えて、字の入った絵になってしまった（絵で
+                // 入った札**に見えて、文字の入った絵になってしまった（絵で
                 // 案内する意味が薄れる）── 行の並んだ `text.alignleft` に
                 // する。`</>` と並べたときに「組んだ文書 / 記号そのもの」に
                 // 読める。
@@ -794,7 +794,7 @@ struct DeskView: View {
             }
             .accessibilityLabel(reminded ? "通知あり" : "通知")
         }
-        // **⋯ の顔ぶれは、窓の「ノート ▾」と同じ。**
+        // **⋯ の顔ぶれは、デスクトップ版の「ノート ▾」と同じ。**
         //
         // ここには「タグ」しか無く、ブックマークもフォルダ移動も履歴も
         // 削除も**一覧まで戻って長押し**するしかなかった ── 開いている
@@ -818,7 +818,7 @@ struct DeskView: View {
                     Label("フォルダへ移動", systemImage: "folder")
                 }
                 if let note = here?.note {
-                    // 窓と同じ3 つ（依頼 516）── Markdown はそのまま、HTML は一枚で完結、PDF は刷ったもの。
+                    // デスクトップ版と同じ3 つ（依頼 516）── Markdown はそのまま、HTML は1 つで完結、PDF は刷ったもの。
                     Menu {
                         ShareLink(item: URL(fileURLWithPath: note.path)) {
                             Label("Markdown", systemImage: "doc.plaintext")
@@ -828,12 +828,12 @@ struct DeskView: View {
                     } label: {
                         Label("エクスポート", systemImage: "square.and.arrow.up")
                     }
-                    // 窓のバックアップの「このノート一枚」と同じもの（画像も一緒に zip に）。
+                    // デスクトップ版のバックアップの「このノート1 つ」と同じもの（画像も一緒に zip に）。
                     Button {
                         do { zipping = try store.backup(scope: "note", what: note.path) }
                         catch { trouble = error.localizedDescription }
                     } label: {
-                        Label("このノート一枚をバックアップ", systemImage: "archivebox")
+                        Label("このノートをバックアップ", systemImage: "archivebox")
                     }
                 }
                 Divider()
@@ -844,14 +844,14 @@ struct DeskView: View {
                     Label("過去バージョン", systemImage: "clock.arrow.circlepath")
                 }
                 // **いまの姿を、一世代として残す。** 自動保存だと世代が
-                // 打鍵の切れ目で決まる ── 「ここは残しておきたい」を人が
-                // 言える道が要る（窓の ⌘S と同じもの）。
+                // 打キーの切れ目で決まる ── 「ここは残しておきたい」を人が
+                // 言えるパスが要る（デスクトップ版の ⌘S と同じもの）。
                 Button { keepNow() } label: {
                     Label("いまのバージョンを保護", systemImage: "square.and.arrow.down")
                 }
                 Divider()
                 // 錠（依頼 629）。**開いているノートにすること**なので、
-                // 設定ではなくこの献立に置く（窓の「ノート ▾」と同じ場所）。
+                // 設定ではなくこのメニューに置く（デスクトップ版の「ノート ▾」と同じ場所）。
                 if let tab = here {
                     if tab.locked {
                         Button { setLock(false) } label: {
@@ -894,8 +894,8 @@ struct DeskView: View {
         do { try store.move(note, to: book) } catch { trouble = error.localizedDescription }
     }
 
-    /// **いまの姿を、一世代として残す。** 自動保存だと世代が打鍵の切れ目で
-    /// 決まる ── 「ここは残しておきたい」を人が言える道が要る（窓の ⌘S）。
+    /// **いまの姿を、一世代として残す。** 自動保存だと世代が打キーの切れ目で
+    /// 決まる ── 「ここは残しておきたい」を人が言えるパスが要る（デスクトップ版の ⌘S）。
 
     /// 錠をかける／やめる（依頼 629）。**フォルダの錠は、そのフォルダごと。**
     private func setLock(_ on: Bool) {
@@ -1045,7 +1045,7 @@ struct DeskView: View {
     /// 開いているノートの一覧（依頼 627・本人「実装してほしいぞ」）。
     ///
     /// 帯ははじけば動くが、何十枚も開くと探すのが遠い ── **帯の右端に、名前で
-    /// 選べる一覧を。** 窓の「N 件 ▾」と同じ役目。いま出しているものに印。
+    /// 選べる一覧を。** デスクトップ版の「N 件 ▾」と同じ役目。いま出しているものに印。
     private var tabList: some View {
         Menu {
             Section("開いているノート（\(desk.tabs.count) 件）") {

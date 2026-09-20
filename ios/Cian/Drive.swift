@@ -4,10 +4,10 @@ import CryptoKit
 import Security
 import UIKit
 
-/// **Google Drive と話す口**（電話・依頼 500）── 窓の `gui/drive.js` の写し。
+/// **Google Drive と話す口**（iPhone・依頼 500）── デスクトップ版の `gui/drive.js` の写し。
 ///
 /// 押すのは「Google でサインイン」だけ。URL は打たせない・Drive の設定画面は
-/// 触らせない（本人が決めた・案 甲）。鍵はキーチェーンに。**判断はしない** ──
+/// 触らせない（本人が決めた・案 甲）。キーはキーチェーンに。**判断はしない** ──
 /// 何を運ぶかは core の `syncplan`、運ぶのは `Syncing`。ここは通信だけ。
 ///
 /// iOS 用のクライアント ID には秘密が無い（Google がそう決めている）ので、
@@ -19,14 +19,14 @@ final class Drive {
     static let scheme = "com.googleusercontent.apps.306373349806-paqosepmbnclbibibnq9ktodk42h6qbr"
     static let redirect = scheme + ":/oauth2redirect"
     static let scope = "https://www.googleapis.com/auth/drive.file"
-    /// **カレンダーの許可は、要る瞬間に足す**（依頼 532・窓の `CAL_SCOPE` と同じ）。
+    /// **カレンダーの許可は、要る瞬間に足す**（依頼 532・デスクトップ版の `CAL_SCOPE` と同じ）。
     /// ノートの同期しか使わない人に、カレンダーの許可を訊かない ── 同意の画面に
     /// 並ぶ数が増えるほど、押す前に引き返す人が増える。`calendar.app.created` は
     /// 「アプリが自分で作った二次カレンダーだけ」で、**非機密**（審査が要らない）。
     static let calScope = "https://www.googleapis.com/auth/calendar.app.created"
     static let homeName = "ambər"
 
-    /// 試験のための差し替え（`walk-phone.sh` が偽の Drive を指す）。人の道には出ない。
+    /// 試験のための差し替え（`walk-phone.sh` が偽の Drive を指す）。人のパスには出ない。
     private let env = ProcessInfo.processInfo.environment
     private var apiUrl: String { env["AMBER_DRIVE_URL"] ?? "https://www.googleapis.com" }
     private var tokenUrl: String { env["AMBER_DRIVE_URL"].map { $0 + "/token" } ?? "https://oauth2.googleapis.com/token" }
@@ -96,7 +96,7 @@ final class Drive {
         return (kept.scope ?? Self.scope).split(separator: " ").map(String.init).contains(one)
     }
 
-    /// ブラウザで「許可」を押してもらい、鍵に換えてキーチェーンへ。返すのは誰か。
+    /// ブラウザで「許可」を押してもらい、キーに換えてキーチェーンへ。返すのは誰か。
     /// `want` を渡すと、その許可だけを足しにいく。
     ///
     /// **`@MainActor` はここに付いていないといけない** ── ブラウザの画面を
@@ -145,7 +145,7 @@ final class Drive {
             "client_id": Self.clientId, "code": code, "code_verifier": verifier,
             "redirect_uri": Self.redirect, "grant_type": "authorization_code",
         ])
-        guard let access = tok["access_token"] as? String else { throw Trouble.bad("鍵が返ってきませんでした") }
+        guard let access = tok["access_token"] as? String else { throw Trouble.bad("キーが返ってきませんでした") }
         var kept = Kept(access: access, refresh: tok["refresh_token"] as? String,
                         until: Date().timeIntervalSince1970 + ((tok["expires_in"] as? Double) ?? 3600) - 60,
                         who: nil, scope: (tok["scope"] as? String) ?? want ?? Self.scope)
@@ -154,7 +154,7 @@ final class Drive {
         return kept.who ?? Who(name: "", email: "")
     }
 
-    /// やめる ── Google 側の許可も取り消して、鍵を捨てる。
+    /// やめる ── Google 側の許可も取り消して、キーを捨てる。
     func signOut() async {
         let kept = load()
         forget()
@@ -237,13 +237,13 @@ final class Drive {
         s.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? s
     }
 
-    /// **グループカレンダーを一枚作る**（依頼 532）。返すのは `(id, name)`。
+    /// **グループカレンダーを1 つ作る**（依頼 532）。返すのは `(id, name)`。
     ///
     /// **押すのは一回。** サインインも、カレンダーの許可も、ここで面倒を見る ──
     /// 使う人に段取りを踏ませない。まだ Google に繋いでいなければ二つまとめて
     /// 訊く（「サインイン」と「カレンダーの許可」でブラウザを二度開かせない）。
     ///
-    /// **予定の読み書きはこの道を通らない。** 作ったカレンダーは、Google の
+    /// **予定の読み書きはこのパスを通らない。** 作ったカレンダーは、Google の
     /// アカウントが iPhone に足してあれば端末のカレンダーに降りてくる ──
     /// そこから先は EventKit の仕事で、通信は要らない。
     func makeGroupCalendar(named name: String) async throws -> (id: String, name: String) {
@@ -355,7 +355,7 @@ final class Drive {
                 "heic": "image/heic", "bmp": "image/bmp", "svg": "image/svg+xml"][e] ?? "application/octet-stream"
     }
 
-    /// 一本上げる（`id` があれば上書き）。字か画像。返すのは新しい id。
+    /// 一本上げる（`id` があれば上書き）。文字か画像。返すのは新しい id。
     func upload(rel: String, text: String? = nil, bytes: Data? = nil, print: String, id: String?) async throws -> String {
         let relDir = rel.contains("/") ? String(rel[..<rel.lastIndex(of: "/")!]) : ""
         let parent = id == nil ? try await dir(relDir) : nil
@@ -376,7 +376,7 @@ final class Drive {
         return got["id"] as? String ?? (id ?? "")
     }
 
-    /// 一本下ろす（字）。
+    /// 一本下ろす（文字）。
     func download(_ id: String) async throws -> String {
         let (data, _) = try await api("/drive/v3/files/" + Self.q(id) + "?alt=media")
         return String(data: data, encoding: .utf8) ?? ""
@@ -408,7 +408,7 @@ final class Drive {
     }
 }
 
-/// ブラウザの小窓を、いまの窓の上に出すための係。
+/// ブラウザのダイアログを、いまのデスクトップ版の上に出すための係。
 private final class Presenter: NSObject, ASWebAuthenticationPresentationContextProviding {
     static let shared = Presenter()
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
@@ -417,7 +417,7 @@ private final class Presenter: NSObject, ASWebAuthenticationPresentationContextP
     }
 }
 
-/// キーチェーンの読み書き（鍵は暗号化して置く ── 設定ファイルには書かない）。
+/// キーチェーンの読み書き（キーは暗号化して置く ── 設定ファイルには書かない）。
 enum Keychain {
     private static func query(_ key: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "amber", kSecAttrAccount as String: key]

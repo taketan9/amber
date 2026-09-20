@@ -122,7 +122,7 @@ enum Diagrams {
     }
     // mermaid が測るために建てた仮の箱を片付ける。**`document.body` の
     // 直下だけ** ── 返ってくる SVG にも同じ id が付くので、id だけで
-    // 消すと、いま面に挿した図そのものが消える（窓でそうなった）。
+    // 消すと、いま画面に挿した図そのものが消える（デスクトップ版でそうなった）。
     window.sweep = (id) => {
       for (const at of [id, 'd' + id]) {
         const n = document.getElementById(at);
@@ -311,10 +311,10 @@ struct Canvas: UIViewRepresentable {
                 "startOnLoad": false,
                 // **書き損じの絵を、mermaid に描かせない。**
                 //
-                // 既定では、字が通らないと mermaid は自分で赤い絵を描いて
+                // 既定では、文字が通らないと mermaid は自分で赤い絵を描いて
                 // `document.body` に置いていく ── こちらの `catch` は届かない。
-                // 打つたびに描き直すので一文字ごとに一枚積み上がり、積まれた
-                // 絵が幅を持つので面が潰れる。窓で実際にそうなった（依頼 347）。
+                // 打つたびに描き直すので一文字ごとに1 つ積み上がり、積まれた
+                // 絵が幅を持つので画面が潰れる。デスクトップ版で実際にそうなった（依頼 347）。
                 "suppressErrorRendering": true,
                 "theme": "base",
                 "themeVariables": vars.merging(["darkMode": dark ? "true" : "false"]) { a, _ in a },

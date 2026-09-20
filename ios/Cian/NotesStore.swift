@@ -14,7 +14,7 @@ final class NotesStore: ObservableObject {
     @Published var notes: [Note] = []
     @Published var trouble: String?
 
-    /// **保存ディレクトリ**（依頼 511・窓の `state.places` と同じ形）。**いくつでも。**
+    /// **保存ディレクトリ**（依頼 511・デスクトップ版の `state.places` と同じ形）。**いくつでも。**
     /// `sync` は `drive`／`none`、`at` は Drive の上での置き場所（'' はいちばん目）。
     /// 選んだフォルダは security-scoped bookmark で憶える ── それがこのアプリに
     /// Google Drive も Dropbox も iCloud のコードも要らない理由（どれも「ファイル」の
@@ -33,7 +33,7 @@ final class NotesStore: ObservableObject {
     @Published var placeTrouble: [String: String] = [:]
     /// いま開いている保存ディレクトリ（一覧のフォルダはこの中のもの）。
     @Published var placeId: String = ""
-    /// 開けた保存ディレクトリ（id → URL・鍵を開けたまま）。
+    /// 開けた保存ディレクトリ（id → URL・キーを開けたまま）。
     private var urls: [String: URL] = [:]
     private static let bookmarkKey = "cian.notes.root"
     private static let placesKey = "amber.places"
@@ -85,7 +85,7 @@ final class NotesStore: ObservableObject {
     var rootPath: String { root?.path ?? "" }
     var rootURL: URL? { root }
 
-    /// その道が入っている保存ディレクトリのフォルダ（長いほうが勝つ）。分からなければいま開いているもの。
+    /// そのパスが入っている保存ディレクトリのフォルダ（長いほうが勝つ）。分からなければいま開いているもの。
     func rootOf(_ path: String) -> String {
         var hit = ""
         for (_, url) in urls where path == url.path || path.hasPrefix(url.path + "/") {
@@ -222,7 +222,7 @@ final class NotesStore: ObservableObject {
         UserDefaults.standard.set(placeId, forKey: Self.placeKey)
     }
 
-    /// 憶えたぶんを開く（鍵も開ける）。開けないものは `placeTrouble` に。
+    /// 憶えたぶんを開く（キーも開ける）。開けないものは `placeTrouble` に。
     private func open() {
         for i in places.indices {
             let p = places[i]
@@ -257,7 +257,7 @@ final class NotesStore: ObservableObject {
     private var outside: URL?
 
     /// ほかの場所の .md を、一覧に入れずに開く（パソコン版の ⌘O と同じ・依頼 517）。
-    /// 返るノートは `root` が空 ── それが「一時的に開いている」印になる。
+    /// 返るノートは `root` が空 ── それが「一時的に開いている」マークになる。
     func openOutside(_ url: URL) -> Note? {
         outside?.stopAccessingSecurityScopedResource()
         _ = url.startAccessingSecurityScopedResource()
@@ -279,11 +279,11 @@ final class NotesStore: ObservableObject {
     /// sure cian is where the notes are going to live.
     /// **名前の付け直しは core が決める。**
     ///
-    /// ここで `名前-2.md` を組み立てていた ── 窓にも取り込みを付けたので、
+    /// ここで `名前-2.md` を組み立てていた ── デスクトップ版にも取り込みを付けたので、
     /// 同じ規則が二組になった。二組あるものは必ずずれ、ずれると**同じ
-    /// ノートが端末によって別の名前で入る**（フォルダの色を窓と電話に
+    /// ノートが端末によって別の名前で入る**（フォルダの色をデスクトップ版と iPhone に
     /// 二度書いて、十一色のうち六色がずれたのと同じ）。写す仕事だけ
-    /// こちらに残る ── 選ばれた URL の鍵を開けていられるのはここだけ。
+    /// こちらに残る ── 選ばれた URL のキーを開けていられるのはここだけ。
     func bring(_ urls: [URL]) {
         guard let root else { return }
         var scoped: [URL] = []
@@ -295,7 +295,7 @@ final class NotesStore: ObservableObject {
                 "to": root.path,
             ])
             if (r["put"] as? Int ?? 0) > 0 { reload() }
-            // 入らなかったぶんは、黙らない（窓と同じ）。
+            // 入らなかったぶんは、黙らない（デスクトップ版と同じ）。
             if let no = r["failed"] as? Int, no > 0 {
                 trouble = "\(no) 件は入れられませんでした。"
             }
@@ -307,7 +307,7 @@ final class NotesStore: ObservableObject {
     /// The folder from last time, or this app's own.
     ///
     /// **前の `cian.notes.root` 一つから引き継ぐ**（依頼 511）── 憶えが `places` に
-    /// なっていない電話では、いままでの場所が一つ目になる（同期はいままで通り Drive）。
+    /// なっていないiPhone では、いままでの場所が一つ目になる（同期はいままで通り Drive）。
     func restore() {
         seedWelcome()
         let d = UserDefaults.standard
@@ -360,7 +360,7 @@ final class NotesStore: ObservableObject {
         defaults.set(true, forKey: Self.seededKey)
     }
 
-    /// 見本のノートを、いま見ているフォルダへ置く。
+    /// サンプルのノートを、いま見ているフォルダへ置く。
     ///
     /// **初回に置けなかった人のための道。** 自動で置くのはアプリ自身の
     /// フォルダを使っている初回だけで、既に自分のフォルダを選んでいる人
@@ -376,7 +376,7 @@ final class NotesStore: ObservableObject {
               FileManager.default.fileExists(atPath: from.path),
               let to = root
         else {
-            trouble = "見本が入っていません"
+            trouble = "サンプルが入っていません"
             return 0
         }
         let before = countNotes(to)
@@ -463,8 +463,8 @@ final class NotesStore: ObservableObject {
 
     /// アプリ自身のフォルダ。**「この iPhone の中に戻す」ための一つ。**
     ///
-    /// 前はここに「開いてきた場所」の履歴が並んでいた。窓は保存場所を一つ
-    /// しか持たないので、電話も一つにした ── 二つの amber で「いまどこに
+    /// 前はここに「開いてきた場所」の履歴が並んでいた。デスクトップ版は保存場所を一つ
+    /// しか持たないので、iPhone も一つにした ── 二つの amber で「いまどこに
     /// 書いているか」の答えが違う形をしているのが、いちばん分かりにくい。
     /// 探すのが大変なのは変わらないが、それは選ぶ画面の話で、選んだあとに
     /// 八つ並べておく話ではない。
@@ -475,7 +475,7 @@ final class NotesStore: ObservableObject {
     /// The tail, because the front of a provider's path is its own
     /// bookkeeping — 「Google Drive › 仕事 › ノート」 is the answer;
     /// `/private/var/mobile/Library/CloudStorage/…` is not.
-    /// フォルダ・色・憶え・共有の印は**保存ディレクトリごと**（core の帳面が
+    /// フォルダ・色・憶え・共有のマークは**保存ディレクトリごと**（core の帳画面が
     /// そこにある）。見せるのは、いま開いている保存ディレクトリのぶん。
     private var booksBy: [String: [String]] = [:]
     private var colorsBy: [String: [String: String]] = [:]
@@ -484,7 +484,7 @@ final class NotesStore: ObservableObject {
     private var cameBy: [String: [String: String]] = [:]
     private var sharesBy: [String: [Shelf]] = [:]
 
-    /// **保存ディレクトリごとに数えて、一つに重ねる**（依頼 511・窓の `reload` と同じ）。
+    /// **保存ディレクトリごとに数えて、一つに重ねる**（依頼 511・デスクトップ版の `reload` と同じ）。
     /// core は一つの保存ディレクトリしか知らない ── 二つを一つに見せるのは画面の都合。
     func reload() {
         var all: [Note] = []
@@ -527,12 +527,12 @@ final class NotesStore: ObservableObject {
         trouble = readAny || places.isEmpty ? nil : firstTrouble
     }
 
-    /// いま書いた一本の行だけ、新しくする。**書いたあとに棚を丸ごと数え
-    /// 直さない**（窓の `freshenRow` と同じ直し）。
+    /// いま書いた一本の行だけ、新しくする。**書いたあとにフォルダを丸ごと数え
+    /// 直さない**（デスクトップ版の `freshenRow` と同じ直し）。
     ///
-    /// 窓で測ったら、1002 本の棚では数え直しに 370ms かかっていた ── 一本
+    /// デスクトップ版で測ったら、1002 本のフォルダでは数え直しに 370ms かかっていた ── 一本
     /// ずつ読み直して、全部を JSON にして渡している。**自分が書いた一本の
-    /// ことは自分が知っている**：字を書いて変わるのは題・書き出し・タグ・
+    /// ことは自分が知っている**：文字を書いて変わるのは題・書き出し・タグ・
     /// 時刻だけで、どのフォルダに居るか（`book`・`shared`・`clash`）は動か
     /// ない。だから手元の行のものを残し、core が答えた分だけ上に重ねる。
     ///
@@ -563,10 +563,10 @@ final class NotesStore: ObservableObject {
         notes[at] = fresh
     }
 
-    /// グループと分けてある棚。**一つとは限らない** ── 印はフォルダごとに置くので、
+    /// グループと分けてある棚。**一つとは限らない** ── マークはフォルダごとに置くので、
     /// グループ用と仕事用が両方あっていい。
     ///
-    /// **教えてもらわなくても分かる。** 印は共有フォルダの中の一枚
+    /// **教えてもらわなくても分かる。** マークは共有フォルダの中の1 つ
     /// （`notebook::SHARE_MARK`）で、フォルダと一緒に旅をする ── 受け取った
     /// 人が自分の amber に「これが共有です」と教え直す手が要らない。
     var shares: [Shelf] { sharesBy[rootPath] ?? [] }
@@ -578,12 +578,12 @@ final class NotesStore: ObservableObject {
         var name: String { at.split(separator: "/").last.map(String.init) ?? "すべて" }
     }
 
-    /// このノートは、その棚の中か。
+    /// このノートは、そのフォルダの中か。
     func inShare(_ at: String, _ note: Note) -> Bool {
         at.isEmpty || note.book == at || note.book.hasPrefix(at + "/")
     }
 
-    /// 共有の棚にする（`off` で、やめる）。**フォルダが無ければ作る。**
+    /// 共有のフォルダにする（`off` で、やめる）。**フォルダが無ければ作る。**
     func setShare(_ folder: String, off: Bool = false, by: String = "") throws {
         guard let root else { return }
         let f = DateFormatter()
@@ -598,12 +598,12 @@ final class NotesStore: ObservableObject {
 
     /// まだ落ちてきていないノートの名前。**黙って足りない一覧を見せない。**
     ///
-    /// iCloud は中身を消して `.買い物リスト.md.icloud` という札を置くので、
+    /// iCloud は中身を消して `.買い物リスト.md.icloud` というラベルを置くので、
     /// 名前が違って一覧に出ない ── 言わないと「ノートが消えた」にしか
     /// 見えないが、待てば戻ってくるだけ。
     @Published var waiting: [String] = []
 
-    /// クラウドが作った控え。ノートとしては一覧に出したまま、札を貼る。
+    /// クラウドが作った控え。ノートとしては一覧に出したまま、ラベルを貼る。
     @Published var clashes: [Note] = []
 
     /// 落ちてきていないものを、**落としてきてもらう。**
@@ -613,7 +613,7 @@ final class NotesStore: ObservableObject {
     /// ファイルの見張りが一覧を描き直す）。
     ///
     /// 頼めなくても何も言わない ── iCloud に置いていないフォルダなら
-    /// そもそも札が出ないし、出たのに頼めないのは向こうの都合で、
+    /// そもそもラベルが出ないし、出たのに頼めないのは向こうの都合で、
     /// 人にできることが何も無い。
     private func fetch(_ rows: [[String: Any]]) {
         for r in rows {
@@ -689,7 +689,7 @@ final class NotesStore: ObservableObject {
 
     /// 絞り込んでいるフォルダ。**タグとは重なり方が違う** ── ノートは一つの
     /// フォルダにしか居ないので、フォルダを「全部」にすると二つ選んだ瞬間に
-    /// 必ず 0 件になる。どれかに入っていれば通す（窓と同じ）。
+    /// 必ず 0 件になる。どれかに入っていれば通す（デスクトップ版と同じ）。
     @Published var onlyBooks: Set<String> = []
 
     /// 期間の絞り込み。`from` / `to` は `YYYY-MM-DD`（片方だけでもよい）。
@@ -839,8 +839,8 @@ final class NotesStore: ObservableObject {
 
     /// Show the tree rather than one folder at a time.
     ///
-    /// **既定は切り。** 窓の左の列は「すべてのノート・ブックマーク・
-    /// フォルダ・タグ」を並べて、その右に日付ごとのノートを出す ── 電話も
+    /// **既定は切り。** デスクトップ版の左の列は「すべてのノート・ブックマーク・
+    /// フォルダ・タグ」を並べて、その右に日付ごとのノートを出す ── iPhone も
     /// 同じ形にした。木は同じものを二度描く（フォルダの段とノートの段）
     /// ので、出すときは上のフォルダの段のほうを引っこめる。
     /// 木が要る人は「フィルタ」から入れる。
@@ -970,11 +970,11 @@ final class NotesStore: ObservableObject {
     /// until somebody types two words.
     private var groups: [[Term]] = []
 
-    /// 絞り込みの一語。**どれが見出しでどれが字かは `note::terms` が決める。**
+    /// 絞り込みの一語。**どれが見出しでどれが文字かは `note::terms` が決める。**
     ///
     /// `tag:定型` `book:仕事` `title:週報`（`タグ:` `フォルダ:` `題:` も同じ）と
-    /// `-` の打ち消し。電話が自分で `:` を数えはじめると、窓と別のものが
-    /// 見つかる検索窓が二つできる。
+    /// `-` の打ち消し。iPhone が自分で `:` を数えはじめると、デスクトップ版と別のものが
+    /// 見つかる検索デスクトップ版が二つできる。
     private struct Term {
         let field: String
         let word: String
@@ -1029,7 +1029,7 @@ final class NotesStore: ObservableObject {
         }
         if !only.isEmpty { out = out.filter { only.isSubset(of: Set($0.tags)) } }
         // フォルダは「どれか」、タグは「全部」── 重なり方が違うことは
-        // 引き出しの中に書いてある（窓と同じ）。
+        // 引き出しの中に書いてある（デスクトップ版と同じ）。
         if !onlyBooks.isEmpty {
             out = out.filter { note in
                 here(note) && onlyBooks.contains { note.book == $0 || note.book.hasPrefix($0 + "/") }
@@ -1226,7 +1226,7 @@ final class NotesStore: ObservableObject {
         case conflict(why: String)
     }
 
-    /// 混ざった結果 ── 字と、どの行が向こうから来たか。
+    /// 混ざった結果 ── 文字と、どの行が向こうから来たか。
     struct Merged {
         let text: String
         /// 向こうから来た行（ファイルの行・0 起点）。
@@ -1235,7 +1235,7 @@ final class NotesStore: ObservableObject {
         let both: [Int]
         /// 人の目が要るか。
         let eyes: Bool
-        /// 同じ行を両方で直したところ（行の中身で）と、前書きの鍵のぶつかり。
+        /// 同じ行を両方で直したところ（行の中身で）と、前書きのキーのぶつかり。
         let spots: [Desk.Spot]
         let fields: [Desk.Field]
 
@@ -1264,7 +1264,7 @@ final class NotesStore: ObservableObject {
 
     /// 同じノートを二人が更新したとき、**どちらかを捨てずに混ぜる**。
     ///
-    /// **判断は core**（`merge`）── 窓と同じ一組を呼ぶ。二組書けば、同じ
+    /// **判断は core**（`merge`）── デスクトップ版と同じ一組を呼ぶ。二組書けば、同じ
     /// ノートが端末によって別の形に混ざる（フォルダの色を二度書いて
     /// 十一色のうち六色がずれたのと同じ）。ここがするのは、向こうの
     /// いまの中身を読んで渡し、混ざったものを書き戻すことだけ。
@@ -1272,7 +1272,7 @@ final class NotesStore: ObservableObject {
         let answer = try Cian.call("read", ["path": note.path])
         // **空が返ってきたら混ぜない。** 読めなかったのか本当に空なのかを
         // 見分けられないまま混ぜると、混ざった結果も空になり、それを
-        // そのまま書き戻す（窓で一度それでノートを消した）。
+        // そのまま書き戻す（デスクトップ版で一度それでノートを消した）。
         guard let theirs = answer["text"] as? String else {
             throw Cian.Failure.engine("向こうの中身を読めません")
         }
@@ -1285,7 +1285,7 @@ final class NotesStore: ObservableObject {
         return Merged.from(got, text: text)
     }
 
-    /// **題に合わせて改名する**（依頼 502・窓と同じ core の `settle`）。改名したら新しい道。
+    /// **題に合わせて改名する**（依頼 502・デスクトップ版と同じ core の `settle`）。改名したら新しい道。
     func settle(_ path: String) -> String? {
         let root = rootOf(path)
         guard !root.isEmpty else { return nil }
@@ -1323,7 +1323,7 @@ final class NotesStore: ObservableObject {
     func save(_ note: Note, text: String, stamp: String, force: Bool = false,
               unlock: Bool = false) throws -> Saved {
         // **書き込む直前の姿を、履歴に渡す。** 一世代にするかどうかを決める
-        // のは core（最後の一区切りから間が空いたときだけ）── 電話と窓で
+        // のは core（最後の一区切りから間が空いたときだけ）── iPhone とデスクトップ版で
         // 決まりが違うと、片方で消えたものをもう片方が残っていると思う。
         // 履歴が置けないことで、保存が止まる理由はない。
         _ = try? Cian.call("keep", [
@@ -1337,16 +1337,16 @@ final class NotesStore: ObservableObject {
         if answer["conflict"] as? Bool == true {
             return .conflict(why: answer["why"] as? String ?? "開いたあとで更新されています")
         }
-        // 保存の三秒後に同期（依頼 500・窓の `syncSoon` と同じ）。
+        // 保存の三秒後に同期（依頼 500・デスクトップ版の `syncSoon` と同じ）。
         Syncing.shared.soon()
         return .ok(stamp: answer["stamp"] as? String ?? "")
     }
 
     /// **いまの姿を、一世代として残す。**
     ///
-    /// 自動保存だと世代が打鍵の切れ目で決まる ── 「ここは残しておきたい」
-    /// を人が言える道が要る（窓の ⌘S と同じ `keep`：間を置かず・印を付けて）。
-    /// 印の付いた世代は数の勘定から外れるので、あとから流れて消えない。
+    /// 自動保存だと世代が打キーの切れ目で決まる ── 「ここは残しておきたい」
+    /// を人が言えるパスが要る（デスクトップ版の ⌘S と同じ `keep`：間を置かず・マークを付けて）。
+    /// マークの付いた世代は数の勘定から外れるので、あとから流れて消えない。
     func keepNow(path: String, text: String) throws -> String {
         let root = rootOf(path)
         guard !root.isEmpty else { return "保存場所がありません" }
@@ -1392,7 +1392,7 @@ final class NotesStore: ObservableObject {
         let dir = book.map { root.appendingPathComponent($0) } ?? root
         // **同じ保存ディレクトリの中なら `root` を渡す**（core が画像を連れて行き、
         // 同期に「名前が変わった」と憶えさせる・依頼 496）。別の保存ディレクトリへ
-        // 渡るときは渡さない ── 向こうの帳面に、外の道を書かせない。
+        // 渡るときは渡さない ── 向こうの帳画面に、外のパスを書かせない。
         var p: [String: Any] = ["path": note.path, "dir": dir.path]
         if note.root == root.path { p["root"] = root.path }
         _ = try Cian.call("move", p)
@@ -1400,7 +1400,7 @@ final class NotesStore: ObservableObject {
     }
 
     /// 画像の行に、大きさの指示を書く／外す（依頼 420）。**決めるのは core**
-    /// ── 窓と電話が別々に文字列をいじると、片方で付けた大きさをもう片方が
+    /// ── デスクトップ版と iPhone が別々に文字列をいじると、片方で付けた大きさをもう片方が
     /// 読めない形になる。
     func sized(_ line: String, width: String?) throws -> String {
         var p: [String: Any] = ["line": line]
@@ -1409,10 +1409,10 @@ final class NotesStore: ObservableObject {
         return got["line"] as? String ?? line
     }
 
-    /// **型を置くフォルダの名前**（窓と同じ一語・依頼 417）。
+    /// **型を置くフォルダの名前**（デスクトップ版と同じ一語・依頼 417）。
     ///
     /// 決め打ちにする ── 設定にすると「どこに置けば型になるか」が人に
-    /// よって違い、見本ノートにも書けない。ただのフォルダなので、中の
+    /// よって違い、サンプルノートにも書けない。ただのフォルダなので、中の
     /// ノートは一覧にも普通に出るし、開いて直せる。
     static let templates = "テンプレート"
 
@@ -1421,13 +1421,13 @@ final class NotesStore: ObservableObject {
         notes.filter { $0.book == Self.templates || $0.book.hasPrefix(Self.templates + "/") }
     }
 
-    /// 見本のテンプレート（週報・議事録・買い物リスト）を「テンプレート」フォルダへ
-    /// （依頼 506・窓と同じ一組 `packaging/templates`）。同じ名前は飛ばす。返すのは置いた数。
+    /// サンプルのテンプレート（週報・議事録・買い物リスト）を「テンプレート」フォルダへ
+    /// （依頼 506・デスクトップ版と同じ一組 `packaging/templates`）。同じ名前は飛ばす。返すのは置いた数。
     @discardableResult
     func addStencils() -> Int {
         guard let from = Bundle.main.resourceURL?.appendingPathComponent("templates"),
               FileManager.default.fileExists(atPath: from.path), let root
-        else { trouble = "見本のテンプレートが入っていません"; return 0 }
+        else { trouble = "サンプルのテンプレートが入っていません"; return 0 }
         let dir = root.appendingPathComponent(Self.templates)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var put = 0
@@ -1462,7 +1462,7 @@ final class NotesStore: ObservableObject {
     /// 同じ中身のノートをもう一つ（依頼 412）。できたほうを返す。
     ///
     /// 何を写して何を写さないかは core が決める（`created` は今日・題は
-    /// そのまま）── 窓と電話で別の写しができると、同じ操作の名前で
+    /// そのまま）── デスクトップ版と iPhone で別の写しができると、同じ操作の名前で
     /// 別のものが二つの端末に増える。
     @discardableResult
     func duplicate(_ note: Note) throws -> String? {
@@ -1490,7 +1490,7 @@ final class NotesStore: ObservableObject {
     }
 
     /// 共有の棚へ入れる。**入れる前に居たフォルダを憶える** ── やめたときに
-    /// そこへ戻せるように（窓と同じ・`.amber/settings.json` の中）。
+    /// そこへ戻せるように（デスクトップ版と同じ・`.amber/settings.json` の中）。
     func share(_ note: Note, to book: String) throws {
         guard let root else { return }
         let from = note.book

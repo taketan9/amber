@@ -5,13 +5,13 @@ import SwiftUI
 /// `:tada:` のような書き方は入れない（本人：「僕でも :tada とか打たない」・
 /// 2026-09-09）── 覚える記法が増えるだけで、ノートに残るのは同じ一文字。
 ///
-/// 表は core が持っている ── 窓と電話で並びも名前も違う、を作らない。
+/// 表は core が持っている ── デスクトップ版と iPhone で並びも名前も違う、を作らない。
 /// 外の何かを取りに行かないので、電波の無いところでも同じものが出る。
 struct Faces: View {
     /// 選ばれた絵文字。ここで閉じるかどうかは呼んだ側が決める。
     let put: (String) -> Void
     @Environment(\.dismiss) private var dismiss
-    /// 最近つかったもの。**憶えるのは字だけ** ── 名前は表から引ける。
+    /// 最近つかったもの。**憶えるのは文字だけ** ── 名前は表から引ける。
     @AppStorage("amber.faces") private var usedRaw = ""
     @State private var table: FaceTable?
     @State private var trouble: String?
@@ -23,7 +23,7 @@ struct Faces: View {
         usedRaw.isEmpty ? (table?.first ?? []) : usedRaw.map(String.init)
     }
 
-    /// 一行に八つ ── 窓の板と同じ数（同じノートを二つの端末で見る人が、
+    /// 一行に八つ ── デスクトップ版の板と同じ数（同じノートを二つの端末で見る人が、
     /// 同じ場所に同じ絵を見つけられる）。
     private let cols = Array(repeating: GridItem(.flexible(), spacing: 2), count: 8)
 
@@ -103,7 +103,7 @@ struct Faces: View {
     }
 
     /// いま出す顔ぶれ。**探しているときは束を無視する** ── 探している人が
-    /// 知りたいのは字であって、どの束に居るかではない。
+    /// 知りたいのは文字であって、どの束に居るかではない。
     private func shown(_ t: FaceTable) -> [Face] {
         let all = t.groups.flatMap(\.faces)
         let q = find.trimmingCharacters(in: .whitespaces).lowercased()

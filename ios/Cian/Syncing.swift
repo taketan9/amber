@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// **運ぶ**（電話・依頼 500）── 窓の `syncNow`（`gui/renderer.js`）の写し。
+/// **運ぶ**（iPhone・依頼 500）── デスクトップ版の `syncNow`（`gui/renderer.js`）の写し。
 ///
 /// **判断は core（`syncplan`）、運ぶのはここ。** 向こうの一覧を持ってきて、
 /// 手順書をもらい、一つずつやって、運べたぶんだけ憶えてもらう（`synced`）。
@@ -20,7 +20,7 @@ final class Syncing: ObservableObject {
     @Published var busy = false
     @Published var trouble = ""
     @Published var troubleSince: Date?
-    /// 「あとで」を押したか（この起動のあいだだけ・窓の `syncLater` と同じ）。
+    /// 「あとで」を押したか（この起動のあいだだけ・デスクトップ版の `syncLater` と同じ）。
     @Published var later = false
     /// 運んだ直後の数（数秒だけ出す）。
     @Published var fresh: Report?
@@ -48,8 +48,8 @@ final class Syncing: ObservableObject {
         store.places.filter { $0.sync == "drive" && store.url(of: $0) != nil }
     }
 
-    /// 向こうの一覧のうち、この保存ディレクトリのぶん（道は保存ディレクトリからの相対に）。
-    /// **いちばん目は `ambər` の直下、二つ目からは `ambər/<at>/`**（窓の `remoteOf` と同じ）。
+    /// 向こうの一覧のうち、この保存ディレクトリのぶん（パスは保存ディレクトリからの相対に）。
+    /// **いちばん目は `ambər` の直下、二つ目からは `ambər/<at>/`**（デスクトップ版の `remoteOf` と同じ）。
     private static func remoteOf(_ all: [Drive.Remote], _ place: NotesStore.Place, _ places: [NotesStore.Place]) -> [Drive.Remote] {
         let others = places.map(\.at).filter { !$0.isEmpty && $0 != place.at }
         let pre = place.at.isEmpty ? "" : place.at + "/"
@@ -139,7 +139,7 @@ final class Syncing: ObservableObject {
 
     /// 一つの保存ディレクトリを運ぶ。`remote` はそのぶんの一覧（相対）。
     ///
-    /// core（`syncplan`・`synced`）は保存ディレクトリ一つしか知らない ── 帳面
+    /// core（`syncplan`・`synced`）は保存ディレクトリ一つしか知らない ── 帳画面
     /// （`.amber/sync.json`）もそこにある。Drive の上の道だけ `pre` を頭に付ける。
     private func carry(_ place: NotesStore.Place, _ remote: [Drive.Remote], _ store: NotesStore) async -> Report {
         var report = Report(reason: place.name)
@@ -256,7 +256,7 @@ final class Syncing: ObservableObject {
         return report
     }
 
-    /// 運んだ直後の列の字。二つ以上あるときは保存ディレクトリの名前を頭に（依頼 511）。
+    /// 運んだ直後の列の文字。二つ以上あるときは保存ディレクトリの名前を頭に（依頼 511）。
     func freshWords(_ r: Report) -> String {
         func parts(_ r: Report) -> [String] {
             var out: [String] = []
@@ -288,7 +288,7 @@ final class Syncing: ObservableObject {
         trouble = ""
     }
 
-    /// 困りごとを人の言葉に（窓の `syncTroubleFace` と同じ）。
+    /// 困りごとを人の言葉に（デスクトップ版の `syncTroubleFace` と同じ）。
     var troubleFace: (text: String, button: String, again: Bool) {
         let e = trouble.lowercased()
         if e.contains("offline") || e.contains("network") || e.contains("インターネット") || e.contains("-1009") || e.contains("-1004") || e.contains("could not connect") {
@@ -348,7 +348,7 @@ extension Desk {
         }
     }
 
-    /// 向こうで改名された ── 開いている札があれば、新しい道の札に差し替える。
+    /// 向こうで改名された ── 開いているラベルがあれば、新しいパスのラベルに差し替える。
     func moved(from: String, to: String, _ store: NotesStore) {
         guard let at = tabs.firstIndex(where: { $0.note.path == from }) else { return }
         guard let got = try? Cian.call("note", ["path": to]), let note = Note(got) else { return }

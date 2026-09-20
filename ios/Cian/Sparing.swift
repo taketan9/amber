@@ -3,16 +3,16 @@ import SwiftUI
 /// **ノートから使われていない画像を削除する**（依頼 449）。
 ///
 /// `attachments/` に置かれた画像は、貼ったノートが消えても・その行だけ
-/// 消しても、そこに残る。一枚ずつは小さいが、**消す道がどこにも無い**ので、
+/// 消しても、そこに残る。1 つずつは小さいが、**消すパスがどこにも無い**ので、
 /// 使っているうちにフォルダだけが重くなる。
 ///
 /// **小さく見せて、選んで消す**（本人が甲を選んだ）── 名前だけの一覧では、
 /// 消していいかどうかを誰も判断できない。
 ///
-/// 数えるのは core（`spare`）。**窓と同じ一組**なので、同じフォルダを
-/// 窓と電話の両方から見ても、同じ枚数が出る。
+/// 数えるのは core（`spare`）。**デスクトップ版と同じ一組**なので、同じフォルダを
+/// デスクトップ版と iPhone の両方から見ても、同じ枚数が出る。
 ///
-/// **電話にはゴミ箱が無い。** 窓は OS のゴミ箱へ入れるので戻せるが、
+/// **iPhone にはゴミ箱が無い。** デスクトップ版は OS のゴミ箱へ入れるので戻せるが、
 /// こちらは消したら終わり ── 訊くときに、そう言う。
 struct Sparing: View {
     @ObservedObject var store: NotesStore
@@ -87,7 +87,7 @@ struct Sparing: View {
                     }
                 }
             }
-            // **戻せないことを、訊くときに言う。** 窓は OS のゴミ箱へ
+            // **戻せないことを、訊くときに言う。** デスクトップ版は OS のゴミ箱へ
             // 入れるので戻せるが、iPhone にゴミ箱は無い。
             .confirmationDialog("\(picked.count) 枚を削除しますか",
                                 isPresented: $asking, titleVisibility: .visible) {
@@ -187,14 +187,14 @@ struct Sparing: View {
         if picked.isEmpty || gone == picked.count { dismiss() }
     }
 
-    /// バイトを、人の読む字に。
+    /// バイトを、人の読む文字に。
     static func size(_ n: Int) -> String {
         if n < 1024 { return "\(n) B" }
         if n < 1024 * 1024 { return "\(Int((Double(n) / 1024).rounded())) KB" }
         return String(format: "%.1f MB", Double(n) / 1024 / 1024)
     }
 
-    /// 秒を、その機械の日付に。
+    /// 秒を、その環境の日付に。
     static func day(_ sec: Double) -> String {
         if sec <= 0 { return "日付なし" }
         let f = DateFormatter()

@@ -2,18 +2,18 @@ import Foundation
 import UIKit
 import WebKit
 
-/// **Web のページを、一本のノートに**（依頼 421 の乙・電話の側）。
+/// **Web のページを、一本のノートに**（依頼 421 の乙・iPhone の側）。
 ///
-/// 窓と同じ手順を、同じ道具で: 取りに行く → 均す → 字にする → ノートにする。
-/// **字にするのは窓と同じ一組**（`paper.js` の `webClean` / `webToMd`）──
-/// 二本目の変換器を書くと、同じページが端末によって別の字で残る。
+/// デスクトップ版と同じ手順を、同じ道具で: 取りに行く → 均す → 文字にする → ノートにする。
+/// **文字にするのはデスクトップ版と同じ一組**（`paper.js` の `webClean` / `webToMd`）──
+/// 二本目の変換器を書くと、同じページが端末によって別の文字で残る。
 ///
 /// そのために見えない `WKWebView` を一つ持つ。重そうに見えるが、**開くのは
 /// 取り込むときだけ**で、終われば捨てる ── 常に居るものではない。
 @MainActor
 final class Clipping: NSObject {
     /// 取りに行ける URL か。**`http`/`https` だけ** ── `file:` を許すと、
-    /// 打った URL で機械の中のファイルを読み出せることになる（窓と同じ）。
+    /// 打った URL で環境の中のファイルを読み出せることになる（デスクトップ版と同じ）。
     static func reach(_ text: String) -> URL? {
         var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.isEmpty { return nil }
@@ -38,7 +38,7 @@ final class Clipping: NSObject {
         }
     }
 
-    /// 取ってきて、ノートに入れる字にする。題も返す。
+    /// 取ってきて、ノートに入れる文字にする。題も返す。
     func clip(_ url: URL) async throws -> (title: String, body: String) {
         let (data, answer) = try await fetch(url)
         let kind = (answer as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? ""
@@ -52,7 +52,7 @@ final class Clipping: NSObject {
             throw Trouble.empty
         }
 
-        // **出どころは本文の最後に、字として**（依頼 423・窓と同じ）。
+        // **出どころは本文の最後に、文字として**（依頼 423・デスクトップ版と同じ）。
         // 前書きに `source:` は足さない ── amber の都合をノートに書かない。
         let day = DateFormatter()
         day.dateFormat = "yyyy-MM-dd"
@@ -64,9 +64,9 @@ final class Clipping: NSObject {
 
     /// 出どころの行に出す**宿の名前**。
     ///
-    /// **窓と同じ形にする。** JS の `new URL(…).host` は番号を付ける
+    /// **デスクトップ版と同じ形にする。** JS の `new URL(…).host` は番号を付ける
     /// （既定の 80 と 443 のときだけ落とす）が、Swift の `URL.host` は
-    /// いつも落とす ── 同じページを取り込んでも、電話の一行だけ番号が
+    /// いつも落とす ── 同じページを取り込んでも、iPhone の一行だけ番号が
     /// 消えていた。
     private static func host(_ url: URL) -> String {
         let name = url.host ?? ""
@@ -94,7 +94,7 @@ final class Clipping: NSObject {
     }
 
     /// **ページが名乗る文字の種類を先に見る。** 日本語の古いページは
-    /// Shift_JIS のことがあり、UTF-8 で読むと全部化ける（窓と同じ）。
+    /// Shift_JIS のことがあり、UTF-8 で読むと全部化ける（デスクトップ版と同じ）。
     private static func text(_ data: Data, said kind: String) -> String {
         let names = [name(in: kind), name(in: String(decoding: data.prefix(4096), as: UTF8.self))]
         for n in names.compactMap({ $0 }) {
@@ -115,18 +115,18 @@ final class Clipping: NSObject {
         return got.isEmpty ? nil : String(got)
     }
 
-    // MARK: 字にするところ
+    // MARK: 文字にするところ
 
     private var web: WKWebView?
 
-    /// HTML を **題と本文**に。**窓と同じ切り出しに通す。**
+    /// HTML を **題と本文**に。**デスクトップ版と同じ切り出しに通す。**
     ///
-    /// 見えない面を一つ建てて `paper.js` を読ませ、その中の `clipTitle` と
-    /// `bestPart` と `webToMd` を、**窓の `cmdClip` と一字一句同じ順で**呼ぶ
-    /// ── Swift 側で書き直さないので、片方だけ直った日に窓と電話で別の字に
+    /// 見えない画面を一つ建てて `paper.js` を読ませ、その中の `clipTitle` と
+    /// `bestPart` と `webToMd` を、**デスクトップ版の `cmdClip` と一字一句同じ順で**呼ぶ
+    /// ── Swift 側で書き直さないので、片方だけ直った日にデスクトップ版と iPhone で別の文字に
     /// ならない。
     ///
-    /// **字は引数で渡す。** 前は本文を JS の中に差し込んでいたが、差し込む
+    /// **文字は引数で渡す。** 前は本文を JS の中に差し込んでいたが、差し込む
     /// 目印（`HTML`）が `outerHTML` の中にもあって、置き換えが命令を壊した
     /// ── 実際に「JavaScript の例外処理」だけが出て、何も取り込めなかった。
     private func turn(_ html: String, at url: URL) async throws
@@ -153,20 +153,20 @@ final class Clipping: NSObject {
         }
     }
 
-    /// 見えない面を建てて、切り出しを読ませる。
+    /// 見えない画面を建てて、切り出しを読ませる。
     ///
     /// 二つ、素直に書くと動かないところがある:
     ///
-    /// 一。**切り出しは `WKUserScript` で入れる。** HTML の字の中に混ぜると、
+    /// 一。**切り出しは `WKUserScript` で入れる。** HTML の文字の中に混ぜると、
     /// ページの側の都合（`</script` の並び）一つで途中で切れる。
     ///
-    /// 二。**面を窓にぶら下げる。** どこにも乗っていない `WKWebView` は
+    /// 二。**画面をデスクトップ版にぶら下げる。** どこにも乗っていない `WKWebView` は
     /// 中身の処理が止められることがあり、`evaluateJavaScript` が返って
     /// こない ── 実際に「取りに行っています…」から動かなくなった。
     /// 大きさ零で置いて、誰にも見えないまま生かしておく。
     private func ready() throws -> WKWebView {
         if let web { return web }
-        // `paper.js` は窓から切り出したもの（組み立てのときに写している）。
+        // `paper.js` はウィンドウから切り出したもの（組み立てのときに写している）。
         let slice = Bundle.main.url(forResource: "paper", withExtension: "js")
             .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
         let setup = WKWebViewConfiguration()
@@ -179,8 +179,8 @@ final class Clipping: NSObject {
             .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first {
             on.addSubview(made)
         }
-        // **道は付けない。** `amber://` を渡すと、その道を配る係が
-        // この面には居ないので、頁がそもそも建たない ── 建たなければ
+        // **パスは付けない。** `amber://` を渡すと、そのパスを配る係が
+        // この画面には居ないので、ページがそもそも建たない ── 建たなければ
         // 切り出しも入らず、`webClean` が居ないと言われる。
         made.loadHTMLString("<!doctype html><meta charset=\"utf-8\"><body>",
                             baseURL: nil)

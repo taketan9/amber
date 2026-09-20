@@ -196,9 +196,9 @@ struct Colouring: View {
 
     /// フォルダに付けられる色。**core に訊く。**
     ///
-    /// 前はここと窓の `PALETTE` に同じ表を書いていて、両方のコメントに
+    /// 前はこことデスクトップ版の `PALETTE` に同じ表を書いていて、両方のコメントに
     /// 「同じ並び」と書いてあった ── それでも**十一色のうち六色がずれて
-    /// いた**。電話で付けた青が、Mac では少し違う青で出ていた。
+    /// いた**。iPhone で付けた青が、Mac では少し違う青で出ていた。
     static let palette: [(String, String)] = {
         guard let out = try? Cian.call("palette", [:]),
               let rows = out["colors"] as? [[String: Any]]

@@ -14,7 +14,7 @@ import UIKit
 /// out.
 struct NoteView: View {
     @Binding var tab: Desk.Tab
-    /// 目次からの飛び先を受け取るため ── **面は二つある**ので、飛ぶ先は
+    /// 目次からの飛び先を受け取るため ── **画面は二つある**ので、飛ぶ先は
     /// desk が持ち、飛ぶのはこちら。
     @ObservedObject var desk: Desk
     let store: NotesStore
@@ -29,9 +29,9 @@ struct NoteView: View {
     /// Whether the seldom-used half of the writing bar is unfolded.
     @State private var more = false
     @State private var trouble: String?
-    /// 長押しされた図の、元の字（枠ごと）。
+    /// 長押しされた図の、元の文字（枠ごと）。
     @State private var fixingText: Fixing?
-    /// ぶつかった場所を選ぶ小窓（依頼 501）。
+    /// ぶつかった場所を選ぶダイアログ（依頼 501）。
     @State private var choosing = false
     /// 絵文字の板を出しているか（依頼 418）。
     @State private var facing = false
@@ -39,18 +39,18 @@ struct NoteView: View {
     @State private var sizing = false
     /// 原寸で見ている画像（依頼 637）。
     @State private var peeking: URL?
-    /// 表示の面で叩かれた、触れないかたまり・リンク（依頼 403）。
-    /// **どの小窓を出すか**を決めるのはこちら（閉じると空になる）。
+    /// 表示の画面で叩かれた、触れないかたまり・リンク（依頼 403）。
+    /// **どのダイアログを出すか**を決めるのはこちら（閉じると空になる）。
     @State private var tapped: Tapped?
-    /// **何を叩いたか**はこちらに残す ── 小窓は「閉じてから」ボタンの用事を
+    /// **何を叩いたか**はこちらに残す ── ダイアログは「閉じてから」ボタンの用事を
     /// 走らせるので、`tapped` を読みに行くともう空になっている。
     @State private var held: Tapped?
-    /// 「表示」の面へ合図を渡す糸。
+    /// 「表示」画面へ合図を渡す糸。
     @StateObject private var hand = PaperHand()
-    /// 表示の面で鍵盤が出ているか ── 帯を出すかどうかの目安。
+    /// 表示の画面でキーボードが出ているか ── 帯を出すかどうかの目安。
     @State private var reading = true
 
-    /// 表示の面の道具。**書く面より少ない** ── `execCommand` で確かに
+    /// 表示の画面の道具。**編集画面より少ない** ── `execCommand` で確かに
     /// できるものだけを出す。できないものを並べると、押しても何も起きない
     /// ボタンができ、それはあることより悪い。
     private var readMarks: some View {
@@ -58,9 +58,9 @@ struct NoteView: View {
             Divider()
             // **戻す・やり直すは流れない。** 記号は横に流れる帯だが、この
             // 二つは押し続けるものなので、端に固定して指の下から逃げない
-            // ようにする（窓の「ほかの記号」のボタンと同じ考え）。
-            // **caret を動かす矢印。** 「コード」の面は `UITextView` なので
-            // iOS が鍵盤の上に純正の帯（∧ ∨）を出すが、「表示」の面は
+            // ようにする（デスクトップ版の「ほかの記号」のボタンと同じ考え）。
+            // **caret を動かす矢印。** 「コード」の画面は `UITextView` なので
+            // iOS がキーボードの上に純正の帯（∧ ∨）を出すが、「表示」画面は
             // `WKWebView` なので出ない ── iPhone で caret を一文字動かすのは
             // 指では難しい（本人の指摘・2026-09-08）。
             //
@@ -84,9 +84,9 @@ struct NoteView: View {
                     mark("箇条書き", "list.bullet") { hand.mark("ul") }
                     mark("チェック", "checklist") { hand.mark("check") }
                     mark("番号リスト", "list.number") { hand.mark("ol") }
-                    // **一覧のボタンの隣に置く。** 電話に Tab は無いので、段を
-                    // 深く・浅くするのはこの二つが手になる（窓の
-                    // Tab / Shift+Tab と同じ。段落では字下げ／字下げ外し）。
+                    // **一覧のボタンの隣に置く。** iPhone に Tab は無いので、段を
+                    // 深く・浅くするのはこの二つが手になる（デスクトップ版の
+                    // Tab / Shift+Tab と同じ。段落ではインデント／インデント外し）。
                     // 帯は横に流れるので、**使うものの隣に置かないと
                     // 流れた先に埋もれる** ── 一度に見えるのは六つだけ。
                     mark("一段深く", "increase.indent") { hand.mark("in") }
@@ -96,7 +96,7 @@ struct NoteView: View {
                     mark("斜体", "italic") { hand.mark("italic") }
                     mark("取り消し線", "strikethrough") { hand.mark("strike") }
                     mark("引用", "text.quote") { hand.mark("quote") }
-                    // **新しい段落は、ここから。** 電話の Return は改行に
+                    // **新しい段落は、ここから。** iPhone の Return は改行に
                     // した（本人が決めた・2026-09-08「改行二回で段落」は
                     // 取らない）ので、段落を分ける手をどこかに置く必要がある。
                     mark("新しい段落", "text.insert") { hand.mark("para") }
@@ -108,7 +108,7 @@ struct NoteView: View {
                     //
                     // 絵は SF Symbol の顔にする ── 帯はぜんぶ一色の記号で
                     // 揃っていて、ここだけ色の付いた 😀 を置くと、記号の帯に
-                    // 絵が一つ落ちているように見える（窓の帯は字なので、
+                    // 絵が一つ落ちているように見える（デスクトップ版の帯は文字なので、
                     // あちらは 😀 そのものを置いた）。
                     mark("絵文字", "face.smiling") { facing = true }
                 }
@@ -124,8 +124,8 @@ struct NoteView: View {
     /// 一つ戻す・やり直す。**「表示」でも「コード」でも同じ一本**（desk が
     /// ノートの姿を積んでいる ── `Desk.stepBack`）。
     ///
-    /// UIKit の取り消しではない ── あれは「打った字」の取り消しで、見出しや
-    /// 升のように面を組み直したところで積み木ごと消えるし、「表示」の面には
+    /// UIKit の取り消しではない ── あれは「打った文字」の取り消しで、見出しや
+    /// セルのように画面を組み直したところで積み木ごと消えるし、「表示」画面には
     /// そもそも届かない。同じ名前の道具が二つあって片方だけ効かないのは、
     /// 見分けの付かない差になる。
     /// caret を動かす一つ。**絵だけ** ── 四つ並ぶので、名前を付けると
@@ -159,7 +159,7 @@ struct NoteView: View {
     /// 配色（依頼 499・cian と同じ二十一）。空なら琥珀。
     @AppStorage("amber.palette") private var palette = ""
     private var chosen: Palette? { Palettes.named(palette) }
-    /// 面の地 ── 配色があればその紙の色、無ければ透ける（iOS の地）。
+    /// 画面の地 ── 配色があればその紙の色、無ければ透ける（iOS の地）。
     private var paperColor: Color { Color(hex: chosen?.vars["--paper"] ?? "") ?? .clear }
 
     struct Fixing: Identifiable {
@@ -167,30 +167,30 @@ struct NoteView: View {
         var id: String { md }
     }
 
-    /// **押されたもの。** 窓は面の中に吹き出しを描くが、電話は iOS の小窓で
-    /// 訊く ── 面の中に自前で描くと、鍵盤や選び目の丸とぶつかる。
+    /// **押されたもの。** デスクトップ版は画面の中に吹き出しを描くが、iPhone は iOS のダイアログで
+    /// 訊く ── 画面の中に自前で描くと、キーボードや選び目の丸とぶつかる。
     struct Tapped: Identifiable {
         /// `fig`（図）・`pre`（枠）・`img`（画像）・`link`。
         let kind: String
-        /// 図と枠は元の字、リンクは行き先。
+        /// 図と枠は元の文字、リンクは行き先。
         let at: String
         /// ファイルの行（前書きを含む）。リンクは -1。
         let line: Int
         var id: String { kind + "\u{1}" + at + "\u{1}" + String(line) }
     }
 
-    /// その種類の小窓が出ているか ── 閉じたら憶えも空にする。
+    /// その種類のダイアログが出ているか ── 閉じたら憶えも空にする。
     private func showing(_ kind: String) -> Binding<Bool> {
         Binding(get: { tapped?.kind == kind }, set: { if !$0 { tapped = nil } })
     }
 
-    /// 選ばれた大きさを、**ノートの字に書く**（依頼 420）。
+    /// 選ばれた大きさを、**ノートの文字に書く**（依頼 420）。
     ///
-    /// 押して選んだ結果が `![猫 w:200px](…)` という**打てる字**として残る ──
+    /// 押して選んだ結果が `![猫 w:200px](…)` という**打てる文字**として残る ──
     /// あとから記法で直せるし、amber の外でも読める（芯の 1）。
     ///
     /// 書き換えるのは**その一行だけ** ── 同じ画像を二度貼っている人の、
-    /// もう一方まで変えない（`held.at` は押された画像の元の字）。
+    /// もう一方まで変えない（`held.at` は押された画像の元の文字）。
     private func size(_ width: String?) {
         guard let was = held?.at, !was.isEmpty else { return }
         do {
@@ -202,31 +202,31 @@ struct NoteView: View {
 
     /// 絵文字を、いま打っているところへ（依頼 418）。
     ///
-    /// **面ごとに入れ方が違う。** 表示の面は `WKWebView` の中の caret、
-    /// コードの面は `UITextView` の選び ── 同じ字を、それぞれの面が
+    /// **画面ごとに入れ方が違う。** 表示の画面は `WKWebView` の中の caret、
+    /// コード画面は `UITextView` の選び ── 同じ文字を、それぞれの画面が
     /// 憶えている場所へ置く。
     private func putFace(_ ch: String) {
-        // **段ではなく、字として入れる。** `Marks.block` は新しい行に置く
+        // **段ではなく、文字として入れる。** `Marks.block` は新しい行に置く
         // ので、文の途中に絵文字を入れたい人には使えない。
         if tab.reading { hand.put(ch) } else { put(Marks.insert(tab.text, tab.pick, ch)) }
     }
 
-    /// 枠を「コード」の面のその行へ。**表示のまま直せないものは、記号を出す。**
+    /// 枠を「コード」の画面のその行へ。**表示のまま直せないものは、記号を出す。**
     private func toCode(_ line: Int) {
-        // **小窓が閉じ切ってから替える。** 同じ拍で面を入れ替えると、
-        // SwiftUI は小窓を畳む処理の途中で下の view を作り直すことになり、
-        // 替えたはずの面が表示のまま残った（押しても何も起きないように
+        // **ダイアログが閉じ切ってから替える。** 同じ拍で画面を入れ替えると、
+        // SwiftUI はダイアログを畳む処理の途中で下の view を作り直すことになり、
+        // 替えたはずの画面が表示のまま残った（押しても何も起きないように
         // 見える）。次の拍に回すと、畳んでから替わる。
         DispatchQueue.main.async {
             tab.reading = false
-            // **面が入れ替わってから飛ぶ。** 同じ拍で行を渡すと、受け取る
-            // コードの面がまだ建っていない ── 頭のまま止まる。
+            // **画面が入れ替わってから飛ぶ。** 同じ拍で行を渡すと、受け取る
+            // コード画面がまだ建っていない ── 頭のまま止まる。
             if line >= 0 { DispatchQueue.main.async { desk.jumping = line } }
         }
     }
 
-    /// 行き先を外で開く ── **amber の中では開かない**。題字を面の中に
-    /// 描いている以上、持っていかれると戻る道が無い（窓と同じ）。
+    /// 行き先を外で開く ── **amber の中では開かない**。題文字を画面の中に
+    /// 描いている以上、持っていかれると戻るパスが無い（デスクトップ版と同じ）。
     private func open(_ href: String) {
         guard let u = URL(string: href), u.scheme != nil,
               UIApplication.shared.canOpenURL(u) else {
@@ -246,12 +246,12 @@ struct NoteView: View {
         return lines.joined(separator: "\n")
     }
 
-    /// 目次で選ばれた見出しへ。**書く面ならその行へ、表示ならその見出しへ**
-    /// （窓の `gotoHead` と同じ）。
+    /// 目次で選ばれた見出しへ。**編集画面ならその行へ、表示ならその見出しへ**
+    /// （デスクトップ版の `gotoHead` と同じ）。
     ///
-    /// core の行番号は前書きを含むファイルの行。書く面が持っているのは
+    /// core の行番号は前書きを含むファイルの行。編集画面が持っているのは
     /// 本文だけなので、前書きのぶんを引く ── 引き忘れると、前書きのある
-    /// ノートでだけ数行ずれる（升の行番号で一度やった）。
+    /// ノートでだけ数行ずれる（セルの行番号で一度やった）。
     private func jump(_ line: Int) {
         guard line >= 0 else { return }
         if tab.reading { hand.go(line: line); return }
@@ -264,7 +264,7 @@ struct NoteView: View {
         tab.pick = NSRange(location: at, length: 0)
     }
 
-    /// 升を押されたとき ── 行番号で裏返す（何番目の升かではない）。
+    /// セルを押されたとき ── 行番号で裏返す（何番目のセルかではない）。
     private func tickLine(_ line: Int, _ done: Bool) {
         guard line >= 0 else { return }
         do {
@@ -279,7 +279,7 @@ struct NoteView: View {
     /// 直した図を、本文の中の元の場所へ返す。
     ///
     /// **枠ごと入れ替える。** 行番号で切ると、前書きのあるノートでずれる
-    /// ── 元の字そのものを探して置き換えるほうが、数え方を一つ減らせる。
+    /// ── 元の文字そのものを探して置き換えるほうが、数え方を一つ減らせる。
     /// 同じ図が二つあるノートでは前のほうが変わるが、そこで人が見ている
     /// のはたいてい前のほう。
     private func swapFence(_ whole: String, was: String, now: String) -> String {
@@ -291,7 +291,7 @@ struct NoteView: View {
         return whole
     }
 
-    /// 錠の帯（依頼 629・本人「間違って更新しないように 1 手間」）。**窓と
+    /// 錠の帯（依頼 629・本人「間違って更新しないように 1 手間」）。**デスクトップ版と
     /// 同じ二つの道** ── 今だけ編集する／ロックをやめる。
     @ViewBuilder private var lockBand: some View {
         if tab.locked {
@@ -317,15 +317,15 @@ struct NoteView: View {
         }
     }
 
-    /// 入ってきたものの報せ。**面の上に置く** ── 「表示」でも「コード」でも
-    /// 同じことが起きているので、片方の面の中に入れると面を替えたときに
-    /// 消えたように見える（窓と同じ形・依頼 354）。
+    /// 入ってきたものの報せ。**画面の上に置く** ── 「表示」でも「コード」でも
+    /// 同じことが起きているので、片方の画面の中に入れると画面を替えたときに
+    /// 消えたように見える（デスクトップ版と同じ形・依頼 354）。
     ///
     /// 言葉は「更新」に揃えてある ── 帯とボタンで言葉が割れると、同じことに
     /// 名前が二つ付く。
     @ViewBuilder
     private var band: some View {
-        // ほかの場所のノートを一時的に開いている（依頼 517・窓の帯と同じ字）。
+        // ほかの場所のノートを一時的に開いている（依頼 517・デスクトップ版の帯と同じ文字）。
         if store.isOutside(tab.note.path) {
             HStack(spacing: 9) {
                 Circle().fill(Color("AccentColor")).frame(width: 8, height: 8)
@@ -339,7 +339,7 @@ struct NoteView: View {
             Divider()
         }
         if tab.clashing {
-            // **ぶつかった場所がある**（依頼 501・窓の帯と同じ言葉）── 数と、選ぶ道。
+            // **ぶつかった場所がある**（依頼 501・デスクトップ版の帯と同じ言葉）── 数と、選ぶ道。
             HStack(spacing: 9) {
                 Circle().fill(Color(red: 0.77, green: 0.34, blue: 0.31)).frame(width: 8, height: 8)
                 Text("\(tab.who.isEmpty ? "向こう" : tab.who)と同じところを直していました ── \(tab.spots.count + tab.fields.count) か所。選ぶまでは両方残っています")
@@ -375,11 +375,11 @@ struct NoteView: View {
     var body: some View {
         Group {
             if tab.reading {
-                // **窓と同じ面。** 組む側は core の `to_html`、書き戻す側は
-                // `gui/renderer.js` から切り出した一組（`paper.js`）── 電話
-                // だけ読むだけだと、同じ名前の面が二つの amber で別のものに
+                // **デスクトップ版と同じ画面。** 組む側は core の `to_html`、書き戻す側は
+                // `gui/renderer.js` から切り出した一組（`paper.js`）── iPhone
+                // だけ読むだけだと、同じ名前の画面が二つの amber で別のものに
                 // なる。SwiftUI で書き直すと書き戻しがもう一組でき、同じ
-                // ノートが端末によって別の字に保存される。
+                // ノートが端末によって別の文字に保存される。
                 VStack(spacing: 0) {
                     lockBand
                     band
@@ -397,28 +397,28 @@ struct NoteView: View {
                           },
                           hand: hand,
                           locked: tab.locked && !tab.freed)
-                    // **道具の帯は、表示の面にも要る。** 打てる面なのに
+                    // **道具の帯は、表示の画面にも要る。** 打てる画面なのに
                     // 記号の入れ方が無いと、`#` や `- [ ]` を覚えている人に
-                    // しか使えない ── 電話の鍵盤にその記号は出ていない。
+                    // しか使えない ── iPhone のキーボードにその記号は出ていない。
                     if reading { readMarks }
                 }
                 .background(paperColor)
                 .sheet(isPresented: $choosing) {
                     Choosing(desk: desk, store: store, id: tab.id)
                 }
-                // **工房はここで開く。** 図は表示の面の中にあり、直した字を
+                // **工房はここで開く。** 図は表示の画面の中にあり、直した文字を
                 // 戻す先はこのノートの本文なので、間に人を挟まない。
                 .sheet(item: $fixingText) { f in
                     Studio(source: f.md) { now in
                         tab.text = swapFence(tab.text, was: fence(f.md), now: now)
                     }
                 }
-                // **触れないものとリンクは、叩くと訊く**（窓の吹き出しと同じ
+                // **触れないものとリンクは、叩くと訊く**（デスクトップ版の吹き出しと同じ
                 // 顔ぶれ・依頼 403）。前は一叩きで何も起きず、450 ミリ秒の
                 // 長押しだけが工房へ行っていた ── 押せるものを押して何も
                 // 起きないのは、壊れているのと見分けがつかない。
                 //
-                // **押されたものごとに、別の小窓を書き下す。** 一つの小窓の
+                // **押されたものごとに、別のダイアログを書き下す。** 一つのダイアログの
                 // 中でボタンを組み替えるより、どれを押すと何が並ぶかがその場で
                 // 読める ── 顔ぶれは四つしかない。
                 .confirmationDialog("枠", isPresented: showing("pre"),
@@ -437,8 +437,8 @@ struct NoteView: View {
                                     titleVisibility: .visible) {
                     // **原寸で見る**（依頼 637・本人「実際の画像サイズに拡大して
                     // ポップアップ表示する、みたいなことはできないかなぁ」）──
-                    // 紙の幅に合わせて描いているので、字の入った画面写真は縮んで
-                    // 読めない。窓と同じ道（押したら原寸）。
+                    // 紙の幅に合わせて描いているので、文字の入った画面写真は縮んで
+                    // 読めない。デスクトップ版と同じ道（押したら原寸）。
                     Button("原寸で見る") { peeking = picURL(held?.at ?? "") }
                     // **画像の大きさは、押して選べる**（依頼 420）── 記法を
                     // 覚えていない人が、いちばん変えたがるのがこれ。
@@ -477,8 +477,8 @@ struct NoteView: View {
                 }
             }
         }
-        // **絵文字の板は、どちらの面からも**（依頼 418）。表示でもコードでも
-        // 同じ板から同じ字が入る ── 面によって道具が違うと、面を替えた人が
+        // **絵文字の板は、どちらの画面からも**（依頼 418）。表示でもコードでも
+        // 同じ板から同じ文字が入る ── 画面によって道具が違うと、画面を替えた人が
         // 「さっきのはどこへ行った」になる。
         //
         // 板は選んでも閉じない ── 顔文字は続けて置くもので（「👍✨」）、
@@ -496,7 +496,7 @@ struct NoteView: View {
             Text(trouble ?? "")
         }
         // 目次で選ばれた見出しへ。**受け取ったら空に戻す** ── 残しておくと、
-        // 面を入れ替えたときにもう一度飛ぶ。
+        // 画面を入れ替えたときにもう一度飛ぶ。
         .onChange(of: desk.jumping) { _, line in
             guard let line else { return }
             jump(line)
@@ -520,7 +520,7 @@ struct NoteView: View {
                         mark("絵文字", "face.smiling") { facing = true }
                         mark("斜体", "italic") { wrap("*") }
                         mark("取り消し線", "strikethrough") { wrap("~~") }
-                        // **`</>` は面の切り替えが持っている**（上の帯）ので、
+                        // **`</>` は画面の切り替えが持っている**（上の帯）ので、
                         // ここは波括弧にする ── 同じ絵が二つの意味を持つと、
                         // 押すまでどちらか分からない。
                         mark("コード", "curlybraces") { wrap("`") }
@@ -580,10 +580,10 @@ struct NoteView: View {
             HStack(spacing: 6) {
                 Button("閉じる") { writing = false }.font(.callout)
                 Spacer(minLength: 0)
-                // **ここは UIKit の取り消しだった。** あれは「打った字」の
-                // 取り消しで、見出しや升のように面を組み直したところで積み木
-                // ごと消える ── しかも「表示」の面には届かない。desk が
-                // ノートの姿を積む一本に替えた（窓と同じ理由・同じ持ち方）。
+                // **ここは UIKit の取り消しだった。** あれは「打った文字」の
+                // 取り消しで、見出しやセルのように画面を組み直したところで積み木
+                // ごと消える ── しかも「表示」画面には届かない。desk が
+                // ノートの姿を積む一本に替えた（デスクトップ版と同じ理由・同じ持ち方）。
                 mark("一つ戻す", "arrow.uturn.backward") { desk.stepBack(forward: false, store) }
                     .disabled(!desk.canStepBack)
                 mark("やり直す", "arrow.uturn.forward") { desk.stepBack(forward: true, store) }
@@ -672,14 +672,14 @@ struct NoteView: View {
         URL(fileURLWithPath: tab.note.path).deletingLastPathComponent()
     }
 
-    /// `![説明](attachments/x.png)` の道を、開けるファイルに（依頼 637）。
-    /// **外の URL は返さない** ── 原寸で見る窓はファイルを見せるところで、
-    /// 網に出る道ではない。
+    /// `![説明](attachments/x.png)` のパスを、開けるファイルに（依頼 637）。
+    /// **外の URL は返さない** ── 原寸で見るデスクトップ版はファイルを見せるところで、
+    /// ネットワークに出るパスではない。
     private func picURL(_ md: String) -> URL? {
         guard let open = md.firstIndex(of: "("), let close = md.lastIndex(of: ")"),
               open < close else { return nil }
         var link = String(md[md.index(after: open)..<close])
-        // `![説明 w:200px](…)` の大きさは道ではない ── 空白より前まで。
+        // `![説明 w:200px](…)` の大きさはパスではない ── 空白より前まで。
         if let sp = link.firstIndex(of: " ") { link = String(link[..<sp]) }
         link = link.removingPercentEncoding ?? link
         if link.isEmpty || link.contains("://") { return nil }
@@ -687,7 +687,7 @@ struct NoteView: View {
     }
 }
 
-/// 原寸で見る窓（依頼 637）。**縮めない** ── 縮めるなら開く意味が無い。
+/// 原寸で見るウィンドウ（依頼 637）。**縮めない** ── 縮めるなら開く意味が無い。
 /// はみ出したぶんは指で送って見る。「画面に合わせる」で一度だけ縮む。
 struct Peeking: View {
     let at: URL
@@ -731,22 +731,22 @@ struct Peeking: View {
 /// Literally the app icon, so the thing on the home screen and the thing at
 /// the top of the list cannot drift apart.
 ///
-/// **いまは電話のどこからも呼んでいない**（2026-09-07、帯の印を名前に
-/// 替えたので ── 絵と字を並べると「くどい」）。残してあるのは、絵そのもの
-/// （`Mark.imageset`）はまだ束ねに入っていて、窓は空の面で同じ一枚を出して
+/// **いまはiPhone のどこからも呼んでいない**（2026-09-07、帯のマークを名前に
+/// 替えたので ── 絵と文字を並べると「くどい」）。残してあるのは、絵そのもの
+/// （`Mark.imageset`）はまだバンドルに入っていて、デスクトップ版は空の画面で同じ画像を出して
 /// いるから。下の注釈に、描き直すと必ずずれるという教訓が残っている。
 struct Mark: View {
     // **アプリのアイコンそのもの**を小さくして出す。案2「琥珀の中の
-    // Markdown」で、`packaging/amber_icon.py` が焼いた 128px の一枚。
+    // Markdown」で、`packaging/amber_icon.py` が焼いた 128px の1 つ。
     //
     // 前はここに葉（案 S4）を `Path` で描いていた。同じ形が
     // `packaging/amber.svg`・`packaging/amber.py`・`gui/renderer.js` にもあり、
     // 四か所が揃っているかを `agree()` が見張っていた ── それでも**アイコンを
     // 替えた日に、中の印だけが前の絵のまま残った**。見張れていたのは「四つの
     // 写しが揃っているか」であって、「アイコンと同じか」ではなかった。
-    // 同じ一枚を渡せば、ずれようがない。
+    // 同じ1 つを渡せば、ずれようがない。
     //
-    // 色替えには追従させない（前の印は `Color.accentColor` を拾っていた）。
+    // 色替えには追従させない（前のマークは `Color.accentColor` を拾っていた）。
     // **ロゴが端末の気分で色を変えるのは、ロゴではない。**
     var body: some View {
         Image("Mark")

@@ -1,24 +1,24 @@
 import SwiftUI
 import WebKit
 
-/// 「表示」の面（電話）── **窓と同じものを動かす。**
+/// 「表示」画面（iPhone）── **デスクトップ版と同じものを動かす。**
 ///
-/// 窓の「表示」は `<div contenteditable>` で、そこに直接打てる。電話だけ
-/// 読むだけだと、**同じ名前の面が二つの amber で別のもの**になる ── 打てる
+/// デスクトップ版の「表示」は `<div contenteditable>` で、そこに直接打てる。iPhone だけ
+/// 読むだけだと、**同じ名前の画面が二つの amber で別のもの**になる ── 打てる
 /// と思って叩いた人は、何も起きない画面を前に「壊れている」と思う。
 ///
 /// SwiftUI で書き直さない。組む側は core の `to_html`、書き戻す側は
 /// `gui/renderer.js` から切り出した一組（`paper.js`）── **書き戻しをもう一組
-/// Swift で書けば、同じノートが端末によって別の字に保存される**。失うのは
-/// たいてい表と升と図で、気づくのは何回か保存したあと。
+/// Swift で書けば、同じノートが端末によって別の文字に保存される**。失うのは
+/// たいてい表とセルと図で、気づくのは何回か保存したあと。
 ///
-/// 画像と図は `amber://` で配る。`WKWebView` は文字列から作った頁に隣の
-/// ファイルを読ませないので、**Swift が給仕する**（束ねの中の道具と、
+/// 画像と図は `amber://` で配る。`WKWebView` は文字列から作ったページに隣の
+/// ファイルを読ませないので、**Swift が配信する**（バンドルの中のライブラリと、
 /// ノートの隣の画像）。ついでに、ノートの外は配らないことがここで保証できる。
-/// 道具の帯から「表示」の面へ、合図を渡す口。
+/// 道具の帯から「表示」画面へ、合図を渡す口。
 ///
-/// **帯は SwiftUI、面は WebView。** 間に糸を一本通しておかないと、帯は
-/// 書く面だけの道具のままになる ── 電話で「表示」に打てるようにした意味が
+/// **帯は SwiftUI、画面は WebView。** 間に糸を一本通しておかないと、帯は
+/// 編集画面だけの道具のままになる ── iPhone で「表示」に打てるようにした意味が
 /// 半分になる。
 final class PaperHand: ObservableObject {
     var send: ((String) -> Void)?
@@ -26,7 +26,7 @@ final class PaperHand: ObservableObject {
     /// 目次から、その行の見出しへ。行番号は core の言う**ファイルの行**
     /// （前書きを含む）── 組む側が `data-line` にそのまま差している。
     func go(line: Int) { send?("go:\(line)") }
-    /// 吹き出しで選ばれたことを、面の側でやらせる（依頼 403）。
+    /// 吹き出しで選ばれたことを、画面の側でやらせる（依頼 403）。
     func did(_ what: String) { send?("did:\(what)") }
     /// 絵文字を、いま打っているところへ（依頼 418）。
     func put(_ ch: String) { send?("put:\(ch)") }
@@ -35,30 +35,30 @@ final class PaperHand: ObservableObject {
 struct Paper: UIViewRepresentable {
     /// いまのノートの Markdown（前書きを除いた本文）。
     @Binding var text: String
-    /// このノートのあるフォルダ ── 画像の道はここから測る。
+    /// このノートのあるフォルダ ── 画像のパスはここから測る。
     let folder: URL
     let dark: Bool
-    /// 「表示」の面の字の大きさ（px）。**SwiftUI の段はここに届かない**ので、
+    /// 「表示」画面の文字の大きさ（px）。**SwiftUI の段はここに届かない**ので、
     /// 同じ増え方を数で渡す ── 一覧だけ大きくなって本文が小さいままだと、
     /// 「大きくした」が半分しか効いていない。
     let size: Int
-    /// 升を押したときなど、core を通したいことがある。
+    /// セルを押したときなど、core を通したいことがある。
     var onCheck: ((Int, Bool) -> Void)?
-    /// いま見ている（打っている）ファイルの行 ── 面を替えるときに使う。
+    /// いま見ている（打っている）ファイルの行 ── 画面を替えるときに使う。
     var onAt: ((Int) -> Void)?
     /// 向こうから来た行と、両方残した行（ファイルの行・0 起点）。
     /// **ノートには何も書いていない** ので、色は外から渡す。
     var came: [Int] = []
     var both: [Int] = []
-    /// 配色（依頼 499）── 面の CSS 変数に差す十五。空なら琥珀（明暗は `dark`）。
+    /// 配色（依頼 499）── 画面の CSS 変数に差す十五。空なら琥珀（明暗は `dark`）。
     var palette: [String: String] = [:]
     /// 図を長押しされた（工房を開く）。
     var onFix: ((String) -> Void)?
-    /// 触れないかたまり・リンクを一叩きしたときの、選ばせる小窓。
+    /// 触れないかたまり・リンクを一叩きしたときの、選ばせるダイアログ。
     var onMenu: ((String, String, Int) -> Void)?
     /// 道具の帯からの合図を受け取る糸。
     var hand: PaperHand?
-    /// 錠（依頼 629）── 真のあいだは面そのものを入力欄にしない。
+    /// 錠（依頼 629）── 真のあいだは画面そのものを入力欄にしない。
     /// **見た目で止めない**: 打てる場所を開かないことで止める。
     var locked = false
 
@@ -71,8 +71,8 @@ struct Paper: UIViewRepresentable {
         config.userContentController.add(context.coordinator, name: "fix")
         config.userContentController.add(context.coordinator, name: "menu")
         config.userContentController.add(context.coordinator, name: "trouble")
-        // **いまどこを見ているか。** 面を替えたときに同じ場所へ立つために
-        // 要る ── 替えてから訊くのでは、もう前の面が無い。
+        // **いまどこを見ているか。** 画面を替えたときに同じ場所へ立つために
+        // 要る ── 替えてから訊くのでは、もう前の画面が無い。
         config.userContentController.add(context.coordinator, name: "at")
         config.setURLSchemeHandler(context.coordinator, forURLScheme: Waiter.scheme)
         let web = WKWebView(frame: .zero, configuration: config)
@@ -104,15 +104,15 @@ struct Paper: UIViewRepresentable {
         context.coordinator.folder = folder
         context.coordinator.show(text, dark: dark, size: size)
         context.coordinator.paint(web, palette)
-        // **組み直すたびに敷き直す。** 札は組み直しで消えるので、
+        // **組み直すたびに敷き直す。** ラベルは組み直しで消えるので、
         // 一度きり渡すと、次に打った瞬間に色が消える。
         let js = "window.paint(\(came),\(both)); true"
         web.evaluateJavaScript(js.replacingOccurrences(of: " ", with: ""))
         web.evaluateJavaScript("window.setLocked(\(locked)); true")
     }
 
-    /// 面そのもの。**窓の見た目に寄せる** ── 同じノートが二つの amber で
-    /// 同じ形に見えないと、「同じ面」と言えない。
+    /// 画面そのもの。**デスクトップ版の見た目に寄せる** ── 同じノートが二つの amber で
+    /// 同じ形に見えないと、「同じ画面」と言えない。
     static let page = """
     <!doctype html><html><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
@@ -137,7 +137,7 @@ struct Paper: UIViewRepresentable {
       #paper blockquote{margin:.9em 0;padding-left:.9em;
         border-left:3px solid var(--line);color:var(--ink-2)}
       #paper hr{border:0;border-top:1px solid var(--line);margin:1.6em 0}
-      /* 折りたたみ（依頼 619）── **窓と同じ姿**。指で押して開け閉めする。 */
+      /* 折りたたみ（依頼 619）── **デスクトップ版と同じ姿**。指で押して開け閉めする。 */
       #paper details{margin:1.1em 0;border:1px solid var(--line-2);border-radius:10px;
         background:var(--rail)}
       #paper details>summary{cursor:pointer;padding:9px 14px;font-weight:600;
@@ -153,8 +153,8 @@ struct Paper: UIViewRepresentable {
       #paper pre{background:var(--rail);padding:11px 13px;border-radius:9px;
         overflow-x:auto}
       #paper pre code{background:none;padding:0}
-      /* 枠の中の琥珀の字（依頼 437）── 窓と同じ。 */
-      /* **電話では少し小さく。** 絵は 43 列あり、そのままだと右が切れる
+      /* 枠の中の琥珀の文字（依頼 437）── デスクトップ版と同じ。 */
+      /* **iPhone では少し小さく。** 絵は 43 列あり、そのままだと右が切れる
          ── 初めて開いた人が見るのが「ambə」では締まらない（実際に切れた）。 */
       #paper pre > code.language-amber{color:var(--amber);display:block;
         line-height:1;font-size:.72em}
@@ -165,16 +165,16 @@ struct Paper: UIViewRepresentable {
       #paper th{background:var(--rail);font-weight:700}
       #paper img{max-width:100%;height:auto;border-radius:9px;
         border:1px solid var(--line)}
-      /* 升は**枠をこちらで描く**（指で押せる大きさが要る）。中身の字
+      /* セルは**枠をこちらで描く**（指で押せる大きさが要る）。中身の文字
          （core が入れる `☑` / `☐`）は**出さない** ── 出すと、塗った枠の
          中に小さいチェックがもう一つ見える（本人が「気持ち悪い」と言った
-         のはこれ・2026-09-08）。窓は枠を描かず字だけを出すので、あちらは
+         のはこれ・2026-09-08）。デスクトップ版は枠を描かず文字だけを出すので、あちらは
          起きていなかった。 */
       #paper .box{appearance:none;width:19px;height:19px;margin:0 7px 0 -1.5em;
         border:1.6px solid var(--ink-3);border-radius:5px;background:none;
         vertical-align:-4px;font-size:0;position:relative;padding:0}
       #paper .box[aria-pressed=true]{background:var(--amber);border-color:var(--amber);}
-      /* 済みの印は、枠の上に自分で引く。 */
+      /* 済みのマークは、枠の上に自分で引く。 */
       #paper .box[aria-pressed=true]::after{content:"";position:absolute;
         left:5.5px;top:2px;width:4px;height:9px;border:solid #fff;
         border-width:0 2.2px 2.2px 0;transform:rotate(45deg)}
@@ -182,9 +182,9 @@ struct Paper: UIViewRepresentable {
       #paper .alert{margin:.9em 0;padding:.1em .9em .1em .9em;border-radius:9px;
         border-left:3px solid var(--amber);background:var(--sel)}
       #paper .alert-h{font-weight:700;color:var(--amber-deep);margin:.7em 0 .2em}
-      /* **五つを色で分ける（窓と同じ色）。** 名前が違うだけで見た目が
-         同じだと、警告と備忘が並んだときに見分けられない ── 窓は分けて
-         いて電話だけ一色だった（依頼 465）。 */
+      /* **五つを色で分ける（デスクトップ版と同じ色）。** 名前が違うだけで見た目が
+         同じだと、警告と備忘が並んだときに見分けられない ── デスクトップ版は分けて
+         いてiPhone だけ一色だった（依頼 465）。 */
       #paper .alert.note{border-left-color:#3D7FA8}
       #paper .alert.tip{border-left-color:#5E8C42}
       #paper .alert.important{border-left-color:#9A6FB5}
@@ -197,7 +197,7 @@ struct Paper: UIViewRepresentable {
       #paper .alert.caution .alert-h{color:#C4564E}
       #paper .mermaid{margin:1.2em 0;text-align:center;overflow-x:auto}
       #paper .mermaid svg{max-width:100%;height:auto}
-      /* 入ってきたもの ── **淡く敷く**（窓と同じ。濃く敷くと字が沈む）。
+      /* 入ってきたもの ── **淡く敷く**（デスクトップ版と同じ。濃く敷くと文字が沈む）。
          同じところを二人が更新して両方残したところだけ、脇に線を足す。 */
       #paper .came{background:rgba(240,165,43,.14)}
       #paper .both{background:rgba(240,165,43,.14);box-shadow:inset 3px 0 0 #C4564E}
@@ -208,7 +208,7 @@ struct Paper: UIViewRepresentable {
     let head = '';
     let quiet = false;
     let hold = null;
-    /// いま変換の途中か。**確定するまで、面を触らない**（窓と同じ規則）。
+    /// いま変換の途中か。**確定するまで、画面を触らない**（デスクトップ版と同じ規則）。
     let composing = false;
     /// 変換中に来た「組み直して」を、確定まで預かる。
     let drawAfter = false;
@@ -217,10 +217,10 @@ struct Paper: UIViewRepresentable {
     window.onerror = (m, s, l) =>
       window.webkit.messageHandlers.trouble.postMessage(m + ' @' + l);
 
-    /// 錠（依頼 629）。**面そのものを入力欄にしない** ── 帯の札で隠すだけ
+    /// 錠（依頼 629）。**画面そのものを入力欄にしない** ── 帯のラベルで隠すだけ
     /// では、指で触れば打ててしまう。組み直しのたびに掛け直す。
     let locked = false;
-    /// 最後に組んだ字 ── 錠を掛け直すときに、もう一度配るのに要る。
+    /// 最後に組んだ文字 ── 錠を掛け直すときに、もう一度配るのに要る。
     let lastText = '';
     window.setLocked = (on) => {
       const was = locked;
@@ -237,8 +237,8 @@ struct Paper: UIViewRepresentable {
 
     /// 組み上がった姿を置いて、打てるようにする。
     window.show = (html, text, dark) => {
-      // **変換中は組み直さない。** 組み直すと未確定の字が消える ──
-      // 用事は預かって、確定してから通す（窓と同じ・`drawAfter`）。
+      // **変換中は組み直さない。** 組み直すと未確定の文字が消える ──
+      // 用事は預かって、確定してから通す（デスクトップ版と同じ・`drawAfter`）。
       if (composing) { drawAfter = true; drawAfter0 = { html, text, dark }; return; }
       document.documentElement.toggleAttribute('data-dark', !!dark);
       quiet = true;
@@ -250,17 +250,17 @@ struct Paper: UIViewRepresentable {
       }
       lastText = text;
       armPaper(box, text, !locked);
-      // 空の注記・引用に、打てる一行を（窓と同じ）。
+      // 空の注記・引用に、打てる一行を（デスクトップ版と同じ）。
       fillAlerts(box);
-      // **画像は `<figure>` で包む ── 窓の `findPictures` と同じ形にする。**
+      // **画像は `<figure>` で包む ── デスクトップ版の `findPictures` と同じ形にする。**
       //
-      // 包まないと `<img>` は段の中の札のままで、字に戻すとき
-      // `inlineToMd` が捨てる（`case 'IMG': out += ''`）── 窓は包んだ
-      // `<figure>` が元の字（`data-md`）を持っているので消えないが、電話は
-      // 包んでいなかったので、**表示の面で一度でも打つと画像が消えた**。
+      // 包まないと `<img>` は段の中のラベルのままで、文字に戻すとき
+      // `inlineToMd` が捨てる（`case 'IMG': out += ''`）── デスクトップ版は包んだ
+      // `<figure>` が元の文字（`data-md`）を持っているので消えないが、iPhone は
+      // 包んでいなかったので、**表示の画面で一度でも打つと画像が消えた**。
       // 消えるのは保存のあとなので、消したつもりの無い人には理由が見えない。
       //
-      // **札を配ったあとに包む**（窓と同じ順）── `keepMark` が元の字を
+      // **ラベルを配ったあとに包む**（デスクトップ版と同じ順）── `keepMark` が元の文字を
       // `<figure>` へ移すので、先に `armPaper` が配っていないと引き継ぐ
       // ものが無い。
       for (const img of box.querySelectorAll('img')) {
@@ -279,13 +279,13 @@ struct Paper: UIViewRepresentable {
       quiet = false;
     };
 
-    /// 打ったら、落ち着いてから字に戻して渡す。
+    /// 打ったら、落ち着いてから文字に戻して渡す。
     ///
     /// **変換の途中では渡さない。** `input` は変換の一字ごとに来るので、
     /// 500ms の間合いが**変換の途中で切れうる** ── そこで渡すと、未確定の
-    /// 字が保存される。同期先に「あいう」が届き、次に「愛」が届く ──
+    /// 文字が保存される。同期先に「あいう」が届き、次に「愛」が届く ──
     /// 履歴が確定前の姿を積み、混ぜる側には「向こうが二度書いた」に見える。
-    /// 窓と同じ規則（`gui/renderer.js` の `composing`）。
+    /// デスクトップ版と同じ規則（`gui/renderer.js` の `composing`）。
     box.addEventListener('input', () => {
       if (quiet) return;
       clearTimeout(hold);
@@ -304,9 +304,9 @@ struct Paper: UIViewRepresentable {
     /// 来た行に、地色を敷く。**できるだけ細かい単位で。**
     ///
     /// 箇条書きは `<ul>` ひとつで一かたまりなので、上の段だけを見て塗ると
-    /// 一行来ただけで三行とも光る ── 買い物リストはまさにその形（窓で
-    /// 実物を見て気づいた・依頼 356）。行の札は `<li>` も持っているので、
-    /// そこまで降りる。最初の `<li>` は札を持たない（親が同じ行を指す）
+    /// 一行来ただけで三行とも光る ── 買い物リストはまさにその形（デスクトップ版で
+    /// 実物を見て気づいた・依頼 356）。行のラベルは `<li>` も持っているので、
+    /// そこまで降りる。最初の `<li>` はラベルを持たない（親が同じ行を指す）
     /// ので親から継ぐ。降りきれない形は、そのかたまりぜんぶ。
     window.paint = (came, both) => {
       for (const b of box.querySelectorAll('.came,.both')) b.classList.remove('came', 'both');
@@ -339,7 +339,7 @@ struct Paper: UIViewRepresentable {
 
     /// **いまどこを見ているかを、こまめに伝えておく。**
     ///
-    /// 替えるときに訊きに行く形にすると、答えを待つあいだ面が止まる ──
+    /// 替えるときに訊きに行く形にすると、答えを待つあいだ画面が止まる ──
     /// 先に渡しておけば、替える側は待たずに読める。伝えるのは caret の
     /// あるかたまり、無ければ**いま上に見えているかたまり**の行番号。
     let tellAt = () => {
@@ -361,15 +361,15 @@ struct Paper: UIViewRepresentable {
     window.addEventListener('scroll', tellSoon, { passive: true });
     box.addEventListener('scroll', tellSoon, { passive: true });
 
-    /// 升は打つものではなく押すもの ── 行番号で裏返す（何番目かではない）。
+    /// セルは打つものではなく押すもの ── 行番号で裏返す（何番目かではない）。
     box.addEventListener('click', (e) => {
       const mark = e.target.closest('.box');
       if (mark) {
         e.preventDefault();
         const done = mark.getAttribute('aria-pressed') !== 'true';
-        // **押した瞬間に裏返す**（窓と同じ・依頼 408）── 指で押したものが
+        // **押した瞬間に裏返す**（デスクトップ版と同じ・依頼 408）── 指で押したものが
         // 何拍か置いて変わるのは「効いたか分からない」の入口。core の答えは
-        // このあと来るが、升の状態は DOM が既に持っている。
+        // このあと来るが、セルの状態は DOM が既に持っている。
         mark.setAttribute('aria-pressed', String(done));
         window.webkit.messageHandlers.tick.postMessage({
           line: Number(mark.dataset.line), done,
@@ -378,18 +378,18 @@ struct Paper: UIViewRepresentable {
       }
     });
 
-    /// **触れないものとリンクは、一叩きで吹き出し**（窓と同じ・依頼 403）。
+    /// **触れないものとリンクは、一叩きで吹き出し**（デスクトップ版と同じ・依頼 403）。
     ///
     /// 前は長押しでしか工房へ行けず、**一叩きでは何も起きなかった** ──
     /// 押せるものが押しても何も起きないのは、壊れているのと同じに見える。
-    /// リンクは一叩きで外へ飛んでいて、字を直したい人に道が無かった。
+    /// リンクは一叩きで外へ飛んでいて、文字を直したい人にパスが無かった。
     ///
-    /// 選ばせるのは**iOS の小窓**（`confirmationDialog`）── 面の中に自前で
-    /// 描くと、鍵盤や選び目とぶつかる。押されたものはここで憶えておき、
+    /// 選ばせるのは**iOS のダイアログ**（`confirmationDialog`）── 画面の中に自前で
+    /// 描くと、キーボードや選び目とぶつかる。押されたものはここで憶えておき、
     /// 選ばれたら `window.did` が戻ってくる。
     let picked = null;
     box.addEventListener('click', (e) => {
-      if (e.target.closest('.box')) return;            // 升は升の道
+      if (e.target.closest('.box')) return;            // セルはセルの道
       const a = e.target.closest('a[href]');
       if (a) {
         const href = a.getAttribute('href') || '';
@@ -402,7 +402,7 @@ struct Paper: UIViewRepresentable {
       let art = e.target.closest('.mermaid, pre, figure, img');
       if (!art || !box.contains(art)) return;
       // **画像は包みごと持つ。** `closest` はいちばん内側を返すので、画像を
-      // 叩くと `<img>` が来る ── 元の字（`data-md`）を持っているのは
+      // 叩くと `<img>` が来る ── 元の文字（`data-md`）を持っているのは
       // `keepMark` で受け取った `<figure>` のほうなので、そちらへ上がる。
       // 持たずに渡すと、大きさを直す先が分からない（依頼 420）。
       if (art.tagName === 'IMG' && art.parentElement?.tagName === 'FIGURE') {
@@ -423,15 +423,15 @@ struct Paper: UIViewRepresentable {
 
     /// 絵文字を caret のところへ（依頼 418）。
     ///
-    /// **`focus()` だけでは caret は戻らない。** 板を出した時点で面から
-    /// 手は離れているので、憶えている場所へ戻してから入れる ── 窓では
+    /// **`focus()` だけでは caret は戻らない。** 板を出した時点で画面から
+    /// 手は離れているので、憶えている場所へ戻してから入れる ── デスクトップ版では
     /// これを忘れていて、ノートの頭に入った（依頼 461）。
     window.putFace = (ch) => {
       if (!caretBack(box)) box.focus();
       document.execCommand('insertText', false, ch);
     };
 
-    /// 小窓で選ばれたことを、面の側でやる。
+    /// ダイアログで選ばれたことを、画面の側でやる。
     window.did = (what) => {
       const n = picked;
       picked = null;
@@ -450,7 +450,7 @@ struct Paper: UIViewRepresentable {
         }
         box.dispatchEvent(new Event('input'));
       } else if (what === 'edit') {
-        // リンクの字を直す ── そこに caret を置くだけ。
+        // リンクの文字を直す ── そこに caret を置くだけ。
         const r = document.createRange();
         r.selectNodeContents(n);
         r.collapse(false);
@@ -470,19 +470,19 @@ struct Paper: UIViewRepresentable {
       return n && n.parentElement === box ? n : null;
     }
 
-    /// 道具の帯から。窓と同じ `execCommand`。
+    /// 道具の帯から。デスクトップ版と同じ `execCommand`。
     window.mark = (what) => {
       box.focus();
-      // **同じボタンで、付けると外す**（窓と同じ・依頼 406）── 中で押したら
+      // **同じボタンで、付けると外す**（デスクトップ版と同じ・依頼 406）── 中で押したら
       // 外れる。長い引用を一行ずつ外すのは、指では手が疲れる。
       //
       // **一行は、見出しか項目か、どちらか一つ** ── 点を付ける前に見出しを
       // 落とす（`- ## 見出し` は `blockToMd` が知らず、保存すると黙って落ちる）。
       //
-      // **かたまりの種類は、切り出しの `blockAs` が決める**（窓と一組）──
+      // **かたまりの種類は、切り出しの `blockAs` が決める**（デスクトップ版と一組）──
       // 表のセルでは一覧にしない・項目を見出しにするときは点を外す・
       // 段落の中に潜った一覧を外へ出す。ここに別の答えを書くと、同じ
-      // ノートが端末によって別の字になる。
+      // ノートが端末によって別の文字になる。
       if (what === 'bold') document.execCommand('bold');
       else if (what === 'italic') document.execCommand('italic');
       else if (what === 'strike') document.execCommand('strikeThrough');
@@ -492,13 +492,13 @@ struct Paper: UIViewRepresentable {
         blockAs(box, 'blockquote');
       } else if (what === 'check') check();
       else if (what === 'head') {
-        // 押すたびに深くなる ── 窓と同じ（`#` → `##` → `###` → 無し）。
+        // 押すたびに深くなる ── デスクトップ版と同じ（`#` → `##` → `###` → 無し）。
         const n = here();
         const now = n && /^H[1-6]$/.test(n.tagName) ? Number(n.tagName[1]) : 0;
         if (!blockAs(box, now >= 3 ? 'p' : 'h' + (now + 1))) return;
       } else if (what === 'para') {
-        // **段落を割る。** 電話の Return は改行なので、ここが「新しい段落」。
-        // 窓の Enter と同じ答えを通す（升・引用・見出し・表 → それ以外は
+        // **段落を割る。** iPhone の Return は改行なので、ここが「新しい段落」。
+        // デスクトップ版の Enter と同じ答えを通す（セル・引用・見出し・表 → それ以外は
         // ブラウザの既定）。
         const sel = getSelection();
         let n = sel?.anchorNode;
@@ -516,13 +516,13 @@ struct Paper: UIViewRepresentable {
 
     /// caret を一つ動かす。
     ///
-    /// **`WKWebView` には、iOS の矢印が付かない。** 「コード」の面は
-    /// `UITextView` なので鍵盤の上に純正の帯（∧ ∨）が出るが、「表示」の面は
+    /// **`WKWebView` には、iOS の矢印が付かない。** 「コード」の画面は
+    /// `UITextView` なのでキーボードの上に純正の帯（∧ ∨）が出るが、「表示」画面は
     /// 出ない ── iPhone で caret を一文字動かすのは、指では難しい（本人の
     /// 指摘・2026-09-08「死ぬほどやりにくい」）。
     ///
-    /// **`selection.modify` に任せる。** 自分で節を渡り歩くと、升や飾りの
-    /// 境目で止まる ── あちらは字の並びを知っている。
+    /// **`selection.modify` に任せる。** 自分で節を渡り歩くと、セルや書式の
+    /// 境目で止まる ── あちらは文字の並びを知っている。
     const move = (dir) => {
       box.focus();
       const sel = getSelection();
@@ -532,21 +532,21 @@ struct Paper: UIViewRepresentable {
       sel.modify('move', to, by);
     };
 
-    /// いまの行を、押せる升の付いた一行にする。
+    /// いまの行を、押せるセルの付いた一行にする。
     ///
-    /// **`execCommand` に升は作れない。** 箇条書きにしてから、升を自分で
-    /// 前に置く ── 升は `<button class="box">` で、`paperToMd` はそれを
+    /// **`execCommand` にセルは作れない。** 箇条書きにしてから、セルを自分で
+    /// 前に置く ── セルは `<button class="box">` で、`paperToMd` はそれを
     /// 見て `- [ ]` に戻す。
     function check() {
-      // **判断は切り出しの `checkLine`**（窓と一組）── caret の一行だけ升に
+      // **判断は切り出しの `checkLine`**（デスクトップ版と一組）── caret の一行だけセルに
       // し、付いていれば外す。表のセルでは何もしない。
       checkLine(box);
     }
 
-    /// 升の行の Enter は、窓と同じ関数（`checkEnter`）に渡す。
+    /// セルの行の Enter は、デスクトップ版と同じ関数（`checkEnter`）に渡す。
     ///
     /// **押し心地を端末で分けない。** ここで別の答えを書けば、同じノートを
-    /// 窓で足すと升、電話で足すと点、になる ── 気づくのは何日か経ってから。
+    /// デスクトップ版で足すとセル、iPhone で足すと点、になる ── 気づくのは何日か経ってから。
     box.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
       if (e.shiftKey || e.metaKey || e.ctrlKey) return;
@@ -556,9 +556,9 @@ struct Paper: UIViewRepresentable {
       if (n && n.nodeType === 3) n = n.parentElement;
       if (!n || !box.contains(n)) return;
       const li = n.closest('li');
-      // **電話の Return は改行。** 新しい段落は下の帯から（本人が決めた・
-      // 2026-09-08）── iOS のメモも LINE も Return は改行で、電話に
-      // `Shift+Enter` は無い。升・引用・見出し・表は、窓と同じ答えを通す
+      // **iPhone の Return は改行。** 新しい段落は下の帯から（本人が決めた・
+      // 2026-09-08）── iOS のメモも LINE も Return は改行で、iPhone に
+      // `Shift+Enter` は無い。セル・引用・見出し・表は、デスクトップ版と同じ答えを通す
       // （`checkEnter` / `quitEnter` / `checkReturn`）。
       if (li ? checkEnter(li) : false) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
       if (quitEnter(n)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
@@ -569,25 +569,25 @@ struct Paper: UIViewRepresentable {
       box.dispatchEvent(new Event('input'));
     });
 
-    /// 行頭の Backspace は、窓と同じ関数（`checkBack`）に渡す。
+    /// 行頭の Backspace は、デスクトップ版と同じ関数（`checkBack`）に渡す。
     ///
     /// **押し心地を端末で分けない。** 既定に任せると、途中の項目は前の
-    /// 項目と繋がる ── 升が一つ黙って消え、二つの「やること」が一行に
-    /// なる。窓で直したものが、電話で直っていないのはいちばん悪い。
+    /// 項目と繋がる ── セルが一つ黙って消え、二つの「やること」が一行に
+    /// なる。デスクトップ版で直したものが、iPhone で直っていないのはいちばん悪い。
     ///
-    /// **`beforeinput` でも受ける。** iPhone の鍵盤の delete は `keydown` を
+    /// **`beforeinput` でも受ける。** iPhone のキーボードの delete は `keydown` を
     /// 出さないことがあり（`keyCode` が 229 のまま来る）、そのときは
     /// `deleteContentBackward` として `beforeinput` に出る。
     const back = (e) => {
       if (e.isComposing) return;
-      // 選んで消すときは、表を壊さないほうが先に受ける（窓と同じ・`checkCut`）。
+      // 選んで消すときは、表を壊さないほうが先に受ける（デスクトップ版と同じ・`checkCut`）。
       if (checkCut(box)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
       if (!checkBack(box)) return;
       e.preventDefault();
       box.dispatchEvent(new Event('input'));
     };
-    /// 行末の Delete（外付けの鍵盤・fn+delete）── 次が記号付きの行なら何も
-    /// 起きない（窓と同じ・`checkDel`・網の決めごと 2）。
+    /// 行末の Delete（外付けのキーボード・fn+delete）── 次が記号付きの行なら何も
+    /// 起きない（デスクトップ版と同じ・`checkDel`・ネットワークの決めごと 2）。
     const fwd = (e) => {
       if (e.isComposing) return;
       if (checkCut(box)) { e.preventDefault(); box.dispatchEvent(new Event('input')); return; }
@@ -604,8 +604,8 @@ struct Paper: UIViewRepresentable {
       else if (e.inputType === 'deleteContentForward') fwd(e);
     });
 
-    /// 外付けの鍵盤の Tab。**電話に Tab は無い**（下の帯のボタンが本線）が、
-    /// 繋いでおけば鍵盤を挿した人の手がそのまま動く。
+    /// 外付けのキーボードの Tab。**iPhone に Tab は無い**（下の帯のボタンが本線）が、
+    /// 繋いでおけばキーボードを挿した人の手がそのまま動く。
     box.addEventListener('keydown', (e) => {
       if (e.key !== 'Tab' || e.isComposing || e.keyCode === 229) return;
       if (!checkTab(box, e.shiftKey)) return;
@@ -616,16 +616,16 @@ struct Paper: UIViewRepresentable {
     /// 目次から呼ばれる ── その行のかたまりを画面の上へ。
     ///
     /// **無い行では動かない。** 前書きを含む行番号なので、本文だけの
-    /// 面には存在しない番号が来ることがある（そのときは何もしない ──
+    /// 画面には存在しない番号が来ることがある（そのときは何もしない ──
     /// 一番上へ飛ぶより、動かないほうが「効かなかった」と分かる）。
     window.go = (n) => {
       const at = box.querySelector('[data-line="' + n + '"]');
       if (at) at.scrollIntoView({ block: 'start', behavior: 'smooth' });
     };
 
-    /// 打った字を、飾りの外へ（窓と同じ `outOfDress`）。
+    /// 打った文字を、書式の外へ（デスクトップ版と同じ `outOfDress`）。
     ///
-    /// **飾ったのは選んだ字で、これから打つ字ではない。** かな漢字は
+    /// **飾ったのは選んだ文字で、これから打つ文字ではない。** かな漢字は
     /// 組み始めに出す ── 組んでいる最中に選び目を動かすと変換が壊れる。
     box.addEventListener('beforeinput', (e) => {
       if (e.isComposing || e.inputType !== 'insertText' || e.data == null) return;
@@ -658,13 +658,13 @@ struct Paper: UIViewRepresentable {
         }).catch(() => {});
         lib = globalThis.mermaid || null;
         if (!lib) return;
-        // 図の色も設定も、窓と同じもの（`Drawing` が組み立てて渡す）。
+        // 図の色も設定も、デスクトップ版と同じもの（`Drawing` が組み立てて渡す）。
         lib.initialize(window.__mmd
           || { startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true });
       }
       // mermaid が測るために建てた仮の箱を片付ける。**`document.body` の
       // 直下だけ** ── 返ってくる SVG にも同じ id が付くので、id だけで
-      // 消すと、いま面に挿した図そのものが消える（窓でそうなった）。
+      // 消すと、いま画面に挿した図そのものが消える（デスクトップ版でそうなった）。
       const sweep = (id) => {
         for (const at of [id, 'd' + id]) {
           const n = document.getElementById(at);
@@ -679,7 +679,7 @@ struct Paper: UIViewRepresentable {
           const div = document.createElement('div');
           div.className = 'mermaid';
           div.innerHTML = svg;
-          // **元の字と行番号を引き継ぐ。** 引き継がないと、字に戻すとき
+          // **元の文字と行番号を引き継ぐ。** 引き継がないと、文字に戻すとき
           // この図の中身がどこにも無く、保存のたびに図が消える。
           for (const k of ['line', 'span', 'md']) {
             if (code.parentElement.dataset[k] !== undefined) {
@@ -688,7 +688,7 @@ struct Paper: UIViewRepresentable {
           }
           div.contentEditable = 'false';
           code.parentElement.replaceWith(div);
-        } catch { /* 描けない図は、書いた字のまま残す */ }
+        } catch { /* 描けない図は、書いた文字のまま残す */ }
         finally { sweep(id); }
       }
     }
@@ -705,7 +705,7 @@ struct Paper: UIViewRepresentable {
         private var sizeShown: Int?
         private var paletteShown = ""
 
-        /// 配色を面に差す（変わったときだけ）。
+        /// 配色を画面に差す（変わったときだけ）。
         func paint(_ web: WKWebView, _ vars: [String: String]) {
             guard ready else { return }
             let data = (try? JSONSerialization.data(withJSONObject: vars)) ?? Data("{}".utf8)
@@ -714,7 +714,7 @@ struct Paper: UIViewRepresentable {
             paletteShown = json
             web.evaluateJavaScript("window.setPalette(\(json)); true")
         }
-        /// 升を押したところ ── 次に来る字は、面の上に既に出ている。
+        /// セルを押したところ ── 次に来る文字は、画面の上に既に出ている。
         private var ticking = false
 
         init(_ parent: Paper) { self.parent = parent }
@@ -727,12 +727,12 @@ struct Paper: UIViewRepresentable {
             show(parent.text, dark: parent.dark, size: parent.size)
         }
 
-        /// 組み上がった姿を渡す。**組むのは core** ── 見出しが何かを電話が
+        /// 組み上がった姿を渡す。**組むのは core** ── 見出しが何かをiPhone が
         /// 決めはじめると、`#仕事` というタグの行が見出しになる。
         func show(_ text: String, dark: Bool, size: Int) {
             guard ready, let web,
                   text != shown || dark != darkShown || size != sizeShown else { return }
-            // 升を押したぶんの字なら、**憶えるだけで組み直さない**。
+            // セルを押したぶんの文字なら、**憶えるだけで組み直さない**。
             if ticking {
                 ticking = false
                 shown = text
@@ -741,7 +741,7 @@ struct Paper: UIViewRepresentable {
             shown = text
             darkShown = dark
             sizeShown = size
-            // 字の大きさは、組み直さずに変えられる ── 根に一つ置くだけ。
+            // 文字の大きさは、組み直さずに変えられる ── 根に一つ置くだけ。
             web.evaluateJavaScript(
                 "document.documentElement.style.setProperty('--size', '\(size)px'); true")
             guard let out = try? Cian.call("html", ["text": text]),
@@ -769,15 +769,15 @@ struct Paper: UIViewRepresentable {
                 guard let d = m.body as? [String: Any],
                       let line = (d["line"] as? NSNumber)?.intValue,
                       let done = d["done"] as? Bool else { return }
-                // **組み直さない。** 升は面の上で既に裏返っていて、core が
+                // **組み直さない。** セルは画面の上で既に裏返っていて、core が
                 // 返すのは同じ姿 ── 組み直せば caret が飛び、長いノートでは
-                // 一瞬止まる（窓と同じ直し・依頼 408）。次に来る字は
+                // 一瞬止まる（デスクトップ版と同じ直し・依頼 408）。次に来る文字は
                 // 「もう出してある」ものとして受ける。
                 ticking = true
                 parent.onCheck?(line, done)
             case "fix":
                 if let md = m.body as? String { parent.onFix?(md) }
-            // **面の中で起きた落ちは、ここへ出る。** 出さないと、`window.onerror`
+            // **画面の中で起きた落ちは、ここへ出る。** 出さないと、`window.onerror`
             // が投げた先が無く、`paper.js` の落ちが誰にも見えない。
             case "trouble":
                 NSLog("amber paper: %@", String(describing: m.body))
@@ -799,8 +799,8 @@ struct Paper: UIViewRepresentable {
 
         // ── 給仕 ────────────────────────────────────────────
         //
-        // **ノートの外は配らない。** 画像の道はノートの隣から測り、`..` で
-        // 外へ出ようとするものは返さない ── 人が書いた字を頁に載せている
+        // **ノートの外は配らない。** 画像のパスはノートの隣から測り、`..` で
+        // 外へ出ようとするものは返さない ── 人が書いた文字をページに載せている
         // ので、そこが外を指していないことは、こちらで確かめる。
 
         func webView(_ web: WKWebView, start task: WKURLSchemeTask) {
@@ -830,7 +830,7 @@ struct Paper: UIViewRepresentable {
     }
 
     /// 図の設定 ── **`Drawing` と同じもの**。同じノートの同じ図が、
-    /// 一枚の面と工房の中で違う色に出る理由が無い。
+    /// 1 つの画面と工房の中で違う色に出る理由が無い。
     static func mmdOptions(dark: Bool) -> String {
         Canvas.Hand.options(dark: dark)
     }

@@ -2,23 +2,23 @@
 import SwiftUI
 import WebKit
 
-/// **電話の網** ── 「表示」の面（`WKWebView`）で、位置 × 操作の総当たり。
+/// **iPhone の網** ── 「表示」画面（`WKWebView`）で、位置 × 操作の総当たり。
 ///
 ///     scripts/walk-phone.sh      # 総ざらいの最後に、これも走る
 ///
-/// 窓の網（`scripts/grid.mjs`）と同じ考え: 同じ操作を、行頭・行中・行末 ×
+/// デスクトップ版の網（`scripts/grid.mjs`）と同じ考え: 同じ操作を、行頭・行中・行末 ×
 /// かたまりの種類ぜんぶで押し、**入れたものが caret のところに入るか・
-/// 字に戻せるか・行のどこで押しても同じか・決めごと（`PAPER.ja.md` 六章）の
-/// 通りか**を見る。窓で通ったことは電話で通ったことにならない ──
+/// 文字に戻せるか・行のどこで押しても同じか・決めごと（`PAPER.ja.md` 六章）の
+/// 通りか**を見る。デスクトップ版で通ったことはiPhone で通ったことにならない ──
 /// `WKWebView` の `contenteditable` は Chromium と癖が違う（四章）。
 ///
-/// **本物の面を建てる。** `Paper.page` を同じ配管（`Paper.Hand`・`amber://`）で
-/// 読み、帯の合図（`window.mark`）・絵文字（`window.putFace`）・鍵の受け口
-/// （`keydown`・`beforeinput`）を、電話が本当に通す道で押す。鍵そのものは
+/// **本物の画面を建てる。** `Paper.page` を同じ配管（`Paper.Hand`・`amber://`）で
+/// 読み、帯の合図（`window.mark`）・絵文字（`window.putFace`）・キーの受け口
+/// （`keydown`・`beforeinput`）を、iPhone が本当に通すパスで押す。鍵そのものは
 /// 送れないので、既定の動きは `execCommand`（`insertText`・`delete`・
 /// `forwardDelete`・`insertParagraph`）で起こす ── WebKit の既定はこれと同じ。
 ///
-/// 判断は面の中の台本（`script`）が返す。**何が正しいかは窓の網と同じ表**
+/// 判断は画面の中の台本（`script`）が返す。**何が正しいかはデスクトップ版のネットワークと同じ表**
 /// （決めごとを写してある）。決めごとの無いところは落第にしない。
 @MainActor
 enum Mesh {
@@ -27,14 +27,14 @@ enum Mesh {
         var bad: [(String, String)] = []
     }
 
-    /// 行のどこで押しても同じ結果であるべきもの（窓の網の `SAME_ANYWHERE`）。
+    /// 行のどこで押しても同じ結果であるべきもの（デスクトップ版のネットワークの `SAME_ANYWHERE`）。
     private static let sameAnywhere: Set<String> = [
         "見出し", "箇条書き", "チェック", "番号", "引用", "Tab", "⇧Tab",
     ]
 
     static func run() async -> Outcome {
         var out = Outcome()
-        // ── 面を建てる（`Paper.makeUIView` と同じ配管） ──
+        // ── 画面を建てる（`Paper.makeUIView` と同じ配管） ──
         let paper = Paper(text: .constant(""), folder: FileManager.default.temporaryDirectory,
                           dark: false, size: 17)
         let hand = Paper.Hand(paper)
@@ -43,7 +43,7 @@ enum Mesh {
             config.userContentController.add(hand, name: name)
         }
         config.setURLSchemeHandler(hand, forURLScheme: Paper.Waiter.scheme)
-        // **見える大きさで置く。** 隠した面は選び目や `execCommand` が効かない
+        // **見える大きさで置く。** 隠した画面は選び目や `execCommand` が効かない
         // ことがある ── 薄くして端に置く（走査の画面には他に何も無い）。
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 640), configuration: config)
         web.navigationDelegate = hand
@@ -65,21 +65,21 @@ enum Mesh {
         }
         out.ran += 1
         guard up else {
-            out.bad.append(("電話の網：面を建てる", "paper.js か window.show が居ません"))
+            out.bad.append(("iPhone の総当たり：画面を建てる", "paper.js か window.show が居ません"))
             return out
         }
         do {
             _ = try await web.evaluateJavaScript(
                 "window.__mmd = \(Paper.mmdOptions(dark: false)); " + script + " true")
         } catch {
-            out.bad.append(("電話の網：台本を流し込む", why(error)))
+            out.bad.append(("iPhone の総当たり：台本を流し込む", why(error)))
             return out
         }
 
         // ── 一つずつ押す ──
         guard let plan = (try? await web.callAsyncJavaScript(
             "return __mesh.plan()", contentWorld: .page)) as? [[String: Any]] else {
-            out.bad.append(("電話の網：段取り", "plan() が返りません"))
+            out.bad.append(("iPhone の総当たり：段取り", "plan() が返りません"))
             return out
         }
         var seen: [String: [String: String]] = [:]     // 位置ちがいを見るため
@@ -88,7 +88,7 @@ enum Mesh {
                   let text = c["text"] as? String, let kind = c["kind"] as? String,
                   let whereAt = c["where"] as? String, let op = c["op"] as? String
             else { continue }
-            let name = "電話の網：\(target) / \(whereAt) / \(op)"
+            let name = "iPhone の総当たり：\(target) / \(whereAt) / \(op)"
             out.ran += 1
             let html = (try? Cian.call("html", ["text": md]))?["html"] as? String ?? ""
             if html.isEmpty { out.bad.append((name, "core が組めません")); continue }
@@ -114,7 +114,7 @@ enum Mesh {
             out.ran += 1
             let values = Array(Set(byWhere.values.map { $0.trimmingCharacters(in: .newlines) }))
             if values.count > 1 {
-                out.bad.append(("電話の網：\(key)",
+                out.bad.append(("iPhone の総当たり：\(key)",
                                 "行のどこで押したかで結果が違います（" + byWhere.keys.sorted().joined(separator: "・") + "）"))
             }
         }
@@ -126,14 +126,14 @@ enum Mesh {
             ?? error.localizedDescription
     }
 
-    /// 面の中で動く台本。**窓の網の `grid-page.js` と `grid.mjs` の写し**だが、
-    /// 押し方は電話の入口（`window.mark`・`window.putFace`・鍵の受け口）に
-    /// 合わせてある。決めごとを足したら、窓の `expect` と一緒にここも直す。
+    /// 画面の中で動く台本。**デスクトップ版のネットワークの `grid-page.js` と `grid.mjs` の写し**だが、
+    /// 押し方はiPhone の入口（`window.mark`・`window.putFace`・キーの受け口）に
+    /// 合わせてある。決めごとを足したら、デスクトップ版の `expect` と一緒にここも直す。
     static let script = #"""
     window.__mesh = (() => {
       const NORMAL = [
         '# 見出し', '',
-        '飾りのない長い段落です。まん中に置けるくらいには長い。', '',
+        '書式のない長い段落です。まん中に置けるくらいには長い。', '',
         '- ひとつ', '- ふたつ', '  - 入れ子', '- みっつ', '',
         '1. 一番', '2. 二番', '',
         '- [ ] やること', '- [x] やった', '',
@@ -143,19 +143,19 @@ enum Mesh {
         '上の段落。', '',
         '```rust', 'fn main() {}', '```', '',
         '下の段落。', '',
-        '　字下げた段落。', '',
+        '　インデントた段落。', '',
         '最後の段落。',
       ].join('\n');
       const TARGETS = [
         ['見出し（頭）', '見出し', 'h'],
-        ['段落', '飾りのない長い段落です。まん中に置けるくらいには長い。', 'p'],
+        ['段落', '書式のない長い段落です。まん中に置けるくらいには長い。', 'p'],
         ['一覧の一つめ', 'ひとつ', 'li1'],
         ['一覧の途中', 'ふたつ', 'li'],
         ['入れ子', '入れ子', 'nest'],
         ['一覧の最後', 'みっつ', 'liN'],
         ['番号', '二番', 'ol'],
-        ['升', 'やること', 'task'],
-        ['済んだ升', 'やった', 'done'],
+        ['セル', 'やること', 'task'],
+        ['済んだセル', 'やった', 'done'],
         ['引用の一行目', '引用の一行目', 'q1'],
         ['引用の二行目', '引用の二行目', 'q2'],
         ['注記', '注記の本文', 'alert'],
@@ -163,7 +163,7 @@ enum Mesh {
         ['表の最後のセル', '買い出し', 'cellN'],
         ['枠の上の段落', '上の段落。', 'before'],
         ['枠の下の段落', '下の段落。', 'after'],
-        ['字下げ', '　字下げた段落。', 'pad'],
+        ['インデント', '　インデントた段落。', 'pad'],
         ['末尾の段落', '最後の段落。', 'last'],
       ];
       const WHERES = ['行頭', '行中', '行末'];
@@ -219,7 +219,7 @@ enum Mesh {
       let pos = 0;
       function spot(text, where) {
         const hit = seek(text);
-        if (!hit) return '面に「' + text + '」がありません';
+        if (!hit) return '画面に「' + text + '」がありません';
         const n = text.length;
         const off = hit.at + (where === '行頭' ? 0 : where === '行中' ? Math.floor(n / 2) : n);
         const r = document.createRange();
@@ -250,7 +250,7 @@ enum Mesh {
           case 'あ': document.execCommand('insertText', false, 'あ'); return;
           case '絵文字': window.putFace('😀'); return;
           case '太字→あ': window.mark('bold'); await pause(30); document.execCommand('insertText', false, 'あ'); return;
-          // 外付けの鍵盤と同じ順 ── まず keydown（受け口が受ければそこまで）、
+          // 外付けのキーボードと同じ順 ── まず keydown（受け口が受ければそこまで）、
           // 受けなければ既定（`execCommand`）。WebKit は消すものが無いとき
           // `beforeinput` を出さないので、keydown を先に通さないと文書の頭の
           // 見出しの `#` が外れない。
@@ -269,11 +269,11 @@ enum Mesh {
         }
       }
 
-      /// 決めごとの通りか。true・字（落第）・undefined（見たまま）。
+      /// 決めごとの通りか。true・文字（落第）・undefined（見たまま）。
       function expect(c) {
         const { op, kind, where, text, bt, lt, md, was, blocks, block } = c;
         const unchanged = same(md, was);
-        const stay = (why) => (unchanged ? true : why + 'のに字が変わりました: ' + diff(was, md));
+        const stay = (why) => (unchanged ? true : why + 'のに文字が変わりました: ' + diff(was, md));
         const line = (want) => {
           const got = mdLine(md, text.replace(/^　+/, ''));
           return got === want ? true : 'その行が ' + show(want) + ' になるはずが ' + show(got) + ' です';
@@ -286,11 +286,11 @@ enum Mesh {
         const dent = (d) => {
           const a = indentOf(mdLine(was, text));
           const b = indentOf(mdLine(md, text));
-          if (b === -1) return 'その行が字から消えました';
-          return b === a + d ? true : '字下げが ' + a + ' → ' + b + '（' + (a + d) + ' のはず）';
+          if (b === -1) return 'その行が文字から消えました';
+          return b === a + d ? true : 'インデントが ' + a + ' → ' + b + '（' + (a + d) + ' のはず）';
         };
         const ins = (s) => {
-          if (lt === null) return '入れたあと、狙った行が面から消えました';
+          if (lt === null) return '入れたあと、狙った行が画面から消えました';
           const want = bt.slice(0, pos) + s + bt.slice(pos);
           if (lt === want) return true;
           const at = lt.indexOf(s);
@@ -305,23 +305,23 @@ enum Mesh {
             const r = ins('あ');
             if (r !== true) return r;
             if (kind === 'h') return true;
-            return md.includes('**あ**') ? true : '字は入りましたが太字になっていません';
+            return md.includes('**あ**') ? true : '文字は入りましたが太字になっていません';
           }
           case 'Tab': {
             if (kind === 'h') return stay('見出しで Tab');
             if (CELL.includes(kind)) return stay('セルで Tab');
             if (['li1', 'nest', 'task'].includes(kind)) return stay('上に項目が無い');
             if (LIST.includes(kind)) return dent(2);
-            return lt === '　' + bt ? true : '字下げが付いていません: ' + show(bt) + ' → ' + show(lt);
+            return lt === '　' + bt ? true : 'インデントが付いていません: ' + show(bt) + ' → ' + show(lt);
           }
           case '⇧Tab': {
             if (kind === 'nest') return dent(-2);
-            if (kind === 'pad') return lt === bt.slice(1) ? true : '字下げが外れていません: ' + show(lt);
-            return stay('外す字下げが無い');
+            if (kind === 'pad') return lt === bt.slice(1) ? true : 'インデントが外れていません: ' + show(lt);
+            return stay('外すインデントが無い');
           }
           case 'Backspace': {
             if (where !== '行頭') {
-              if (pos === 0) return stay('消す字が無い');
+              if (pos === 0) return stay('消す文字が無い');
               const want = bt.slice(0, pos - 1) + bt.slice(pos);
               return lt === want ? true : '一文字消えるはずが: ' + show(bt) + ' → ' + show(lt);
             }
@@ -346,7 +346,7 @@ enum Mesh {
           case 'Delete': {
             if (where === '行末') {
               if (['before', 'last'].includes(kind) || LIST.includes(kind) || CELL.includes(kind)) return stay('行末で Delete');
-              if (kind === 'h') return md.includes('# 見出し飾りのない') ? true : '次の段落と繋がるはずが: ' + diff(was, md);
+              if (kind === 'h') return md.includes('# 見出し書式のない') ? true : '次の段落と繋がるはずが: ' + diff(was, md);
               if (kind === 'q1') return md.includes('引用の一行目引用の二行目') ? true : '同じ箱の次の行と繋がるはずが: ' + diff(was, md);
               if (['p', 'q2', 'alert', 'after', 'pad'].includes(kind)) {
                 const next = blocks.slice(block + 1).find((b) => b !== null && b !== '');
@@ -360,7 +360,7 @@ enum Mesh {
             return lt === want ? true : '一文字消えるはずが: ' + show(bt) + ' → ' + show(lt);
           }
           case 'Return': {
-            // 電話の Return は改行。升・見出し・表・箱は窓の Enter と同じ答え。
+            // iPhone の Return は改行。セル・見出し・表・箱はデスクトップ版の Enter と同じ答え。
             if (kind === 'h') {
               if (where !== '行中') return stay('見出しの端で Return');
               return md.includes('# ' + text.slice(0, k) + '\n\n' + text.slice(k)) ? true : '前は見出し・後ろは段落のはずが: ' + diff(was, md);
@@ -368,10 +368,10 @@ enum Mesh {
             if (kind === 'cell') return stay('セルで Return（下のセルへ）');
             if (kind === 'cellN') return md.includes('| 　 | 　 |') ? true : '最後の行のセルで Return を押しても、行が増えません';
             if (['task', 'done'].includes(kind)) {
-              if (where !== '行中') return stay('升の端で Return');
+              if (where !== '行中') return stay('セルの端で Return');
               return undefined;
             }
-            // 入れ子を持つ項目（ふたつ）の行末は、既定が入れ子を新しい項目へ移す ── 見たまま（窓と同じ）。
+            // 入れ子を持つ項目（ふたつ）の行末は、既定が入れ子を新しい項目へ移す ── 見たまま（デスクトップ版と同じ）。
             if (kind === 'li' && where === '行末') return undefined;
             if (LIST.includes(kind)) { if (where !== '行中') return stay('項目の端で Return'); return undefined; }
             if (['q1', 'q2', 'alert'].includes(kind)) {
@@ -424,8 +424,8 @@ enum Mesh {
             if (kind === 'nest') return line('  - [ ] ' + text);
             if (kind === 'ol') return line('2. [ ] ' + text);
             if (['task', 'done'].includes(kind)) return line('- ' + text);
-            if (kind === 'q1') return md.includes('- [ ] 引用の一行目') ? true : '引用から出て升になるはずが: ' + diff(was, md);
-            if (kind === 'alert') return line('- [ ] ' + text) === true && !md.includes('[!NOTE]') ? true : '注記から出て升になるはずが: ' + diff(was, md);
+            if (kind === 'q1') return md.includes('- [ ] 引用の一行目') ? true : '引用から出てセルになるはずが: ' + diff(was, md);
+            if (kind === 'alert') return line('- [ ] ' + text) === true && !md.includes('[!NOTE]') ? true : '注記から出てセルになるはずが: ' + diff(was, md);
             if (CELL.includes(kind)) return stay('セルでチェック');
             return undefined;
           }
@@ -454,9 +454,9 @@ enum Mesh {
         await pause(40);
         if (errors.length) why.push(...errors.map((e) => '例外: ' + e));
         let now = null;
-        try { now = paperToMd(box, head); } catch (e) { why.push('字に戻すとき落ちます: ' + e.message); }
-        if (now === null && !why.length) why.push('もう字に戻せません（paperToMd が null）');
-        if (!caretInBox()) why.push('焦点が面から外れました');
+        try { now = paperToMd(box, head); } catch (e) { why.push('文字に戻すとき落ちます: ' + e.message); }
+        if (now === null && !why.length) why.push('もう文字に戻せません（paperToMd が null）');
+        if (!caretInBox()) why.push('焦点が画面から外れました');
         const lt = line && box.contains(line) ? line.textContent : null;
         if (now !== null) {
           const want = expect({ op, kind, where, text, bt, lt, md: now, was, blocks, block });

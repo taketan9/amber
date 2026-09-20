@@ -24,7 +24,7 @@ struct Where: View {
     let restore: () -> Void
     /// 取ってきて、一本のノートにする（依頼 421 の乙）。
     ///
-    /// **題はページのもの、中身は本文だけ、出どころは本文の最後に字で。**
+    /// **題はページのもの、中身は本文だけ、出どころは本文の最後に文字で。**
     /// 判断はぜんぶ `Clipping` と core にあり、ここは繋ぐだけ。
     private func clip() {
         guard let url = Clipping.reach(clipUrl) else {
@@ -57,13 +57,13 @@ struct Where: View {
 
     /// **URL を訊く紙**（依頼 442 の丙）。
     ///
-    /// 小窓（`alert`）ではなく紙にしてあるのは、**貼り付けのボタンを置けるのが
+    /// ダイアログ（`alert`）ではなく紙にしてあるのは、**貼り付けのボタンを置けるのが
     /// 紙だけ**だから。クリップボードを amber から覗くと iOS が毎回
     /// 「ペーストしてよいか」と訊いてくるが、**人が貼り付けのボタンを押した
     /// こと自体がその答えになる**ので、訊かれない（iOS がそのために
     /// 用意したボタン）。
     ///
-    /// ボタンに出る字（「ペースト」）は iOS が決めるもので、amber からは
+    /// ボタンに出る文字（「ペースト」）は iOS が決めるもので、amber からは
     /// 変えられない ── なので、何をするボタンかは下の一行で言う。
     @ViewBuilder private var clipSheet: some View {
         NavigationStack {
@@ -114,7 +114,7 @@ struct Where: View {
         var id: String { name }
     }
 
-    /// 見本を何枚置いたか。**言わないと、押しても何も起きなかったように
+    /// サンプルを何枚置いたか。**言わないと、押しても何も起きなかったように
     /// 見える**（既にあるものは飛ばすので、本当に何も起きない回がある）。
     @State private var added: Int?
     @Environment(\.dismiss) private var dismiss
@@ -135,7 +135,7 @@ struct Where: View {
     @State private var signingIn = false
     @State private var signInSaid: String?
 
-    /// 窓の `THEMES` と同じ鍵 ── 空は琥珀（iPhone に合わせる）、`amber-light`／`amber-dark`
+    /// デスクトップ版の `THEMES` と同じ鍵 ── 空は琥珀（iPhone に合わせる）、`amber-light`／`amber-dark`
     /// は琥珀の明暗、それ以外は配色の名前。
     private var themeKey: Binding<String> {
         Binding(
@@ -156,7 +156,7 @@ struct Where: View {
     var body: some View {
         NavigationStack {
             List {
-                // **保存ディレクトリ**（依頼 511・窓の ⚙「保存ディレクトリの追加・変更・削除」と
+                // **保存ディレクトリ**（依頼 511・デスクトップ版の ⚙「保存ディレクトリの追加・変更・削除」と
                 // 同じ三段）── 一覧 → 一つ → 同期先／名前／場所／外す。同期の入れる切るもここ。
                 Section {
                     ForEach(store.places) { p in
@@ -238,11 +238,11 @@ struct Where: View {
                 }
 
                 Section {
-                    // **Web から取り込む**（依頼 421 の乙・窓と同じ）。
+                    // **Web から取り込む**（依頼 421 の乙・デスクトップ版と同じ）。
                     //
                     // **押しただけでクリップボードを覗かない**（依頼 442）。
                     // 覗くと iOS が毎回「ペーストしてよいか」と訊いてきて、
-                    // amber の言葉ではない小窓が先に一枚出る ── 貼るかどうかは
+                    // amber の言葉ではないダイアログが先に1 つ出る ── 貼るかどうかは
                     // 人が中で決める。
                     Button {
                         clipUrl = ""
@@ -272,7 +272,7 @@ struct Where: View {
                         Label("バックアップから戻す", systemImage: "clock.arrow.circlepath")
                     }
                     // **片づけ**（依頼 449）── 貼ったノートを消しても、
-                    // 画像は `attachments/` に残る。消す道がどこにも
+                    // 画像は `attachments/` に残る。消すパスがどこにも
                     // 無かったので、フォルダだけが重くなっていた。
                     Button {
                         feeding = true
@@ -318,7 +318,7 @@ struct Where: View {
                         let n = store.addWelcome()
                         added = n
                     } label: {
-                        Label("見本のノートを入れる", systemImage: "sparkles")
+                        Label("サンプルのノートを入れる", systemImage: "sparkles")
                     }
                 } footer: {
                     Text("Markdown の書き方・『覚悟の磨き方』・ストラテジーパターンの三枚を、いま見ているフォルダの直下に置きます（フォルダもタグも作りません）。同じ名前があるものは飛ばすので、二度押しても増えません。")
@@ -330,9 +330,9 @@ struct Where: View {
                     Text("切ると、書く画面に「保存」が出ます。切っていても、画面を離れるときに一度だけ確認します。")
                 }
 
-                // **窓の歯車にあって、電話に無かった二つ。**
+                // **デスクトップ版の歯車にあって、iPhone に無かった二つ。**
                 // 記号の書き方を知らない人がいちばん先に困るのがここで、
-                // 電話には帯のボタンしか道が無かった。
+                // iPhone には帯のボタンしかパスが無かった。
                 Section {
                     NavigationLink {
                         Syntax()
@@ -349,7 +349,7 @@ struct Where: View {
                 }
 
                 Section {
-                    // **窓の「テーマ」と同じ一つの表**（本人「文言を窓版に合わせて」・2026-09-12）
+                    // **デスクトップ版の「テーマ」と同じ一つの表**（本人「文言をウィンドウ版に合わせて」・2026-09-12）
                     // ── 琥珀の3 つ（iPhone に合わせる・明るい・暗い）と、cian と同じ二十一。
                     // 琥珀を選ぶと `look`、配色を選ぶと `palette`（明暗はその配色に従う）。
                     Picker("テーマ", selection: themeKey) {
@@ -358,7 +358,7 @@ struct Where: View {
                         Text("琥珀 ── 暗い").tag("amber-dark")
                         ForEach(Palettes.all, id: \.name) { Text($0.label).tag($0.name) }
                     }
-                    // **字の大きさは、窓にもある**（⌘+ / ⌘−）── 電話にだけ
+                    // **文字の大きさは、デスクトップ版にもある**（⌘+ / ⌘−）── iPhone にだけ
                     // 無いと、同じノートが端末によって読みやすさで分かれる。
                     Picker("文字の大きさ", selection: $font) {
                         ForEach(Size.allCases) { Text($0.label).tag($0) }
@@ -377,7 +377,7 @@ struct Where: View {
             .sheet(item: $zip) { at in
                 ActivityView(item: at)
             }
-            .alert("見本のノート", isPresented: Binding(
+            .alert("サンプルのノート", isPresented: Binding(
                 get: { added != nil }, set: { if !$0 { added = nil } }
             )) {
                 Button("閉じる") {}

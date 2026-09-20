@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// **カレンダー**（依頼 454・電話の側）。窓と同じ形。
+/// **カレンダー**（依頼 454・iPhone の側）。デスクトップ版と同じ形。
 ///
 /// 月の表に予定を並べ、日を押すとその日が下に開く。**予定を押したら
 /// ノートへ** ── 予定は入口で、書くのはノート。**何もないところを押したら
 /// 足せる**（足すのは新しいノートで、日付は前書きの `remind:` に書く ──
 /// 依頼 73 の語彙のまま、カレンダーのためだけの置き場所を作らない）。
 ///
-/// 数えるのは core（`month`）で、**窓と同じ一組** ── 同じフォルダを
+/// 数えるのは core（`month`）で、**デスクトップ版と同じ一組** ── 同じフォルダを
 /// 両方から見ても、同じ予定が同じ日に並ぶ。
 struct Calendaring: View {
     @ObservedObject var store: NotesStore
@@ -70,7 +70,7 @@ struct Calendaring: View {
     @State private var newTitle = ""
     @State private var newAt = "09:00"
     @State private var newEnd = ""
-    /// 予定をどこへ入れるか（依頼 545・窓の `toGroup` と同じ）。**選ばれていない
+    /// 予定をどこへ入れるか（依頼 545・デスクトップ版の `toGroup` と同じ）。**選ばれていない
     /// 状態で開く** ── 既定を持たせると、その既定のまま押した予定が出る。
     @State private var newToGroup: Bool?
     /// だれの用事か（グループに出すときだけ）。
@@ -78,7 +78,7 @@ struct Calendaring: View {
     /// 直している、この iPhone の予定。
     @State private var editing: Slot?
     @State private var editTitle = ""
-    /// 月／週／日（依頼 515・窓と同じ3 つ）。
+    /// 月／週／日（依頼 515・デスクトップ版と同じ3 つ）。
     @State private var mode = CalPrefs.view
     @State private var settings = false
     /// 表示設定を変えたら描き直すための数。
@@ -106,9 +106,9 @@ struct Calendaring: View {
     /// 「時間内に型検査できません」で組めなくなる（実際になった）。
     private var inside: some View {
         VStack(spacing: 0) {
-            // 月／週／日の切り替え（依頼 515）── 窓の表の上の3 つと同じ。
+            // 月／週／日の切り替え（依頼 515）── デスクトップ版の表の上の3 つと同じ。
             // **何を出すかは、その右に一つ**（依頼 531・本人が絵を見て案ウ）──
-            // 段をもう一つ足すと月の表が 85pt 下がる（画面の一割）。電話は
+            // 段をもう一つ足すと月の表が 85pt 下がる（画面の一割）。iPhone は
             // 縦が命なので、横に置いて段を増やさない。
             HStack(spacing: 8) {
                 Picker("表示", selection: $mode) {
@@ -243,8 +243,8 @@ struct Calendaring: View {
     /// 回る順は **両方 → 自分だけ → グループ → 両方**（本人）。
     /// 回る形の弱いところは「ほかに何が選べるか」が押すまで分からないこと
     /// なので、**長押しで3 つ出す** ── 押し先が一つで済む軽さは残したまま、
-    /// 全部を見る道も残す。
-    /// **一人なら、その色。二人以上なら、帯を分ける**（依頼 547・窓の
+    /// 全部を見るパスも残す。
+    /// **一人なら、その色。二人以上なら、帯を分ける**（依頼 547・デスクトップ版の
     /// `tagPaint` と同じ決まり）── 二人の用事は二人のものなので、どちらか
     /// 片方の色にしてしまうと嘘になる。タグが無ければ何も差さず、
     /// いままでの出どころ別の色のままにする。
@@ -298,7 +298,7 @@ struct Calendaring: View {
         }
     }
 
-    /// グループカレンダーを一枚作る（依頼 532）。**押すのは一回。**
+    /// グループカレンダーを1 つ作る（依頼 532）。**押すのは一回。**
     ///
     /// サインインもカレンダーの許可も `Drive` が面倒を見る。作る前に
     /// 「いまの予定は一つも動きません」と言う ──「共有」を押した瞬間に
@@ -332,7 +332,7 @@ struct Calendaring: View {
     /// （依頼 534・実機で分かった）。
     ///
     /// はじめはパソコン版の設定ページの URL を開いていた。**URL は合っていた**
-    /// （本人の本物のカレンダーで確かめた ── 組んだ字と Google が出す URL が
+    /// （本人の本物のカレンダーで確かめた ── 組んだ文字と Google が出す URL が
     /// 一字一句同じ）。**駄目だったのは、iPhone が `calendar.google.com` を
     /// Google カレンダーのアプリに渡してしまうこと** ── アプリは設定ページを
     /// 出せないので、「このカレンダーにアクセスするには…ログインしてください」
@@ -346,7 +346,7 @@ struct Calendaring: View {
     /// **グループカレンダーを消す**（依頼 535）。
     ///
     /// **本当に消える。** 持ち主が消すと、グループの人の画面からも消える ──
-    /// 「amber から外す」ではない。戻す道がどこにも無いので、押す前にそう言う。
+    /// 「amber から外す」ではない。戻すパスがどこにも無いので、押す前にそう言う。
     private func dropGroup() {
         busy = true
         Task {
@@ -389,9 +389,9 @@ struct Calendaring: View {
                     .fontWeight(d == Self.today ? .bold : .regular)
                 ForEach(mine.prefix(2)) { s in
                     // **塗ってあるものが、グループに見えている予定**（依頼 530）。
-                    // 窓とまったく同じ決まり ── 自分だけの予定は塗らない。
+                    // デスクトップ版とまったく同じ決まり ── 自分だけの予定は塗らない。
                     // だれの用事かが分かっているものは、**その色の帯を左に**
-                    // 立てる（依頼 547）── 升目は字が 8pt なので、色を字に
+                    // 立てる（依頼 547）── セル目は文字が 8pt なので、色を文字に
                     // 乗せると読めなくなる。
                     HStack(spacing: 2) {
                         tagBand(s, width: 2, height: 9)
@@ -451,9 +451,9 @@ struct Calendaring: View {
                 } label: {
                     Label("予定を登録する", systemImage: "plus")
                 }
-                // **グループを始める道は、ここに置く**（依頼 532）── 設定の
+                // **グループを始めるパスは、ここに置く**（依頼 532）── 設定の
                 // 中ではない。狙いは IT に明るくない人で、**PC を持っていない
-                // 可能性が大いにある**（本人）ので、電話で始められないのは
+                // 可能性が大いにある**（本人）ので、iPhone で始められないのは
                 // 致命的。作ったら消え、そのあとは「グループへ招待」になる。
                 if groupName.isEmpty {
                     Button { making = true } label: {
@@ -467,7 +467,7 @@ struct Calendaring: View {
                     Button { invite() } label: {
                         Label("グループへ招待", systemImage: "person.2")
                     }
-                    // **作る道があるなら、やめる道もある**（依頼 535）。
+                    // **作るパスがあるなら、やめるパスもある**（依頼 535）。
                     // 一生に一度で戻せないので、赤くして、押す前に二度言う。
                     Button(role: .destructive) { dropping = true } label: {
                         Label("グループカレンダーを削除", systemImage: "trash")
@@ -515,7 +515,7 @@ struct Calendaring: View {
                     .background(CalPrefs.inGroup(s)
                         ? CalPrefs.hereTint.opacity(0.18) : Color.clear)
                     .clipShape(RoundedRectangle(cornerRadius: 5))
-                    // **道は出さない** ── 読めない長さになるうえ、知りたいのは
+                    // **パスは出さない** ── 読めない長さになるうえ、知りたいのは
                     // 中身のほう。自分のノートは一行目、よその予定は場所と出どころ。
                     if s.noNote {
                         let under = [s.place, s.from].filter { !$0.isEmpty }.joined(separator: "・")
@@ -731,11 +731,11 @@ struct Calendaring: View {
         }
     }
 
-    /// **だれの用事かを、メモ欄から読む**（依頼 547・窓の `readCalTags` と同じ）。
+    /// **だれの用事かを、メモ欄から読む**（依頼 547・デスクトップ版の `readCalTags` と同じ）。
     ///
     /// 訊くのはグループカレンダーの予定だけ ── 自分だけの予定に人の名前は
     /// 入らないし、よその予定表のメモまで覗く筋合いが無い。**一度にまとめて
-    /// 訊く**（`caltag` は字の一覧を受ける）── 予定の数だけ扉を叩かない。
+    /// 訊く**（`caltag` は文字の一覧を受ける）── 予定の数だけ入口を叩かない。
     private func readTags(_ all: [Slot]) -> [Slot] {
         let want = all.indices.filter { CalPrefs.inGroup(all[$0]) && !all[$0].notes.isEmpty }
         guard !want.isEmpty else { return all }
@@ -760,8 +760,8 @@ struct Calendaring: View {
         let end = newEnd.trimmingCharacters(in: .whitespacesAndNewlines)
         if Phone.allowed {
             // **選ばれた行き先に入れる**（依頼 545）。グループならそのカレンダーへ
-            // 書き、だれの用事かをメモ欄の最後の行に置く（字を作るのは core の
-            // `caltagset` ── 窓と同じ一枚に訊く）。
+            // 書き、だれの用事かをメモ欄の最後の行に置く（文字を作るのは core の
+            // `caltagset` ── デスクトップ版と同じ1 つに訊く）。
             let toGroup = newToGroup == true && !groupName.isEmpty
             var notes = ""
             if toGroup && !newTags.isEmpty {
@@ -825,8 +825,8 @@ private struct Asking: ViewModifier {
             .alert("読めません", isPresented: Binding(
                 get: { trouble != nil }, set: { if !$0 { trouble = nil } })
             ) { Button("閉じる") {} } message: { Text(trouble ?? "") }
-            // **時刻は打たせない**（依頼 493 の電話の側・本人「手打ちすると絶対ミスする」）
-            // ── 窓と同じ小窓一枚: タイトル・終日・開始・終了（十五分刻み）。
+            // **時刻は打たせない**（依頼 493 のiPhone の側・本人「手打ちすると絶対ミスする」）
+            // ── デスクトップ版と同じダイアログ1 つ: タイトル・終日・開始・終了（十五分刻み）。
             .sheet(isPresented: $adding) {
                 EventForm(day: day, toPhone: toPhone, groupName: groupName,
                           title: $newTitle, at: $newAt, end: $newEnd,
@@ -848,8 +848,8 @@ private struct Asking: ViewModifier {
     }
 }
 
-/// **予定を登録する小窓**（窓の `askEvent` と同じ四つ）。開始を選ぶと終了は一時間後、
-/// 終日に印を入れたら時刻は選べない、空のままなら登録できない。
+/// **予定を登録するダイアログ**（デスクトップ版の `askEvent` と同じ四つ）。開始を選ぶと終了は一時間後、
+/// 終日にマークを入れたら時刻は選べない、空のままなら登録できない。
 struct EventForm: View {
     let day: String
     let toPhone: Bool
@@ -861,8 +861,8 @@ struct EventForm: View {
     @Binding var toGroup: Bool?
     @Binding var tags: [String]
     let add: () -> Void
-    /// **選びは、この小窓が持つ**（依頼 547）── `@Binding` を直に触ると、
-    /// 一つ選ぶたびに外の画面まで描き直されて、選んだ印が消える（画面で出た）。
+    /// **選びは、このダイアログが持つ**（依頼 547）── `@Binding` を直に触ると、
+    /// 一つ選ぶたびに外の画面まで描き直されて、選んだマークが消える（画面で出た）。
     /// 外に渡すのは「登録する」を押したときだけ。
     @State private var toG: Bool?
     @State private var who: [String] = []
@@ -886,7 +886,7 @@ struct EventForm: View {
     var body: some View {
         NavigationStack {
             Form {
-                // **どこに入れるかを、いちばん先に選ばせる**（依頼 545・窓と同じ丙）。
+                // **どこに入れるかを、いちばん先に選ばせる**（依頼 545・デスクトップ版と同じ丙）。
                 // グループカレンダーが無ければ、選ぶものが無いので出さない。
                 if canGroup {
                     Section("どこに入れる") {
@@ -913,13 +913,13 @@ struct EventForm: View {
                                         if who.contains(t) { Image(systemName: "checkmark").foregroundStyle(.tint) }
                                     }
                                     // **行のどこを押しても効く。** `.plain` に
-                                    // すると押せるのは字のところだけになり、
+                                    // すると押せるのは文字のところだけになり、
                                     // 名前の右の空きを押しても何も起きない
                                     // （画面で出た ── 押したのに付かなかった）。
                                     .contentShape(Rectangle())
                                 }
                                 // **選んでいない名前を、選んだ色で出さない** ──
-                                // `Button` の字は既定で琥珀になるので、全部が
+                                // `Button` の文字は既定で琥珀になるので、全部が
                                 // 選ばれているように見える（実機の前に画面で出た）。
                                 .buttonStyle(.plain)
                             }

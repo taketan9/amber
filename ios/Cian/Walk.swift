@@ -1,12 +1,12 @@
 #if DEBUG
 import Foundation
 
-/// **電話の総ざらい**（依頼 448）── 窓の `scripts/walk.sh` にあたるもの。
+/// **iPhone の総ざらい**（依頼 448）── デスクトップ版の `scripts/walk.sh` にあたるもの。
 ///
 ///     scripts/walk-phone.sh
 ///
-/// 窓の総ざらいは、画素を押していない ── **窓の関数**を押している
-/// （`openNote`・`setView`・`toggleToc`…）。電話も同じにする: 画面の下に
+/// デスクトップ版の総ざらいは、画素を押していない ── **デスクトップ版の関数**を押している
+/// （`openNote`・`setView`・`toggleToc`…）。iPhone も同じにする: 画面の下に
 /// ある関数（`NotesStore` と `Cian` と `Clipping`）を片端から呼び、
 /// **落ちないこと・答えが筋の通った形であること**を見る。
 ///
@@ -17,7 +17,7 @@ import Foundation
 ///
 /// **見えないところ**（画素でしか触れないもの）は、これでは見られない ──
 /// 吹き出し・記号の帯・写真選び・共有シート。そこは手で押す（技能書の
-/// 「三。電話（手で押す）」）。
+/// 「三。iPhone（手で押す）」）。
 ///
 /// **走査は、アプリの後片づけを肩代わりしない。** 一覧を読み直すのは
 /// `NotesStore` の仕事で、ここで気を利かせて `reload()` を呼ぶと、
@@ -26,7 +26,7 @@ import Foundation
 /// 言った（2026-09-09）。呼ぶのは、アプリの誰も読み直さないところだけ
 /// （保存のあと）。
 ///
-/// `--walk` を渡して起こすと、画面の代わりにこれが走り、終わったら
+/// `--walk` を渡して起こすと、画面の代わりにこれがラン、終わったら
 /// 落ちた数を持って自分で終わる。**`#if DEBUG` の中** ── 配るものには
 /// 入らない。
 @MainActor
@@ -39,7 +39,7 @@ enum Walk {
     /// 一つ動かして、落ちなかったか・答えが筋の通った形かを見る。
     ///
     /// 返すのは「よければ nil、悪ければその理由」── 真偽値だと、落第の
-    /// ときに何が違ったのかが残らない（窓の総ざらいで学んだ）。
+    /// ときに何が違ったのかが残らない（デスクトップ版の総ざらいで学んだ）。
     private static func step(_ name: String, _ body: () throws -> String?) {
         ran += 1
         do {
@@ -60,13 +60,13 @@ enum Walk {
 
     static func run() async {
         let store = NotesStore()
-        // **自分のフォルダで走る。** 選ぶ小窓は出せないし、出せたとしても
+        // **自分のフォルダで走る。** 選ぶダイアログは出せないし、出せたとしても
         // 本人のノートを触ることになる。
         store.useOwn()
         store.reload()
 
         // ── 一。始まり ──────────────────────────────────
-        step("見本が入る") {
+        step("サンプルが入る") {
             let put = store.addWelcome()
             return store.notes.isEmpty ? "一本も入りませんでした（置いたのは \(put) 本）" : nil
         }
@@ -91,14 +91,14 @@ enum Walk {
             if stamp.isEmpty { return "しるしがありません" }
             return nil
         }
-        step("打って、保存されて、同じ字が返る") {
+        step("打って、保存されて、同じ文字が返る") {
             let (text, stamp) = try store.open(note)
             let want = text + "\n打った行。\n"
             guard case .ok = try store.save(note, text: want, stamp: stamp) else {
                 return "保存できませんでした"
             }
             let (again, _) = try store.open(note)
-            return again == want ? nil : "書いた字と読んだ字が違います"
+            return again == want ? nil : "書いた文字と読んだ文字が違います"
         }
         step("しるしが古いと、黙って上書きしない") {
             let (text, stamp) = try store.open(note)
@@ -382,15 +382,15 @@ enum Walk {
         }
         step("ほかの場所のノートを開く：一覧に入れずに読める") {
             let at = FileManager.default.temporaryDirectory.appendingPathComponent("よそ-\(Int(Date().timeIntervalSince1970)).md")
-            try "# よその一枚\n\n一覧には入らない。\n".write(to: at, atomically: true, encoding: .utf8)
+            try "# よそのファイル\n\n一覧には入らない。\n".write(to: at, atomically: true, encoding: .utf8)
             defer { try? FileManager.default.removeItem(at: at) }
             guard let n = store.openOutside(at) else { return "開けません: \(store.trouble ?? "")" }
-            if n.title != "よその一枚" { return "タイトルが \(n.title)" }
-            if !store.isOutside(n.path) { return "一時的に開いている印が付いていません" }
+            if n.title != "よそのファイル" { return "タイトルが \(n.title)" }
+            if !store.isOutside(n.path) { return "一時的に開いているマークが付いていません" }
             if store.notes.contains(where: { $0.path == at.path }) { return "一覧に入っています" }
             return nil
         }
-        step("エクスポート：HTML は一枚で完結し、PDF は頁になる") {
+        step("エクスポート：HTML は 1 ファイルで完結し、PDF はページになる") {
             guard let note = store.notes.first(where: { $0.title == "ストラテジーパターン" }) ?? store.notes.first else { return "ノートがありません" }
             let (text, _) = try store.open(note)
             let html = try Exporting.html(note, text: text)
@@ -428,7 +428,7 @@ enum Walk {
             }
         }
 
-        // ── 五。「表示」の面の網（位置 × 操作・`Mesh`） ────
+        // ── 五。「表示」画面の網（位置 × 操作・`Mesh`） ────
         let grid = await Mesh.run()
         ran += grid.ran
         bad.append(contentsOf: grid.bad)
@@ -437,7 +437,7 @@ enum Walk {
     }
 
     /// 偽の Drive（`scripts/fake-drive.js`）に、上げて・下ろして・改名を写して・消す。
-    /// 向こうの端末は `/_put` `/_move` `/_trash` で演じる（窓の `walk-sync.mjs` と同じ）。
+    /// 向こうの端末は `/_put` `/_move` `/_trash` で演じる（デスクトップ版の `walk-sync.mjs` と同じ）。
     private static func syncWalk(_ store: NotesStore, _ drive: String) async {
         func talk(_ path: String, _ body: [String: Any]? = nil) async -> [String: Any] {
             var req = URLRequest(url: URL(string: drive + path)!)
@@ -465,7 +465,7 @@ enum Walk {
             if let t = r.trouble.first { return "困りごと: " + t }
             return r.up >= store.notes.count ? nil : "\(r.up) 本しか上がりません（\(store.notes.count) 本のはず）"
         }
-        await step("同期：向こうに同じ道で並ぶ") {
+        await step("同期：向こうに同じパスで並ぶ") {
             let there = await rels()
             return there.contains("ambər へようこそ.md") ? nil : "向こうの一覧: " + there.prefix(6).joined(separator: " / ")
         }
@@ -486,7 +486,7 @@ enum Walk {
             guard let r = await sync.now("手") else { return "運びませんでした" }
             if r.up != 1 { return "上がったのが \(r.up) 本" }
             let got = await talk("/_get?rel=" + ("太郎から.md".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""))
-            return (got["text"] as? String ?? "").contains("iPhone で足した。") ? nil : "向こうの字が古いままです"
+            return (got["text"] as? String ?? "").contains("iPhone で足した。") ? nil : "向こうの文字が古いままです"
         }
         _ = await talk("/_move", ["rel": "太郎から.md", "to": "太郎のメモ.md"])
         await step("同期：向こうで名前が変わると、こちらのファイルも変わる") {
@@ -504,7 +504,7 @@ enum Walk {
             guard let note = store.notes.first(where: { $0.path.hasSuffix("/太郎のメモ.md") }) else { return "太郎のメモ.md がありません" }
             desk.open(note, store, writing: true)
             try desk.load(note.path, store)
-            guard let at = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "札がありません" }
+            guard let at = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "目印がありません" }
             desk.tabs[at].text = desk.tabs[at].text.replacingOccurrences(of: "iPhone で足した。", with: "iPhone で足した（こちらは十個）。")
             _ = try desk.save(note.path, store)
             _ = await sync.now("手")
@@ -515,7 +515,7 @@ enum Walk {
             _ = try desk.save(note.path, store)
             guard let r = await sync.now("手") else { return "運びませんでした" }
             if r.clash != 1 { return "ぶつかりが \(r.clash)（\(r.trouble.joined(separator: " / ")))" }
-            guard let now = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "札が消えました" }
+            guard let now = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "目印が消えました" }
             let tab = desk.tabs[now]
             if !tab.whole.contains("十個") || !tab.whole.contains("六個") { return "両方残っていません" }
             if tab.spots.count != 1 { return "ぶつかった場所が \(tab.spots.count) です" }
@@ -525,16 +525,16 @@ enum Walk {
         await step("同期：「こちらの記載を反映する」を選ぶと、向こうの行が消えて向こうにも上がる") {
             guard let note = store.notes.first(where: { $0.path.hasSuffix("/太郎のメモ.md") }) else { return "太郎のメモ.md がありません" }
             desk.chooseSpot(note.path, 0, "ours", store)
-            guard let now = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "札が消えました" }
+            guard let now = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "目印が消えました" }
             let tab = desk.tabs[now]
-            if tab.whole.contains("六個") || !tab.whole.contains("十個") { return "選んだあとの字が違います" }
+            if tab.whole.contains("六個") || !tab.whole.contains("十個") { return "選んだあとの文字が違います" }
             if tab.clashing { return "選び口が残っています" }
             guard let r = await sync.now("手") else { return "運びませんでした" }
             if r.up != 1 { return "上がったのが \(r.up) 本" }
             let there = await talk("/_get?rel=" + ("太郎のメモ.md".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""))
             let t = there["text"] as? String ?? ""
             desk.close(note.path)
-            return t.contains("十個") && !t.contains("六個") ? nil : "向こうの字が違います"
+            return t.contains("十個") && !t.contains("六個") ? nil : "向こうの文字が違います"
         }
         // ファイル名は題に合わせる（依頼 502）── 離れたときと、時刻名の揃え直し。
         await step("名前：一行目でタイトルが決まるノートは、離れたときに名前が揃う") {
@@ -558,7 +558,7 @@ enum Walk {
             let names = store.notes.map { $0.path.split(separator: "/").last.map(String.init) ?? "" }
             return n >= 1 && names.contains("めそぽたみあ.md") ? nil : "揃ったのが \(n) 本: " + names.prefix(8).joined(separator: " / ")
         }
-        await step("同期：改名したぶんは、向こうも同じ ID のまま道が変わる") {
+        await step("同期：改名したぶんは、向こうも同じ ID のままパスが変わる") {
             guard let r = await sync.now("手") else { return "運びませんでした" }
             if r.trouble.first != nil { return "困りごと: " + r.trouble[0] }
             let there = await rels()
@@ -593,7 +593,7 @@ enum Walk {
         sync.auto = true
     }
 
-    /// **保存ディレクトリを二つ**（依頼 511・窓の「二十の四」と同じ）── 足す・切り替える・
+    /// **保存ディレクトリを二つ**（依頼 511・デスクトップ版の「二十の四」と同じ）── 足す・切り替える・
     /// 作る・移す・運ぶ・外す。二つ目はアプリの一時フォルダに置く（憶えは書かない）。
     private static func placeWalk(_ store: NotesStore, _ drive: String?) async {
         let dir = FileManager.default.temporaryDirectory

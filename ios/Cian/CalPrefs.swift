@@ -1,17 +1,17 @@
 import SwiftUI
 
-/// **カレンダー表示設定**（依頼 515・窓の `cmdCalSettings` と同じ3 つ）──
+/// **カレンダー表示設定**（依頼 515・デスクトップ版の `cmdCalSettings` と同じ3 つ）──
 /// どの予定表を出すか・土日を出すか・個人カレンダーの色。
 ///
-/// 窓と同じ鍵（`me` / `here:<予定表>` / `away:<名前>`）で持つが、**この端末の中だけ**
-/// ── 見え方の好みは端末ごとで、ノートと一緒に旅をさせない（窓も `remember`）。
+/// デスクトップ版と同じ鍵（`me` / `here:<予定表>` / `away:<名前>`）で持つが、**この端末の中だけ**
+/// ── 見え方の好みは端末ごとで、ノートと一緒に旅をさせない（デスクトップ版も `remember`）。
 @MainActor
 enum CalPrefs {
     private static let hideKey = "amber.calHide"
     private static let weekendKey = "amber.calWeekend"
     private static let colorKey = "amber.calHereColor"
     private static let viewKey = "amber.calView"
-    /// グループカレンダーの名前（依頼 530）。**窓が作り、電話は見るだけ。**
+    /// グループカレンダーの名前（依頼 530）。**デスクトップ版が作り、iPhone は見るだけ。**
     private static let groupKey = "amber.calGroupName"
     /// 何を出しているか ── `me` / `group` / `both`。
     private static let sideKey = "amber.calSide"
@@ -27,25 +27,25 @@ enum CalPrefs {
         get { UserDefaults.standard.object(forKey: weekendKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: weekendKey) }
     }
-    /// 個人カレンダー（この端末の予定表）の色。空なら緑（既定・窓と同じ）。
+    /// 個人カレンダー（この端末の予定表）の色。空なら緑（既定・デスクトップ版と同じ）。
     static var hereColor: String {
         get { UserDefaults.standard.string(forKey: colorKey) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: colorKey) }
     }
-    /// 月／週／日（窓の `calView` と同じ3 つ）。
+    /// 月／週／日（デスクトップ版の `calView` と同じ3 つ）。
     static var view: String {
         get { UserDefaults.standard.string(forKey: viewKey) ?? "month" }
         set { UserDefaults.standard.set(newValue, forKey: viewKey) }
     }
 
-    /// 窓の `CAL_COLORS` と同じ八色・同じ順（依頼 540）。
+    /// デスクトップ版の `CAL_COLORS` と同じ八色・同じ順（依頼 540）。
     static let colors: [(hex: String, name: String)] = [
         ("#e0669c", "ローズ"), ("#d9a400", "アンバー"), ("#2f8a52", "リーフ"),
         ("#8e5cb3", "バイオレット"), ("#1fa3a3", "シアン"), ("#c0392b", "カーマイン"),
         ("#7a5c3a", "セピア"), ("#5a6b7f", "スレート"),
     ]
     static func colorName(_ hex: String) -> String { colors.first { $0.hex == hex }?.name ?? hex }
-    /// グループカレンダーの名前（無ければ空）。**窓が作ったものを、電話は
+    /// グループカレンダーの名前（無ければ空）。**デスクトップ版が作ったものを、iPhone は
     /// 端末のカレンダー越しに見る** ── Google のアカウントが iPhone に足して
     /// あれば、作った翌日には降りてきている。
     static var groupName: String {
@@ -77,15 +77,15 @@ enum CalPrefs {
         groupName.isEmpty && !groupAsked && Phone.calendars.contains(groupWord)
     }
 
-    /// この端末が見たことのあるタグ（依頼 545・窓の `tagsKnown` と同じ）。
+    /// この端末が見たことのあるタグ（依頼 545・デスクトップ版の `tagsKnown` と同じ）。
     /// **選ばせるために憶えておく** ── 毎回名前を打たせない。
     static var tagsKnown: [String] {
         get { UserDefaults.standard.stringArray(forKey: tagsKey) ?? [] }
         set { UserDefaults.standard.set(newValue, forKey: tagsKey) }
     }
-    /// そのタグの色（依頼 545・窓の `tagColor` と同じ五色・同じ配り方）。
+    /// そのタグの色（依頼 545・デスクトップ版の `tagColor` と同じ五色・同じ配り方）。
     /// **決めていなければ、順に配る** ── 設定を開かなくても色分けされた表が
-    /// 見られるほうがよい。`among` は憶えている順で、窓の `tagOrder` にあたる。
+    /// 見られるほうがよい。`among` は憶えている順で、デスクトップ版の `tagOrder` にあたる。
     static let laneColors = ["#e0669c", "#d9a400", "#2f8a52", "#8e5cb3", "#1fa3a3"]
     static func laneColor(_ t: String, among all: [String]) -> String {
         let i = all.firstIndex(of: t) ?? 0
@@ -107,15 +107,15 @@ enum CalPrefs {
 
     /// その予定は、グループカレンダーのものか（依頼 530）。
     ///
-    /// **予定表の名前で当てる** ── 窓の `inGroup` とまったく同じ決まり。
-    /// ここが窓とずれると、同じ予定が端末によって違う顔をする。
+    /// **予定表の名前で当てる** ── デスクトップ版の `inGroup` とまったく同じ決まり。
+    /// ここがデスクトップ版とずれると、同じ予定が端末によって違う顔をする。
     static func inGroup(_ s: Calendaring.Slot) -> Bool {
         !groupName.isEmpty && s.isPhone && s.from == groupName
     }
 
     static var hereTint: Color { Color(hex: hereColor.isEmpty ? "#2f8a52" : hereColor) ?? .green }
 
-    /// その予定はどの予定表のものか（窓の `whoOf` と同じ鍵）。
+    /// その予定はどの予定表のものか（デスクトップ版の `whoOf` と同じ鍵）。
     static func key(of s: Calendaring.Slot) -> String {
         if s.kind == "away" { return "away:" + s.from }
         if s.kind == "here" { return "here:" + s.from }
@@ -128,7 +128,7 @@ enum CalPrefs {
         return side == "group" ? inGroup(s) : !inGroup(s)
     }
 
-    /// 出し入れできる予定表の一覧（窓の `calSources` と同じ並び）。
+    /// 出し入れできる予定表の一覧（デスクトップ版の `calSources` と同じ並び）。
     static func sources() -> [(key: String, name: String)] {
         var out: [(key: String, name: String)] = [("me", "自分のノート（日付を書いたノート）")]
         for c in Phone.calendars { out.append(("here:" + c, c + "（この iPhone）")) }

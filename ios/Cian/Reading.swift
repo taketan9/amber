@@ -41,8 +41,8 @@ struct Block: Identifiable {
         runs = (o["runs"] as? [[String: Any]] ?? []).map {
             ($0["text"] as? String ?? "", $0["color"] as? String)
         }
-        // 升の中の飾りは `text` のまま持ってきて、描くときに読む ──
-        // ここで剥がすと、Markdown の読み手が電話にもう一つ生える。
+        // セルの中の書式は `text` のまま持ってきて、描くときに読む ──
+        // ここで剥がすと、Markdown の読み手がiPhone にもう一つ生える。
         let cell = { (c: [String: Any]) in c["text"] as? String ?? "" }
         head = (o["head"] as? [[String: Any]] ?? []).map(cell)
         align = o["align"] as? [String] ?? []
@@ -54,13 +54,13 @@ struct Block: Identifiable {
 
 // **`Reading` はここに在った**（2026-09-16 に外した・本人「いらない」）。
 //
-// 「表示」の面は `Paper.swift` に一本化してある ── `core` の `to_html` を
-// WKWebView で出し、書き戻しは窓と共有した一組（`paper.js`）を通る。
+// 「表示」画面は `Paper.swift` に一本化してある ── `core` の `to_html` を
+// WKWebView で出し、書き戻しはデスクトップ版と共有した一組（`paper.js`）を通る。
 // `Reading` は SwiftUI で組み直した二つ目の読み手で、**どこからも呼ばれて
-// いなかった。** 残しておくと「Markdown の読み手が電話にもう一つある」
+// いなかった。** 残しておくと「Markdown の読み手がiPhone にもう一つある」
 // ように見えるうえ、こちらは `AttributedString(markdown:)` を使うので
-// **逃がしの読み方が窓と違った** ── 使われていない食い違いは、いつか
+// **逃がしの読み方がデスクトップ版と違った** ── 使われていない食い違いは、いつか
 // 誰かが繋いだ日に本物の食い違いになる。
 //
-// この一枚に残したのは `Block` だけ ── `NotesStore.blocks(of:)` が
-// core の答えを組み立てる型で、窓の面にも電話の面にも要る。
+// この1 つに残したのは `Block` だけ ── `NotesStore.blocks(of:)` が
+// core の答えを組み立てる型で、デスクトップ版の画面にもiPhone の画面にも要る。
