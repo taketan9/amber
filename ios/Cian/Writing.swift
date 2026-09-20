@@ -1,16 +1,16 @@
 import SwiftUI
 import UIKit
 
-/// One note on screen, reading or writing.
+/// 画面に出ているノート 1 件。表示中でも編集中でも。
 ///
-/// **Its text belongs to the desk, not to this view.** A `TabView` throws its
-/// pages away as you swipe, and a page that owned the text would take your
-/// unsaved paragraph with it. Everything that survives a swipe is in the
-/// binding; everything in `@State` here is about this moment on screen.
+/// **本文はこの View ではなく、親の画面が持っている。** `TabView` はスワイプ
+/// するとページを捨てるので、本文を持つページは未保存の段落ごと持って
+/// いってしまう。スワイプを越えて残るものは binding にあり、ここの
+/// `@State` は「いま画面に出ている状態」だけ。
 ///
-/// The toolbar, the sheets and the saving all live a level up, on the desk —
-/// see `DeskView`. A page that builds its own toolbar has it rebuilt every
-/// time the page changes, and SwiftUI shows that as a 「⋯」 flickering in and
+/// ツールバーもシートも保存も、1 つ上の画面（`DeskView`）にある。
+/// 自分でツールバーを組み立てるページは、ページが変わるたびに組み直され、
+/// SwiftUI ではそれが「⋯」の明滅として見える。
 /// out.
 struct NoteView: View {
     @Binding var tab: Desk.Tab
@@ -20,13 +20,13 @@ struct NoteView: View {
     let store: NotesStore
     @ObservedObject var pen: Pen
     @Binding var writing: Bool
-    /// Asks the desk for the table sheet. **Presented up there, not here** —
-    /// a sheet put on a `TabView` page is a sheet on a view the TabView is
-    /// free to rebuild, and it does not open.
+    /// 表のシートを親の画面に出してもらう。**出すのはあちらで、ここではない** ──
+    /// `TabView` のページに付けたシートは、TabView がいつ組み直してもよい View に
+    /// 付いたシートで、開かない。
     let table: () -> Void
-    /// Likewise the photo picker.
+    /// 写真の選択も同じ。
     let photo: () -> Void
-    /// Whether the seldom-used half of the writing bar is unfolded.
+    /// 編集バーの、たまにしか使わない側を開いているか。
     @State private var more = false
     @State private var trouble: String?
     /// 長押しされた図の、元の文字（枠ごと）。
@@ -470,9 +470,9 @@ struct NoteView: View {
                     band
                     Editor(pen: pen, text: $tab.text, pick: $tab.pick, editing: $writing)
                         .disabled(tab.locked && !tab.freed)
-                    // Only while the keyboard is up, which is the only time
-                    // it is *above the keyboard* rather than sitting at the
-                    // bottom of a page nobody is typing into.
+                    // キーボードが出ているあいだだけ ── そのときだけ
+                    // バーは*キーボードの上*にあり、それ以外では誰も打って
+                    // いないページの下端に居座ることになる。
                     if writing { marks }
                 }
             }
@@ -504,14 +504,14 @@ struct NoteView: View {
         }
     }
 
-    // MARK: the writing bar
+    // MARK: 編集バー
 
-    /// The Markdown a phone keyboard makes you hunt for, and the four keys it
-    /// does not have at all.
+    /// iPhone のキーボードでは探さないと打てない Markdown の記号と、
+    /// そもそも無い 4 つのキー。
     ///
-    /// Two rows, the second folded away. The first row is what a note is
-    /// actually made of; the rest are real Markdown and really occasional,
-    /// and a bar of fourteen icons costs you the five you use every time.
+    /// 2 段で、2 段目は畳んである。1 段目はノートが実際にできているもの、
+    /// 残りは本物の Markdown だが本当にたまにしか使わない。14 個のアイコンが
+    /// 並ぶバーは、毎回使う 5 つを見つけにくくする。
     private var marks: some View {
         VStack(spacing: 0) {
             if more {
@@ -557,7 +557,7 @@ struct NoteView: View {
                 Divider()
             }
             // What a note is made of. Pressing 見出し again goes deeper:
-            // # → ## → ### → none. Three buttons would be three names for
+            // # → ## → ### → 無し。ボタンを 3 つにすると、1 つのことに
             // one idea.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -574,9 +574,9 @@ struct NoteView: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 6)
             }
-            // Moving about, on its own row and pushed to the right — the
-            // side the thumb is on, and away from the marks so a press meant
-            // for one is never a press on the other.
+            // 移動は独立した段の右寄せ ── 親指のある側で、記号から
+            // 離してある。片方を押したつもりがもう片方に当たることが
+            // 無いように。
             HStack(spacing: 6) {
                 Button("閉じる") { writing = false }.font(.callout)
                 Spacer(minLength: 0)
@@ -589,8 +589,8 @@ struct NoteView: View {
                 mark("やり直す", "arrow.uturn.forward") { desk.stepBack(forward: true, store) }
                     .disabled(!desk.canStepForward)
                 Spacer().frame(width: 18)
-                // **The arrows a phone keyboard does not have.** In vim's
-                // order, because that is the order his hands know.
+                // **iPhone のキーボードに無い矢印。** vim の並びにしてある ──
+                // 手が覚えているのがその並びだから。
                 mark("左", "arrow.left") { pen.step(.left) }
                 mark("下", "arrow.down") { pen.step(.down) }
                 mark("上", "arrow.up") { pen.step(.up) }
@@ -612,7 +612,7 @@ struct NoteView: View {
 
     // MARK: the edits
 
-    /// How many `#` the cursor's line already carries.
+    /// カーソルのある行に、`#` がいくつ付いているか。
     private var heads: Int {
         let r = Marks.lineRange(tab.text, tab.pick)
         let row = (tab.text as NSString).substring(with: r)
@@ -625,11 +625,11 @@ struct NoteView: View {
         put(Marks.block(tab.text, tab.pick, body, caret: caret))
     }
 
-    /// Wrap what is selected in a colour.
+    /// 選択範囲を色で包む。
     ///
-    /// With nothing selected there is nothing to paint, so this opens an
+    /// 選択が無ければ塗る対象が無いので、
     /// empty pair and leaves the cursor inside it — the same thing 太字 does,
-    /// for the same reason.
+    /// 同じ理由で。
     private func paint(_ hex: String) {
         let s = tab.text as NSString
         let inner = tab.pick.length > 0 ? s.substring(with: tab.pick) : ""
@@ -640,7 +640,7 @@ struct NoteView: View {
                  then: NSRange(location: at, length: (inner as NSString).length)))
     }
 
-    /// Make one edit through the text view, so the phone's undo knows it
+    /// 編集はテキストビュー経由で 1 回だけ行う ── iPhone の取り消しが
     /// happened.
     private func put(_ e: Edit) {
         var text = tab.text
@@ -650,16 +650,16 @@ struct NoteView: View {
         tab.pick = pick
     }
 
-    /// A task pressed in the reading view.
+    /// 表示画面で押されたチェックボックス。
     ///
-    /// Written straight to the text; the desk saves it a moment later, like
-    /// anything else typed.
+    /// 本文に直接書く。保存は少しあとで親の画面がする ── ほかの入力と
+    /// 同じように。
     private func tick(_ b: Block) {
         guard b.line >= 0 else { return }
         do {
-            // **The whole note, because a task's line number is a line
-            // number in the file.** The editor holds only the body; the
-            // front matter is still up there taking lines.
+            // **ノート全体を渡す。チェックボックスの行番号は、ファイルの中の
+            // 行番号だから。** エディタが持っているのは本文だけで、
+            // front matter はその上で行を使っている。
             let whole = try store.checked(tab.whole, line: b.line, done: !b.done)
             let (head, body) = try store.split(whole)
             tab.head = head
@@ -726,10 +726,10 @@ struct Peeking: View {
     }
 }
 
-/// The icon, loaded rather than drawn.
+/// アイコン。描かずに読み込む。
 ///
-/// Literally the app icon, so the thing on the home screen and the thing at
-/// the top of the list cannot drift apart.
+/// そのままアプリのアイコンを使う。ホーム画面にあるものと一覧の上にある
+/// ものが、ずれようがないように。
 ///
 /// **いまはiPhone のどこからも呼んでいない**（2026-09-07、帯のマークを名前に
 /// 替えたので ── 絵と文字を並べると「くどい」）。残してあるのは、絵そのもの
@@ -757,17 +757,17 @@ struct Mark: View {
     }
 }
 
-/// Where you are, as the trail of names it is.
+/// いまどこにいるかを、名前の連なりとして出す。
 ///
-/// **A folder's own name is not an answer to "where am I".** Two folders
-/// called 「2026」 in two different places look identical at the top of a
-/// list, and the one thing the title bar had room to say was the half that
-/// does not tell them apart. Each name is a step back to that level.
+/// **フォルダの名前だけでは「いまどこか」の答えにならない。** 別々の場所に
+/// ある「2026」という 2 つのフォルダは、一覧の上では見分けがつかず、
+/// タイトルバーに書ける唯一のものが、その見分けのつかない側だった。
+/// 名前はそれぞれ、その階層へ戻るための一歩になっている。
 struct Crumbs: View {
-    /// The path from the root, `""` for the root itself.
+    /// ルートからのパス。ルート自身は `""`。
     let at: String
     let root: String
-    /// Called with the path to walk back to.
+    /// 戻り先のパスを渡して呼ばれる。
     let go: (String) -> Void
 
     var body: some View {
@@ -789,9 +789,9 @@ struct Crumbs: View {
         at.split(separator: "/").map(String.init)
     }
 
-    /// The one you are in is in the text colour; the way back is the accent.
-    /// Colouring them the same would make the last name look like something
-    /// to press, and pressing it does nothing.
+    /// いまいる場所は本文の色、戻れる場所はアクセント色。
+    /// 同じ色にすると、最後の名前も押せるものに見えるが、押しても
+    /// 何も起きない。
     private func step(_ name: String, _ path: String) -> some View {
         let here = path == at
         return Button {
@@ -807,11 +807,11 @@ struct Crumbs: View {
     }
 }
 
-/// Every folder there is, laid out as the shape it is.
+/// あるフォルダすべてを、そのままの構造で並べる。
 ///
-/// A list shows one level at a time, which is the right way to *use* a
-/// folder and the wrong way to *understand* one. This is the other question:
-/// what is in here, and how deep does it go.
+/// 一覧は 1 階層ずつ見せる。フォルダを*使う*にはそれが正しく、
+/// *把握する*には正しくない。ここが答えるのはもう 1 つの問い ──
+/// 中に何があり、どこまで深いのか。
 struct Tree: View {
     @ObservedObject var store: NotesStore
     let go: (String) -> Void
@@ -868,9 +868,9 @@ struct Tree: View {
             dismiss()
         } label: {
             HStack(spacing: 8) {
-                // The indent *is* the structure — `allBooks` is already every
-                // folder in order, so the depth of the path is the depth of
-                // the row and nothing has to be assembled.
+                // インデントが構造そのもの ── `allBooks` は既にすべての
+                // フォルダを順に並べているので、パスの深さがそのまま行の
+                // 深さになり、組み立てるものは何も無い。
                 if depth > 0 {
                     Spacer().frame(width: CGFloat(depth - 1) * 18)
                     Image(systemName: "arrow.turn.down.right")

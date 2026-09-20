@@ -1,28 +1,28 @@
 import SwiftUI
 import UIKit
 
-/// The place you type, and **where the cursor is**.
+/// 入力する場所と、**カーソルの位置**。
 ///
-/// `TextEditor` does not say where the cursor is, so every writing tool had
+/// `TextEditor` はカーソルの位置を教えてくれないので、編集の道具はどれも
 /// to work on the last line of the note — you pressed 見出し and the heading
-/// appeared at the bottom. This is the same box with the one thing it was
-/// missing reported back.
+/// 末尾に挿入されていた。ここは同じ入力欄に、足りなかった 1 つを
+/// 返させるようにしたもの。
 ///
-/// **The composing text is not the text.** While an IME is putting a word
-/// together (`markedTextRange`), the box holds characters that have not been
-/// committed. Writing into it then throws the composition away and the
-/// half-typed word jumps or vanishes — so nothing is pushed in either
-/// direction until the composition ends.
+/// **変換中の文字は、本文ではない。** IME が語を組み立てているあいだ
+/// （`markedTextRange`）、入力欄には確定していない文字が入っている。
+/// そこへ書き込むと変換が破棄され、打ちかけの語が飛んだり消えたり
+/// する ── だから変換が終わるまで、どちら向きにも何も渡さない。
+///
 struct Editor: UIViewRepresentable {
-    /// The box itself, for the things only UIKit can do: undo, and moving
-    /// the cursor a line at a time.
+    /// 入力欄そのもの。UIKit にしかできないこと ── 取り消しと、
+    /// カーソルを 1 行ずつ動かすこと ── のため。
     let pen: Pen
     @Binding var text: String
-    /// The selection, in UTF-16 units — the units `NSString` counts in, and
-    /// therefore the ones every edit below is written in.
+    /// 選択範囲。単位は UTF-16 ── `NSString` が数える単位であり、
+    /// 下のすべての編集もその単位で書いてある。
     @Binding var pick: NSRange
-    /// Whether it has the keyboard. Reported rather than commanded: the
-    /// keyboard also goes away for reasons that have nothing to do with us.
+    /// キーボードを持っているか。命令ではなく報告 ── キーボードは
+    /// こちらと関係のない理由でも引っ込む。
     @Binding var editing: Bool
 
     func makeUIView(context: Context) -> UITextView {
@@ -34,9 +34,9 @@ struct Editor: UIViewRepresentable {
         v.backgroundColor = .clear
         v.textContainerInset = UIEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
         v.alwaysBounceVertical = true
-        // Nothing helpful: a notes app is where you type `- [ ]` and
-        // `](https://`, and a capitaliser that decides otherwise is fighting
-        // you at the one moment you know exactly what you meant.
+        // おせっかいは全部切る ── ノートアプリは `- [ ]` や
+        // `](https://` を打つ場所で、勝手に大文字にする機能は、
+        // いちばん意図がはっきりしている瞬間に邪魔をする。
         v.autocorrectionType = .no
         v.autocapitalizationType = .none
         v.smartQuotesType = .no
@@ -47,7 +47,7 @@ struct Editor: UIViewRepresentable {
     }
 
     func updateUIView(_ v: UITextView, context: Context) {
-        // Mid-composition: leave it alone entirely.
+        // 変換中は、一切触らない。
         if v.markedTextRange != nil { return }
         if v.text != text {
             v.text = text
@@ -91,11 +91,11 @@ struct Editor: UIViewRepresentable {
     }
 }
 
-/// One replacement: what to take out, what to put in, and where the cursor
-/// lands afterwards.
+/// 置換 1 回ぶん ── 何を取り除き、何を入れ、カーソルをどこに
+/// 置くか。
 ///
-/// **An edit rather than a whole new text.** A tool that hands back the
-/// entire note has thrown away what changed, and UIKit's undo works on
+/// **本文を丸ごと差し替えるのではなく、編集として渡す。** ノート全体を
+/// 返す道具は「何が変わったか」を捨てていて、UIKit の取り消しは
 /// changes — so 見出し could not be undone, only the typing around it.
 struct Edit {
     let at: NSRange
@@ -103,22 +103,22 @@ struct Edit {
     let then: NSRange
 }
 
-/// The writing tools, as edits on text and a selection.
+/// 編集の道具を、(本文, 選択範囲) → 編集 という形で置く。
 ///
-/// Kept apart from the view so each one is a plain function of (text,
-/// selection) → edit: that is the whole of what a Markdown button does, and
-/// it is the shape a test can hold.
+/// View から切り離してあるので、どれも (本文, 選択範囲) → 編集 の素の
+/// 関数になる。Markdown のボタンがやることはそれで全部だし、
+/// テストが掴める形でもある。
 enum Marks {
-    /// The line the cursor is on, as a range over `text`.
+    /// カーソルのある行を、`text` 上の範囲として返す。
     static func lineRange(_ text: String, _ pick: NSRange) -> NSRange {
         let s = text as NSString
         let at = min(max(0, pick.location), s.length)
         return s.lineRange(for: NSRange(location: at, length: 0))
     }
 
-    /// Put `prefix` on the cursor's line, or take it off if it is already
-    /// there. Toggling matters: the moment you press it by mistake, pressing
-    /// it again is what you reach for.
+    /// カーソルのある行に `prefix` を付ける。既に付いていれば外す。
+    /// 切り替えにしてあるのが大事 ── 押し間違えた瞬間に手が伸びるのは、
+    /// もう一度押すことだから。
     static func line(_ text: String, _ pick: NSRange, _ prefix: String) -> Edit {
         let s = text as NSString
         let r = lineRange(text, pick)
@@ -138,7 +138,7 @@ enum Marks {
                     then: NSRange(location: max(r.location, pick.location + shift), length: 0))
     }
 
-    /// One `#` deeper on the cursor's line, and back to none after three.
+    /// カーソルのある行の `#` を 1 つ深くする。3 つの次は無しに戻る。
     static func deepen(_ text: String, _ pick: NSRange) -> Edit {
         let s = text as NSString
         let r = lineRange(text, pick)
@@ -156,7 +156,7 @@ enum Marks {
                     then: NSRange(location: max(r.location, pick.location + after - before), length: 0))
     }
 
-    /// Wrap the selection, or open an empty pair with the cursor inside it.
+    /// 選択範囲を囲む。選択が無ければ空の対を置き、カーソルをその中へ。
     static func wrap(_ text: String, _ pick: NSRange, _ mark: String) -> Edit {
         let s = text as NSString
         let n = (mark as NSString).length
@@ -169,18 +169,18 @@ enum Marks {
                     then: NSRange(location: pick.location + n, length: 0))
     }
 
-    /// Drop a block in below the cursor's line.
+    /// カーソルのある行の下にブロックを挿入する。
     ///
-    /// `caret` is how far into what was inserted the cursor should land —
-    /// inside the fence rather than after it, which is where you were going
-    /// to type anyway.
+    /// `caret` は、挿入したものの中のどこにカーソルを置くか ── フェンスの
+    /// 後ろではなく中。どのみちそこから打ち始めるのだから。
+    ///
     static func block(_ text: String, _ pick: NSRange, _ body: String, caret: Int? = nil) -> Edit {
         let s = text as NSString
         let r = lineRange(text, pick)
         var at = min(r.location + r.length, s.length)
         var insert = body
-        // A note whose last line has no newline would otherwise get the
-        // block welded onto the end of that line.
+        // 最終行が改行で終わっていないノートでは、そうしないと
+        // ブロックがその行の末尾にくっついてしまう。
         if at > 0, s.substring(with: NSRange(location: at - 1, length: 1)) != "\n" {
             insert = "\n" + insert
         }
@@ -190,20 +190,20 @@ enum Marks {
                     then: NSRange(location: at + landing, length: 0))
     }
 
-    /// Put text in at the cursor, replacing whatever is selected.
+    /// カーソル位置に文字列を入れる。選択があれば置き換える。
     static func insert(_ text: String, _ pick: NSRange, _ body: String) -> Edit {
         Edit(at: pick, with: body,
              then: NSRange(location: pick.location + (body as NSString).length, length: 0))
     }
 }
 
-/// The box, held from outside it.
+/// 入力欄を、外から保持する。
 ///
-/// Undo belongs to UIKit — it is the same undo three-finger-swipe and the
-/// shake gesture use, and reimplementing it in Swift would be a second,
-/// worse one that disagrees with the phone. So the tools reach the text
-/// through the view (`replace(_:withText:)` registers an undo step) rather
-/// than by swapping the whole string, and this is how they reach it.
+/// 取り消しは UIKit のもの ── 三本指スワイプやシェイクが使うのと同じ
+/// 取り消しで、Swift で作り直せば 2 つ目の、しかも端末の挙動と食い違う
+/// 劣ったものになる。だから道具は本文へ、文字列を丸ごと差し替える
+/// のではなく View 経由で届く（`replace(_:withText:)` が取り消しの段を
+/// 登録する）。その届け方がここ。
 @MainActor
 final class Pen: ObservableObject {
     weak var view: UITextView?
@@ -218,17 +218,17 @@ final class Pen: ObservableObject {
     func undo() { view?.undoManager?.undo(); refresh() }
     func redo() { view?.undoManager?.redo(); refresh() }
 
-    /// Make one edit, in a way the phone's own undo understands.
+    /// 編集を 1 回、端末の取り消しが理解できる形で行う。
     ///
-    /// **Through the text storage, not `replace(_:withText:)`.** That one
-    /// goes in by the same door as typing, and the door applies smart
-    /// substitution — so a table's `| --- |` came out as `| — |`, em dashes,
-    /// and the table stopped being a table. Writing to the storage skips
-    /// that, and the undo step is registered here instead of by UIKit.
+    /// **`replace(_:withText:)` ではなく text storage 経由で。** あちらは
+    /// 入力と同じ入口を通り、その入口はスマート置換を掛ける ── 表の
+    /// `| --- |` が `| — |`（emダッシュ）になり、表が表でなくなった。
+    /// storage へ書けばそこを通らない。取り消しの段は UIKit ではなく
+    /// ここで登録する。
     ///
-    /// Falls back to a plain string swap when there is no live view — the
-    /// reading half has none, and an edit that silently did nothing there
-    /// would be worse than one that cannot be undone.
+    /// 生きた View が無いときは素の文字列差し替えに落とす ── 表示側には
+    /// View が無く、そこで黙って何も起きない編集は、取り消せない編集より
+    /// 悪い。
     func apply(_ e: Edit, to text: inout String, pick: inout NSRange) {
         guard let v = view else {
             let s = text as NSString
@@ -246,11 +246,11 @@ final class Pen: ObservableObject {
         refresh()
     }
 
-    /// One undo step: put the whole note back as it was.
+    /// 取り消し 1 段ぶん ── ノート全体を元に戻す。
     ///
-    /// Coarse on purpose — a tool press is one thing that happened, and
-    /// undoing half of a table is not something anybody wants. Registering
-    /// the opposite from inside the undo is what makes it redoable.
+    /// 粗いのは意図的 ── 道具を 1 回押したことは 1 つの出来事であって、
+    /// 表の半分だけ取り消したい人はいない。取り消しの中から逆向きを
+    /// 登録しておくと、やり直しができるようになる。
     private func remember(_ v: UITextView, _ was: String, _ pick: NSRange) {
         v.undoManager?.registerUndo(withTarget: v) { [weak self] tv in
             let now = tv.text ?? ""
@@ -262,10 +262,10 @@ final class Pen: ObservableObject {
         }
     }
 
-    /// Move the cursor one step. **The arrow keys a phone keyboard does not
-    /// have** — and the reason writing anything longer than a line on a
-    /// phone is miserable. Up and down are `.layout` moves, so they follow
-    /// the line as it is *drawn*, wrapping included.
+    /// カーソルを 1 つ動かす。**iPhone のキーボードに無い矢印キー** ──
+    /// そして iPhone で 1 行より長いものを書くのが苦痛な理由。上下は
+    /// `.layout` の移動なので、折り返しも含めて*描かれたとおりの*行に
+    /// 従う。
     func step(_ way: UITextLayoutDirection) {
         guard let v = view, let from = v.selectedTextRange?.start else { return }
         guard let to = v.position(from: from, in: way, offset: 1) else { return }

@@ -1,21 +1,21 @@
 import SwiftUI
 import WebKit
 
-/// A mermaid diagram, drawn.
+/// mermaid の図を描く。
 ///
-/// **The phone used to show the source.** `flowchart LR` and four indented
-/// lines, in a grey box, where the Mac showed a picture — the same note read
-/// as two different things depending on which amber you opened it in. That is
-/// the one thing this app is not allowed to do.
+/// **以前 iPhone はソースをそのまま出していた。** Mac が絵を出しているところで、
+/// `flowchart LR` とインデントされた 4 行が灰色の箱に入って出ていた ── 同じ
+/// ノートが、どちらの amber で開いたかで別のものとして読めていた。それは
+/// このアプリがやってはいけない唯一のこと。
 ///
-/// Drawn by mermaid itself in a `WKWebView`, not by a Swift renderer written
-/// for the phone: a second implementation of eight diagram kinds is a second
-/// set of answers, and the interesting ones (mindmap layout, gantt scales) are
-/// exactly where two implementations would disagree.
+/// 描くのは `WKWebView` の中の mermaid 自身で、iPhone 用に書いた Swift の
+/// レンダラではない ── 8 種類の図の 2 つ目の実装は 2 つ目の答えであり、
+/// 面白いところ（マインドマップの配置、ガントの目盛り）こそ、2 つの実装が
+/// 食い違う場所そのもの。
 ///
-/// **The library is not in the app's memory until a note has a diagram in it.**
-/// mermaid is 3.4MB and most notes have no diagram, which is the same reason
-/// the window loads it late.
+/// **ライブラリは、図のあるノートを開くまで読み込まない。** mermaid は 3.4MB
+/// あり、ほとんどのノートに図は無い。デスクトップ版が遅れて読み込むのと
+/// 同じ理由。
 struct Drawing: View {
     let source: String
     @Environment(\.colorScheme) private var scheme
@@ -25,9 +25,9 @@ struct Drawing: View {
     var body: some View {
         Group {
             if missing || Diagrams.tool == nil {
-                // **Say the source, rather than nothing.** A diagram the app
-                // cannot draw is still a diagram somebody wrote; hiding it
-                // would lose the note's content on this device only.
+                // **何も出さずに、ソースを出す。** 描けなかった図も
+                // 誰かが書いた図であり、隠せばこの端末でだけ
+                // ノートの中身が失われる。
                 ScrollView(.horizontal, showsIndicators: false) {
                     Text(source).font(.callout.monospaced())
                 }
@@ -44,13 +44,13 @@ struct Drawing: View {
     }
 }
 
-/// Where the drawing tools are unpacked.
+/// 描画に使うファイルを展開する場所。
 ///
-/// The library and the page that uses it are copied out of the bundle once,
-/// into Caches: a `WKWebView` will load a `file:` page and let it fetch a
-/// script **beside** it, but it will not read out of the app bundle for a page
-/// built from a string. Copying is cheaper than inlining 3.4MB into the HTML
-/// of every diagram on screen.
+/// ライブラリとそれを使うページは、バンドルから Caches へ一度だけコピーする ──
+/// `WKWebView` は `file:` のページを読み込み、その**隣**にあるスクリプトを
+/// 取りに行かせてくれるが、文字列から組み立てたページのためにアプリの
+/// バンドルを読むことはしない。画面に出る図ごとに 3.4MB を HTML へ
+/// 埋め込むより、コピーのほうが安い。
 enum Diagrams {
     static let tool: URL? = unpack()
 
@@ -65,8 +65,8 @@ enum Diagrams {
         let page = dir.appendingPathComponent("draw.html")
         do {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-            // Copy again when the app is newer than what is unpacked —
-            // otherwise an update ships a new mermaid that never gets used.
+            // アプリが展開済みのものより新しければコピーし直す ──
+            // そうしないと、更新で入った新しい mermaid が一度も使われない。
             if !fm.fileExists(atPath: js.path) || newer(lib, than: js) {
                 try? fm.removeItem(at: js)
                 try fm.copyItem(at: lib, to: js)
@@ -85,10 +85,10 @@ enum Diagrams {
         return at > bt
     }
 
-    /// The eleven colours. **The same eleven the window uses** — see `FAMILY`
-    /// in `gui/renderer.js`. Two lists would mean the same pie chart came out
-    /// in different colours on the phone, which is the kind of difference
-    /// nobody reports and everybody notices.
+    /// 11 色。**デスクトップ版が使うのと同じ 11 色** ── `gui/renderer.js` の
+    /// `FAMILY` を見よ。表が 2 つあると、同じ円グラフが iPhone では違う色で
+    /// 出ることになる ── 誰も報告しないが、誰もが気づく類の違い。
+    ///
     static let family = [
         "#F7BD5C", "#8FC8E8", "#A8D9A8", "#C9AEE0", "#F7A99C", "#8ED9CE",
         "#EFDA8A", "#AEBBEE", "#F4B4CE", "#C6DE8E", "#D3D3D9",
@@ -112,9 +112,9 @@ enum Diagrams {
       window.webkit.messageHandlers.trouble.postMessage(m + ' @' + src + ':' + line);
     };
     function tell() {
-      // Two frames: the first lets the SVG land, the second lets the
-      // browser finish laying it out. Measuring once too early reports a
-      // height of nothing and the diagram opens as a sliver.
+      // 2 フレーム待つ ── 1 つ目で SVG が入り、2 つ目で
+      // ブラウザが配置を終える。早すぎると高さが 0 と返り、
+      // 図が細い帯になって開く。
       requestAnimationFrame(() => requestAnimationFrame(() => {
         const h = document.getElementById('box').getBoundingClientRect().height;
         window.webkit.messageHandlers.tall.postMessage(Math.ceil(h) + 2);
@@ -138,8 +138,8 @@ enum Diagrams {
         const { svg } = await mermaid.render(id, src);
         box.innerHTML = svg;
       } catch (e) {
-        // **Show what was written, and why it did not draw.** An empty
-        // space says the note lost something.
+        // **書かれていたものと、描けなかった理由を出す。** 空白は
+        // 「ノートが何かを失った」と言っている。
         const p = document.createElement('pre');
         p.id = 'bad';
         p.style.background = bad.bg;
@@ -156,7 +156,7 @@ enum Diagrams {
     """
 }
 
-/// The web view itself.
+/// WebView そのもの。
 struct Canvas: UIViewRepresentable {
     let source: String
     let dark: Bool
@@ -170,13 +170,13 @@ struct Canvas: UIViewRepresentable {
         config.userContentController.add(context.coordinator, name: "trouble")
         let web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
-        // The note's background shows through — a white card behind every
-        // diagram would be the one bright rectangle in a dark note.
+        // ノートの背景を透かす ── 図の後ろに白いカードを置くと、
+        // 暗いノートの中でそこだけが明るい四角になる。
         web.isOpaque = false
         web.backgroundColor = .clear
         web.scrollView.backgroundColor = .clear
-        // The page reports its own height and the list scrolls; a scroll
-        // view inside a scroll view swallows the flick.
+        // ページが自分の高さを返し、スクロールは一覧側がする ──
+        // スクロールの中のスクロールは、指の動きを飲み込む。
         web.scrollView.isScrollEnabled = false
         web.scrollView.bounces = false
         // **触りは通す。** 図そのものは押しても何もしないので、web view が
@@ -216,8 +216,8 @@ struct Canvas: UIViewRepresentable {
         func draw(_ web: WKWebView) {
             self.web = web
             guard ready, let (src, dark) = want else { return }
-            // Redrawing the same diagram on every layout pass would reload
-            // mermaid's layout engine while the reader is scrolling past.
+            // 配置のたびに同じ図を描き直すと、読んでいる人が
+            // スクロールしている最中に mermaid の配置エンジンが読み直される。
             let key = src + (dark ? "#dark" : "#light")
             guard key != drawn else { return }
             drawn = key
@@ -243,7 +243,7 @@ struct Canvas: UIViewRepresentable {
             if abs(want - tall) > 1 { tall = want }
         }
 
-        /// A Swift value as a JavaScript literal.
+        /// Swift の値を JavaScript のリテラルにする。
         private func json(_ v: Any) -> String {
             guard let d = try? JSONSerialization.data(withJSONObject: [v], options: []),
                   let s = String(data: d, encoding: .utf8)
@@ -251,18 +251,18 @@ struct Canvas: UIViewRepresentable {
             return String(s.dropFirst().dropLast())
         }
 
-        /// The colours for a diagram that would not draw.
+        /// 描けなかった図に使う色。
         ///
-        /// **Two hashes on the raw string.** With one, the `"#` in `"#3b2f16"`
-        /// ends the literal and the rest of the line is read as code.
+        /// **raw 文字列のシャープは 2 つ。** 1 つだと `"#3b2f16"` の中の `"#` が
+        /// リテラルを終わらせ、行の残りがコードとして読まれる。
         static func bad(_ dark: Bool) -> String {
             dark ? ##"{"bg":"#3b2f16","fg":"#bcac91"}"## : ##"{"bg":"#f7e2b6","fg":"#6b5a41"}"##
         }
 
-        /// **The same settings the window uses** (`mermaidOpts` in
-        /// `gui/renderer.js`), with the phone's colours in place of the CSS
-        /// variables. The window reads its theme from the page; here the two
-        /// themes are written out, because a phone has exactly two.
+        /// **デスクトップ版と同じ設定**（`gui/renderer.js` の `mermaidOpts`）に、
+        /// CSS 変数の代わりに iPhone の色を入れたもの。デスクトップ版はテーマを
+        /// ページから読むが、ここでは 2 つのテーマを書き出してある ── iPhone に
+        /// あるテーマはちょうど 2 つだから。
         static func options(dark: Bool) -> String {
             let paper = dark ? "#14110c" : "#fffdf8"
             let rail = dark ? "#1d1913" : "#f3ecdf"
@@ -285,9 +285,9 @@ struct Canvas: UIViewRepresentable {
                 vars["pie\(n + 1)"] = c
                 vars["cScale\(n)"] = c
                 vars["cScaleInv\(n)"] = c
-                // Every one of the eleven is a pale wash, so the label on it
-                // is always the dark ink — the window works this out from the
-                // colour's lightness and lands in the same place.
+                // 11 色はどれも淡いので、その上の文字は常に濃い色になる ──
+                // デスクトップ版は色の明るさから計算していて、同じ答えに
+                // 行き着く。
                 vars["cScaleLabel\(n)"] = Diagrams.ink
             }
             let mind = Diagrams.family.enumerated().map { n, c in
@@ -319,9 +319,9 @@ struct Canvas: UIViewRepresentable {
                 "theme": "base",
                 "themeVariables": vars.merging(["darkMode": dark ? "true" : "false"]) { a, _ in a },
                 "themeCSS": css,
-                // **A phone is 402 points wide.** The window lets a diagram
-                // run to 52em and scroll; here everything has to fit, so the
-                // spacings are tighter and the boxes narrower.
+                // **iPhone の幅は 402 ポイント。** デスクトップ版は図を 52em まで
+                // 伸ばしてスクロールさせるが、ここでは全部収める必要があるので、
+                // 間隔を詰め、箱を狭くしてある。
                 "flowchart": ["curve": "basis", "padding": 10, "nodeSpacing": 28,
                               "rankSpacing": 32, "htmlLabels": true, "useMaxWidth": true],
                 "pie": ["textPosition": 0.62, "useMaxWidth": true],
@@ -332,8 +332,8 @@ struct Canvas: UIViewRepresentable {
                 "gantt": ["useWidth": 720, "useMaxWidth": true, "barHeight": 20, "barGap": 6,
                           "topPadding": 42, "leftPadding": 72, "gridLineStartPadding": 26,
                           "fontSize": 11, "sectionFontSize": 11, "numberSectionStyles": 4],
-                // A note is something a person wrote. HTML in a diagram's
-                // label does not get to run.
+                // ノートは人が書いたもの。図のラベルの中の HTML を
+                // 実行させはしない。
                 "securityLevel": "strict",
                 "fontFamily": "-apple-system, \"Hiragino Sans\", sans-serif",
             ]
