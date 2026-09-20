@@ -275,9 +275,22 @@ function bookChoices() {
 /// 連れて行き、同期に「名前が変わった」と憶えさせる）。別の保存ディレクトリへ
 /// 渡るときは渡さない ── 向こうの帳画面に、外のパスを書かせない（同期は
 /// 片方で消え・片方で新しく上がる、として運ぶ）。
-function moveOp(path, dir) {
+async function moveOp(path, dir) {
     const same = rootOf(path) === rootOf(dir);
-    return ask('move', { path, dir, root: same ? rootOf(path) : '' });
+    const r = await ask('move', { path, dir, root: same ? rootOf(path) : '' });
+    // **移したあとの手当ては、改名と同じ**（2026-09-20 に総ざらいで見つけた）。
+    //
+    // パスで持っているもの（タブ・机にしまってあるノート・たどった道・
+    // 開いているノート）を繋ぎ直す。`afterRename` はこれまで改名にしか
+    // 繋がっていなかったので、**共有に入れる・外す・フォルダへ移す の
+    // あと、机にしまってあるタブの中のノートだけが古いパスを指したまま**に
+    // なっていた。そのタブへ戻ると `restoreTab` が古いノートを
+    // `state.open` に戻すので、そこから先の保存は**もう無いパス**へ行き、
+    // 「No such file」で落ちる ── 打った字はファイルに入らず、同期は
+    // 「変わっていません」と言う。総ざらいの同期の段が 7 つ落ちていたのは、
+    // 元をたどるとこれ一つだった。
+    if (r && r.path && r.path !== path) afterRename(path, r.path);
+    return r;
 }
 
 /// 開いているノートの保存ディレクトリ（開いていなければいちばん目）。
@@ -1469,7 +1482,12 @@ function stashTab() {
 function restoreTab(t) {
     const k = t.keep;
     if (!k) return false;
-    state.open = k.open;
+    // **しまってあるノートは、しまった時の姿。** そのあいだに場所が変わって
+    // いることがある（共有に入れる・外す・フォルダへ移す）ので、いまの一覧に
+    // 同じパスのノートが居れば、そちらを信じる ── パスは `afterRename` が
+    // 繋ぎ直すが、`rel` や `book` はここでしか新しくならない。
+    // 一覧に居ないノート（外から開いた一本）は、しまってあるものをそのまま。
+    state.open = state.notes.find((n) => n.path === k.open.path) || k.open;
     state.stamp = k.stamp;
     state.head = k.head;
     state.base = k.base;
@@ -1857,13 +1875,32 @@ async function openNote(path, opts) {
                 if (state.open && state.open.path !== path) await settleName(state.open.path);
                 stashTab();
                 showing = path;
+                // **待っているあいだに、机の上が変わっていることがある。**
+                // 上の `await`（書き戻し・保存・改名）の最中に `reload` が
+                // 走ると、`dropGoneTabs` がタブを作り直す ── **さっき数えた
+                // 番号は、もう別のタブを指している**（減っていれば何も指さない）。
+                // だから番号ではなく、パスで取り直す。
+                //
+                // 取り直さないと `tabs[at]` が `undefined` になり、
+                // `restoreTab` が「`keep` を読めません」で落ちて、**ノートが
+                // 開かないまま先へ進む** ── 総ざらいで、共有をやめた直後と
+                // 保存ディレクトリを移した直後に実際に落ちていた
+                // （どちらもノートのパスが変わる操作・2026-09-20）。
+                // 落ちるのは開く側なので、**そのあとの操作はぜんぶ前のノートに
+                // 当たる**（同期の段が「上がりません」と言っていたのはこれ）。
+                //
                 // **しまってあるなら、読み直さない。** 打ちかけの文字を
                 // 失わないための机なので、戻るだけで捨てては元も子もない。
-                if (restoreTab(tabs[at])) {
+                const back = tabs.find((t) => t.path === path);
+                if (back && restoreTab(back)) {
                     if (!opts || !opts.walking) trailPush(path);
                     afterTab();
                     return;
                 }
+                // 机から消えていたら、置き直してからファイルを読む ──
+                // `showing` だけが机に無いパスを指していると、次にタブを
+                // 触ったところで同じ落ち方をする。
+                if (!back) tabs.push({ path, keep: null });
             } else if (opts && opts.keep && tabs[at].keep) {
                 // 同じタブを押しただけ ── 何もしない。
                 return;

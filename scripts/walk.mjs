@@ -115,6 +115,36 @@ await step('タブ：同じノートをもう一度押しても増えない', `
     await openNote(two[0]);
     if (tabs.length !== n0) return '同じ一本で増えました（' + tabs.length + '）';
     return showing === two[0] ? true : 'そのタブに移っていません';`, true);
+// 三の二の一の二。**待っているあいだに、机の上が変わることがある**
+// （2026-09-20）── `openNote` はタブの番号を先に数えてから、書き戻し・保存・
+// 改名を `await` する。その最中に `reload` が走ると `dropGoneTabs` がタブを
+// 作り直すので、番号はもう別のタブを指している。総ざらいで、共有をやめた
+// 直後と保存ディレクトリを移した直後に「`keep` を読めません」で落ちていた
+// ── **落ちるのは開く側なので、そのあとの操作はぜんぶ前のノートに当たる。**
+await step('タブ：待っているあいだに机が変わっても、ノートは開く', `
+    const a = ${path('買い物.md')};
+    const b = ${path('よくばり.md')};
+    await openNote(a);
+    await openNote(b, { tab: true });
+    if (showing !== b) return '二本目が出ていません';
+    // a へ戻る ── その途中で、a のタブを机から外す（reload がするのと同じこと）。
+    const was = window.syncRead;
+    // **一度だけ抜く。** openNote は書き戻しを二度呼ぶので、毎回抜くと
+    // 机に置き直したそばから、また抜くことになる（試験のほうの作り話が
+    // 本物より意地悪になっていた）。
+    let once = true;
+    window.syncRead = async (...x) => {
+        const out = await was(...x);
+        if (once) { once = false; tabs = tabs.filter((t) => t.path !== a); }
+        return out;
+    };
+    try { await openNote(a); } finally { window.syncRead = was; }
+    if (!state.open || state.open.path !== a) return '開きません: ' + (state.open && state.open.path);
+    if (showing !== a) return 'showing が ' + showing;
+    if (!tabs.some((t) => t.path === a)) return '机の上に戻っていません: ' + tabs.map((t) => t.path.split('/').pop()).join(' / ');
+    await closeTab(b);
+    return true;`, true);
+
 // 三の二の二。**変換の途中で別のノートへ移っても、打った文字が消えない**
 // （依頼 558）── 日本語を打つ人は「一区切り打って、まとめて変換」なので、
 // ここで落とすと一度に消える量が大きい。会社の Windows で本人が踏んだ。
@@ -768,6 +798,28 @@ await step('命令：家族と共有する', answering(
 await step('命令：共有をやめる', answering(
     `const was = state.open.title; cmdToShare();`,
     `return !state.notes.some((n) => n.title === was && n.shared);`), true);
+// **移したあと、そのタブから保存できるか**（2026-09-20 に総ざらいで見つけた）。
+// 共有に入れる・外す・フォルダへ移す はノートのパスを変える。机にしまって
+// あるノートだけ古いパスのまま残ると、そのタブへ戻ったとたん保存が
+// 「No such file」で落ちる ── 画面は何ともないので、気づくのは同期が
+// 「変わっていません」と言うとき。**打った字がファイルに入るか**で見る。
+await step('移したあとでも、そのタブから保存できる', `
+    await openNote(${path('よくばり.md')});
+    await openNote(${path('買い物.md')});
+    setView('write');
+    await new Promise((g) => setTimeout(g, 300));
+    const nl = String.fromCharCode(10);
+    const v = editor.getValue();
+    loading = true;
+    editor.setValue(v + (v.endsWith(nl) ? '' : nl) + '- 移したあとの一行' + nl);
+    loading = false;
+    readStale();
+    state.dirty = true;
+    await save();
+    await new Promise((g) => setTimeout(g, 400));
+    const disk = (await ask('read', { path: state.root + '/買い物.md' })).text;
+    return disk.includes('- 移したあとの一行') ? true
+        : '入りません（開いているのは ' + state.open.path.replace(state.root, '') + '）';`, true);
 await step('命令：サンプルのノートを入れる', answering(
     `cmdWelcome();`,
     `return state.notes.length > 0;`), true);

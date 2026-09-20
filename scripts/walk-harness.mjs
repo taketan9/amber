@@ -116,8 +116,22 @@ export async function step(name, src, want) {
         if (!state.open || view === 'write') return 'skip';
         return paperToMd(el('read'), state.head) === null ? 'もう文字に戻せません' : 'ok';
     `);
+    // **机の上が、しまってあるノートとずれていないか**（2026-09-20）。
+    // タブは `t.path`、しまってあるノートは `t.keep.open.path` で同じ一本を
+    // 指している。移した（共有に入れる・外す・フォルダへ移す）ときに片方
+    // だけ繋ぎ直すと、そのタブへ戻ったとたん `state.open` が**もう無い
+    // パス**になり、そこから先の保存が黙って落ちる ── 画面は何ともない
+    // ので、**気づくのは同期が「変わっていません」と言うとき**。実際に
+    // 同期の段が 7 つ落ちていて、元をたどると 100 段ほど前のここだった。
+    const tabsOk = await run(`
+        const ずれ = tabs.filter((t) => t.keep && t.keep.open && t.keep.open.path !== t.path);
+        if (!ずれ.length) return 'ok';
+        return '机の上としまってあるノートがずれています: ' + JSON.stringify(ずれ.map((t) => [
+            t.path.replace(state.root, ''), t.keep.open.path.replace(state.root, '')]));
+    `);
     const why = [];
     if (r.bad) why.push(r.bad);
+    if (tabsOk.value && tabsOk.value !== 'ok') why.push(tabsOk.value);
     if (r.frozen) {
         why.push(...(r.where || []));
         bad.push({ name, why });
