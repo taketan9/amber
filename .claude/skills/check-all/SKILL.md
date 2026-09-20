@@ -22,7 +22,7 @@ description: amber の全部の動作チェック。いつもの検査（Rust・
 cd ~/workspace/amber
 cargo test --workspace
 cargo clippy --workspace --all-targets
-for t in diagram-test paper-test win-test switch-test contract round-test key-test web-test agree-test words-test paint-test drive-test themes-test; do
+for t in diagram-test paper-test win-test switch-test contract round-test key-test web-test agree-test words-test paint-test drive-test themes-test plain-test; do
   printf '%-14s ' "$t"; node scripts/$t.js 2>&1 | tail -1
 done
 python3 scripts/requests.py     # 台帳（依頼が守られているか）

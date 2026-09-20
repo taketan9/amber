@@ -75,6 +75,7 @@ node scripts/paper-test.js      # 「表示」画面が、入力しても文字�
 node scripts/round-test.js      # テキスト → 画面 → テキスト が、元に戻るか（総当たり）
 node scripts/key-test.js        # 「表示」画面でキーを押したら、テキストがどうなるか
 node scripts/win-test.js        # Windows のパスとキーボード（mac では一生出ない不具合）
+node scripts/plain-test.js      # コメントが普通の日本語のままか（依頼 642）
 node scripts/contract.js        # 同梱する側（crmaine）との約束が生きているか
 node gui/vendor.js              # Monaco・vim・mermaid を落とす（git に入れていない）
 ./scripts/ios-build.sh          # iPhone 向け（3ターゲット、記号まで見る）
