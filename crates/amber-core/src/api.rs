@@ -26,22 +26,22 @@ fn keep_out(p: &serde_json::Value, path: &std::path::Path) -> anyhow::Result<()>
     crate::lock::keep_out(path, p["unlock"].as_bool().unwrap_or(false))
 }
 
-/// The methods, in Rust terms.
+/// 操作の一覧を、Rust の側から見たもの。
 ///
-/// Separated from the `extern "C"` shell so the tests below run the real
-/// thing: they call this, not a pointer dance, and every rule they state is
-/// a rule the phone gets.
+/// `extern "C"` の殻から分けてあるので、下のテストは本物を走らせる ──
+/// ポインタ操作ではなくこちらを呼ぶので、テストが述べる規則はすべて
+/// iPhone にもそのまま効く規則になる。
 pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
     match method {
         "version" => Ok(serde_json::json!({
             "amber": env!("CARGO_PKG_VERSION"),
-            // Whether this build has a desktop under it. The phone's does
-            // not, and `delete` to the trash refuses there rather than
-            // deleting outright.
+            // このビルドがデスクトップ環境の上で動いているか。iPhone 版は違うので、
+            // ゴミ箱への `delete` はそこでは拒否する ── いきなり消すのではなく。
+            //
             "desktop": crate::DESKTOP,
         })),
 
-        // Every note under a directory. The same walk the window asks for.
+        // ディレクトリ配下のすべてのノート。デスクトップ版が呼ぶのと同じ走査。
         "notes" => {
             let dir = std::path::PathBuf::from(arg(p, "path"));
             if !dir.is_dir() {
@@ -64,15 +64,15 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             // 相手の amber に何も伝わらず、受け取った人が自分で教え直す手が
             // 要った（`notebook::SHARE_MARK` の註）。
             let shares = crate::notebook::shares(&dir, &walk.rows);
-            // The favourite shelves: the ones notes are standing on, plus the
-            // ones that were made and are still empty. Without the second
-            // half a shelf vanishes the moment its last note leaves it, which
-            // reads as cian losing the folder.
+            // お気に入りのフォルダ ── ノートが実際に入っているものに加えて、作った
+            // だけでまだ空のものも。後半が無いと、最後のノートが出ていった瞬間に
+            // フォルダが消え、amber がフォルダを失くしたように見える。
+            //
             let mut shelves: Vec<String> = book.stars.clone();
             for f in &found {
                 if let Some(sh) = f.note.star.clone() {
                     // Every level of it: a note on 買い物/週次 means 買い物
-                    // exists too, whether or not anything stands on it.
+                    // 中に何かあるかどうかに関わらず、存在するものとして扱う。
                     let parts: Vec<&str> = sh.split('/').filter(|p| !p.is_empty()).collect();
                     for n in 1..=parts.len() {
                         shelves.push(parts[..n].join("/"));
@@ -88,8 +88,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     serde_json::json!({
                         "path": n.path.display().to_string(),
                         "rel": f.rel,
-                        // The directory it sits in, relative to the root: a
-                        // notebook is a directory here, as it is in the window.
+                        // そのノートが入っているディレクトリ（ルートからの相対）── ここでも
+                        // デスクトップ版と同じく、ノートブックはディレクトリのこと。
                         "book": f.rel.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
                         "title": n.title,
                         "excerpt": n.excerpt,
@@ -98,10 +98,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         "created": n.created,
                         "bytes": n.bytes,
                         "star": n.star,
-                        // What to match when the phone narrows the list, so
+                        // iPhone が一覧を絞り込むときの照合対象。デスクトップ版と同じものに
                         // that `#仕事` finds the same notes it finds in the
-                        // window. Sent rather than derived on the far side:
-                        // deriving it there is how the two answers drift.
+                        // なるように、向こうで導出させず、こちらから送る ── 向こうで導出
+                        // させるのが、答えが 2 つに分かれていく道。
                         "search": crate::note::haystack(n),
                         // **家族と分けてあるか。** 判断は core に一つ ──
                         // デスクトップ版と iPhone に 2 つ書くと、片方だけ「共有」の表示が
@@ -121,11 +121,11 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     })
                 })
                 .collect();
-            // The folders, from the same walk. **Derived from the
-            // directories and not from the notes**: a notebook somebody just
-            // made is empty, and a list built out of the notes inside would
-            // not show it — which looks exactly like the folder not having
-            // been made.
+            // フォルダの一覧も同じ走査から。**ノートからではなくディレクトリから
+            // 導く** ── 作ったばかりのノートブックは空なので、中のノートから組んだ
+            // 一覧には出てこない。それは「フォルダが作られなかった」と見分けが
+            // つかない。
+            //
             let mut books: Vec<String> = walk
                 .rows
                 .iter()
@@ -184,12 +184,12 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
-        // The text of one note, and what it was when it was read.
+        // ノート 1 件の本文と、読んだ時点でのファイルの状態。
         //
-        // The stamp comes back with it because the phone has to hand it in
-        // again to save: two devices on one synced directory is the case this
-        // whole mode exists for, and "was this still the file I opened?" is
-        // not a question the caller should have to know how to ask.
+        // スタンプも一緒に返す。iPhone は保存時にそれを渡し直す必要があるから ──
+        // 同期されたディレクトリを 2 台で使う状況こそ、この仕組み全体が存在する
+        // 理由であり、「これはまだ自分が開いたファイルか」は、呼び出し側が
+        // 訊き方を知っているべき問いではない。
         "read" => {
             let path = std::path::PathBuf::from(arg(p, "path"));
             let f = crate::text::read(&path)?;
@@ -204,12 +204,12 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
-        // Write a note back, unless somebody else wrote it first.
+        // ノートを書き戻す。ただし先に誰かが書いていたら書かない。
         //
-        // The encoding, the line ending and the trailing newline are the
-        // file's own, read again here: a note that arrived as Shift_JIS with
-        // CRLF goes back that way, and a phone that saved it as UTF-8 with LF
-        // would show the Mac a diff on every line of a file it had not edited.
+        // 文字コード・改行コード・末尾の改行はファイル自身のものを、ここで
+        // もう一度読む ── Shift_JIS + CRLF で来たノートはその形で戻す。
+        // iPhone が UTF-8 + LF で保存すると、編集していないファイルの全行に
+        // 差分が出たように Mac からは見える。
         "write" => {
             let path = std::path::PathBuf::from(arg(p, "path"));
             let text = arg(p, "text");
@@ -225,8 +225,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     }
                 }
             }
-            // A note that is not there yet is a new note, not a failure:
-            // the phone writes one it has only just made.
+            // まだ存在しないノートは新規ノートであって、失敗ではない ──
+            // iPhone は作ったばかりのものを書く。
             let mut f = crate::text::read(&path).unwrap_or_default();
             // **「今だけ編集する」で錠が落ちない**（依頼 629）── 保存は前書きごと
             // 書き直すので、`locked: true` の行が消えた内容を書くとロックまで外れる。
@@ -244,7 +244,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
-        // A new note, named and shaped by the same rules the window uses.
+        // 新しいノート。名前も形も、デスクトップ版と同じ規則で決める。
         "new" => {
             let dir = std::path::PathBuf::from(arg(p, "dir"));
             keep_out(p, &dir.join("新しいノート.md"))?;
@@ -260,10 +260,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
-        // A note, as things to draw. The reading half of the phone: what a
-        // heading *is* is decided in `crate::note`, and what a heading
-        // *looks like* is decided on the phone. Splitting it the other way
-        // would put a Markdown parser somewhere no test can reach.
+        // ノートを描画単位にしたもの。iPhone の表示側が使う ── 何が見出し
+        // *である*かは `crate::note` が決め、見出しが*どう見えるか*は iPhone が
+        // 決める。逆の分け方をすると、テストの届かない場所に Markdown パーサーを
+        // 置くことになる。
         "blocks" => {
             let text = if p["text"].is_string() {
                 arg(p, "text")
@@ -272,8 +272,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 crate::text::read(&path)?.lines.join("\n")
             };
             use crate::note::Block;
-            // The coloured pieces of a line, worked out here so the window
-            // and the phone cannot disagree about what a note says.
+            // 行の色付き部分。ここで求めることで、デスクトップ版と iPhone が
+            // ノートの解釈で食い違わない。
             fn runs(text: &str) -> serde_json::Value {
                 serde_json::Value::Array(
                     crate::note::spans(text)
@@ -411,29 +411,29 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "html": crate::markdown::to_html(&lines) }))
         }
 
-        // Put a note on a favourite shelf, or take it off.
+        // ノートをお気に入りフォルダに入れる、または外す。
         //
-        // Text in, text out, like every other edit: a favourite is a line in
-        // the note's own front matter, so it travels with the note and the
-        // Mac reads the same word.
+        // ほかの編集と同じく、テキストを受けてテキストを返す。お気に入りは
+        // ノート自身の front matter の 1 行なので、ノートと一緒に移動し、
+        // Mac も同じ語を読む。
         "star" => {
             let text = arg(p, "text");
             let shelf = p["shelf"].as_str();
             let out = match shelf {
-                // `star: true` rather than `star:` — a field with nothing
-                // after it reads as yes to the next thing that looks.
+                // `star:` ではなく `star: true` と書く ── 値の無いフィールドは、
+                // 次に読んだものから「はい」と解釈される。
                 Some("") => crate::note::set_field(&text, "star", Some("true")),
                 Some(sh) => crate::note::set_field(&text, "star", Some(sh)),
                 None => crate::note::set_field(&text, "star", None),
             };
-            // The one written before favourites had a name. Left behind, it
-            // would keep the note a favourite after it was taken off one.
+            // お気に入りに名前が付く前の書き方。残しておくと、お気に入りから外した
+            // あともお気に入りのままになる。
             let out = crate::note::set_field(&out, "pinned", None);
             Ok(serde_json::json!({ "text": out }))
         }
 
-        // Make or forget a favourite shelf. Only the empty ones need saying
-        // out loud — the rest are named by the notes standing on them.
+        // お気に入りフォルダを作る／忘れる。明示的に記録が要るのは空のものだけ ──
+        // ほかは中のノートが名前を持っている。
         "shelf" => {
             let root = std::path::PathBuf::from(arg(p, "path"));
             let name = arg(p, "name");
@@ -710,8 +710,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "shares": crate::notebook::shares(&root, &walk.rows) }))
         }
 
-        // What colour a folder is. His to choose — cian offers a palette and
-        // does not insist on it.
+        // フォルダの色。選ぶのは使う人 ── amber はパレットを提案するだけで、
+        // 押し付けない。
         "color" => {
             let root = std::path::PathBuf::from(arg(p, "path"));
             let folder = arg(p, "folder");
@@ -719,25 +719,25 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "colors": crate::notebook::read(&root).colors }))
         }
 
-        // Wrap a piece of text in a colour, the way cian writes it. Here
-        // and not in the front ends: the notation is one decision, and two
-        // places that write it are two notations one edit apart.
+        // テキストを色で包む。amber が書くのと同じ形式で。フロントエンドでは
+        // なくここに置く ── 記法は 1 つの決めごとで、それを書く場所が 2 つ
+        // あれば、1 回の編集で記法が 2 つになる。
         "paint" => {
             Ok(serde_json::json!({
                 "text": crate::note::paint(&arg(p, "text"), &arg(p, "color")),
             }))
         }
-        // Everything, moved to a new home — `notebook::migrate`, the
-        // same one the window calls. Copy, check, then remove; and
-        // nothing is overwritten.
+        // 全部を新しい場所へ移す ── `notebook::migrate`、デスクトップ版が
+        // 呼ぶのと同じもの。コピー → 確認 → 削除の順で、上書きは
+        // 一切しない。
         "migrate" => {
             let from = std::path::PathBuf::from(arg(p, "from"));
             let to = std::path::PathBuf::from(arg(p, "to"));
             Ok(serde_json::json!({ "moved": crate::notebook::migrate(&from, &to)? }))
         }
 
-        // A backup, put back — `notebook::restore`, the same one the
-        // window calls.
+        // バックアップの書き戻し ── `notebook::restore`、デスクトップ版が
+        // 呼ぶのと同じもの。
         // ── 前の姿 ──────────────────────────────────────────────
         //
         // **判断はここ。** いつ一世代にするか、何世代残すか、いつ落とすかは
@@ -929,11 +929,11 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "path": to.display().to_string() }))
         }
 
-        // What a search box means, as groups of words.
+        // 検索ボックスの意味を、語のグループとして表したもの。
         //
-        // Asked once per query rather than once per note: the *meaning* of
-        // the query is the decision, and it belongs here; running it over a
-        // list that is already in the phone's memory does not.
+        // ノートごとではなくクエリごとに 1 回問い合わせる ── クエリの*意味*が
+        // 決めごとでここに属する。iPhone のメモリ上にある一覧に対して実行
+        // する部分は、そうではない。
         "terms" => {
             // 前端は **見出しごとに探し分ける**（題だけ・タグだけ・
             // フォルダだけ）。文字列だけを渡していた頃は、`tag:定型` と打っても
@@ -953,20 +953,20 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "groups": groups }))
         }
 
-        // Split a note into how it describes itself and what it says.
+        // ノートを「自己説明の部分」と「本文」に分ける。
         //
-        // **So the writing half can show only the second part.** The front
-        // matter is cian's bookkeeping — the title it derived, the date it
-        // stamped, the tags set from a sheet — and a person who did not type
-        // it should not have to scroll past it to reach their own first line.
-        // Where it ends is `note::front`'s answer, the same one the reading
-        // half and the window use.
+        // **編集側が本文だけを表示できるように。** front matter は amber の
+        // 管理情報 ── 導出したタイトル、打った日付、シートから設定したタグ ──
+        // であり、それを打っていない人が、自分の 1 行目に辿り着くために
+        // そこをスクロールする必要は無い。
+        // どこで終わるかは `note::front` の答えで、表示側もデスクトップ版も
+        // 同じものを使う。
         "split" => {
             let text = arg(p, "text");
             let lines: Vec<String> = text.lines().map(str::to_string).collect();
             let n = crate::note::front(&lines).lines;
-            // Rebuilt from the lines rather than sliced by bytes: the note
-            // may end without a newline, and the head must keep its own.
+            // バイト位置で切らず、行から組み直す ── ノートは改行で終わらないことが
+            // あり、先頭部分は自分の改行を保たなければならない。
             let head = if n == 0 {
                 String::new()
             } else {
@@ -978,13 +978,13 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "head": head, "body": body }))
         }
 
-        // Tick or untick one task, by the line it is on.
+        // チェックボックスを 1 つ切り替える。指定は行番号で。
         //
-        // Text in, text out, like every other edit here: the caller saves it
-        // the ordinary way, so pressing a checkbox goes through the same
-        // check against the file on disk as typing does. That matters more
-        // here than anywhere — a checkbox is the one edit somebody makes
-        // without looking at the note.
+        // ここのほかの編集と同じく、テキストを受けてテキストを返す。呼び出し側が
+        // 通常の手順で保存するので、チェックボックスを押す操作も、入力と同じ
+        // 競合検査をディスク上のファイルに対して通る。ここではそれがどこよりも
+        // 重要 ── チェックボックスは、人が
+        // ノートを開かずに行う唯一の編集だから。
         "check" => {
             let text = arg(p, "text");
             let line = p["line"].as_u64().unwrap_or(0) as usize;
@@ -992,13 +992,13 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "text": crate::note::set_check(&text, line, done) }))
         }
 
-        // Look inside the notes, not only at what the listing already knows.
+        // 一覧が既に持っている情報だけでなく、ノートの中身まで見る。
         //
-        // The listing carries a line per note — title, tags, the first
-        // hundred characters — and that is what the search field narrows
-        // against instantly. It is not enough: the sentence you remember is
-        // usually further down. This walks the files, and it is
-        // `cian_core::search`, the same one `:grep` uses in the window.
+        // 一覧はノートごとに 1 行持っている ── タイトル、タグ、先頭 100 文字 ──
+        // そして検索欄はそれに対して即座に絞り込む。だがそれでは足りない ──
+        // 憶えている文はたいていもっと下にある。ここはファイルを走査していて、
+        // デスクトップ版の `:grep` が使うのと同じ `search` を呼ぶ。
+        //
         "find" => {
             let root = std::path::PathBuf::from(arg(p, "path"));
             let cap = p["limit"].as_u64().unwrap_or(200) as usize;
@@ -1026,11 +1026,11 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "hits": hits }))
         }
 
-        // Tags on, tags off. Text in and text out: the caller saves the
-        // result the way it saves any other edit, so tagging goes through the
-        // same conflict check as typing. A tagger that wrote the file itself
-        // would be a second way to write a note, and the second way is the one
-        // that loses somebody else's paragraph.
+        // タグの付け外し。テキストを受けてテキストを返す ── 呼び出し側は
+        // ほかの編集と同じ手順で保存するので、タグ付けも入力と同じ競合検査を
+        // 通る。自分でファイルを書くタグ付けはノートを書く 2 つ目の経路になり、
+        // 2 つ目の経路こそが他人の段落を消すもの。
+        //
         "settags" => {
             let tags: Vec<String> = p["tags"]
                 .as_array()
@@ -1041,8 +1041,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
-        // One plain field on or off — `pinned` today, whatever tomorrow.
-        // Text in, text out, so it saves like any other edit.
+        // 単純なフィールドを 1 つ設定／削除する ── 今は `pinned`、明日は何であれ。
+        // テキストを受けてテキストを返すので、ほかの編集と同じように保存される。
         "setfield" => {
             let value = p["value"].as_str();
             Ok(serde_json::json!({
@@ -1214,7 +1214,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "path": made.display().to_string() }))
         }
 
-        // Move a note into another notebook, pictures and all.
+        // ノートを別のノートブックへ移す。画像もまとめて。
         //
         // `root` を渡されたら、履歴のディレクトリ・共有から戻る場所・同期の記録も一緒に移す
         // （依頼 496）── 同期は「消して新しく上げる」ではなく「名前が変わった」として運ぶ。
@@ -1258,8 +1258,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "came": crate::notebook::read(&root).came }))
         }
 
-        // Make a notebook. A folder, because that is what a notebook is
-        // here — somebody looking at the same place from a Mac sees folders.
+        // ノートブックを作る。実体はフォルダ ── ここではノートブックとは
+        // そういうもので、同じ場所を Mac から見た人にはフォルダが見える。
         // クラウドの中に、amber の置き場所を用意する。
         //
         // **`mkbook` と分けてある。** あちらは「新しいフォルダを作る」で、
@@ -1288,16 +1288,16 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "path": dir.display().to_string() }))
         }
 
-        // A backup, as a zip somebody can put anywhere.
+        // バックアップ。どこにでも置ける zip として。
         //
-        // The scope is chosen by the caller and the answer is a file: cian
-        // does not know about clouds, and the phone's own share sheet knows
-        // about all of them. `zip` and not a folder copy, because a folder is
-        // not a thing you can hand to a mail app.
+        // 範囲は呼び出し側が選び、答えはファイル ── amber はクラウドを知らないが、
+        // iPhone の共有シートは全部知っている。フォルダのコピーではなく `zip` に
+        // しているのは、フォルダはメールアプリに渡せるものではないから。
         //
-        // `all` — everything under the notes root, pictures included.
-        // `book` — one notebook and what is under it.
-        // `tag`  — every note carrying a tag, wherever it lives.
+        //
+        // `all` ── ノートのルート配下すべて。画像も含む。
+        // `book` ── ノートブック 1 つとその配下。
+        // `tag`  ── そのタグを持つノートすべて。どこにあっても。
         // `note` — one file.
         "backup" => {
             let root = std::path::PathBuf::from(arg(p, "path"));
@@ -1344,9 +1344,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     anyhow::bail!("{} がありません", s.display());
                 }
             }
-            // Beside the app's own temporary files, named for what is in it
-            // and the day — a folder of `backup.zip` is a folder of one
-            // question: which one is which.
+            // アプリ自身の一時ファイルの隣に置く。名前には中身と日付を入れる ──
+            // `backup.zip` ばかりのフォルダは、「どれがどれか」という問いだけが
+            // 並んだフォルダになる。
             let dir = std::path::PathBuf::from(arg(p, "into"));
             let dir = if dir.as_os_str().is_empty() { std::env::temp_dir() } else { dir };
             std::fs::create_dir_all(&dir)?;
@@ -1368,7 +1368,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
-        // What a note wants to be reminded about, and what its routine owes.
+        // そのノートの通知設定と、繰り返しが溜めているぶん。
         "remind" => {
             let text = if p["text"].is_string() {
                 arg(p, "text")
@@ -1407,9 +1407,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }))
         }
 
-        // Carry out a routine for a day it came due, and write down that it
-        // was done. Two steps in one call: a copy made without the note of it
-        // is a copy that gets made again tomorrow.
+        // 期日が来た日のぶんの繰り返しを実行し、実行したことを記録する。
+        // 2 つの手順を 1 回の呼び出しで ── 記録せずに作ったコピーは、明日も
+        // もう一度作られる。
         "carryout" => {
             let path = std::path::PathBuf::from(arg(p, "path"));
             let on = arg(p, "on");
@@ -1422,10 +1422,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "path": made.display().to_string() }))
         }
 
-        // A photo, put beside the note. The phone sends it base64 because
-        // that is what fits down a C string; everything about *where it goes*
-        // is `crate::note::attach`, the same call the window makes when a
-        // screenshot is pasted into the editor.
+        // 写真をノートの隣に置く。iPhone が base64 で送るのは、それが C の文字列に
+        // 載るから。*どこに置くか*に関わることはすべて `crate::note::attach` にあり、
+        // デスクトップ版がエディタにスクリーンショットを貼り付けたときに呼ぶのと
+        // 同じ関数。
         "image" => {
             let note = std::path::PathBuf::from(arg(p, "note"));
             keep_out(p, &note)?;
@@ -1434,12 +1434,12 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "link": link, "bytes": bytes.len() }))
         }
 
-        // Remove a note.
+        // ノートを削除する。
         //
-        // Outright, because there is no trash on a phone to move it to —
-        // `crate::DESKTOP` is false here and `DeleteMode::Trash` refuses
-        // rather than pretending. The caller is expected to have asked first;
-        // this is the part that cannot be taken back.
+        // 完全に削除する。iPhone には移動先のゴミ箱が無いため ── ここでは
+        // `crate::DESKTOP` が false で、`DeleteMode::Trash` はふりをせずに
+        // 拒否する。呼び出し側が先に確認している前提で、ここは取り消せない
+        // 部分。
         "delete" => {
             let path = std::path::PathBuf::from(arg(p, "path"));
             if !path.is_file() {
@@ -1528,12 +1528,12 @@ fn chrono_today() -> chrono::NaiveDate {
     chrono::Local::now().date_naive()
 }
 
-/// Base64, in. Written here rather than pulled in: it is twenty lines, and a
-/// dependency that exists to decode one field is a dependency the iOS build
-/// has to carry to a phone.
+/// base64 のデコード。外部クレートを入れずにここに書いてある ── 20 行で済むし、
+/// フィールドを 1 つデコードするためだけの依存は、iOS 版が iPhone まで
+/// 運ばなければならない依存になる。
 fn b64(text: &str) -> Option<Vec<u8>> {
-    // A data: URL is what a browser hands over, and the phone may as well be
-    // allowed to send one.
+    // ブラウザが渡してくるのは data: URL なので、iPhone にもそれを送らせて
+    // かまわない。
     let text = match text.find(',') {
         Some(at) if text.starts_with("data:") => &text[at + 1..],
         _ => text,
@@ -1557,13 +1557,13 @@ fn b64(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// The stamp as the one string the caller stores and hands back.
+/// スタンプを、呼び出し側が保存して返すための 1 つの文字列にしたもの。
 ///
-/// It used to go out as `{len, modified: <seconds>}`, which read well and was
-/// wrong: a time rounded to the second no longer equals the file it came
-/// from, so **every** save came back as a conflict with nobody. The test
-/// below caught it. `crate::stamp::token` keeps it exact, and the phone
-/// never has to know what is inside.
+/// 以前は `{len, modified: <秒>}` で出していた。読みやすかったが誤りで、
+/// 秒に丸めた時刻は元のファイルと等しくなくなるため、**すべての**保存が
+/// 相手のいない競合として返ってきた。下のテストがそれを捕まえた。
+/// `crate::stamp::token` は正確なまま保ち、iPhone は中身を知らなくて
+/// よい。
 fn stamp_json(s: &crate::stamp::Stamp) -> serde_json::Value {
     serde_json::Value::String(crate::stamp::token(s))
 }
@@ -1713,8 +1713,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(
             d.path().join("long.md"),
-            // The word is past where an excerpt would stop, which is the whole
-            // reason this method exists.
+            // その語は抜粋が切れる位置より後ろにある。この操作が存在する理由が
+            // まさにそれ。
             format!("---\ntitle: 長いノート\n---\n{}\n合言葉はここ。\n", "埋草。".repeat(80)),
         )
         .unwrap();
@@ -1728,7 +1728,7 @@ mod tests {
         assert!(hits[0]["path"].as_str().unwrap().ends_with("long.md"));
         assert_eq!(hits[0]["text"], "合言葉はここ。");
 
-        // Nothing to look for is not "every note".
+        // 検索語が無いことは「すべてのノート」を意味しない。
         let r = call("find", &serde_json::json!({
             "path": d.path().to_str().unwrap(), "needle": "  ",
         })).unwrap();
@@ -1746,10 +1746,10 @@ mod tests {
         let r = call("notes", &serde_json::json!({ "path": d.path().to_str().unwrap() })).unwrap();
         let books: Vec<String> = r["books"].as_array().unwrap()
             .iter().map(|b| b.as_str().unwrap().to_string()).collect();
-        // Nothing is in it yet, and it still has to show — otherwise making a
-        // folder looks exactly like the folder not having been made.
+        // まだ中身が無くても表示されなければならない ── そうでないと、フォルダを
+        // 作ったことと作られなかったことの見分けがつかない。
         assert!(books.contains(&"仕事".to_string()), "{books:?}");
-        // `attachments` is where the pictures live, not a notebook.
+        // `attachments` は画像の置き場所であって、ノートブックではない。
         let note = d.path().join("a.md");
         crate::note::attach(&note, &[1], "png").unwrap();
         let r = call("notes", &serde_json::json!({ "path": d.path().to_str().unwrap() })).unwrap();
@@ -1757,8 +1757,8 @@ mod tests {
             .iter().map(|b| b.as_str().unwrap().to_string()).collect();
         assert!(!books.iter().any(|b| b.contains("attachments")), "{books:?}");
 
-        // Making one that is already there is refused rather than silently
-        // doing nothing, which would read as success.
+        // 既にあるものを作ろうとしたら、黙って何もしない（それは成功に見える）
+        // のではなく、拒否する。
         assert!(call("mkbook", &serde_json::json!({
             "dir": d.path().join("仕事").to_str().unwrap(),
         })).is_err());
@@ -1783,14 +1783,14 @@ mod tests {
             })).unwrap();
             let at = std::path::PathBuf::from(r["path"].as_str().unwrap());
             assert!(at.is_file(), "{scope}: {at:?}");
-            // Named for what is in it and the day: a folder of `backup.zip`
-            // is a folder of one question.
+            // 名前に中身と日付を入れる ── `backup.zip` ばかりのフォルダは、
+            // 「どれがどれか」という問いだけが並んだフォルダになる。
             assert!(at.to_string_lossy().contains(&crate::note::today()), "{at:?}");
             assert!(std::fs::metadata(&at).unwrap().len() > 0, "{scope} は空でした");
         }
 
-        // A tag nobody used is an error, not an empty zip that looks like a
-        // backup until the day somebody needs it.
+        // 誰も使っていないタグはエラーにする。バックアップに見えるが必要な日に
+        // 空だと分かる zip にはしない。
         assert!(call("backup", &serde_json::json!({
             "path": root, "scope": "tag", "what": "ない",
             "into": out.path().to_str().unwrap(),
@@ -1811,7 +1811,7 @@ mod tests {
 
         let made = call("carryout", &serde_json::json!({ "path": path, "on": "2026-09-02" })).unwrap();
         assert!(made["path"].as_str().unwrap().ends_with("ごみ 2026-09-02.md"));
-        // Written down, or it happens again tomorrow.
+        // 記録する。しないと明日もう一度起きる。
         let after = call("remind", &serde_json::json!({ "path": path })).unwrap();
         assert_eq!(after["last"], "2026-09-02");
     }
@@ -1820,16 +1820,16 @@ mod tests {
     fn a_photo_is_written_beside_the_note_and_the_link_finds_it() {
         let d = note_dir();
         let note = d.path().join("a.md").to_str().unwrap().to_string();
-        // "aGk=" is "hi". Padding and a data: prefix both have to survive the
-        // trip, because that is what the two callers actually send.
+        // "aGk=" は "hi"。パディングも data: の前置きも、往復で壊れてはいけない ──
+        // 2 つの呼び出し側が実際に送ってくるのがそれだから。
         let r = call("image", &serde_json::json!({
             "note": note, "b64": "data:image/png;base64,aGk=", "ext": "png",
         })).unwrap();
         let link = r["link"].as_str().unwrap();
         assert_eq!(r["bytes"], 2);
         assert_eq!(std::fs::read(d.path().join(link)).unwrap(), b"hi");
-        // Nothing to attach does not silently make an empty file that the
-        // link in the note would then point at.
+        // 添付する中身が無いときに、ノートのリンクが指すことになる空ファイルを
+        // 黙って作ったりはしない。
         assert!(call("image", &serde_json::json!({ "note": note, "b64": "" })).is_err());
     }
 
@@ -1839,8 +1839,8 @@ mod tests {
         let note = d.path().join("a.md").to_str().unwrap().to_string();
         assert_eq!(call("delete", &serde_json::json!({ "path": note })).unwrap()["ok"], true);
         assert!(!d.path().join("a.md").exists());
-        // Twice is an error, not a second silent success — the caller asked
-        // to remove something that is not there.
+        // 2 回目はエラーにする。黙って成功を返さない ── 呼び出し側は存在しない
+        // ものの削除を求めている。
         assert!(call("delete", &serde_json::json!({ "path": note })).is_err());
     }
 
@@ -1852,7 +1852,7 @@ mod tests {
         assert_eq!(notes.len(), 1, "only the Markdown one is a note");
         assert_eq!(notes[0]["title"], "段取り");
         // The same line the window filters on, so `#仕事` narrows to the same
-        // notes on both. Derived on the far side, these would drift.
+        // 両方のノート。向こう側で導出させると、答えがずれていく。
         let search = notes[0]["search"].as_str().unwrap();
         assert!(search.contains("#仕事"), "{search}");
         assert!(search.contains("段取り"), "{search}");
@@ -1889,8 +1889,8 @@ mod tests {
         let r = call("read", &serde_json::json!({ "path": path })).unwrap();
         let stamp = r["stamp"].clone();
 
-        // The other device. Longer, so the stamp differs even where the
-        // filesystem's timestamps are coarse.
+        // もう一方の端末。長くしてあるので、ファイルシステムのタイムスタンプが
+        // 粗い環境でもスタンプが変わる。
         std::fs::write(d.path().join("a.md"), "むこうで書き足した行\nもう一行\nさらに\n").unwrap();
 
         let w = call(
@@ -1904,7 +1904,7 @@ mod tests {
             "and the other person's writing is still there"
         );
 
-        // `force` is how the person says they looked and meant it anyway.
+        // `force` は「見たうえで、それでもそうする」と人が言うための手段。
         let w = call(
             "write",
             &serde_json::json!({ "path": path, "text": "こちらの版", "stamp": stamp, "force": true }),
@@ -1924,7 +1924,7 @@ mod tests {
         .unwrap();
         assert_eq!(r["name"], "段取り.md");
         assert!(sub.join("段取り.md").is_file(), "including the directory");
-        // Twice on the same day does not overwrite the first one.
+        // 同じ日に 2 回作っても、1 つ目を上書きしない。
         let r2 = call(
             "new",
             &serde_json::json!({ "dir": sub.to_str().unwrap(), "title": "段取り" }),
