@@ -1,12 +1,12 @@
 import SwiftUI
 import PhotosUI
 
-/// The notes that are open at once.
+/// 同時に開いているノート。
 ///
-/// **The text lives here, not in the view.** A `TabView` builds and throws
-/// away its pages as you swipe; anything a page held would go with it, and
-/// what a page holds is what you have typed and not saved. So a tab is a
-/// piece of state on the desk, and the editor is a window onto it.
+/// **本文はここにあり、View には無い。** `TabView` はスワイプのたびにページを
+/// 作っては捨てるので、ページが持っていたものは一緒に消える。そしてページが
+/// 持つのは、打ったまま保存していない文字。だからタブはこの画面が持つ状態で、
+/// エディタはそこを覗く窓口にしてある。
 @MainActor
 final class Desk: ObservableObject {
     /// ぶつかった場所 ── こちらの行と向こうの行（どちらかが空のこともある）。
@@ -23,19 +23,19 @@ final class Desk: ObservableObject {
 
     struct Tab: Identifiable, Equatable {
         let note: Note
-        /// How the note describes itself: the `---` block at the top.
+        /// ノートの自己説明 ── 先頭の `---` のブロック。
         ///
-        /// **Kept apart from the text so the writing half never shows it.**
-        /// The title, the date and the tags are cian's bookkeeping — a person
-        /// who did not type them should not have to scroll past them to reach
-        /// their own first line. Typing cannot change it; the sheets can, and
-        /// they go through `whole`.
+        /// **本文と分けてあるので、編集側には一度も出ない。**
+        /// タイトル・日付・タグは amber の管理情報 ── 打っていない人が、自分の
+        /// 1 行目に辿り着くためにそこをスクロールする必要は無い。入力では
+        /// 変えられず、変えられるのはシートだけで、そちらは `whole` を通る。
+        ///
         var head = ""
-        /// What the note says. This is what the editor holds.
+        /// ノートの本文。エディタが持っているのはこれ。
         var text = ""
-        /// What was on disk when it was opened or last saved.
+        /// 開いたとき、または最後に保存したときのディスク上の状態。
         var stamp = ""
-        /// The text as saved, to tell "changed" from "opened".
+        /// 保存した時点の本文。「変わった」と「開いただけ」を見分けるため。
         var saved = ""
         var reading = true
         /// 錠（依頼 629）。**core が答えたそのまま** ── 前書きの `locked: true` か、
@@ -59,9 +59,9 @@ final class Desk: ObservableObject {
         var forwards: [String] = []
         /// 最後に積んだ姿。空は「まだ何も積んでいない」。
         var lastSaved = ""
-        /// Where the cursor is, in UTF-16 units. On the desk with the text
-        /// because it belongs to the note, not to the moment on screen: swipe
-        /// away and back and you are where you left off.
+        /// カーソルの位置（UTF-16 単位）。本文と一緒にこの画面が持つ ── それは
+        /// 画面に出ている瞬間ではなくノートに属するものだから。スワイプで離れて
+        /// 戻っても、離れたところに居る。
         var pick = NSRange(location: 0, length: 0)
         /// **混ぜるときの土台**（分かれる前）── 開いた時点、または前に
         /// 保存できた時点の中身。動くのは**ファイルと確かに一致した瞬間**
@@ -86,7 +86,7 @@ final class Desk: ObservableObject {
         var at = -1
 
         var id: String { note.path }
-        /// The file, as it would be written.
+        /// 書き出したときのファイルの中身。
         var whole: String { head + text }
         var dirty: Bool { loaded && text != saved }
 
@@ -107,14 +107,14 @@ final class Desk: ObservableObject {
     /// **画面は二つある**（`WKWebView` の「表示」と `UITextView` の「コード」）
     /// ので、飛ぶ先を持つのは desk、飛ぶのはそれぞれの画面。
     @Published var jumping: Int?
-    /// Which tab is showing, by path — **not by index**. Closing a tab shifts
-    /// every index after it, and a selection that is an index quietly starts
-    /// pointing at the note next door.
+    /// どのタブを表示しているか。パスで持つ ── **添え字ではない**。タブを閉じると
+    /// それ以降の添え字が全部ずれ、添え字で持った選択は黙って隣のノートを
+    /// 指しはじめる。
     @Published var showing: String = ""
 
     var current: Tab? { tabs.first { $0.id == showing } }
 
-    /// Open a note, or come back to it if it is already open.
+    /// ノートを開く。既に開いていればそこへ戻る。
     /// ノートを机に出す。**押したぶんだけ、タブが増える**（依頼 555）。
     ///
     /// 前は「仮のタブ」があって、一覧から押しただけのものは次を開くと
@@ -150,10 +150,10 @@ final class Desk: ObservableObject {
         for t in tabs.reversed() where t.id != id { close(t.id) }
     }
 
-    /// Close one tab, and choose what to show next.
+    /// タブを 1 つ閉じ、次に何を表示するか決める。
     ///
-    /// The neighbour on the left, because that is where you came from — a
-    /// close that jumps to the far end of the row loses your place.
+    /// 左隣にする。そこから来たから ── 端へ飛ぶ閉じ方は、
+    /// 居場所を見失わせる。
     /// 棚（閉じるときに名前を揃えるのに要る・依頼 502）。`ContentView` が渡す。
     weak var store: NotesStore?
 
@@ -170,8 +170,8 @@ final class Desk: ObservableObject {
         }
     }
 
-    /// Read a note in, once. Coming back to a tab must not throw away what
-    /// is in it — that is the whole reason the text lives here.
+    /// ノートを 1 回だけ読み込む。タブに戻ったときに中身を捨ててはいけない ──
+    /// 本文をここに置いている理由がまさにそれ。
     func load(_ id: String, _ store: NotesStore) throws {
         guard let at = tabs.firstIndex(where: { $0.id == id }), !tabs[at].loaded else { return }
         let (text, stamp) = try store.open(tabs[at].note)
@@ -239,7 +239,7 @@ final class Desk: ObservableObject {
         tabs[at].freed = true
     }
 
-    /// Take a whole note back apart — after a sheet has changed a field.
+    /// ノート全体を分解し直す ── シートがフィールドを変えたあとに。
     func adopt(_ id: String, _ whole: String, _ store: NotesStore) {
         guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
         let (head, body) = (try? store.split(whole)) ?? ("", whole)
@@ -247,18 +247,18 @@ final class Desk: ObservableObject {
         tabs[at].text = body
     }
 
-    /// The blocks are drawn from the **whole** note, because a task's line
-    /// number is a line number in the file — that is what `set_check` takes.
+    /// ブロックは**ノート全体**から作る。チェックボックスの行番号はファイルの
+    /// 中の行番号で、`set_check` が受け取るのもそれだから。
     func redraw(_ id: String, _ store: NotesStore) {
         guard let at = tabs.firstIndex(where: { $0.id == id }) else { return }
         tabs[at].blocks = (try? store.blocks(of: tabs[at].whole)) ?? []
     }
 
-    /// Save, and say what happened. `nil` is "nothing to do".
+    /// 保存して、何が起きたかを返す。`nil` は「することが無い」。
     ///
-    /// Returns the conflict's words rather than throwing them: a clash is not
-    /// a failure, it is the other device having got there first, and the
-    /// caller has to ask a question rather than report an error.
+    /// 競合は throw せず、その文言を返す ── ぶつかったことは失敗ではなく、
+    /// 別の端末が先に着いていたということ。呼び出し側はエラーを報告するのでは
+    /// なく、人に問わなければならない。
     @discardableResult
     func save(_ id: String, _ store: NotesStore, force: Bool = false) throws -> String? {
         guard let at = tabs.firstIndex(where: { $0.id == id }), tabs[at].loaded else { return nil }
@@ -559,7 +559,7 @@ final class Desk: ObservableObject {
 ///   ので、並び順のメニューからは消した（本人・2026-09-12「同一機能は不要」）。
 ///   「フォルダごと（ツリー）」はデスクトップ版の左の列にあたるもので、iPhone だけに残す。
 ///
-/// The open notes, with a strip of tabs above them.
+/// 開いているノートと、その上のタブの帯。
 struct DeskView: View {
     @ObservedObject var desk: Desk
     let store: NotesStore
@@ -584,9 +584,9 @@ struct DeskView: View {
     @State private var dropping: Note?
     @State private var touring = false
     @State private var kept: String?
-    /// On by default. Off is for people who want to decide when a note is
-    /// written — and then the button has to be there, because nothing else
-    /// will write it.
+    /// 既定で on。off は「いつ書き込むかを自分で決めたい」人のためで、
+    /// そのときはボタンが要る ── ほかに書き込むものが無いから。
+    ///
     @AppStorage("cian.autosave") private var autosave = true
 
     private var here: Desk.Tab? { desk.current }
@@ -594,9 +594,9 @@ struct DeskView: View {
     private var pages: some View {
         VStack(spacing: 0) {
             if desk.tabs.count > 1 { strip }
-            // Swipe between the open notes. `.never` for the dots: the strip
-            // above already says how many there are and which one this is,
-            // and two answers to one question is one too many.
+            // 開いているノートをスワイプで行き来する。ドットは `.never` ──
+            // 上の帯が「いくつあって、いまどれか」を既に言っていて、
+            // 1 つの問いに答えが 2 つあるのは 1 つ多い。
             TabView(selection: $desk.showing) {
                 ForEach(desk.tabs) { tab in
                     if let bound = desk.binding(tab.id) {
@@ -650,9 +650,9 @@ struct DeskView: View {
             }
             .sheet(isPresented: $ringing) {
                 if let note = here?.note, let whole = here?.whole {
-                    // The sheet reads and writes the *whole* note — a
-                    // reminder lives in the front matter, which the editor
-                    // does not hold.
+                    // このシートはノート*全体*を読み書きする ── 通知の設定は
+                    // front matter にあり、エディタはそこを持っていない。
+                    //
                     Ringing(
                         note: note,
                         text: Binding(
@@ -675,36 +675,36 @@ struct DeskView: View {
             }
     }
 
-    /// The chrome, and the things that keep the note written down.
+    /// 画面の枠まわりと、ノートを書き込み続けるための仕掛け。
     ///
-    /// Split off from `body` only because one long chain of modifiers is
-    /// more than the Swift type-checker will sit through.
+    /// `body` から切り出してあるのは、modifier を長く繋ぐと Swift の型検査が
+    /// 音を上げるから、というだけの理由。
     private var wired: some View {
         pages
             .navigationTitle(here?.note.shown ?? "")
             .navigationBarTitleDisplayMode(.inline)
-            // **The chrome belongs to the desk, not to the page.** A
-            // `TabView` keeps the neighbouring page alive and rebuilds pages
-            // as things change, and a toolbar built by a page is rebuilt
-            // with it — which SwiftUI shows as a 「⋯」 appearing for an
-            // instant and going away. Up here there is one toolbar, and
-            // nothing the page does rebuilds it.
+            // **枠まわりはこの画面のもので、ページのものではない。**
+            // `TabView` は隣のページを生かしたまま、変化に応じてページを
+            // 組み直す。ページが組み立てたツールバーも一緒に組み直され、
+            // SwiftUI ではそれが「⋯」が一瞬出て消える形で見える。
+            // ここに置けばツールバーは 1 つで、ページが何をしても
+            // 組み直されない。
             .toolbar { chrome }
             .photosPicker(isPresented: $picking, selection: $picked, matching: .images)
             .onChange(of: picked) { _, item in if let item { take(item) } }
             .onChange(of: desk.showing) { _, _ in load() }
             .task { load() }
-            // Written down as you write, so there is nothing to remember to
-            // do. Debounced: a save per keystroke is a file rewritten forty
-            // times a sentence, and on a synced folder that is forty things
-            // for the other device to notice.
+            // 書いているそばから書き込むので、覚えておくことは何も無い。
+            // 間引いてある ── 打鍵ごとの保存は、一文で 40 回ファイルを
+            // 書き直すことになり、同期フォルダではそれが向こうの端末に
+            // 40 回気づかせることになる。
             .onChange(of: here?.text ?? "") { _, _ in if autosave { later() } }
-            // Leaving is the other moment worth saving at — the phone can
-            // stop the app without asking, so a save that only happened on a
-            // timer would lose the last thing typed.
-            // Even with automatic saving off, leaving is not the moment to
-            // lose what was typed — so this is not a save, it is the last
-            // chance to *offer* one. With it on, it is the save.
+            // 離れる瞬間も保存に値する ── 端末は断りなくアプリを止められる
+            // ので、タイマーだけの保存では最後に打ったものが失われる。
+            //
+            // 自動保存が off でも、離れる瞬間は打ったものを失ってよい
+            // 瞬間ではない ── これは保存ではなく、保存を*提案する*最後の
+            // 機会。on のときは、これが保存そのものになる。
             .onChange(of: phase) { _, going in if going != .active, autosave { now() } }
             .onDisappear {
                 saving?.cancel()
@@ -720,9 +720,9 @@ struct DeskView: View {
             }
         }
         ToolbarItem(id: "state", placement: .topBarTrailing) {
-            // Not a button any more: it saves itself. This says which of the
-            // two states it is in, because a note that says nothing about
-            // whether it is written down is a note you cannot walk away from.
+            // もうボタンではない ── 自分で保存する。ここが言うのは
+            // 2 つの状態のどちらかで、書き込まれたかどうかを何も言わない
+            // ノートは、安心して離れられないノートだから。
             Group {
                 if here?.dirty == true {
                     Label(autosave ? "保存中" : "未保存", systemImage: "circle.fill")
@@ -783,10 +783,10 @@ struct DeskView: View {
             }
             .accessibilityLabel(here?.reading == true ? "コード" : "表示")
         }
-        // The bell on the bar and not in the menu: whether a note is going
-        // to ring is something you want to *see* without opening anything —
-        // it is a state, and a state hidden behind a menu is a state nobody
-        // knows about.
+        // ベルはメニューではなくバーに置く ── 鳴るかどうかは
+        // 何も開かずに*見えて*ほしいもの。あれは状態であり、
+        // メニューの奥に隠れた状態は、誰も知らない状態になる。
+        //
         ToolbarItem(id: "bell", placement: .topBarTrailing) {
             Button { ringing = true } label: {
                 Image(systemName: reminded ? "bell.fill" : "bell")
@@ -937,7 +937,7 @@ struct DeskView: View {
         do { try desk.load(desk.showing, store) } catch { trouble = error.localizedDescription }
     }
 
-    /// Save in a moment, unless more typing arrives first.
+    /// 少しあとで保存する。その前に入力が来たら、待ち直す。
     private func later() {
         saving?.cancel()
         let id = desk.showing
@@ -948,7 +948,7 @@ struct DeskView: View {
         }
     }
 
-    /// Save right now.
+    /// いますぐ保存する。
     private func now(force: Bool = false) {
         saving?.cancel()
         write(desk.showing, force: force)
@@ -970,8 +970,8 @@ struct DeskView: View {
         } catch { trouble = error.localizedDescription }
     }
 
-    /// The picture goes to disk first, and only then into the text: the other
-    /// order writes a link to a file that may never arrive.
+    /// 画像を先にディスクへ書き、そのあとで本文に入れる ── 逆の順だと、
+    /// 来ないかもしれないファイルへのリンクを書くことになる。
     private func take(_ item: PhotosPickerItem) {
         guard let id = here?.id, let note = here?.note else { return }
         busy = true
@@ -984,8 +984,8 @@ struct DeskView: View {
                 }
                 let link = try store.attach(data, ext: Self.kind(of: data), to: note)
                 guard let at = desk.tabs.firstIndex(where: { $0.id == id }) else { return }
-                // Where you were, not at the end: a picture belongs in the
-                // paragraph you were writing when you reached for it.
+                // 末尾ではなく、居た場所に入れる ── 画像は、手を伸ばした
+                // ときに書いていた段落に属する。
                 var text = desk.tabs[at].text
                 var pick = desk.tabs[at].pick
                 pen.apply(Marks.block(text, pick, "![](\(link))\n"), to: &text, pick: &pick)
@@ -997,9 +997,9 @@ struct DeskView: View {
         }
     }
 
-    /// What the first bytes say the picture is — a screenshot is a PNG and a
-    /// photo is usually a HEIC, and calling either one the other leaves a
-    /// file nothing will open.
+    /// 先頭のバイトが言う画像の形式 ── スクリーンショットは PNG、写真は
+    /// たいてい HEIC で、取り違えると何でも開けないファイルが
+    /// 残る。
     private static func kind(of data: Data) -> String {
         let b = [UInt8](data.prefix(12))
         if b.count >= 8, b[0] == 0x89, b[1] == 0x50 { return "png" }
@@ -1025,8 +1025,8 @@ struct DeskView: View {
             tabList
             }
             .background(.bar)
-            // Swiping to a tab that is off the end of the strip should bring
-            // the strip with it, or the two disagree about where you are.
+            // 帯の外にあるタブへスワイプしたら、帯も一緒に動かす ──
+            // でないと帯と中身が「いまどこか」で食い違う。
             .onChange(of: desk.showing) { _, now in
                 withAnimation { to.scrollTo(now, anchor: .center) }
             }
@@ -1081,8 +1081,8 @@ struct DeskView: View {
         let on = tab.id == desk.showing
         return HStack(spacing: 4) {
             if tab.dirty {
-                // Unsaved, said in the one place you are looking when you
-                // decide to close something.
+                // 未保存であることを、閉じようと決めた瞬間に目が行く
+                // ただ 1 か所で言う。
                 Circle().frame(width: 6, height: 6).foregroundStyle(.orange)
             }
             Text(tab.note.shown).lineLimit(1).font(.subheadline)

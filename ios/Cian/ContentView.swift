@@ -2,11 +2,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 import PhotosUI
 
-/// The list of notes, and one note open.
+/// ノートの一覧と、開いている 1 件。
 ///
-/// A row is a title and the line under it — the same two lines the cian view
-/// draws in the window, for the same reason: the eye runs down the titles and
-/// only drops into the second line when it has stopped somewhere.
+/// 1 行はタイトルと、その下の 1 行 ── デスクトップ版が描くのと同じ 2 行で、
+/// 理由も同じ。目はタイトルを縦に追い、どこかで止まったときにだけ
+/// 2 行目に降りる。
 struct ContentView: View {
     @StateObject private var store = NotesStore()
     @StateObject private var desk = Desk()
@@ -14,28 +14,28 @@ struct ContentView: View {
     @State private var picking = false
     @State private var naming = false
     @State private var booking = false
-    /// What the one file picker is being asked for this time.
+    /// ただ 1 つのファイル選択が、今回は何を訊かれているか。
     @State private var fetching: Fetching?
-    /// **The same thing, kept for the answer.**
+    /// **同じものを、答えを受け取るために保持しておく。**
     ///
-    /// Dismissing the picker sets `isPresented` to false, whose setter
-    /// clears `fetching` — and *then* the completion runs and reads it, by
-    /// which time it is `nil`. So the picker opened, a folder was chosen, and
-    /// nothing happened: the answer fell into the `nil` case. This is the
-    /// third time a SwiftUI presentation has cleared the thing its own
-    /// callback needed, and the second time I called it verified after
-    /// watching only the half that opens.
+    /// 選択画面を閉じると `isPresented` が false になり、その setter が
+    /// `fetching` を消す ── そして*そのあとで*完了処理が走ってそれを読むので、
+    /// そのときには `nil` になっている。つまり画面が開き、フォルダが選ばれ、
+    /// 何も起きない ── 答えが `nil` の枝に落ちる。SwiftUI の表示が、自分の
+    /// コールバックが必要としているものを消したのはこれで 3 度目で、
+    /// 開く側だけを見て「確かめた」と言ったのは 2 度目。
+    ///
     @State private var asked: Fetching?
     enum Fetching { case folder, addFolder, notes, zip, outside }
     /// 場所を変えようとしている保存ディレクトリ（`nil` は足す）。
     @State private var relocating: String?
-    /// The folder we just left, while asking whether to bring its notes.
+    /// いま離れたフォルダ。中のノートを持っていくか訊いているあいだだけ保持する。
     @State private var moving: URL?
     @State private var moved: String?
     @State private var showing = false
     /// カレンダーが出ているか（依頼 454）。
     @State private var showCal = false
-    /// Which folder row the finger is over, and whether it is over `..`.
+    /// 指がどのフォルダの行の上にあるか、そしてそれが `..` かどうか。
     @State private var into: String?
     @State private var outside = false
     @State private var needle = ""
@@ -56,7 +56,7 @@ struct ContentView: View {
     @State private var treeing = false
     /// この中にフォルダを作る（親の道）。
     @State private var making: String?
-    /// The folder the list is drawn for, and which way it last moved.
+    /// 一覧がどのフォルダのものか、そして最後にどちら向きに動いたか。
     @State private var walked = ""
     /// 履歴を見せている相手（ノートかフォルダ）。
     @State private var past: Past.Which?
@@ -74,14 +74,14 @@ struct ContentView: View {
                     list
                 }
             }
-            // The notebook, when one is chosen: the title bar is where you
-            // look to know what you are looking at, and a filtered list that
-            // still says the folder's name reads as a list that lost notes.
-            // At the top the name is drawn in the list, so the bar stays
-            // out of the way; inside a folder the bar says where you are.
-            // The trail is drawn in the list, so the bar stays out of the
-            // way — a large title saying the folder's name *and* a
-            // breadcrumb saying the same name is the name twice.
+            // ノートブックを選んでいればその名前 ── タイトルバーは
+            // 「いま何を見ているか」を知るために見る場所で、絞り込んだ
+            // 一覧がフォルダ名のままだと「ノートが消えた一覧」に見える。
+            // 最上位では名前を一覧の中に描くので、バーは引っ込む。
+            // フォルダの中では、バーが現在地を言う。
+            // 経路は一覧の中に描くので、バーは引っ込む ── 大きな見出しが
+            // フォルダ名を言い、*さらに*パンくずが同じ名前を言えば、
+            // 名前が 2 回出ることになる。
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -151,8 +151,8 @@ struct ContentView: View {
             })
         }
         .sheet(isPresented: $picking) {
-            // The sheet closes itself first; these open a beat later, from
-            // here, where there is no presentation in the way.
+            // シートが先に自分で閉じ、これらはひと呼吸あとに、
+            // 表示が重なっていないここから開く。
             Where(store: store,
                   choose: { id in DispatchQueue.main.async {
                       relocating = id
@@ -214,7 +214,7 @@ struct ContentView: View {
         } message: {
             Text("中のノートはそのままです。")
         }
-        // **Said before it is done, and said in numbers.** There is no
+        // **やる前に、数で言う。** 取り消す手段は
         // wastepaper basket on a phone: this is the real thing, and 「中の
         // ノートごと」 is not a figure of speech.
         // 確認文はデスクトップ版と同じ形（本人・2026-09-12）── iPhone にゴミ箱は無いので「削除」。
@@ -241,10 +241,10 @@ struct ContentView: View {
                 catch { store.trouble = error.localizedDescription }
             }
         }
-        // A notification pressed opens the note it was about. It can arrive
-        // before the notes are loaded (pressed from the lock screen, cold
-        // start), so this watches the store as well as the ring: whichever
-        // is second does the opening.
+        // 押された通知は、それが指していたノートを開く。通知はノートが
+        // 読み込まれる前に届きうる（ロック画面から押した、冷えた状態での
+        // 起動）ので、通知だけでなくストアも見張る ── 後に来たほうが
+        // 開く。
         .onChange(of: ring.wanted) { _, _ in answer() }
         .onChange(of: store.notes) { _, _ in answer() }
         .task {
@@ -254,18 +254,18 @@ struct ContentView: View {
             Syncing.shared.desk = desk
             Syncing.shared.load()
             desk.store = store
-            // What the routines owed while the phone was doing something
-            // else. Asked for once, on the way in — see `Bell` for why this
-            // is the moment and not nine on a Wednesday.
+            // 端末が別のことをしているあいだに繰り返しが溜めたぶん。
+            // 入ってきたときに一度だけ訊く ── なぜ水曜の 9 時ではなく
+            // この瞬間なのかは `Bell` を見よ。
             _ = await Bell.ask()
             store.catchUp()
         }
-        // **One `.fileImporter`, and one only.** Two on the same view is one
-        // importer — SwiftUI keeps the last and the other button does
-        // nothing at all. That is written two lines above where it happened
+        // **`.fileImporter` は 1 つだけ。** 同じ View に 2 つ置くと 1 つに
+        // なる ── SwiftUI は最後のものを残し、もう一方のボタンは
+        // 何もしない。それが起きた場所の 2 行上にそう書いてあるのに、
         // for the second time: 「保存場所を選ぶ」 lost to 「インポート」 and
-        // pressing it looked like a button that was never wired up. So there
-        // is one, and what it is picking decides what it accepts.
+        // 押しても配線されていないボタンにしか見えなかった。だから
+        // 1 つにして、何を選んでいるかで受け付けるものを決める。
         .fileImporter(
             isPresented: Binding(get: { fetching != nil },
                                  set: { if !$0 { fetching = nil } }),
@@ -280,10 +280,10 @@ struct ContentView: View {
         ) { r in
             switch (asked, r) {
             case (.folder, .success(let urls)):
-                // **Ask before moving, and ask before switching.** The notes
-                // that are here now do not follow by themselves: a new folder
-                // is an empty folder, and somebody who did not expect that
-                // has just lost sight of everything they wrote.
+                // **移す前に訊き、切り替える前に訊く。** いまここにある
+                // ノートは勝手にはついてこない ── 新しいフォルダは空の
+                // フォルダで、それを予想していなかった人は、書いたもの全部を
+                // 見失ったことになる。
                 if let url = urls.first, let id = relocating,
                    let p = store.places.first(where: { $0.id == id }) {
                     let old = store.url(of: p)
@@ -316,11 +316,11 @@ struct ContentView: View {
             }
             asked = nil
         }
-        // **Two `.alert` on one view is one alert.** SwiftUI keeps the last
-        // and the other one shows without its buttons doing anything — which
-        // is exactly what the delete confirmation did: it appeared, both
-        // answers were inert, and nothing said why. This one lives a level up,
-        // on the stack rather than on the list.
+        // **1 つの View に `.alert` を 2 つ置くと 1 つになる。** SwiftUI は
+        // 最後のものを残し、もう一方はボタンが何もしないまま出る ──
+        // 削除の確認がまさにそれだった。出るのに、どちらの答えも
+        // 効かず、理由はどこにも出ない。こちらは 1 つ上、一覧ではなく
+        // スタックに置いてある。
         .alert(
             "できません",
             isPresented: Binding(get: { store.trouble != nil }, set: { if !$0 { store.trouble = nil } })
@@ -332,8 +332,8 @@ struct ContentView: View {
         .sheet(isPresented: $naming) {
             Making(make: { title, tags in
                 if let note = make(title, tags) {
-                    // Straight into it, in the writing half — you asked for
-                    // it in order to write in it.
+                    // そのまま編集側で開く ── 書くために作ったのだから。
+                    //
                     // **作ったノートも「表示」で開く。** デスクトップ版がそうなので
                     // iPhone も同じに ── 打ちたくなったら、画面のどこを叩いても
                     // その場で編集画面に入る（`NoteView`）。
@@ -355,10 +355,10 @@ struct ContentView: View {
 
     }
 
-    /// `try?` here would be the whole bug: a delete that fails silently looks
-    /// exactly like a delete that was never asked for, and the row stays.
-    /// `try?` here would be the whole bug: a delete that fails silently looks
-    /// exactly like a delete that was never asked for, and the row stays.
+    /// ここで `try?` を使うとそれが不具合そのものになる ── 黙って失敗した削除は、
+    /// そもそも頼まれなかった削除と見分けがつかず、行は残ったままになる。
+    /// ここで `try?` を使うとそれが不具合そのものになる ── 黙って失敗した削除は、
+    /// そもそも頼まれなかった削除と見分けがつかず、行は残ったままになる。
     private func remove(_ note: Note) {
         do { try store.remove(note) } catch { store.trouble = error.localizedDescription }
     }
@@ -389,9 +389,9 @@ struct ContentView: View {
                                     .foregroundStyle(.orange)
                             }
                         }
-                        // The line the word was actually on, when there is one:
-                        // showing the note's opening instead would be answering a
-                        // question nobody asked.
+                        // その語が実際にあった行を出す ── ノートの冒頭を
+                        // 代わりに出すのは、誰も訊いていない問いに
+                        // 答えることになる。
                         if let hit = store.hits[note.path], !needle.isEmpty {
                             Text(hit).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         } else if !note.excerpt.isEmpty {
@@ -403,10 +403,10 @@ struct ContentView: View {
                         if !note.tags.isEmpty || !note.book.isEmpty || away {
                             HStack(spacing: 6) {
                                 if !note.book.isEmpty || away {
-                                    // The notebook first: it says *where*, and
-                                    // where is what tells two same-named notes
-                                    // apart. Quieter than the tags, which are a
-                                    // thing you chose rather than a place.
+                                    // ノートブックを先に ── それは*どこか*を言い、
+                                    // 同じ名前の 2 件を見分けるのはそこだから。
+                                    // タグより控えめにする ── あちらは場所ではなく
+                                    // 自分で選んだもの。
                                     Label(store.bookLabel(note), systemImage: "folder")
                                         .font(.caption2).foregroundStyle(.tint.opacity(0.8))
                                 }
@@ -417,36 +417,36 @@ struct ContentView: View {
                             }
                         }
                     }
-                    // The whole row, not the words in it. A label is as wide
-                    // as its longest line, so a short title left most of the
-                    // row dead to the finger — and a row that answers in one
-                    // place and not the one beside it reads as a bug.
+                    // 行の全体を当たり判定にする。ラベルの幅はいちばん長い行に
+                    // 合うので、短いタイトルでは行の大半が指に反応しなかった ──
+                    // ある場所では反応し、その隣では反応しない行は、
+                    // 不具合に見える。
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
-                // The row keeps the colours its own text asked for — a title
-                // in link-blue says "this is a link" about every note in the
-                // list, which is the one thing they all are.
+                // 行は本文が求めた色をそのまま保つ ── リンクの青で描いた
+                // タイトルは、一覧のすべてのノートについて「これはリンクだ」と
+                // 言うことになる。それは全部に当てはまる唯一のこと。
                 .buttonStyle(.plain)
-                // Pick a note up by its row. The path is what travels: it is
-                // what every one of these actions takes, and a note is not a
-                // thing that can be halfway between two folders.
+                // 行を掴んでノートを持ち上げる。運ばれるのはパス ── ここの
+                // どの操作も受け取るのがそれで、ノートは 2 つのフォルダの
+                // 中間に存在できるものではない。
                 .draggable(note.path)
-                // Swipe, then tap — the two steps *are* the confirmation, which
-                // is how Apple's own Notes does it. `allowsFullSwipe: false` so a
-                // long swipe cannot delete on its own: there is no trash on a
-                // phone, and this is the one action here that cannot be undone.
+                // スワイプしてからタップ ── その 2 段が確認そのもので、
+                // Apple の「メモ」もそうしている。`allowsFullSwipe: false` に
+                // してあるので長いスワイプだけでは消えない ── iPhone には
+                // ゴミ箱が無く、ここで唯一取り消せない操作だから。
                 //
-                // An alert asking again was written and taken out: its destructive
-                // button did not fire under the automated taps that drive these
-                // checks, while its cancel did, and I could not explain the
-                // difference. Shipping a confirmation I have not seen work would
-                // be worse than the gesture that I have.
+                // もう一度訊くアラートは書いて、外した ── これらの検査を
+                // 動かす自動のタップでは破壊的なボタンが反応せず、取り消しは
+                // 反応した。その違いを説明できなかった。動くところを見て
+                // いない確認を出すのは、見たことのあるこのジェスチャーより
+                // 悪い。
                 .swipeActions(allowsFullSwipe: false) {
                     Button("削除", role: .destructive) { remove(note) }
                 }
-                // Pinning on the other side, where a swipe that starts left is
-                // for keeping and one that starts right is for losing.
+                // ピン留めは反対側に置く ── 左から始まるスワイプは残すため、
+                // 右から始まるスワイプは失うため。
                 .swipeActions(edge: .leading) {
                     Button {
                         do { try store.star(note, on: note.star == nil ? "" : nil) }
@@ -490,23 +490,23 @@ struct ContentView: View {
                         Label("このノートをテンプレートにする", systemImage: "doc.on.doc")
                     }
                     Divider()
-                    // The order they are reached for. Favouriting is the one
-                    // done in passing; moving is filing; exporting is the one
-                    // that leaves cian, and leaving is always last.
+                    // 手が伸びる順に並べる。お気に入りはついでにやること、
+                    // 移動は整理、書き出しは amber の外へ出ること ── 出ていくものは
+                    // 常に最後。
                     Button { shelving = note } label: {
                         Label(note.star == nil ? "ブックマークに登録する" : "ブックマークグループを変える", systemImage: "star")
                     }
-                    // Every notebook, not just the ones beside this note —
-                    // filing is often filing *away*.
+                    // このノートの隣だけでなく、すべてのノートブックを出す ──
+                    // 整理とはたいてい*よそへ*しまうこと。
                     Menu("フォルダへ移動") {
                         Button("（トップページ）") { moveTo(note, nil) }
                         ForEach(store.allBooks, id: \.self) { b in
                             Button(b) { moveTo(note, b) }
                         }
                     }
-                    // One note, out to wherever — Files, Drive, Dropbox,
-                    // mail. The system sheet does all of those, so cian does
-                    // not have to know any of them by name.
+                    // ノート 1 件を、どこへでも ── ファイル、Drive、Dropbox、
+                    // メール。OS のシートが全部やってくれるので、amber がそれらを
+                    // 名前で知っている必要は無い。
                     ShareLink(item: URL(fileURLWithPath: note.path)) {
                         Label("エクスポート", systemImage: "square.and.arrow.up")
                     }
@@ -539,10 +539,10 @@ struct ContentView: View {
                 }
     }
 
-    /// Notes dropped somewhere. `nil` is the top of the folder.
+    /// どこかにドロップされたノート。`nil` は最上位。
     ///
-    /// Returns whether anything moved, which is what tells the phone to keep
-    /// the drop animation rather than snapping the row back.
+    /// 何か動いたかを返す。端末はそれを見て、ドロップのアニメーションを
+    /// 続けるか、行を元に戻すかを決める。
     private func drop(_ paths: [String], into book: String?) -> Bool {
         var moved = false
         for path in paths {
@@ -555,7 +555,7 @@ struct ContentView: View {
         return moved
     }
 
-    /// Open the note a notification was about, once it is known.
+    /// 通知が指していたノートを、分かった時点で開く。
     private func answer() {
         guard let want = ring.wanted else { return }
         guard let note = store.notes.first(where: { $0.path == want }) else { return }
@@ -611,8 +611,8 @@ struct ContentView: View {
         ContentUnavailableView {
             Label("ノートの保存場所", systemImage: "folder.badge.questionmark")
         } description: {
-            // Named rather than "choose a folder": the point is that it can be
-            // the folder the Mac already has, wherever it is kept.
+            // 「フォルダを選ぶ」ではなく、そう名乗らせる ── 要点は、
+            // Mac が既に持っているフォルダをそのまま指せること。
             Text("マークダウンのノートがあるフォルダを選びます。iCloud Drive・Google Drive・Dropbox のどれでも構いません。")
         } actions: {
             Button("保存場所を見る") { picking = true }.buttonStyle(.borderedProminent)
@@ -634,13 +634,13 @@ struct ContentView: View {
         .listRowSeparator(.hidden)
     }
 
-    /// Move, and let it be seen moving.
+    /// 移動し、それが動いて見えるようにする。
     ///
-    /// **A list that changes instantly reads as a list that did not change.**
-    /// The finger lands, the contents are already different, and the eye has
-    /// nothing to follow — so you press again to check whether it worked.
-    /// Which way it slides says which way you went; sliding the same way in
-    /// both directions would be worse than not sliding at all.
+    /// **瞬時に変わる一覧は、変わらなかった一覧に見える。** 指が触れた
+    /// ときには中身が既に別物で、目が追うものが何も無い ── だから
+    /// 効いたかどうか確かめるために、もう一度押すことになる。
+    /// どちらへ滑るかが、どちらへ進んだかを言う。両方向で同じ向きに
+    /// 滑らせるなら、滑らせないほうがまし。
     private func go(_ act: () -> Void) {
         let was = store.at
         act()
@@ -661,11 +661,11 @@ struct ContentView: View {
         }
     }
 
-    /// Whether the tree is what is being drawn right now.
+    /// いまツリー表示を描いているかどうか。
     ///
-    /// One answer, asked in four places — the folder rows, the favourites,
-    /// the tree itself and the bands all have to agree, and four copies of
-    /// the same condition is how three of them end up agreeing.
+    /// 答えは 1 つで、訊く場所は 4 つ ── フォルダの行、お気に入り、
+    /// ツリー本体、見出しの帯。すべてが一致していなければならず、同じ条件を
+    /// 4 か所に書けば、そのうち 3 か所だけが一致する。
     private var treeing2: Bool {
         store.tree && needle.isEmpty && !store.narrowing && !store.flat
     }
@@ -780,8 +780,8 @@ struct ContentView: View {
                         .foregroundStyle(store.flat ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 0, trailing: 16))
                     } else {
-                        // A folder's own name does not say where it is, and
-                        // two folders called 「2026」 look identical at the
+                        // フォルダの名前だけでは、それがどこにあるかを言えない。
+                        // 「2026」という 2 つのフォルダは
                         // top of a list.
                         Crumbs(at: store.at, root: store.rootName) { to in
                             go { store.leave(for: to) }
@@ -796,9 +796,9 @@ struct ContentView: View {
             // 改名した ── 「棚」も含めて、何のことか画面が説明して
             // いなかった）。ここだけ古い名前のままだと、同じものが
             // 二つの amber で違う名前で呼ばれる。
-            // Pinned notes under a heading that says what pinning did.
-            // A note that silently jumps to the top is a note that moved for
-            // no reason you can see.
+            // ピン留めしたノートを、それが何をした結果かを言う見出しの下に出す。
+            // 黙って先頭へ飛ぶノートは、理由の見えない移動を
+            // したノートになる。
             let stuck = treeing2 ? [] : store.pinnedHere(needle)
             // **一つも無くても段は出す**（デスクトップ版と同じ ── 依頼で「一つも無い
             // ときに段ごと消えると、最初の一つを作るパスがどこにも無くなる」）。
@@ -858,18 +858,18 @@ struct ContentView: View {
                 }
             }
 
-            // The notebooks first, then the notes in this one. Folders above
-            // files is what every file manager since the first one has done,
-            // and this is the same gesture: go in, come back.
-            // The one-level-at-a-time listing. **Not while the tree is on**,
-            // or the folders and the favourites are each drawn twice — which
-            // is exactly what happened the first time, and reads as the list
-            // having lost its mind rather than as two views agreeing.
+            // 先にノートブック、次にこのフォルダのノート。フォルダが
+            // ファイルより上なのは、最初のファイラ以来どれもそうしてきた
+            // からで、ここも同じ操作 ── 入って、戻る。
+            // 1 階層ずつの一覧。**ツリー表示のあいだは出さない** ──
+            // 出すとフォルダもお気に入りも 2 回ずつ描かれる。最初に
+            // まさにそうなって、2 つの View が一致しているのではなく
+            // 一覧が壊れたように見えた。
             if !store.flat && needle.isEmpty && !treeing2 {
                 // 見出しを付ける ── デスクトップ版の左の列がそう呼んでいる。
-                // The way out, and a place to drop things through it. cian's
-                // own panes have had a `..` row since the beginning, and it
-                // has always meant both: go up, and put this up there.
+                // 出口であり、そこへ物を落とす場所でもある。amber の
+                // ペインには最初から `..` の行があり、常にその両方を
+                // 意味してきた ── 上へ行く、そして上へ置く。
                 if let up = store.up {
                     Button { go { store.leave(for: up) } } label: {
                         Label("..", systemImage: "arrow.up.left")
@@ -939,8 +939,8 @@ struct ContentView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    // A note dropped on a folder goes into it — pictures and
-                    // all, which is `note::move_to`'s business and not this
+                    // フォルダに落としたノートはその中に入る ── 画像もろとも。
+                    // それは `note::move_to` の仕事で、ここの
                     // view's.
                     .dropDestination(for: String.self) { paths, _ in
                         drop(paths, into: b.path)
@@ -1032,17 +1032,17 @@ struct ContentView: View {
             // 古いまま残る。段のほうを畳んだのは、**押すと一覧じゅうが
             // 動く**からでもある（絞った瞬間に段が消え、次に押した指が
             // 別の行に当たった）。
-            // **The tree, unless you are looking for something.** A tree of
-            // search results is not a shape anybody reads — when you are
-            // narrowing, what you want is the shortest list of answers, and
-            // when you are not, what you want is to see where things are.
+            // **探していないときはツリー。** 検索結果のツリーは誰も
+            // 読める形ではない ── 絞り込んでいるときに欲しいのは
+            // いちばん短い答えの並びで、そうでないときに欲しいのは
+            // 何がどこにあるかを見ることだから。
             if treeing2 {
                 Nest(store: store, open: { note in
                     desk.open(note, store)
                     showing = true
                 }, row: { note in AnyView(row(note)) })
             } else {
-                // Under headings that follow the ordering — see `bands`.
+                // 並び順に沿った見出しの下に置く ── `bands` を見よ。
                 ForEach(store.bands(store.matching(needle))) { band in
                     Section(band.name) {
                         ForEach(band.notes) { row($0) }
@@ -1056,24 +1056,24 @@ struct ContentView: View {
         // 探す欄のすぐ下から始める ── 一覧が自分で取る上の余白は、
         // 大きな題があった頃のためのもので、いまは何も置いていない。
         .contentMargins(.top, 2, for: .scrollContent)
-        // The whole list is replaced when the folder changes, so it can
-        // slide in from the side it came from.
+        // フォルダが変わると一覧ごと差し替える。来た側から
+        // 滑り込ませるため。
         .id(walked)
         .transition(.asymmetric(
             insertion: .move(edge: deeper ? .trailing : .leading).combined(with: .opacity),
             removal: .move(edge: deeper ? .leading : .trailing).combined(with: .opacity)
         ))
-        // **Only from the edges.** A whole-screen horizontal swipe is the
-        // rows' own gesture — that is how a note is starred or deleted — so
-        // the way out lives where the phone already puts it. Simultaneous
-        // rather than exclusive: scrolling must still win, and this only
-        // decides anything once the finger is up.
+        // **端からだけ。** 画面全体の横スワイプは行自身の操作 ──
+        // ノートに星を付けたり消したりするのがそれ ── なので
+        // 出口は端末が既に置いている場所に置く。排他ではなく同時に
+        // してあるのは、スクロールが勝たなければならないから。ここが
+        // 何かを決めるのは、指が離れたあとだけ。
         .simultaneousGesture(
             DragGesture(minimumDistance: 12).onEnded { g in
-                // A flick counts for more than it travelled: the finger that
-                // is still moving when it leaves the glass meant to go
-                // further. Without this the gesture wanted a deliberate drag
-                // across a third of the screen, which is not what a swipe is.
+                // 素早い動きは、実際の距離より多く数える ── 画面から離れる
+                // 瞬間もまだ動いていた指は、もっと先へ行くつもりだった。
+                // これが無いと、画面の 3 分の 1 をゆっくり引きずる操作に
+                // なり、それはスワイプではない。
                 let went = max(abs(g.translation.width), abs(g.predictedEndTranslation.width) * 0.6)
                 guard went > abs(g.translation.height) * 1.4, went > 22 else { return }
                 if g.startLocation.x < 36, g.translation.width > 0, let up = store.up {
@@ -1098,9 +1098,9 @@ struct ContentView: View {
                 Color.clear.onChange(of: geo.size.width, initial: true) { _, w in wide = w }
             }
         }
-        // Somebody else may move us — restoring a folder, or coming back
-        // from a note. The slide is for moves you made; this keeps the two
-        // in step when it was not one.
+        // こちら以外の理由で移動することもある ── フォルダの復元や、
+        // ノートからの戻り。滑らせるのは自分でした移動のためで、
+        // そうでないときに両者の辻褄を合わせる。
         .onChange(of: store.at, initial: true) { _, now in if walked != now { walked = now } }
         // **畳んでおく。** 絞り込みの帯と並べて置きっぱなしにすると、一覧の
         // 頭が毎回二段ぶん要る ── 言葉で探すのは、絞るより回数が少ない
@@ -1112,22 +1112,22 @@ struct ContentView: View {
         }
         .refreshable { store.reload() }
         .modifier(Waking(store: store, desk: desk))
-        // One screen for every open note, with the tabs above them.
+        // 開いているノートごとに 1 画面、その上にタブ。
         .navigationDestination(isPresented: $showing) { DeskView(desk: desk, store: store) }
-        // Straight into the note that was just made, and **in the writing
-        // half** — you asked for it in order to write in it.
+        // 作ったばかりのノートをそのまま開く。しかも**編集側で** ──
+        // 書くために作ったのだから。
         //
-        // **Inside the stack, not on it.** Attached to the `NavigationStack`
-        // itself this does nothing at all: the note was made, the sheet
-        // closed, and the list just sat there.
+        // **スタックの中に置く。スタック自体ではない。** `NavigationStack`
+        // に付けると何も起きない ── ノートはでき、シートは閉じ、
+        // 一覧はそのまま座っていた。
 
     }
 }
 
-/// A folder path, so a sheet can be presented for one.
+/// フォルダのパス。それに対してシートを出せるようにするため。
 ///
-/// `String` is not `Identifiable` and should not be made so app-wide — this
-/// is the one place that needs it, and only for the sheet.
+/// `String` は `Identifiable` ではないし、アプリ全体でそうすべきでもない ──
+/// 必要なのはここだけで、しかもシートのためだけ。
 extension String: @retroactive Identifiable {
     public var id: String { self }
 }
