@@ -1,14 +1,14 @@
 import Foundation
 import SwiftUI
 
-/// Where the notes are, and what is in there.
+/// ノートがどこにあり、中に何があるか。
 ///
-/// The folder is chosen once with the system picker and remembered as a
-/// **security-scoped bookmark**. That is not a detail: it is the whole reason
-/// this app needs no Google Drive, Dropbox or iCloud code at all. On iOS all
-/// three are Files providers, so one picked folder reaches any of them — and
-/// it is the *same folder the Mac has open*, which is the linkage this was
-/// built for.
+/// フォルダは OS の選択画面で一度選び、**security-scoped bookmark** として
+/// 記録する。これは細部の話ではなく、このアプリが Google Drive も Dropbox も
+/// iCloud のコードも一切持たずに済む理由そのもの。iOS ではその 3 つとも
+/// 「ファイル」のプロバイダなので、選んだフォルダ 1 つでどれにも届く ── しかも
+/// それは*Mac が開いているのと同じフォルダ*で、この仕組みはそのために
+/// 作ってある。
 @MainActor
 final class NotesStore: ObservableObject {
     @Published var notes: [Note] = []
@@ -40,16 +40,16 @@ final class NotesStore: ObservableObject {
     private static let placeKey = "amber.place"
     private static let seededKey = "amber.notes.seeded"
 
-    /// The app's own folder, which is where notes go when nothing else is
+    /// アプリ自身のフォルダ。ほかに何も指定されていないときのノートの置き場所。
     /// chosen.
     ///
-    /// It shows in Files as **cian**, because the app declares
-    /// `UIFileSharingEnabled` — so it is a real place you can put a file into
-    /// from anywhere else, not a hidden container. Starting here rather than
-    /// with a picker matters: the picker offers cloud providers, and a
-    /// provider whose app is not installed is *listed but greyed out*, which
-    /// reads as "amber cannot see my Drive" rather than as "Drive is not on
-    /// this phone".
+    /// 「ファイル」には **cian** として出る。アプリが `UIFileSharingEnabled` を
+    /// 宣言しているため ── つまり隠しコンテナではなく、どこからでもファイルを
+    /// 置ける本物の場所。選択画面から始めずにここから始めるのが大事 ── 選択画面は
+    /// クラウドのプロバイダを並べるが、アプリが入っていないプロバイダは
+    /// *並ぶが灰色*になり、それは「Drive がこの端末に無い」ではなく
+    /// 「amber が自分の Drive を見られない」と読める。
+    ///
     private var ownFolder: URL? {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
     }
@@ -63,25 +63,25 @@ final class NotesStore: ObservableObject {
     var many: Bool { places.count > 1 }
     /// 一覧の上に出す名前（いま開いている保存ディレクトリのもの）。
     var rootName: String { place?.name ?? "" }
-    /// Whether the notes are in the app's own folder rather than one picked.
+    /// ノートが、選んだフォルダではなくアプリ自身のフォルダにあるか。
     var own: Bool { place?.own ?? true }
     /// The path as a trail of names — 「この iPhone › ambər › 仕事」.
     ///
-    /// A phone hides paths, which is usually kind and here is not: the same
-    /// folder name can exist in three different clouds, and "ambər" on its own
-    /// answers *what is it called* when the question is *where is it*.
+    /// 端末はパスを隠す。たいていは親切だがここでは違う ── 同じフォルダ名が
+    /// 3 つのクラウドに存在しうるし、「ambər」だけでは*どこにあるか*を
+    /// 訊いているのに*何という名前か*に答えていることになる。
     var trail: [String] { place.map(trail(of:)) ?? [] }
     func trail(of p: Place) -> [String] {
         if p.own { return ["この iPhone", "ambər"] }
         guard let url = urls[p.id] else { return [p.name, "（見つかりません）"] }
-        // The tail of the path, which is the part that means anything: the
-        // front of it is the provider's own bookkeeping.
+        // パスの末尾。意味があるのはそこだけで、前半は
+        // プロバイダ自身の管理情報。
         let parts = url.pathComponents.filter { $0 != "/" }
         let keep = parts.suffix(4)
         return (parts.count > keep.count ? ["…"] : []) + keep
     }
 
-    /// The chosen folder's path, for the one screen that should say it.
+    /// 選んだフォルダのパス。それを表示すべき唯一の画面のため。
     var rootPath: String { root?.path ?? "" }
     var rootURL: URL? { root }
 
@@ -234,13 +234,13 @@ final class NotesStore: ObservableObject {
             guard let data = p.bookmark else { placeTrouble[p.id] = "そのフォルダの憶えがありません"; continue }
             var stale = false
             guard let url = try? URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale) else {
-                // A folder in a cloud provider can move, be signed out of, or be
-                // handed back stale after an update. Saying so beats an empty list
-                // that looks like "you have no notes".
+                // クラウドのフォルダは移動するし、サインアウトされるし、
+                // 更新後に古い状態で返ってくることもある。そう言うほうが、
+                // 「ノートが 1 つもありません」に見える空の一覧よりよい。
                 placeTrouble[p.id] = "そのフォルダが見つかりません"
                 continue
             }
-            // **The permission has to be opened and closed** — for a folder
+            // **権限は開いて閉じる必要がある** ── フォルダに対して
             // somebody picked. 開けなくても読めるなら使う（アプリの中のフォルダ）。
             if !url.startAccessingSecurityScopedResource(), !FileManager.default.isReadableFile(atPath: url.path) {
                 placeTrouble[p.id] = "そのフォルダを開く許可がありません"
@@ -272,11 +272,11 @@ final class NotesStore: ObservableObject {
     /// いま一時的に開いている、ほかの場所のノートか。
     func isOutside(_ path: String) -> Bool { outside?.path == path }
 
-    /// Copy Markdown files in from somewhere else.
+    /// よそから Markdown のファイルをコピーして取り込む。
     ///
-    /// **Copied, not moved.** Whatever exported them still has them, which is
-    /// the answer somebody wants the first time they try this and are not yet
-    /// sure cian is where the notes are going to live.
+    /// **移動ではなくコピー。** 書き出した側にも残る ── 初めて試す人が、
+    /// amber をノートの置き場所にすると決めきる前に欲しい答えが
+    /// それだから。
     /// **名前の付け直しは core が決める。**
     ///
     /// ここで `名前-2.md` を組み立てていた ── デスクトップ版にも取り込みを付けたので、
@@ -304,7 +304,7 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    /// The folder from last time, or this app's own.
+    /// 前回のフォルダ、無ければアプリ自身のフォルダ。
     ///
     /// **前の `cian.notes.root` 一つから引き継ぐ**（依頼 511）── 憶えが `places` に
     /// なっていないiPhone では、いままでの場所が一つ目になる（同期はいままで通り Drive）。
@@ -327,24 +327,24 @@ final class NotesStore: ObservableObject {
         tidyNames()
     }
 
-    /// **Don't show a first-time reader an empty list.**
+    /// **初めて開いた人に空の一覧を見せない。**
     ///
-    /// With nothing in it there is nowhere to learn what the app can do —
-    /// Markdown, folders, tags, the diagrams. Three notes that can be read,
-    /// pressed and rewritten teach it faster than a screen of instructions,
-    /// and they are the same three the Mac window puts down
-    /// (`packaging/welcome`), so both ambers open on the same page.
+    /// 何も入っていなければ、アプリに何ができるかを学ぶ場所が無い ──
+    /// Markdown、フォルダ、タグ、図。読めて、押せて、書き換えられる 3 件の
+    /// ノートは、説明の画面より速くそれを教える。しかも Mac のデスクトップ版が
+    /// 置くのと同じ 3 件（`packaging/welcome`）なので、どちらの amber も
+    /// 同じ画面で始まる。
     ///
-    /// Once only. **Deleted means deleted** — nothing that somebody threw
-    /// away should grow back on the next launch, so the flag records *that we
-    /// put them down*, not whether the folder is empty now.
+    /// 一度だけ。**消したものは消したまま** ── 捨てたものが次の起動で
+    /// 生え直してはいけないので、記録するのは*置いたこと*であって、
+    /// いまフォルダが空かどうかではない。
     private func seedWelcome() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: Self.seededKey) else { return }
-        // **Somebody who already picked a folder is not a first-time reader.**
-        // Their notes live in that folder; putting samples in the app's own
-        // one would drop three files into a place they are not looking at,
-        // and they would find them weeks later without knowing where from.
+        // **既にフォルダを選んだ人は、初めて開いた人ではない。**
+        // その人のノートはそのフォルダにあり、アプリ自身のフォルダに
+        // サンプルを置けば、見ていない場所に 3 つのファイルが落ち、
+        // 何週間も経ってから、どこから来たか分からないまま見つけることになる。
         guard defaults.data(forKey: Self.bookmarkKey) == nil, defaults.data(forKey: Self.placesKey) == nil else {
             defaults.set(true, forKey: Self.seededKey)
             return
@@ -352,8 +352,8 @@ final class NotesStore: ObservableObject {
         guard let from = Bundle.main.resourceURL?.appendingPathComponent("welcome"),
               FileManager.default.fileExists(atPath: from.path),
               let to = ownFolder else { return }
-        // Notes already here: somebody's own folder, or a restored backup.
-        // Say we seeded anyway, so an empty day later stays empty.
+        // 既にノートがある ── 自分のフォルダか、復元したバックアップ。
+        // それでも「置いた」と記録する。あとで空になった日も空のままにするため。
         if !hasNotes(to) {
             copyTree(from: from, to: to)
         }
@@ -406,8 +406,8 @@ final class NotesStore: ObservableObject {
         return false
     }
 
-    /// Copy a folder in, keeping its shape. **Never over a file that is
-    /// already there** — a sample must not be able to eat somebody's note.
+    /// フォルダを構造ごとコピーして取り込む。**既にあるファイルを上書きしない** ──
+    /// サンプルが人のノートを食べられてはいけない。
     private func copyTree(from: URL, to: URL) {
         let fm = FileManager.default
         guard let walker = fm.enumerator(
@@ -427,11 +427,11 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    /// Everything that is here now, moved to a folder that was just chosen.
+    /// いまここにあるものすべてを、選んだばかりのフォルダへ移す。
     ///
-    /// **Copy, check, then remove** — see the engine's `migrate`. Between two
-    /// providers this is not a rename, and a note lost halfway is the worst
-    /// thing this app could do.
+    /// **コピー → 確認 → 削除の順** ── エンジンの `migrate` を見よ。2 つの
+    /// プロバイダをまたぐとこれは rename ではないし、途中でノートを失うのは
+    /// このアプリがやりうる最悪のこと。
     func migrate(from old: URL, to fresh: URL) throws -> Int {
         let scoped = old.startAccessingSecurityScopedResource()
         defer { if scoped { old.stopAccessingSecurityScopedResource() } }
@@ -440,8 +440,8 @@ final class NotesStore: ObservableObject {
         return out["moved"] as? Int ?? 0
     }
 
-    /// A backup, put back into the notes folder. Nothing already there is
-    /// overwritten — the count of what was left alone comes back too.
+    /// バックアップをノートのフォルダへ書き戻す。既にあるものは上書きせず、
+    /// 手を付けなかった件数も返す。
     func restore(_ zip: URL) throws -> (Int, Int) {
         guard let root else { throw Cian.Failure.engine("保存場所がありません") }
         let scoped = zip.startAccessingSecurityScopedResource()
@@ -451,9 +451,9 @@ final class NotesStore: ObservableObject {
         return (out["put"] as? Int ?? 0, out["kept"] as? Int ?? 0)
     }
 
-    /// How many notes are in a folder that is not the current one — asked
+    /// いまのフォルダではない場所に、ノートがいくつあるか ── 問いと
     /// before offering to move them, because 「N 件」 is the difference
-    /// between a question and a shrug.
+    /// 諦めのあいだで訊く。
     func notesAt(_ url: URL) -> Int {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -470,9 +470,9 @@ final class NotesStore: ObservableObject {
     /// 八つ並べておく話ではない。
     var ownName: String { "この iPhone の中（ambər）" }
 
-    /// The path as a trail of names, for a URL that is not the current one.
+    /// パスを名前の連なりにする。いまのものではない URL のため。
     ///
-    /// The tail, because the front of a provider's path is its own
+    /// 末尾だけ。プロバイダのパスの前半は、あちらの管理情報だから。
     /// bookkeeping — 「Google Drive › 仕事 › ノート」 is the answer;
     /// `/private/var/mobile/Library/CloudStorage/…` is not.
     /// フォルダ・色・憶え・共有のマークは**保存ディレクトリごと**（core の帳画面が
@@ -623,21 +623,21 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    /// Where a word was found inside the notes: path → the line it was on.
+    /// ノートの中で語が見つかった場所 ── パス → その行番号。
     ///
-    /// Kept apart from `notes` because it answers a different question. The
-    /// listing knows a note's title, tags and first hundred characters and
-    /// narrows against them the instant you type; this walks the files, which
-    /// is slower and finds the sentence you actually remember.
+    /// `notes` と分けてあるのは、答える問いが違うから。一覧はノートの
+    /// タイトル・タグ・先頭 100 文字を知っていて、打った瞬間にそれで絞り込む。
+    /// こちらはファイルを走査するので遅いが、実際に憶えている文を
+    /// 見つけられる。
     @Published var hits: [String: String] = [:]
 
     private var finding: Task<Void, Never>?
 
-    /// Look inside the notes for `needle`, a moment after you stop typing.
+    /// 打つのをやめて少ししてから、ノートの中を `needle` で探す。
     ///
-    /// Debounced and cancellable: a search per keystroke would walk the folder
-    /// five times for a five-letter word, and the four thrown away would be
-    /// the four the phone spent its battery on.
+    /// 間引いてあり、途中で止められる ── 打鍵ごとの検索は、5 文字の語で
+    /// フォルダを 5 回歩くことになり、捨てられる 4 回ぶんが端末の電池を
+    /// 使っている。
     func find(_ needle: String) {
         finding?.cancel()
         let n = needle.trimmingCharacters(in: .whitespaces)
@@ -661,11 +661,11 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    /// How the list is ordered.
+    /// 一覧の並び順。
     ///
-    /// Newest first by default: a notes list is read from the top, and what
-    /// belongs there is what you were last writing. By title is for when you
-    /// know the name and not the day — the same two the window offers.
+    /// 既定は新しい順 ── ノートの一覧は上から読まれ、そこにあるべきなのは
+    /// 最後に書いていたもの。名前順は、日付ではなく名前を憶えているときの
+    /// ためで、デスクトップ版が出すのと同じ 2 つ。
     enum Order: String, CaseIterable, Identifiable {
         case updated, created, title
         var id: String { rawValue }
@@ -680,11 +680,11 @@ final class NotesStore: ObservableObject {
 
     @Published var order: Order = .updated
 
-    /// Tags being narrowed by, pressed rather than typed.
+    /// 絞り込みに使っているタグ。打つのではなく押して選ぶ。
     ///
     /// Several at once means **all of them** — the note that is both 仕事 and
     /// 定型. Any-of would grow the list as you press, which is the opposite of
-    /// what pressing a filter is for.
+    /// 絞り込みを押すのはそのため。
     @Published var only: Set<String> = []
 
     /// 絞り込んでいるフォルダ。**タグとは重なり方が違う** ── ノートは一つの
@@ -730,11 +730,11 @@ final class NotesStore: ObservableObject {
         return f
     }()
 
-    /// The tags on the notes you can see from here, most used first.
+    /// ここから見えているノートに付いているタグ。よく使う順。
     ///
-    /// From what is in front of you and not from the whole folder: a bar of
-    /// forty tags is a bar nobody reads, and the ones worth pressing are the
-    /// ones this pile actually has.
+    /// フォルダ全体ではなく、目の前にあるものから作る ── 40 個並んだ帯は
+    /// 誰も読まないし、押す価値があるのはこの山が実際に持っている
+    /// タグだから。
     var tagsHere: [String] {
         var count: [String: Int] = [:]
         for n in notes where flat || (here(n) && (n.book == at || at.isEmpty)) {
@@ -745,54 +745,54 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    /// Which notebook is open, as a path relative to the root. `""` is the
-    /// top. This is *where you are*, not a filter — the two look the same on
-    /// screen for one level and stop looking the same the moment there is a
-    /// notebook inside a notebook.
+    /// どのノートブックを開いているか。ルートからの相対パスで、`""` は最上位。
+    /// これは*現在地*であって絞り込みではない ── 1 階層のあいだは画面上で
+    /// 同じに見えるが、ノートブックの中にノートブックがある瞬間から
+    /// 同じではなくなる。
     @Published var at = ""
 
-    /// The folders stepped out of, newest last.
+    /// 出てきたフォルダ。新しいものが末尾。
     ///
-    /// **So that going back can be undone.** Swiping one way is "up", and a
-    /// gesture that cannot be taken back is a gesture people stop trusting —
-    /// so swiping the other way walks back down the way you came.
+    /// **戻る操作を取り消せるように。** 一方向のスワイプが「上へ」で、
+    /// 取り消せない操作は、そのうち信用されなくなる ── だから逆向きの
+    /// スワイプで、来た道を下りられるようにしてある。
     @Published private(set) var forward: [String] = []
 
-    /// Up one, remembering where we were.
+    /// 1 つ上へ。いた場所は憶えておく。
     func leave(for to: String) {
         forward.append(at)
         at = to
     }
 
-    /// Into a folder chosen by hand. That is a new direction, so whatever
-    /// was ahead is no longer ahead of anything.
+    /// 手で選んだフォルダへ入る。それは新しい方向なので、先にあったものは
+    /// もう誰の先でもなくなる。
     func into(_ book: String) {
         forward.removeAll()
         at = book
     }
 
-    /// Back down the way we came, if there is a way.
+    /// 来た道を下りる。道があれば。
     func back() -> Bool {
         guard let last = forward.popLast() else { return false }
         at = last
         return true
     }
 
-    /// Show everything at once, folders ignored.
+    /// フォルダを無視して、全部を一度に出す。
     ///
-    /// Both ways of keeping notes are real. Some people put four hundred in
-    /// one pile and find them by searching; some want them filed. Neither is
-    /// a mistake to be corrected by an app, so this is a switch.
+    /// ノートの持ち方はどちらも本物。400 件を 1 つの山に入れて検索で
+    /// 見つける人もいれば、整理したい人もいる。どちらもアプリが正すべき
+    /// 間違いではないので、ここはスイッチにしてある。
     @Published var flat = false
 
-    /// Every notebook there is, as paths relative to the root — including the
-    /// empty ones, which is why this comes from the engine's walk of the
-    /// directories rather than from the notes.
+    /// あるノートブックすべてを、ルートからの相対パスで ── 空のものも含む。
+    /// だからノートからではなく、エンジンによるディレクトリの走査から
+    /// 作っている。
     var allBooks: [String] { booksBy[rootPath] ?? [] }
 
-    /// Every favourite shelf, including the empty ones.
+    /// お気に入りのフォルダすべて。空のものも含む。
     @Published var stars: [String] = []
-    /// Folder path → the colour it was given.
+    /// フォルダのパス → 付けられた色。
     var colors: [String: String] { colorsBy[rootPath] ?? [:] }
 
     /// 錠のかかったフォルダ（依頼 629）。**上のフォルダの錠も効く** ──
@@ -806,7 +806,7 @@ final class NotesStore: ObservableObject {
         locks.first { $0.isEmpty || book == $0 || book.hasPrefix($0 + "/") }
     }
 
-    /// The shelves directly inside `shelf`, with how many notes are under each.
+    /// `shelf` の直下にあるフォルダと、それぞれの配下のノート数。
     func shelves(in shelf: String) -> [(name: String, path: String, count: Int)] {
         let prefix = shelf.isEmpty ? "" : shelf + "/"
         var seen: [String] = []
@@ -823,11 +823,11 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    /// Which folders and shelves are open in the tree.
+    /// ツリーの中で、どのフォルダとお気に入りを開いているか。
     ///
-    /// On the store rather than in the view: the list is rebuilt on every
-    /// keystroke and every reload, and a disclosure state that lived in the
-    /// view would close every folder each time a note was saved.
+    /// View ではなくストアに置く ── 一覧は打鍵のたび、再読み込みのたびに
+    /// 組み直されるので、開閉の状態を View に持たせると、ノートを保存する
+    /// たびにフォルダが全部閉じる。
     @Published var unfolded: Set<String> = []
 
     func opened(_ key: String) -> Binding<Bool> {
@@ -837,7 +837,7 @@ final class NotesStore: ObservableObject {
         )
     }
 
-    /// Show the tree rather than one folder at a time.
+    /// 1 階層ずつではなく、ツリーで表示する。
     ///
     /// **既定は切り。** デスクトップ版の左の列は「すべてのノート・ブックマーク・
     /// フォルダ・タグ」を並べて、その右に日付ごとのノートを出す ── iPhone も
@@ -846,10 +846,10 @@ final class NotesStore: ObservableObject {
     /// 木が要る人は「フィルタ」から入れる。
     @Published var tree = false
 
-    /// The folders directly inside one, wherever the list is standing.
+    /// あるフォルダの直下のフォルダ。一覧がどこにいても。
     ///
-    /// Like `books` but from a given path rather than from `at` — the tree
-    /// asks about every level, not only the one that is open.
+    /// `books` と同じだが、`at` ではなく渡されたパスから見る ── ツリーは
+    /// 開いている階層だけでなく、すべての階層について訊く。
     func shelfless(in book: String) -> [(name: String, path: String, count: Int)] {
         let prefix = book.isEmpty ? "" : book + "/"
         var seen: [String] = []
@@ -865,17 +865,17 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    /// The favourites standing directly on one shelf.
+    /// あるお気に入りフォルダの直下にあるお気に入り。
     func starred(on shelf: String) -> [Note] {
         sorted(notes.filter { $0.star == shelf })
     }
 
-    /// Put a note on a shelf, or take it off the favourites entirely.
+    /// ノートをお気に入りフォルダに入れる、またはお気に入りから完全に外す。
     ///
-    /// Reads the file rather than taking text from a caller: this is done
-    /// from the list, where nothing has the note open, and the stamp that
-    /// comes back with the text is the one the save is checked against — so
-    /// starring a note goes through the same check as typing in it.
+    /// 呼び出し側から本文を受け取らず、ファイルを読む ── これは一覧から
+    /// 行う操作で、そこではノートを開いているものが無い。本文と一緒に返る
+    /// スタンプが保存時の照合に使われるので、星を付ける操作も入力と
+    /// 同じ検査を通る。
     func star(_ note: Note, on shelf: String?) throws {
         let (text, stamp) = try open(note)
         var p: [String: Any] = ["text": text]
@@ -885,7 +885,7 @@ final class NotesStore: ObservableObject {
         reload()
     }
 
-    /// Make a favourite shelf, or forget one and everything under it.
+    /// お気に入りフォルダを作る、または配下ごと忘れる。
     func shelf(_ name: String, drop: Bool = false) throws {
         if drop {
             for p in places { if let u = urls[p.id] { _ = try? Cian.call("shelf", ["path": u.path, "name": name, "drop": true]) } }
@@ -896,26 +896,26 @@ final class NotesStore: ObservableObject {
         reload()
     }
 
-    /// How many notes are anywhere under one folder — what a delete would
-    /// take with it, said before it is done.
+    /// あるフォルダの配下すべてにノートがいくつあるか ── 削除が
+    /// 何を巻き込むかを、実行前に言う。
     func under(_ book: String) -> Int {
         notes.filter { here($0) && ($0.book == book || $0.book.hasPrefix(book + "/")) }.count
     }
 
-    /// Rename a folder. The notes inside keep their names and their words.
+    /// フォルダを改名する。中のノートの名前も中身も変わらない。
     func rename(_ book: String, to name: String) throws {
         guard let root else { return }
         _ = try Cian.call("book", ["path": root.path, "book": book, "name": name])
-        // Standing in the folder that was renamed, the old path is a place
-        // that no longer exists — so step up rather than show nothing.
+        // 改名したフォルダの中にいる場合、古いパスはもう存在しない
+        // 場所になる ── 何も出さずに、1 つ上へ移る。
         if at == book || at.hasPrefix(book + "/") {
             at = book.split(separator: "/").dropLast().joined(separator: "/")
         }
         reload()
     }
 
-    /// Throw a folder away with everything in it. **There is no wastepaper
-    /// basket on a phone** — the asking happens before this is called.
+    /// フォルダを中身ごと削除する。**iPhone にはゴミ箱が無い** ── 確認は
+    /// これを呼ぶ前に済ませてある。
     func drop(_ book: String) throws {
         guard let root else { return }
         _ = try Cian.call("book", ["path": root.path, "book": book, "drop": true])
@@ -925,15 +925,15 @@ final class NotesStore: ObservableObject {
         reload()
     }
 
-    /// Give a folder a colour, or take it away.
+    /// フォルダに色を付ける、または外す。
     func color(_ folder: String, _ hex: String?) throws {
         guard let root else { return }
         _ = try Cian.call("color", ["path": root.path, "folder": folder, "color": hex ?? NSNull()])
         reload()
     }
 
-    /// The notebooks directly inside the one that is open, with how many
-    /// notes are anywhere underneath each.
+    /// 開いているノートブックの直下のノートブックと、それぞれの配下に
+    /// あるノートの数。
     var books: [(name: String, path: String, count: Int)] {
         let prefix = at.isEmpty ? "" : at + "/"
         var seen: [String] = []
@@ -950,24 +950,24 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    /// The name to put above the list.
+    /// 一覧の上に出す名前。
     var here: String {
         at.isEmpty ? rootName : (at.split(separator: "/").last.map(String.init) ?? at)
     }
 
-    /// One level up, or nil at the top.
+    /// 1 つ上の階層。最上位では nil。
     var up: String? {
         guard !at.isEmpty else { return nil }
         let parts = at.split(separator: "/").dropLast()
         return parts.joined(separator: "/")
     }
 
-    /// The query, as groups of words: an OR of ANDs.
+    /// クエリを語のグループにしたもの ── AND のまとまりを OR でつないだ形。
     ///
-    /// **What the query means is `cian-core`'s answer** (`note::terms`) —
-    /// asked once when the text changes, not once per note. Three front ends
-    /// each deciding what two words mean is three search boxes that agree
-    /// until somebody types two words.
+    /// **クエリの意味を決めるのは core**（`note::terms`）── 文字列が変わった
+    /// ときに一度だけ訊き、ノートごとには訊かない。3 つのフロントエンドが
+    /// 「2 語」の意味を別々に決めれば、2 語打たれるまでは一致している
+    /// 3 つの検索ボックスになる。
     private var groups: [[Term]] = []
 
     /// 絞り込みの一語。**どれが見出しでどれが文字かは `note::terms` が決める。**
@@ -1008,19 +1008,19 @@ final class NotesStore: ObservableObject {
         return hay.contains(t.word) != t.not
     }
 
-    /// Narrow by what a note is *about*, not by what its file is called.
+    /// ファイル名ではなく、ノートが*何についてのものか*で絞り込む。
     func matching(_ needle: String) -> [Note] {
         let n = needle.trimmingCharacters(in: .whitespaces).lowercased()
         var out = notes
-        // Searching looks everywhere, whatever notebook is open: the note you
-        // are looking for is the one you have forgotten where you put.
-        // A tag narrows like a search does — everywhere, not just here.
+        // 検索はどのノートブックを開いていても全体を見る ── 探している
+        // ノートとは、どこに置いたか忘れたノートだから。
+        // タグも検索と同じように全体を絞り込む ── ここだけではない。
         // Pressing 「#仕事」 while standing in one folder and being shown only
         // that folder's 仕事 notes is the answer to a question nobody asked.
         if !flat && n.isEmpty && !narrowing { out = out.filter { here($0) && $0.book == at } }
         if !n.isEmpty {
-            // Either half: what the listing knows, or what was found inside.
-            // Every word of one group has to be there; any group will do.
+            // どちらでもよい ── 一覧が知っていることか、中から見つかったものか。
+            // 1 つのグループの語は全部必要。グループはどれか 1 つ当たればよい。
             out = out.filter { note in
                 if hits[note.path] != nil { return true }
                 guard !groups.isEmpty else { return note.search.contains(n) }
@@ -1036,38 +1036,38 @@ final class NotesStore: ObservableObject {
             }
         }
         if span != nil { out = out.filter(inSpan) }
-        // The favourites are drawn in their own section above this, so they
-        // come out here rather than being sorted to the front: a note in two
-        // places at once is a note somebody deletes twice.
+        // お気に入りはこの上の独立した節に描くので、先頭へ並べ替える
+        // のではなくここから外す ── 一度に 2 か所に出るノートは、
+        // 2 回消されるノートになる。
         let stuck = Set(pinnedHere(needle).map(\.path))
         return sorted(out.filter { !stuck.contains($0.path) })
     }
 
-    /// The favourites to show above the list.
+    /// 一覧の上に出すお気に入り。
     ///
-    /// At the top of the folder, **every** favourite wherever it lives — that
-    /// is what a favourite is for: the note you keep coming back to, within
-    /// reach without going to find it. Inside a folder, only that folder's,
-    /// because there you are looking at one place on purpose.
+    /// 最上位では、どこにあろうと**すべての**お気に入りを出す ── それが
+    /// お気に入りの意味だから。何度も戻るノートを、探しに行かずに
+    /// 手の届くところに置く。フォルダの中ではそのフォルダのものだけ ──
+    /// そこでは意図して 1 か所を見ているから。
     func pinnedHere(_ needle: String) -> [Note] {
         guard needle.trimmingCharacters(in: .whitespaces).isEmpty, !flat, !narrowing else { return [] }
         let all = notes.filter { $0.star != nil }
         return sorted(at.isEmpty ? all : all.filter { here($0) && $0.book == at })
     }
 
-    /// A run of notes under one heading.
+    /// 1 つの見出しの下に並ぶノートのまとまり。
     struct Band: Identifiable {
         let name: String
         let notes: [Note]
         var id: String { name }
     }
 
-    /// The list, cut into the runs a person actually reads it in.
+    /// 一覧を、人が実際に読むまとまりに切ったもの。
     ///
-    /// **The headings follow the ordering.** Grouped by date while sorted by
+    /// **見出しは並び順に従う。** 名前順に並べながら日付でまとめると
     /// title would put 「今日」 above a note from March, which is worse than
-    /// no headings at all — so by title the headings are first letters, and
-    /// by date they are days.
+    /// 意味が無いので、名前順なら見出しは頭文字、日付順なら
+    /// 日付になる。
     func bands(_ list: [Note]) -> [Band] {
         var names: [String] = []
         var rows: [String: [Note]] = [:]
@@ -1105,62 +1105,62 @@ final class NotesStore: ObservableObject {
         case .updated: out.sort { $0.updated > $1.updated }
         case .created: out.sort { $0.created > $1.created }
         // `localizedStandardCompare` and not `<`: 「あ」 before 「い」, and
-        // note-2 before note-10, which plain string order gets wrong both ways.
+        // note-2 を note-10 より前に。素の文字列順ではどちらも間違える。
         case .title: out.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         }
         return out
     }
 
-    /// The text of a note, and the stamp that says which version it was.
+    /// ノートの本文と、どの時点のものかを言うスタンプ。
     ///
-    /// The two travel together on purpose. Saving has to hand the stamp back,
-    /// and a caller that has to remember to ask for it separately is a caller
-    /// that will one day forget — and the forgetting is silent until the day
-    /// two devices are open on the same note.
+    /// 2 つを一緒に運ぶのは意図的。保存はスタンプを返す必要があり、別に
+    /// 訊くことを覚えておかなければならない呼び出し側は、いつか忘れる ──
+    /// そして忘れたことは、2 台が同じノートを開く日まで黙っている。
+    ///
     func open(_ note: Note) throws -> (String, String) {
         let answer = try Cian.call("read", ["path": note.path])
         return (answer["text"] as? String ?? "", answer["stamp"] as? String ?? "")
     }
 
-    /// A note split into its bookkeeping and its words.
+    /// ノートを、管理情報と本文に分けたもの。
     ///
-    /// The writing half shows only the second part — see the engine's
-    /// `split`. Where the front matter ends is decided there, so the phone,
-    /// the window and the terminal all agree where a note starts.
+    /// 編集側は後半だけを出す ── エンジンの `split` を見よ。front matter が
+    /// どこで終わるかはそこで決まるので、iPhone もデスクトップ版も端末版も、
+    /// ノートの開始位置について一致する。
     func split(_ text: String) throws -> (String, String) {
         let out = try Cian.call("split", ["text": text])
         return (out["head"] as? String ?? "", out["body"] as? String ?? text)
     }
 
-    /// The note with one task ticked or unticked, as text to save.
+    /// チェックボックスを 1 つ切り替えたノートを、保存用のテキストとして返す。
     ///
-    /// By the line it is on, not by which box it is — see `note::set_check`.
+    /// 何番目のチェックボックスかではなく、行番号で指定する ── `note::set_check` を見よ。
     func checked(_ text: String, line: Int, done: Bool) throws -> String {
         let out = try Cian.call("check", ["text": text, "line": line, "done": done])
         return out["text"] as? String ?? text
     }
 
-    /// A piece of text wrapped in a colour, written the way cian writes it.
+    /// テキストを色で包んだもの。amber が書くのと同じ形式で。
     ///
-    /// Through the engine rather than a format string here: the notation is
-    /// one decision, and two places that write it are two notations one edit
+    /// ここで書式文字列を組まず、エンジンを通す ── 記法は 1 つの決めごとで、
+    /// それを書く場所が 2 つあれば、1 回の編集で記法が 2 つになる。
     /// apart.
     func painted(_ text: String, _ color: String) throws -> String {
         let out = try Cian.call("paint", ["text": text, "color": color])
         return out["text"] as? String ?? text
     }
 
-    /// The note with a different set of tags on it.
+    /// タグを入れ替えたノート。
     ///
-    /// Comes back as text for the caller to save, so this goes through the
-    /// same conflict check as any other edit.
+    /// 呼び出し側が保存するためのテキストとして返るので、ほかの編集と
+    /// 同じ競合検査を通る。
     func tagged(_ text: String, _ tags: [String]) throws -> String {
         let answer = try Cian.call("settags", ["text": text, "tags": tags])
         return answer["text"] as? String ?? text
     }
 
-    /// Every tag in the folder, commonest first — what to offer rather than
-    /// make somebody type again.
+    /// フォルダにあるタグすべて。よく使う順 ── 打ち直させるのではなく
+    /// 候補として出すため。
     var allTags: [String] {
         var n: [String: Int] = [:]
         for note in notes { for t in note.tags { n[t, default: 0] += 1 } }
@@ -1168,12 +1168,12 @@ final class NotesStore: ObservableObject {
             .map(\.key)
     }
 
-    /// What a note asked to be reminded about.
+    /// そのノートが通知してほしいと言っている内容。
     func reminder(of text: String) throws -> Reminder {
         Reminder(try Cian.call("remind", ["text": text]))
     }
 
-    /// Set or clear one front-matter field, coming back as text to save.
+    /// front matter のフィールドを 1 つ設定／削除し、保存用のテキストとして返す。
     func field(_ text: String, _ key: String, _ value: String?) throws -> String {
         let out = try Cian.call("setfield", [
             "text": text, "key": key, "value": value ?? NSNull(),
@@ -1181,11 +1181,11 @@ final class NotesStore: ObservableObject {
         return out["text"] as? String ?? text
     }
 
-    /// Make the copies every routine owes, and write down that they were made.
+    /// 繰り返しが溜めているぶんのコピーを作り、作ったことを記録する。
     ///
-    /// Done on opening the app, because that is the only moment a phone gives
-    /// an app to do it — see `Bell`. Quiet when there is nothing owed, which
-    /// is almost always.
+    /// アプリを開いたときに行う。端末がそれをやらせてくれる唯一の瞬間だから ──
+    /// `Bell` を見よ。溜まっていなければ何もしない。たいていはそちら。
+    ///
     func catchUp() {
         guard root != nil else { return }
         var made = 0
@@ -1199,7 +1199,7 @@ final class NotesStore: ObservableObject {
         if made > 0 { reload() }
     }
 
-    /// A zip of some or all of the notes, for handing to something else.
+    /// ノートの一部または全部の zip。ほかのアプリに渡すため。
     func backup(scope: String, what: String) throws -> URL {
         guard let root else { throw Cian.Failure.engine("保存場所がありません") }
         let r = try Cian.call("backup", [
@@ -1209,11 +1209,11 @@ final class NotesStore: ObservableObject {
         return URL(fileURLWithPath: at)
     }
 
-    /// The note, split into things to draw.
+    /// ノートを、描画単位に分けたもの。
     ///
-    /// Given the text rather than the path, so what is on screen is what the
-    /// preview shows — including edits not saved yet. A preview of the file on
-    /// disk would show yesterday's note while you are looking at today's.
+    /// パスではなく本文を渡す。画面に出ているものがそのままプレビューに
+    /// 出るように ── まだ保存していない編集も含めて。ディスク上のファイルの
+    /// プレビューは、今日のノートを見ているときに昨日のノートを出す。
     func blocks(of text: String) throws -> [Block] {
         let answer = try Cian.call("blocks", ["text": text])
         return (answer["blocks"] as? [[String: Any]] ?? []).map(Block.init)
@@ -1221,8 +1221,8 @@ final class NotesStore: ObservableObject {
 
     enum Saved {
         case ok(stamp: String)
-        /// Somebody else wrote it first. `why` is cian's own account of the
-        /// difference; nothing has been written.
+        /// 先に誰かが書いていた。`why` は amber 自身による違いの説明で、
+        /// 何も書き込まれていない。
         case conflict(why: String)
     }
 
@@ -1360,10 +1360,10 @@ final class NotesStore: ObservableObject {
             : "いまのバージョンを保護しました（古くなっても消えません）。"
     }
 
-    /// Put a picture beside a note and hand back the Markdown link for it.
+    /// 画像をノートの隣に置き、そのための Markdown のリンクを返す。
     ///
-    /// Base64 because that is what fits down a C string. The bytes go over
-    /// once; nothing about where the file lands is decided here.
+    /// base64 なのは、それが C の文字列に載るから。バイト列は一度だけ渡り、
+    /// ファイルがどこに置かれるかはここでは決めない。
     func attach(_ data: Data, ext: String, to note: Note) throws -> String {
         let answer = try Cian.call("image", [
             "note": note.path,
@@ -1376,7 +1376,7 @@ final class NotesStore: ObservableObject {
         return link
     }
 
-    /// Make a notebook inside the one that is open.
+    /// 開いているノートブックの中に、ノートブックを作る。
     func makeBook(_ name: String, under: String? = nil) throws {
         guard let root else { return }
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1386,7 +1386,7 @@ final class NotesStore: ObservableObject {
         reload()
     }
 
-    /// Move a note into another notebook — `nil` means the top of the folder.
+    /// ノートを別のノートブックへ移す ── `nil` は最上位。
     func move(_ note: Note, to book: String?) throws {
         guard let root else { return }
         let dir = book.map { root.appendingPathComponent($0) } ?? root
@@ -1517,24 +1517,24 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    /// Remove a note. There is no trash on a phone, so this cannot be undone
-    /// — the caller asks first.
+    /// ノートを削除する。iPhone にはゴミ箱が無いので取り消せない ──
+    /// 呼び出し側が先に確認する。
     func remove(_ note: Note) throws {
         _ = try Cian.call("delete", ["path": note.path])
         reload()
     }
 
-    /// A new note in the chosen folder, named and shaped by cian.
+    /// 選んだフォルダに新しいノートを作る。名前も形も amber が決める。
     func make(titled title: String, tags: [String] = []) throws -> Note? {
         guard let root else { return nil }
-        // In the notebook that is open, not always at the top — otherwise
-        // filing is something you do afterwards, every time.
+        // 常に最上位ではなく、開いているノートブックの中に作る ──
+        // でないと毎回、あとから整理することになる。
         let dir = root.appendingPathComponent(at)
         let made = try Cian.call("new", ["dir": dir.path, "title": title])
         guard let path = made["path"] as? String else { return nil }
-        // The tags go on by rewriting the note that was just written, rather
-        // than by teaching `new` about tags: one place decides what a note's
-        // front matter looks like, and it is already `note::set_tags`.
+        // タグは、書いたばかりのノートを書き直して付ける。`new` に
+        // タグを教えるのではなく ── ノートの front matter の形を決めるのは
+        // 1 か所で、それは既に `note::set_tags` だから。
         if !tags.isEmpty {
             let read = try Cian.call("read", ["path": path])
             let text = read["text"] as? String ?? ""

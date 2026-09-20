@@ -29,8 +29,7 @@ struct CianApp: App {
                 // シアン。アプリの名前もアイコンもそれだから。画面ごとに
                 // 色を変えず、アプリ全体で 1 色にする ── 色は「触れるもの」を
                 // 見分ける手がかりで、画面ごとに答えが違えば
-                // touched, and a different answer on every screen is no
-                // answer.
+                // 手がかりにならない。
                 // 配色を選んでも tint はシアンのまま（依頼 75・色は一つ、置き場所も一つ）。
                 .tint(Color("AccentColor"))
                 .preferredColorScheme(chosen.map { $0.light ? ColorScheme.light : .dark } ?? look.scheme)
