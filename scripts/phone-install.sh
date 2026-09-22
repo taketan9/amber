@@ -47,6 +47,9 @@ done <<< "$rows"
 [ "$want" = "--list" ] && exit 0
 
 hit=0
+failed=0
+# 組むはずの版。**入れたものがこれと違えば、入れたとは言わない。**
+version=$(sed -n 's/.*MARKETING_VERSION = \([0-9.]*\);.*/\1/p' ios/Cian.xcodeproj/project.pbxproj | head -1)
 while IFS=$'\t' read -r name ident udid model trouble; do
     [ -z "$ident" ] && continue
     if [ -n "$want" ] && [[ "$name" != *"$want"* ]]; then continue; fi
@@ -59,21 +62,47 @@ while IFS=$'\t' read -r name ident udid model trouble; do
     # 新しい端末は、はじめは書類に入っていないので「この端末は入っていません」で
     # 止まる。この旗があると Xcode が Apple に登録しにいく ── **本人の Apple ID に
     # 「この端末で開発する」と記録される**（Xcode からいつでも消せる）。
-    xcodebuild -project ios/Cian.xcodeproj -scheme Cian \
+    out=$(xcodebuild -project ios/Cian.xcodeproj -scheme Cian \
         -destination "platform=iOS,id=$udid" -configuration Debug \
-        -allowProvisioningUpdates build \
-        2>&1 | grep -E 'error:|\*\* BUILD' || true
+        -allowProvisioningUpdates build 2>&1 || true)
+    printf '%s\n' "$out" | grep -E 'error:|\*\* BUILD' || true
+    # **組めなかったら、入れない**（2026-09-22）。前は失敗を `|| true` で飲み込み、
+    # そのあと DerivedData に**前回組めた古い `Cian.app`** を見つけて入れていた ──
+    # 署名が切れて組めなかった日に「入れました」と言い、実際には一つ前の版が
+    # 入り直しただけだった（3.2.4 のつもりで 3.2.3 が二台に入った）。
+    if ! printf '%s\n' "$out" | grep -q '\*\* BUILD SUCCEEDED \*\*'; then
+        echo "  組めませんでした ── 上の error を見てください。入れていません"
+        failed=1
+        continue
+    fi
     app=$(find ~/Library/Developer/Xcode/DerivedData/Cian-*/Build/Products/Debug-iphoneos \
           -maxdepth 1 -name 'Cian.app' 2>/dev/null | head -1)
-    [ -n "$app" ] || { echo "  組めていません"; continue; }
+    [ -n "$app" ] || { echo "  組めていません"; failed=1; continue; }
+    # **入れる前に、版を見る** ── 組めたと言っても、見つけた `Cian.app` が
+    # 別の場所の古いものなら同じことが起きる。
+    got=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist" 2>/dev/null || true)
+    if [ "$got" != "$version" ]; then
+        echo "  組んだはずの版（$version）ではなく $got が見つかりました。入れていません"
+        failed=1
+        continue
+    fi
     if xcrun devicectl device install app --device "$ident" "$app" >/dev/null 2>&1; then
-        echo "  入れました。"
+        echo "  入れました（$version）。"
     else
         echo "  入れられませんでした（端末のロックを解いて、つないだままにしてください）"
+        failed=1
     fi
 done <<< "$rows"
 
 [ "$hit" = "1" ] || { echo; echo "「$want」に当たる端末がありません。"; exit 1; }
+
+# **一台でも入らなければ、そう言って止まる。** 下の「いつまで動くか」は、
+# 入らなかったときは**前に組んだ古い署名の日付**を読んでしまうので、出さない。
+if [ "$failed" = "1" ]; then
+    echo
+    echo "入らなかった端末があります。上の理由を見てください。"
+    exit 1
+fi
 
 # **いつ切れるかを言う。** 言わないと、ある朝いきなり起動しなくなる。
 prof=$(find ~/Library/Developer/Xcode/DerivedData/Cian-*/Build/Products/Debug-iphoneos/Cian.app \
