@@ -3,7 +3,7 @@
 
     python3 packaging/gui_zip.py out/amber-gui.zip
 
-入れるのは3 つ。
+入れるのは 4 つ。
 
   * `gui/**` ── 画面そのもの（`node_modules` は入れない。あそこには
     Electron 本体が居て、同梱する側は自分の Electron の中で動かす）
@@ -11,6 +11,11 @@
     と指している。`gui/` だけではアイコンの出ない画面になる
   * `packaging/welcome/**` ── 「サンプルノートを入れる」のコピー元。
     入れておかないと、同梱した側でそれを実行した人に「サンプルが入っていません」が出る
+  * `packaging/templates/**` ── 「サンプルのテンプレートを入れる」のコピー元
+    （依頼 506）。**入れ忘れていた**（crmaine から・2026-09-22）── 自前の
+    `scripts/pack.js` は入れていたので、手元で組んだ amber では出ず、
+    **この zip から組んだ環境でだけ必ず転けていた**（「サンプルのテンプレートが
+    入っていません」）。同じものを二か所で数えると、片方だけ増える
 
 **`zip` コマンドではなく Python で作る。** サンプルノートの名前は日本語で、
 1 つは `ambər へようこそ.md`（シュワー入り）── Info-ZIP の `zip` は既定で
@@ -43,9 +48,10 @@ def rows() -> list[tuple[Path, str]]:
             continue
         out.append((at, rel.as_posix()))
     out.append((ROOT / "packaging" / "amber-mark.png", "packaging/amber-mark.png"))
-    for at in sorted((ROOT / "packaging" / "welcome").rglob("*")):
-        if at.is_file():
-            out.append((at, at.relative_to(ROOT).as_posix()))
+    for sub in ("welcome", "templates"):
+        for at in sorted((ROOT / "packaging" / sub).rglob("*")):
+            if at.is_file():
+                out.append((at, at.relative_to(ROOT).as_posix()))
     lic = ROOT / "LICENSE"
     if lic.exists():
         out.append((lic, "LICENSE"))
@@ -88,6 +94,7 @@ def check(at: Path) -> None:
     want(lambda x: x == "gui/vendor/mermaid/mermaid.min.js", "図")
     want(lambda x: x == "packaging/amber-mark.png", "アイコン")
     seen = want(lambda x: x.startswith("packaging/welcome/") and x.endswith(".md"), "サンプルノート")
+    kept = want(lambda x: x.startswith("packaging/templates/") and x.endswith(".md"), "サンプルのテンプレート")
 
     if any(x.startswith("gui/node_modules/") for x in names):
         sys.exit("NG: node_modules が混ざっています（200MB 超）")
@@ -111,7 +118,7 @@ def check(at: Path) -> None:
             sys.exit(f"NG: {i.filename} に実行ビットがありません（Unix で中に入れません）")
 
     kb = at.stat().st_size // 1024
-    print(f"できました: {at} ({kb} KB ・ {len(names)} 件 ・ サンプル {seen} 枚)")
+    print(f"できました: {at} ({kb} KB ・ {len(names)} 件 ・ サンプル {seen} 本 ・ テンプレート {kept} 本)")
 
 
 def main() -> None:

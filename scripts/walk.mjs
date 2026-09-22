@@ -1302,6 +1302,38 @@ await step('カレンダー：予定を足すと、ノートが一本できる',
     return true;
 `, true);
 
+/* ── 十六の四の一。**予定表が使えない端末で、終日を登録する**（2026-09-22） ──
+ *
+ * crmaine が紹介動画を撮っていて見つけた。予定表の使えない端末（Windows・
+ * 許可を断った Mac）では、予定はノートの `remind:` として置かれる。終日を
+ * 選ぶと**日付だけ**を書くのに、core は時刻を必須にしていたので読めず、
+ * **登録した日に出なかった** ── 作った日に「ノート」として出るだけで、
+ * その日の予定には「予定はありません」と出た。
+ */
+await step('終日を登録すると、ファイルには日付だけの remind が入る', `
+    const hadHere = hereOn;
+    hereOn = false;
+    const was = window.askEvent;
+    window.askEvent = async () => ({ title: '終日の試し', start: '', end: '', tags: [], toGroup: false });
+    try { await calAdd('2026-09-23', ''); } finally { window.askEvent = was; hereOn = hadHere; }
+    await new Promise((g) => setTimeout(g, 800));
+    const n = state.notes.find((x) => x.title === '終日の試し');
+    if (!n) return 'ノートがありません';
+    const t = (await ask('read', { path: n.path })).text;
+    // 逆引用符と円記号はここに書けない（walk-harness.mjs の註）── 改行は fromCharCode で。
+    return t.includes('remind: 2026-09-23' + String.fromCharCode(10)) ? true : t.slice(0, 160);`, true);
+await step('その日の予定に入る（「予定はありません」にならない）', `
+    calMonth = { y: 2026, m: 9 };
+    calDay = '2026-09-23';
+    await drawCal();
+    await new Promise((g) => setTimeout(g, 600));
+    // 見るのは core が返した予定そのもの（calSlots）。calShown は
+    // 手前の段が選んだ絞り込み（自分だけ／グループ）を引き継ぐので、ここで
+    // 見たいもの（その日に予定として返るか）と別の理由で落ちる。
+    const plans = calSlots.filter((s) => s.title === '終日の試し' && s.kind !== 'note' && s.day === '2026-09-23');
+    calShut();
+    return plans.length === 1 ? true : '予定に入っていません: ' + JSON.stringify(calSlots.filter((s) => s.title === '終日の試し').map((s) => [s.day, s.kind]));`, true);
+
 /* ── 十六の四の二。**みんなの予定を、人ごとに**（依頼 471） ── */
 
 if (process.env.TEAMCSV) {
@@ -2411,7 +2443,7 @@ if (NOTES2) {
 // 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => relOf(x.book) === '歩き試し'
-            || /複製|新しいノート|週報|二台目|名前は一行目から|ダイアログから作ったノート/.test(x.title || '')
+            || /複製|新しいノート|週報|二台目|名前は一行目から|ダイアログから作ったノート|終日の試し/.test(x.title || '')
             || /買い物\.2\.md$/.test(x.path))) {
         try { await ask('delete', { path: n.path }); } catch { /* もう無い */ }
     }

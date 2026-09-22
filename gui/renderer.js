@@ -9855,7 +9855,12 @@ async function calAdd(day, at0) {
         });
         await reload({ quiet: true });
         await drawCal();
-        say('「' + title.trim() + '」を ' + dayName(day) + ' に登録しました');
+        // **どこに置いたかを言う**（crmaine から・2026-09-22）。ここへ来るのは
+        // この端末の予定表が使えないとき（Windows・許可を断った Mac）で、
+        // 置いたのは amber のノート ── Google や Apple のカレンダーには出ない。
+        // 本物の予定表に入れたときと同じ言葉だと、そちらを探しに行く。
+        say('「' + title.trim() + '」を ' + dayName(day) + ' に登録しました'
+            + ' ── この端末の予定表が使えないので、ノートとして置きました');
     } catch (e) {
         say('足せません: ' + why(e));
     }

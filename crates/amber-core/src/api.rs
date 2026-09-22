@@ -1388,6 +1388,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             };
             Ok(serde_json::json!({
                 "once": r.once.map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
+                // 時刻の無い一度きり（終日）。**鳴らす時刻は渡さない** ──
+                // `once` に入れると通知の側が 0 時に鳴らす（`note::Remind::day`）。
+                "day": r.day.map(|d| d.to_string()),
                 "every": r.every.map(|(e, h, m)| serde_json::json!({
                     "kind": match e {
                         crate::note::Every::Daily => "daily",

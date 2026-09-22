@@ -2175,8 +2175,25 @@ mod tests {
         // 通知は、誰も選んでいない時刻に鳴る。
         assert_eq!(remind("---\nrepeat: weekly ときどき 09:00\n---\n").every, None);
         assert_eq!(remind("---\nremind: あした\n---\n").once, None);
+        assert_eq!(remind("---\nremind: あした\n---\n").day, None);
         assert_eq!(remind("---\nrepeat: daily 25:00\n---\n").every, None);
         assert_eq!(remind("本文だけ\n"), Remind::default());
+    }
+
+    #[test]
+    fn 時刻の無い通知は_終日として読む() {
+        use chrono::NaiveDate;
+        // **書く側が実際に書く二つの形**（デスクトップ版の `calAdd` と iPhone の
+        // `Calendaring` は、どちらも `day` か `day + ' ' + 時刻` を書く）。
+        // 読めない形を書いていたので、登録した日に出なかった（2026-09-22）。
+        let d = NaiveDate::from_ymd_opt(2026, 9, 23).unwrap();
+        let all = remind("---\nremind: 2026-09-23\n---\n");
+        assert_eq!(all.day, Some(d), "日付だけは終日");
+        assert_eq!(all.once, None, "鳴らす時刻は勝手に決めない");
+
+        let timed = remind("---\nremind: 2026-09-23 14:30\n---\n");
+        assert_eq!(timed.once, d.and_hms_opt(14, 30, 0));
+        assert_eq!(timed.day, None, "時刻があれば終日ではない");
     }
 
     #[test]
@@ -2673,6 +2690,17 @@ pub enum Every {
 pub struct Remind {
     /// `remind: 2026-09-10 09:00` — once.
     pub once: Option<chrono::NaiveDateTime>,
+    /// `remind: 2026-09-10` ── 時刻の無い一度きり（終日）。
+    ///
+    /// **書く側がこの形で書いている**（デスクトップ版の `calAdd`・iPhone の
+    /// `Calendaring` ── 予定表が使えない端末で「終日」を選ぶと、ノートに
+    /// 日付だけの `remind:` を置く）。読む側が時刻を必須にしていたので、
+    /// **登録したはずの日に出ず**、作った日にノートとして出るだけだった
+    /// （crmaine の紹介動画を撮っていて見つかった・2026-09-22）。
+    ///
+    /// `once` とは別に持つ ── **鳴らす時刻を勝手に決めない**。終日の予定を
+    /// 朝の何時に知らせるかは本人が決めること（まだ決めていない）。
+    pub day: Option<chrono::NaiveDate>,
     /// `repeat: weekly wed 09:00` ── 繰り返し。
     pub every: Option<(Every, u32, u32)>,
     /// `last: 2026-09-03` ── この繰り返しを最後に実行した日。ノートの中に持つのは、
@@ -2707,6 +2735,10 @@ pub fn remind_lines(lines: &[String]) -> Remind {
 
     if let Some(v) = f.fields.get("remind") {
         out.once = when(v);
+        // 時刻が無ければ、日付だけの終日として読む（`day` の註）。
+        if out.once.is_none() {
+            out.day = day(v.trim());
+        }
     }
     if let Some(v) = f.fields.get("last") {
         out.last = day(v.trim());

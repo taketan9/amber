@@ -640,7 +640,48 @@ jobs:
             rm -f "$f"
           done
           sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      # **資材の名前が変わったら、リリースノートの頭に書く**（crmaine から・
+      # 2026-09-22）。v3.2.0 で `amber-server-win-x64.exe` が `.exe.zip` に
+      # 変わったとき、どこにも書かなかったので、**取り寄せる側（crmaine）が
+      # 黙って止まった**。
+      #
+      # **憶えておく約束にしない** ── 「変えたら書く」を決まりにしても、忘れた日に
+      # 何も鳴らない。一つ前のリリースの資材の名前と自動で見比べ、違えば頭に
+      # 書く。**変わらなくても一覧は毎回書く**（取り寄せる側が、いま何が
+      # 置いてあるかを一目で読めるように）。
+      - name: 資材の名前が変わっていないか、一つ前と見比べる
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 版の入った名前（`amber-win-x64-3.1.8.zip`）は毎回変わるので、版を
+          # 伏せてから見比べる ── 伏せないと、形が同じでも毎回「変わった」と言う。
+          mask() { sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+/-<版>/g'; }
+          now=$(cd out && ls -1 | sort)
+          prev_tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)
+          before=""
+          if [ -n "$prev_tag" ]; then
+            before=$(gh release view "$prev_tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | sort || true)
+          fi
+          gone=$(comm -23 <(printf '%s\n' "$before" | sed '/^$/d' | mask | sort -u) <(printf '%s\n' "$now" | mask | sort -u))
+          came=$(comm -13 <(printf '%s\n' "$before" | sed '/^$/d' | mask | sort -u) <(printf '%s\n' "$now" | mask | sort -u))
+          {
+            if [ -n "$before" ] && { [ -n "$gone" ] || [ -n "$came" ]; }; then
+              echo "## ⚠ 資材の名前が変わりました（$prev_tag から）"
+              echo
+              echo "取り寄せている道具がある場合は、名前を合わせてください。"
+              echo
+              [ -n "$gone" ] && printf '%s\n' "$gone" | sed 's/^/- なくなった: `/; s/$/`/'
+              [ -n "$came" ] && printf '%s\n' "$came" | sed 's/^/- 増えた: `/; s/$/`/'
+              echo
+            fi
+            echo "## 置いてある資材"
+            echo
+            printf '%s\n' "$now" | sed 's/^/- `/; s/$/`/'
+            echo
+          } > release-notes.md
+          cat release-notes.md
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*
+          body_path: release-notes.md
           generate_release_notes: true

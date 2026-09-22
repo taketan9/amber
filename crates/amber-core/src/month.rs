@@ -235,6 +235,15 @@ pub fn of(rows: &[crate::survey::Row], year: i32, month: u32) -> Vec<Slot> {
                                 path: path.clone(), kind: Kind::Once });
             }
         }
+        // **時刻の無い一度きり（終日）も、その日に出す**（2026-09-22）。前は
+        // 読めずに捨てていたので、予定表の使えない端末で「終日」を登録すると、
+        // 登録した日ではなく**作った日にノートとして**出るだけだった。
+        if let Some(d) = plan.day {
+            if d >= from && d <= to {
+                out.push(Slot { day: d, at: None, title: title.clone(),
+                                path: path.clone(), kind: Kind::Once });
+            }
+        }
         if let Some((every, h, m)) = plan.every {
             let at = chrono::NaiveTime::from_hms_opt(h, m, 0);
             for d in lands(every, from, to) {
@@ -260,6 +269,25 @@ mod tests {
         let stop = std::sync::atomic::AtomicBool::new(false);
         let limits = crate::survey::Limits { depth: 4, rows: 200, hidden: false, ..Default::default() };
         crate::survey::survey(root, limits, &stop).rows
+    }
+
+    #[test]
+    fn 時刻の無い一度きりは_その日に終日で出る() {
+        // crmaine が紹介動画を撮っていて踏んだ形そのまま（2026-09-22）──
+        // 20 日に作って 23 日に知らせたいノート。前は 20 日に「ノート」として
+        // 出るだけで、23 日には何も出なかった。
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::write(root.join("歯医者.md"),
+            "---\ntitle: 歯医者\ncreated: 2026-09-20\nremind: 2026-09-23\n---\n\n# 歯医者\n").unwrap();
+
+        let got = super::of(&walk(root), 2026, 9);
+        let once: Vec<&super::Slot> = got.iter().filter(|s| s.kind == super::Kind::Once).collect();
+        assert_eq!(once.len(), 1, "予定として一つ出る: {:?}", got);
+        assert_eq!(once[0].day.to_string(), "2026-09-23", "登録した日に出る");
+        assert_eq!(once[0].at, None, "時刻は無い（終日）");
+        // 作った日にノートとして出るのは、これまでどおり。
+        assert!(got.iter().any(|s| s.kind == super::Kind::Note && s.day.to_string() == "2026-09-20"));
     }
 
     #[test]
