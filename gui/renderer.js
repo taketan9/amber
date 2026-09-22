@@ -609,6 +609,47 @@ function dayOf(sec) {
         + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+/// **終日の予定は、その日に amber を開いた瞬間に鳴らす**（本人・2026-09-22）。
+///
+/// 時刻の無い予定（`remind: 2026-09-23`）には鳴らす時刻が無い ── 本人が
+/// 決めたのは「その日に開いた瞬間」。「今日か」は core が決める（`allday`）
+/// ── iPhone と同じ答えにするため。
+///
+/// **同じ日に何度開いても一度だけ。** 開き直すたびに鳴ると、止めたくなって
+/// 通知ごと切られる。鳴らしたことはこの端末の設定に憶える ── ノートには
+/// 書かない（鳴っただけでノートが変わると、同期先で差分になる）。
+///
+/// 通知を出せない環境では、画面の下の一行で言う ── 黙って飛ばすと、
+/// 登録した予定が一度も知らされないまま過ぎる。
+let rangAllday = {};
+let alldayOn = '';
+/// 鳴らす口。**試験から差し替えられるように、間に一つ挟む** ── `window.amber` は
+/// preload が凍らせて渡すので、上から書き換えても黙って効かない（総ざらいで
+/// 差し替えたつもりが、本物の通知が Mac に出た）。
+let ringNow = (title, body) => window.amber.ring(title, body);
+async function ringAllday() {
+    const rang = { ...rangAllday };
+    let day = '';
+    for (const p of state.places) {
+        let got;
+        try { got = await window.amber.call('allday', { path: p.dir }); } catch { continue; }
+        day = got.day;
+        for (const n of got.notes || []) {
+            if (rang[n.path] === got.day) continue;
+            rang[n.path] = got.day;
+            let shown = false;
+            try { shown = await ringNow(n.title, '今日の予定（終日）'); } catch { /* 下で言う */ }
+            if (!shown) say('今日の予定（終日）: ' + n.title);
+        }
+    }
+    if (!day) return;
+    alldayOn = day;
+    // 今日のぶんだけ残す ── 憶えが際限なく溜まらないように。
+    for (const k of Object.keys(rang)) if (rang[k] !== day) delete rang[k];
+    rangAllday = rang;
+    window.amber.remember({ rangAllday: rang });
+}
+
 /// 一語が当たるか。**見出しごとに探し先が違う。**
 ///
 /// `tag:定型` `book:仕事` `title:週報`（`タグ:` `フォルダ:` `題:` も同じ）と
@@ -13724,6 +13765,13 @@ const escapeAttr = escapeHtml;
     const first = (saved.open && back.includes(saved.open)) ? saved.open : back[0];
     if (first) { showing = first; await openNote(first, { keep: true }); }
     else if (saved.open && state.notes.some((n) => n.path === saved.open)) await openNote(saved.open);
+
+    // **終日の予定は、その日に開いた瞬間に鳴らす**（`ringAllday`）。
+    rangAllday = saved.rangAllday || {};
+    await ringAllday();
+    // 開きっぱなしで夜を越すと「開いた瞬間」が来ないまま当日が過ぎる ──
+    // 前に出したとき、**日付が変わっていれば**もう一度見る。
+    window.addEventListener('focus', () => { if (dayOf(Date.now() / 1000) !== alldayOn) ringAllday(); });
 
     // **保存しかけたまま閉じない。**
     window.addEventListener('beforeunload', () => { if (state.dirty) save(); });

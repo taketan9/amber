@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 import SwiftUI
 
 /// ノートがどこにあり、中に何があるか。
@@ -1224,6 +1225,43 @@ final class NotesStore: ObservableObject {
             }
         }
         if made > 0 { reload() }
+        if let root { ringAllday(root) }
+    }
+
+    /// **終日の予定は、その日に amber を開いた瞬間に鳴らす**（本人・2026-09-22）。
+    ///
+    /// 時刻の無い予定（`remind: 2026-09-23`）には鳴らす時刻が無いので、OS の
+    /// 目覚まし（`Bell`）には預けられない ── 本人が決めたのは「その日に開いた
+    /// 瞬間」。「今日か」は core が決める（`allday`）── デスクトップ版と同じ答えに
+    /// するため。
+    ///
+    /// **同じ日に何度開いても一度だけ。** 鳴らしたことはこの端末に憶える
+    /// （`amber.alldayRang` ── 新しい鍵は `amber.` で始める。`cian.` のものは
+    /// 変えると設定が消えるので残してあるだけ）── ノートには書かない（鳴っただけでノートが
+    /// 変わると、同期先で差分になる）。
+    ///
+    /// 出すのは「いますぐ」の通知。アプリが前に出ていても、`Ring`
+    /// （`willPresent`）が上から出す。
+    func ringAllday(_ root: URL) {
+        guard let r = try? Cian.call("allday", ["path": root.path]),
+              let day = r["day"] as? String,
+              let notes = r["notes"] as? [[String: Any]] else { return }
+        let key = "amber.alldayRang"
+        var rang = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        // 今日のぶんだけ残す ── 憶えが際限なく溜まらないように。
+        rang = rang.filter { $0.value == day }
+        for n in notes {
+            guard let path = n["path"] as? String, rang[path] != day else { continue }
+            rang[path] = day
+            let body = UNMutableNotificationContent()
+            body.title = n["title"] as? String ?? ""
+            body.body = "今日の予定（終日）"
+            body.sound = .default
+            body.userInfo = ["path": path]
+            UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: "\(path)#allday#\(day)", content: body, trigger: nil))
+        }
+        UserDefaults.standard.set(rang, forKey: key)
     }
 
     /// ノートの一部または全部の zip。ほかのアプリに渡すため。

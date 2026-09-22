@@ -1100,6 +1100,39 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         // いま乗るのは amber が既に知っているものだけ（前書きの `remind:`
         // と `repeat:`、それとノートを書いた日）── **語彙を増やさない**。
         // よそのカレンダーは、ここに足す形で入る。
+        // **今日が終日の日のノート**（2026-09-22・本人「amber を起動した瞬間に
+        // 鳴らすがよいな」）。
+        //
+        // 終日の予定（`remind: 2026-09-23` ── 時刻の無い一度きり）は、鳴らす
+        // 時刻を持たない。本人が決めたのは**その日に amber を開いた瞬間**。
+        // 「今日か」を**ここで一度だけ決める** ── デスクトップ版と iPhone が
+        // それぞれ今日を数えると、日付の変わり目で片方だけ鳴る日ができる。
+        // 鳴らしたかどうかは、それぞれの端末が憶える（ノートには書かない ──
+        // 書くと、鳴っただけでノートが変わり、同期先で差分になる）。
+        "allday" => {
+            let dir = std::path::PathBuf::from(arg(p, "path"));
+            if !dir.is_dir() {
+                anyhow::bail!("{} を開けません", dir.display());
+            }
+            let today = chrono_today();
+            use chrono::Datelike;
+            let limits = crate::survey::Limits {
+                depth: p["depth"].as_u64().unwrap_or(6) as usize,
+                rows: 4000,
+                hidden: false,
+                ..Default::default()
+            };
+            let stop = std::sync::atomic::AtomicBool::new(false);
+            let walk = crate::survey::survey(&dir, limits, &stop);
+            let slots = crate::month::of(&walk.rows, today.year(), today.month());
+            Ok(serde_json::json!({
+                "day": today.to_string(),
+                "notes": slots.iter()
+                    .filter(|s| s.kind == crate::month::Kind::Once && s.at.is_none() && s.day == today)
+                    .map(|s| serde_json::json!({ "path": s.path, "title": s.title }))
+                    .collect::<Vec<_>>(),
+            }))
+        }
         "month" => {
             let dir = std::path::PathBuf::from(arg(p, "path"));
             if !dir.is_dir() {
@@ -1588,6 +1621,31 @@ mod tests {
         .unwrap();
         std::fs::write(d.path().join("b.txt"), "not a note\n").unwrap();
         d
+    }
+
+    /// 終日の予定は、その日に amber を開いた瞬間に鳴らす（本人・2026-09-22）。
+    /// 「今日か」は core が決める ── 今日の終日だけを返し、ほかの日と時刻の
+    /// あるものは返さない（時刻のあるものは OS の目覚ましが鳴らす）。
+    #[test]
+    fn 今日が終日の日のノートだけを返す() {
+        let d = tempfile::tempdir().unwrap();
+        let today = chrono_today();
+        // **同じ月の別の日**にする ── 月末に走らせたとき明日を使うと来月になり、
+        // この月の予定に入らないので、「今日だけか」を見ないまま通ってしまう。
+        use chrono::Datelike;
+        let other = today.with_day(if today.day() == 1 { 2 } else { 1 }).unwrap();
+        let put = |name: &str, body: String| std::fs::write(d.path().join(name), body).unwrap();
+        put("今日.md", format!("---\ntitle: 今日の終日\nremind: {today}\n---\n"));
+        put("別の日.md", format!("---\ntitle: 別の日の終日\nremind: {other}\n---\n"));
+        put("時刻.md", format!("---\ntitle: 今日の十時\nremind: {today} 10:00\n---\n"));
+        put("ただ.md", "---\ntitle: 何もない\n---\n".to_string());
+
+        let r = call("allday", &serde_json::json!({ "path": d.path().to_string_lossy() })).unwrap();
+        assert_eq!(r["day"], today.to_string());
+        let titles: Vec<&str> = r["notes"].as_array().unwrap().iter()
+            .map(|n| n["title"].as_str().unwrap()).collect();
+        assert_eq!(titles, vec!["今日の終日"], "今日の終日だけ: {titles:?}");
+        assert!(r["notes"][0]["path"].as_str().unwrap().ends_with("今日.md"));
     }
 
     /// ロック（依頼 629）。**ゲートは `write` 側に 1 つ** ── 書式を付ける・タグを付けるは

@@ -1334,6 +1334,42 @@ await step('その日の予定に入る（「予定はありません」にな�
     calShut();
     return plans.length === 1 ? true : '予定に入っていません: ' + JSON.stringify(calSlots.filter((s) => s.title === '終日の試し').map((s) => [s.day, s.kind]));`, true);
 
+/* ── 十六の四の一の二。**終日の予定は、その日に開いた瞬間に鳴らす**（本人・2026-09-22） ──
+ *
+ * 鳴らす口は差し替えて数える（ringNow）── window.amber は preload が凍らせて
+ * 渡すので、上から書き換えても効かず、本物の通知が Mac に出る。
+ */
+{
+    const d = new Date();
+    const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    writeFileSync(NOTES + '/今日の終日.md', '---\ntitle: 今日の終日\nremind: ' + today + '\n---\n\n今日の予定。\n');
+}
+await step('終日の予定：その日に開いたら一度だけ鳴り、二度目は鳴らない', `
+    const rang = [];
+    const was = ringNow;
+    ringNow = async (t) => { rang.push(t); return true; };
+    try {
+        rangAllday = {};
+        await ringAllday();
+        const n1 = rang.filter((t) => t === '今日の終日').length;
+        await ringAllday();
+        const n2 = rang.filter((t) => t === '今日の終日').length;
+        if (n1 !== 1) return '一度目に ' + n1 + ' 回鳴りました';
+        if (n2 !== 1) return '二度目にも鳴りました';
+        const kept = await window.amber.recall();
+        return kept.rangAllday && Object.values(kept.rangAllday).includes(alldayOn) ? true : '鳴らしたことを憶えていません';
+    } finally { ringNow = was; }`, true);
+await step('終日の予定：通知が出せないときは、画面の下で言う', `
+    const was = ringNow;
+    ringNow = async () => false;
+    try {
+        rangAllday = {};
+        await ringAllday();
+        await new Promise((g) => setTimeout(g, 200));
+        const line = (document.getElementById('say') || {}).textContent || '';
+        return line.includes('今日の終日') ? true : '言っていません: ' + line;
+    } finally { ringNow = was; }`, true);
+
 /* ── 十六の四の二。**みんなの予定を、人ごとに**（依頼 471） ── */
 
 if (process.env.TEAMCSV) {
@@ -2443,7 +2479,7 @@ if (NOTES2) {
 // 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => relOf(x.book) === '歩き試し'
-            || /複製|新しいノート|週報|二台目|名前は一行目から|ダイアログから作ったノート|終日の試し/.test(x.title || '')
+            || /複製|新しいノート|週報|二台目|名前は一行目から|ダイアログから作ったノート|終日の試し|今日の終日/.test(x.title || '')
             || /買い物\.2\.md$/.test(x.path))) {
         try { await ask('delete', { path: n.path }); } catch { /* もう無い */ }
     }

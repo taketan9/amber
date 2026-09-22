@@ -639,7 +639,11 @@ jobs:
             echo "置かない: $f"
             rm -f "$f"
           done
-          sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+          # **名前は `SHA256SUMS`**（2026-09-22・本人が決めた・crmaine から）──
+          # cian と揃えて、取り寄せる側が一つの名前で両方を扱えるように。
+          # 前は `SHA256SUMS.txt`。変えた回のリリースノートには、下の段が
+          # 「なくなった／増えた」を自動で書く。
+          sha256sum * > SHA256SUMS && cat SHA256SUMS
       # **資材の名前が変わったら、リリースノートの頭に書く**（crmaine から・
       # 2026-09-22）。v3.2.0 で `amber-server-win-x64.exe` が `.exe.zip` に
       # 変わったとき、どこにも書かなかったので、**取り寄せる側（crmaine）が
