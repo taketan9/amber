@@ -844,12 +844,29 @@ body.split #read { border-left: 1px solid var(--line-2); }
 /* チェックは押せる。**押せると分かる形にする** ── 読める形の中で
    ただ一つ触れるものなので、触れないものと同じ見た目では見つからない。 */
 #read li.task { list-style: none; margin-left: -1.3em; }
+/* **枠はこちらで描く ── iPhone と同じ形**（2026-09-27・依頼 653）。
+   前はデスクトップ版だけが core の入れる `☑` / `☐` の**文字をそのまま**出していて、
+   同じノートのチェックが端末によって別の絵だった（iPhone は 2026-09-08 から
+   枠を描いている）。**文字は出さない** ── 出すと、塗った枠の中に小さい
+   チェックがもう一つ見える（本人が「気持ち悪い」と言ったのがそれ）。
+   大きさは `em` ── デスクトップ版は文字の大きさを変えられるので、px で描くと
+   文字だけ大きくなって枠が取り残される。 */
 #read .box {
-  display: inline-block; width: 1.3em; cursor: pointer;
-  color: var(--amber-deep); font-size: 1.05em; user-select: none;
-  font-family: inherit; line-height: inherit; text-align: left;
+  appearance: none; display: inline-block; cursor: pointer;
+  width: 1.3em; height: 1.3em; padding: 0; margin: 0 .45em 0 0;
+  border: 1.6px solid var(--ink-3); border-radius: .34em; background: none;
+  vertical-align: -.28em; position: relative; user-select: none;
+  /* 中の字を、枠の外へ追い出す（`font-size: 0` にすると `em` が効かなくなる）。 */
+  color: transparent; text-indent: -9em; overflow: hidden;
 }
-#read .box:hover { color: var(--amber); }
+#read .box:hover { border-color: var(--amber); }
+#read .box[aria-pressed="true"] { background: var(--amber); border-color: var(--amber); }
+/* 済みのマークは、枠の上に自分で引く（iPhone と同じ引き方）。 */
+#read .box[aria-pressed="true"]::after {
+  content: ""; position: absolute; left: .42em; top: .18em;
+  width: .26em; height: .58em; border: solid #fff;
+  border-width: 0 .15em .15em 0; transform: rotate(45deg);
+}
 #read .box:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; border-radius: 4px; }
 
 #read blockquote {
