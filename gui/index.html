@@ -613,10 +613,25 @@ body.mac #top { padding-top: 30px; }
   flex: none; padding: 3px 8px; border-radius: 8px;
   color: var(--ink-2); -webkit-app-region: no-drag; line-height: 1.3;
 }
-#tocbtn { font-size: 15px }
 #dots { font-size: 12.5px; font-weight: 600; }
-/* 歯車は絵なので、文字と同じ大きさだと小さく見える。 */
-#gear { font-size: 23px; padding: 0 8px; line-height: 1; }
+/* **目次と設定は、線で描いた絵**（2026-09-27・crmaine から）── 前は `☰` と
+   `⚙` の文字で、隣に並ぶ鐘や矢印（手描きの SVG）と明らかに別人に見えた。
+   大きさは鐘・矢印と同じ 19px、枠の背丈も揃える。 */
+#tocbtn, #gear {
+  width: 32px; height: 30px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+#tocbtn svg, #gear svg { width: 19px; height: 19px; }
+/* **記号のボタンは、どれも線で描いた絵**（2026-09-27）── 大きさはその場の
+   文字に合わせる。ここに足し忘れると、絵が既定の 300×150 で出て枠を割る。 */
+#findoff svg { width: 13px; height: 13px; }
+#zenbtn svg { width: 15px; height: 15px; }
+#stripwrap .go svg { width: 15px; height: 15px; }
+#calbox .hd .prev svg, #calbox .hd .next svg { width: 17px; height: 17px; }
+#tablebar [data-do^="align:"] svg { width: 15px; height: 15px; }
+.tab .x svg { width: 11px; height: 11px; }
+#drawer .calhead .mv svg { width: 14px; height: 14px; }
+#drawer .span .x svg { width: 11px; height: 11px; }
 #tocbtn:hover, #dots:hover, #gear:hover { background: var(--hover); color: var(--ink); }
 
 /* 戻す・やり直す。**歯車の左** ── ノートに対してすることなので、
@@ -1875,7 +1890,7 @@ body.dropping::after {
       </div>
       <div id="findbox" hidden>
         <input id="find" type="text" placeholder="ノートを探す" spellcheck="false">
-        <button id="findoff" title="やめる（Esc）">✕</button>
+        <button id="findoff" title="やめる（Esc）"></button>
       </div>
       <div id="drawers"></div>
     </div>
@@ -1902,7 +1917,7 @@ body.dropping::after {
       <div id="title"></div>
       <button id="savenow" hidden title="書きかけを保存する（自動保存を切っているとき）">保存</button>
       <!-- 押せるものは no-drag の箱に入れる（帯はデスクトップ版を引きずる四角）。 -->
-      <span id="zenwrap"><button id="zenbtn" title="ノートだけを大きく（F12）">⤢</button></span>
+      <span id="zenwrap"><button id="zenbtn" title="ノートだけを大きく（F12）"></button></span>
       <div id="views">
         <button data-view="read" title="表示（⌘E で入れ替え）">表示</button>
         <button data-view="split" title="並べて表示（⌘P）">並べて表示</button>
@@ -1917,12 +1932,12 @@ body.dropping::after {
       <!-- **目次はボタンで出す。** 一度、帯の幅を空けるためにメニューへ引っ込めた
            ことがある（依頼 297）── メニューの中では見つからず、「消えた」と
            言われた。幅は `#meta` を固定してから空いている。 -->
-      <button id="tocbtn" title="目次（⌘⇧O）">☰</button>
+      <button id="tocbtn" title="目次（⌘⇧O）"></button>
       <button id="dots" title="このノートにすること（右押しでも同じ）">ノート ▾</button>
       <button id="bell" title="通知設定 ── いつ知らせるか" hidden></button>
       <button id="back" title="一つ戻す（⌘Z）" hidden></button>
       <button id="fwd" title="やり直す（⌘⇧Z）" hidden></button>
-      <button id="gear" title="ambər の設定と見た目（⌘⇧P で全部）">⚙</button>
+      <button id="gear" title="ambər の設定と見た目（⌘⇧P で全部）"></button>
       <div id="meta">
         <div id="count2"></div>
         <div id="state"></div>
@@ -1936,9 +1951,9 @@ body.dropping::after {
          一本しか開いていないときは出ない（ふだんの画面を、タブのために
          一段ぶん狭くしない）。 -->
     <div id="stripwrap" hidden>
-      <button class="go" id="stripleft" title="左のタブへ" hidden>‹</button>
+      <button class="go" id="stripleft" title="左のタブへ" hidden></button>
       <div id="strip"></div>
-      <button class="go" id="stripright" title="右のタブへ" hidden>›</button>
+      <button class="go" id="stripright" title="右のタブへ" hidden></button>
       <!-- **開いているノートの一覧**（依頼 627・本人「実装してほしいぞ。PC版でも一覧は出せるかい？」）。
            何十枚も開くと、はじいても引っ張っても探すのは遠い ── 名前で選べる一覧を、帯の右端に。 -->
       <button class="go all" id="stripall" title="開いているノートの一覧"></button>
@@ -1970,9 +1985,9 @@ body.dropping::after {
        かった。右のその日の欄は落とした（同じことが表の中に出ている）。 -->
   <div id="cal" hidden><div id="calbox">
     <div class="hd">
-      <button class="prev" title="前へ">‹</button>
+      <button class="prev" title="前へ"></button>
       <b class="mo"></b>
-      <button class="next" title="次へ">›</button>
+      <button class="next" title="次へ"></button>
       <button class="today">今日</button>
       <!-- **どのカレンダーを見るか**（依頼 529）── どう並べるか（日・週・月）
            より先に置く。グループカレンダーが無ければ出さない ── 選べない
@@ -2142,9 +2157,9 @@ body.dropping::after {
     <button data-do="col+">列を足す</button>
     <button data-do="col-">列を消す</button>
     <span class="sep"></span>
-    <button data-do="align:left" title="左に寄せる">⇤</button>
-    <button data-do="align:center" title="真ん中に寄せる">⇔</button>
-    <button data-do="align:right" title="右に寄せる">⇥</button>
+    <button data-do="align:left" title="左に寄せる"></button>
+    <button data-do="align:center" title="真ん中に寄せる"></button>
+    <button data-do="align:right" title="右に寄せる"></button>
   </div>
   <div id="say"></div>
   <script src="vendor/monaco/vs/loader.js"></script>

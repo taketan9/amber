@@ -1580,7 +1580,7 @@ function drawStrip() {
         + ' title="' + escapeAttr(t.path) + '">'
         + (t.dirty ? '<span class="d"></span>' : '')
         + '<span class="t">' + escapeHtml(t.name) + '</span>'
-        + '<button class="x" title="このノートを閉じる">✕</button></div>').join('');
+        + '<button class="x" title="このノートを閉じる">' + X_ICON + '</button></div>').join('');
     for (const d of box.querySelectorAll('.tab')) {
         const t = tabs[Number(d.dataset.n)];
         d.onmousedown = (e) => {
@@ -5612,7 +5612,7 @@ function toggleSplit() { setView(view === 'split' ? 'write' : 'split'); }
 
 function setZen(on) {
     zen = on;
-    if (el('zenbtn')) { el('zenbtn').textContent = on ? '⤡' : '⤢'; el('zenbtn').title = on ? '元の大きさに戻す（F12 か Esc）' : 'ノートだけを大きく（F12）'; }
+    if (el('zenbtn')) { el('zenbtn').innerHTML = ZEN_ICON(on); el('zenbtn').title = on ? '元の大きさに戻す（F12 か Esc）' : 'ノートだけを大きく（F12）'; }
     applyView();
     // 戻るときは黙る ── `say('')` は空のラベルを出してしまう。
     if (on) say('ノートだけを大きく（F12 か Esc で戻る）');
@@ -7402,6 +7402,67 @@ const BELL_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true">'
     + 's-1.3-1-1.3-4.4A3.9 3.9 0 0 0 8 1.6zM6.6 12.4a1.6 1.6 0 0 0 2.8 0"'
     + ' fill="none" stroke="currentColor" stroke-width="1.35"'
     + ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/// 歯車。**文字の `⚙` は書体で形も太さも変わる**ので、鐘や矢印と同じ作法で描く
+/// （crmaine から・2026-09-27）。上の「矢印は文字ではなく線で描く」を自分で
+/// 書いておきながら、設定と目次だけが漏れていた。
+const GEAR_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="'
+    + 'M6.27 1.53 L9.73 1.53 L10.5 3.67 L12.74 3.26 L14.47 6.27 L13.0 8.0 L14.47 9.73 L12.74 12.74 L10.5 12.33 L9.73 14.47 L6.27 14.47 L5.5 12.33 L3.26 12.74 L1.53 9.73 L3.0 8.0 L1.53 6.27 L3.26 3.26 L5.5 3.67Z'
+    + 'M8 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4"'
+    + ' fill="none" stroke="currentColor" stroke-width="1.35"'
+    + ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/// 送り（`‹` `›`）・閉じる（`✕`）・最大化（`⤢`）・表の寄せ。
+/// **どれも文字ではなく線で描く**（2026-09-27・本人「他もあれば探して欲しい」）──
+/// 記号文字は書体で太さも大きさも向きも変わり、隣の手描きの絵と別人に見える。
+const CHEV_ICON = (right) => '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="'
+    + (right ? 'M6.2 3.4 10.8 8 6.2 12.6' : 'M9.8 3.4 5.2 8 9.8 12.6')
+    + '" fill="none" stroke="currentColor" stroke-width="1.6"'
+    + ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+const X_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true">'
+    + '<path d="M4.3 4.3 11.7 11.7M11.7 4.3 4.3 11.7" fill="none"'
+    + ' stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+
+/// ノートだけを大きく（`on` なら「元の大きさに戻す」）。四隅へ出る矢印と、戻る矢印。
+const ZEN_ICON = (on) => '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="'
+    + (on
+        ? 'M12.8 3.2 9.6 6.4M9.6 6.4h3M9.6 6.4v-3M3.2 12.8 6.4 9.6M6.4 9.6h-3M6.4 9.6v3'
+        : 'M13.2 2.8 10 6M13.2 2.8h-3M13.2 2.8v3M2.8 13.2 6 10M2.8 13.2h3M2.8 13.2v-3')
+    + '" fill="none" stroke="currentColor" stroke-width="1.5"'
+    + ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/// 表の寄せ。**矢印ではなく、寄った行そのもの**で見せる ── `⇤` は向きを読み解く
+/// 一手が要るが、短い行がどちらに寄っているかは見た瞬間に分かる。
+const ALIGN_ICON = (how) => '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="'
+    + 'M3 4h10M3 12h10'
+    + (how === 'left' ? 'M3 8h6' : how === 'right' ? 'M7 8h6' : 'M5 8h6')
+    + '" fill="none" stroke="currentColor" stroke-width="1.5"'
+    + ' stroke-linecap="round"/></svg>';
+
+/// 目次の三本線。`☰` も書体まかせなので、同じく線で引く。
+const TOC_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true">'
+    + '<path d="M2.6 4h10.8M2.6 8h10.8M2.6 12h10.8" fill="none"'
+    + ' stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+
+/// 帯の絵を流し込む。**一度だけ**（押したときの仕掛けは別のところで付く）。
+///
+/// 目次と設定は、ノートを開いていなくても出ている ── `drawSteps` は戻す・
+/// やり直すと一緒に呼ばれるので、そこに混ぜると**開くまで文字のまま**になる。
+function drawIcons() {
+    const put = (node, svg) => { if (node && !node.innerHTML) node.innerHTML = svg; };
+    put(el('tocbtn'), TOC_ICON);
+    put(el('gear'), GEAR_ICON);
+    put(el('findoff'), X_ICON);
+    put(el('zenbtn'), ZEN_ICON(false));
+    put(el('stripleft'), CHEV_ICON(false));
+    put(el('stripright'), CHEV_ICON(true));
+    put(document.querySelector('#calbox .hd .prev'), CHEV_ICON(false));
+    put(document.querySelector('#calbox .hd .next'), CHEV_ICON(true));
+    for (const b of document.querySelectorAll('#tablebar [data-do^="align:"]')) {
+        put(b, ALIGN_ICON(b.dataset.do.slice('align:'.length)));
+    }
+}
 
 function drawSteps() {
     const b = el('back');
@@ -11669,7 +11730,7 @@ function drawWhen(box) {
         if (at) {
             const x = document.createElement('button');
             x.className = 'x';
-            x.textContent = '✕';
+            x.innerHTML = X_ICON;
             x.title = name + 'を外す';
             x.onclick = () => setWhen(key, null);
             span.append(x);
@@ -11684,10 +11745,10 @@ function drawWhen(box) {
     const head = document.createElement('div');
     head.className = 'calhead';
     const back = document.createElement('button');
-    back.className = 'mv'; back.textContent = '‹'; back.title = '前の月';
+    back.className = 'mv'; back.innerHTML = CHEV_ICON(false); back.title = '前の月';
     back.onclick = () => { calAt = stepMonth(calAt, -1); drawDrawer(); };
     const fwd = document.createElement('button');
-    fwd.className = 'mv'; fwd.textContent = '›'; fwd.title = '次の月';
+    fwd.className = 'mv'; fwd.innerHTML = CHEV_ICON(true); fwd.title = '次の月';
     fwd.onclick = () => { calAt = stepMonth(calAt, 1); drawDrawer(); };
     const ttl = document.createElement('span');
     ttl.textContent = calAt.y + '年 ' + (calAt.m + 1) + '月';
@@ -13712,8 +13773,9 @@ const escapeAttr = escapeHtml;
     moreMarks = !!saved.moreMarks;
     drawMarks();
     // **帯を先に整える。** ノートを一本も開かないまま終わる起動もある
-    // （初めて立ち上げた日がそう）── そのとき ⚙ が出ていないと、
+    // （初めて立ち上げた日がそう）── そのとき設定の歯車が出ていないと、
     // 保存場所を決めるパスがどこにも無い。
+    drawIcons();
     applyView();
     // 掴んで動かす縦棒（依頼 596）。**憶えた幅を先に戻してから**繋ぐ。
     grabsUp();

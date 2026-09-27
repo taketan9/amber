@@ -517,10 +517,13 @@ await step('新しいノートのダイアログ：タイトルとタグを入�
     return true;`, true);
 await step('最大化・最小化の印：押すとノートだけになり、もう一度で戻る', `
     await openNote(${path('買い物.md')});
+    // 印は絵になった（2026-09-27・依頼 652）ので、文字ではなく**入れ替わったか**で見る。
+    const was = el('zenbtn').innerHTML;
     el('zenbtn').click();
-    const big = zen && el('zenbtn').textContent === '⤡';
+    const big = zen && el('zenbtn').innerHTML !== was;
     el('zenbtn').click();
-    if (!big) return '大きくなりません';
+    if (!big) return '大きくなりません（印も入れ替わっていません）';
+    if (el('zenbtn').innerHTML !== was) return '戻したのに印が戻りません';
     return zen ? 'もう一度押しても戻りません' : true;`, true);
 await step('新しいノートのダイアログ：何も入れずに作成でも作れる', `
     const p = cmdNewNote();
