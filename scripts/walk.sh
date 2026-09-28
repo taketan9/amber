@@ -65,6 +65,20 @@ MD
 # 設定の写し（無ければ「無かった」と憶えておく）
 if [ -f "$mine" ]; then cp "$mine" "$work/amber.json.mine"; else touch "$work/なかった"; fi
 
+# **ようこそ画面と案内は、憶えた状態で始める**（依頼 654・656）── どちらも
+# 画面ぜんぶを覆い、案内は次へを押すまで進めない。憶えさせずに始めると
+# **282 段が一段目から通らない。**
+#
+# **ここは本物の設定に書く。** 引き出し（`userData`）は隔離していない（下の註）
+# ので、`$HOME` を作り替えても Electron はこちらを読む。上の写しと、終わりの
+# 戻しが守る ── `$work/home` の下に書いても、誰も読まない（一度そう書いて、
+# 画面が覆われたままなのを見た）。
+#
+# 台本（`AMBER_DO`）で `showHello()` と `startTour()` を直に呼ぶ段があるので、
+# 出なくても確かめられる。
+mkdir -p "$(dirname "$mine")"
+AMBER_STATE="$mine" python3 "$root/scripts/walk-first.py"
+
 # ── 試すノート。**書けるものを一通り**入れておく ──
 cp "$root/packaging/welcome/attachments/amber.png" "$notes/attachments/" 2>/dev/null || true
 # **途中に書くための一本**（依頼 461）。書式の無い長い段落が一つ ──
@@ -255,13 +269,6 @@ sleep 0.5
 # 向けてみたが、まっさらな引き出しで開いたデスクトップ版は数分で固まった（Chromium が鍵束に
 # 訊きに行って、裏の側が止まる ── 2026-09-11・二度）。設定は上の写しと戻しで守り、
 # **走っているあいだは本人のアプリを触らない**（本人が変えた見方が巻き戻る）。
-# **ようこそ画面は、憶えた状態で始める**（依頼 654）── `$HOME` を作り替えて
-# いるので設定はまっさらで、そのままだと初めての人と見なされて `#hello` が
-# 画面ぜんぶを覆う。**282 段が一段目から通らなくなる。** 台本（`AMBER_DO`）で
-# `showHello()` を直に呼ぶ段があるので、既定では出さない。
-mkdir -p "$work/home/Library/Application Support/amber"
-printf '%s\n' '{ "greeted": true }' > "$work/home/Library/Application Support/amber/amber.json"
-
 # `AMBER_AWAKE` ── 後ろに隠れたテスト用のアプリを App Nap に止めさせない（`main.js`）。
 # **`--use-mock-keychain` が要る。** `$HOME` を作り替えているので、Chromium が
 # 鍵束を `$HOME/Library/Keychains` に探しに行って見つからず、**本人の画面に

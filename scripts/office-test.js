@@ -108,6 +108,29 @@ console.log('会社向けのビルドの、はじめの一枚（依頼 654）');
     ok(!/Google/.test(run(true, goSrc)), '会社向けのビルドはサインインへ行かない', run(true, goSrc));
 }
 
+console.log('会社向けのビルドの、はじめの案内（依頼 656）');
+{
+    // ここも**本物の枝を通す** ── 「三つ目が落ちる」を検査の側で書き写すと、
+    // 画面の側だけ直した日に黙る。
+    const tourSrc = cutOut('const TOUR = [', '\n];');
+    const m = /TOUR\.filter\(\(r\) => [^)]*\)\)/.exec(src);
+    if (!m) { console.error('gui/renderer.js から案内の選り分けを切り出せません'); process.exit(2); }
+    const run = (office) => (0, eval)('(function () {\n'
+        + 'const OFFICE = ' + (office ? 'true' : 'false') + ';\n'
+        + tourSrc + '\nreturn ' + m[0] + ';\n})')();
+
+    const full = run(false).map((r) => r.say);
+    const office = run(true).map((r) => r.say);
+    ok(full.length === 5, '通常のビルドは五段', full.length);
+    ok(office.length === 4, '会社向けのビルドは四段', office.length);
+    // **共有の段だけが落ちる。** 予定表は会社のための道具なので残す
+    // （上の「残すもの」と同じ考え）。
+    ok(full.some((t) => t.includes('共有に便利です')), '通常のビルドは共有を案内する', full);
+    ok(!office.some((t) => t.includes('共有に便利です')), '会社向けのビルドは共有を案内しない', office);
+    ok(office.some((t) => t.includes('予定表はここから')), '会社向けのビルドにも予定表は残る', office);
+    ok(office.some((t) => t.includes('ここから押すだけ')), '会社向けのビルドにも書く道具は残る', office);
+}
+
 console.log('版のラベルの読み方');
 {
     // `main.js` は `edition.json` を隣から読む。**環境変数が勝つ**

@@ -1117,7 +1117,37 @@ body.vim #vim { display: block; }
 }
 #veil[hidden] { display: none !important; }
 /* 予定を登録するダイアログ（依頼 493）── ダイアログと同じ高さ・同じ紙。 */
-/* **はじめの一枚**（依頼 654）── 初めて開いた人に、まず三つだけ見せる。
+/* **はじめの案内**（依頼 656）── 初めての人に、左の列を上から四つと、
+   書く道具の帯を一つ。**次へを押すまで進めない**（本人が決めた）ので、
+   後ろは押せない。指している先だけ輪で囲って、そこが明るく見えるようにする。 */
+#tour { position: fixed; inset: 0; z-index: 97; -webkit-app-region: no-drag; }
+#tour[hidden] { display: none !important; }
+#tour .veil { position: absolute; inset: 0; background: rgba(0,0,0,.5); }
+/* 指している先の輪。**穴は開けない** ── 影を大きく広げて、そこだけ暗幕が
+   退いたように見せる（四枚の板で囲うより、角の丸みが素直に出る）。 */
+#tour .ring {
+  position: absolute; border-radius: 9px; border: 2px solid var(--amber);
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.5); pointer-events: none;
+}
+#tour .bub {
+  position: absolute; width: min(300px, 70vw); background: var(--paper);
+  border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.34);
+  padding: 13px 14px 10px; display: flex; flex-direction: column; gap: 10px;
+}
+#tour .bub .t { font-size: 13px; line-height: 1.65; color: var(--ink); white-space: pre-line; }
+#tour .bub .ft { display: flex; align-items: center; gap: 10px; }
+#tour .bub .n { font-size: 11px; color: var(--ink-3); flex: 1; }
+/* 琥珀の上の字は `#3a2408` で固定（ようこそ画面と同じ理由）。 */
+#tour .bub .next {
+  padding: 7px 15px; border-radius: 9px; border: 1px solid var(--amber-deep);
+  background: var(--amber); color: #3a2408; font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+#tour .bub .stop {
+  border: none; background: none; padding: 4px; font-size: 11px; color: var(--ink-3);
+  cursor: pointer; text-decoration: underline;
+}
+#tour .bub .stop:hover { color: var(--ink-2); }
+/* **ようこそ画面**（依頼 654）── 初めて開いた人に、まず三つだけ見せる。
    後ろを暗くして、押すものを二つに絞る（大きな「Google で始める」と、
    小さな文字リンク）。**逃げ道を小さくするが、必ず置く** ── Apple の
    5.1.1(v) は「主な機能に要らないサインインを強いてはいけない」と書いて
@@ -2173,6 +2203,15 @@ body.dropping::after {
     <button type="button" class="go"></button>
     <button type="button" class="skip"></button>
   </div></div>
+  <!-- はじめの案内（依頼 656）。輪と吹き出しの場所は `tourStep` が測って置く。 -->
+  <div id="tour" hidden>
+    <div class="veil"></div>
+    <div class="ring" hidden></div>
+    <div class="bub">
+      <div class="t"></div>
+      <div class="ft"><span class="n"></span><button type="button" class="stop">やめる</button><button type="button" class="next"></button></div>
+    </div>
+  </div>
   <div id="more" hidden></div>
   <!-- 絵文字の板（依頼 418）。**探す欄・束の帯・盤**の三段。 -->
   <div id="emoji" hidden>

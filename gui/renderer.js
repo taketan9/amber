@@ -8341,6 +8341,10 @@ document.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') {
         // **手前にあるものから閉じる。** ダイアログが開いているのに大きい画面が
         // 戻ると、閉じたつもりのものが残る。
+        // **はじめの案内（依頼 656）といちばん手前。** どちらも「やめる」と同じ道。
+        // 次へを押すまで進めない作りなので、Esc を塞ぐと、指す先を見失った人に
+        // できることが無くなる。
+        if (tourOn && tourStop) { e.preventDefault(); tourStop(); return; }
         // ようこそ画面（依頼 654）は、いちばん手前 ── 小さい文字リンクと同じ道。
         // **塞がない。** Esc が効かないようこそ画面は、押すところを見つけられなかった
         // 人にとって行き止まりになる。
@@ -10580,6 +10584,10 @@ const CMDS = [
     // **足す・変える・外す・同期先、を一つの入口で**（依頼 511・本人「保存
     // ディレクトリを追加・変更・削除っていう表現で全部できるようにしない？」）。
     { id: 'places', name: '保存ディレクトリの追加・変更・削除', app: true, run: cmdPlaces },
+    // **もう一度見る道**（依頼 656）── はじめの案内は一度きりで、次へを押す
+    // まで進めない作りなので、読まずに押し流した人の戻り道が要る。
+    { id: 'tour', name: 'はじめの案内', sub: 'amber の使いかたを、もう一度見る',
+      app: true, run: () => startTour(true) },
     // **作るパスがあるなら、やめるパスもある**（依頼 535）。押す場所は ⚙ ──
     // 一生に一度で、戻せない操作なので、毎日押すものの隣には置かない。
     { id: 'groupdrop', name: 'グループカレンダーを削除する', app: true, need: 'group', net: true, run: cmdDropGroup },
@@ -10968,8 +10976,11 @@ async function cmdTheme() {
 /// **できることは前からあった。** フォルダもブックマークも階層に
 /// なるし、タグもノートに付ければ増える ── ただ、それを言う場所が画面に
 /// 無かった。使えないのと、あるのに見えないのは、使う人には同じこと。
+/// 列の段の見出し。**`data-head` を付ける** ── 名前で探すと、見出しの字を
+/// 変えた日に、それを当てにしていたところが黙って外れる（案内の吹き出しが
+/// そこを指している・依頼 656）。
 function head(name, plus) {
-    return '<div class="head">' + escapeHtml(name)
+    return '<div class="head" data-head="' + escapeAttr(name) + '">' + escapeHtml(name)
         // **「＋」も文字で書かない。** 全角の記号は行の高さも幅も文字に引かれて、
         // 段の見出しの隣で一つだけ大きく沈む ── マークは線で描く（「新しい
         // ノート」の丸と同じ太さ・同じ形）。
@@ -13072,7 +13083,153 @@ function signInTrouble(err) {
     return 'サインインできませんでした: ' + e;
 }
 
-/* ── はじめの一枚（依頼 654） ── */
+/* ── はじめの案内（依頼 656） ── */
+
+/// 五つの吹き出し。**文は本人が書いた**（2026-09-27）。
+///
+/// 指す先は**左の列を上から**（カレンダー → 新しいノート → フォルダ）── その
+/// 並びは iPhone の一覧と同じ順に揃えてあるので（依頼 505・247）、二つの
+/// amber で同じ案内を当て直せる。最後の一つだけ、ノートを開いて帯を指す。
+///
+/// **三つ目に指す先が無いのは、わざと。** 共有の段は `state.shares` があると
+/// きだけ出るので、初めての人の列には無い ── 無いものを指すより、真ん中に
+/// 置いて読ませる。文も場所ではなく「何に使えるか」を言っている。
+///
+/// `office: false` は会社向けのビルドで落とす段（依頼 602 で共有が閉じている）。
+const TOUR = [
+    { at: '#rail .dest[data-kind="cal"]', say: '予定表はここから。' },
+    { at: '#new', say: 'ノートはここから。' },
+    { at: null, office: false,
+      say: '家族との買い物リストや、メモの共有に便利です。\nMarkdownの記法を知らなくても、ボタンでかんたんに書けます。' },
+    { at: '#rail .head[data-head="フォルダ"]', say: 'フォルダとタグで整理できます。' },
+    { at: '#marks', open: true, say: '見出し、表、チェックなど、ここから押すだけ。' },
+];
+
+/// 案内を出しているか（Esc の一本道から見る）。
+let tourOn = false;
+let tourStop = null;
+
+/// 指している先に輪を掛け、吹き出しを隣に置く。
+///
+/// **穴は開けず、影を広げる**（`box-shadow` を画面より大きく）── 四枚の板で
+/// 囲うやり方だと、角の丸みと 1px のずれが出る。
+///
+/// 吹き出しは右へ、入らなければ下へ、それも入らなければ上へ。**最後に必ず
+/// 画面の中へ押し戻す** ── 狭い机で枠の外に出ると「次へ」が押せなくなり、
+/// 次へを押すまで進めない案内が行き止まりになる。
+function tourPlace(mark) {
+    const ring = document.querySelector('#tour .ring');
+    const bub = document.querySelector('#tour .bub');
+    const veil = document.querySelector('#tour .veil');
+    const pad = 4;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    if (!mark) {
+        ring.hidden = true;
+        // 指す先の無い段だけ、暗幕で覆う。
+        veil.hidden = false;
+        bub.style.left = Math.round((W - bub.offsetWidth) / 2) + 'px';
+        bub.style.top = Math.round((H - bub.offsetHeight) / 2) + 'px';
+        return;
+    }
+    const r = mark.getBoundingClientRect();
+    ring.hidden = false;
+    // **輪の影が、そのまま暗幕。** 二枚重ねると濃さが足し算になって、
+    // 後ろの画面がほとんど見えなくなる（実際にそうなった ── 案内は
+    // 「どこにあるか」を見せるものなので、後ろが消えると意味が無い）。
+    veil.hidden = true;
+    ring.style.left = (r.left - pad) + 'px';
+    ring.style.top = (r.top - pad) + 'px';
+    ring.style.width = (r.width + pad * 2) + 'px';
+    ring.style.height = (r.height + pad * 2) + 'px';
+    const bw = bub.offsetWidth;
+    const bh = bub.offsetHeight;
+    let x = r.right + 14;
+    let y = r.top - 6;
+    if (x + bw > W - 12) {
+        x = r.left;
+        y = r.bottom + 14;
+        if (y + bh > H - 12) y = r.top - bh - 14;
+    }
+    bub.style.left = Math.max(12, Math.min(x, W - bw - 12)) + 'px';
+    bub.style.top = Math.max(12, Math.min(y, H - bh - 12)) + 'px';
+}
+
+/// 最後の段のために、サンプルを一本開く。
+///
+/// **表示で開く。** 編集で開くと Monaco の `setValue` が変わりの報せを起こし、
+/// 触っていないサンプルの更新時刻が動く ── 案内は上げた直後に走るので、そのまま
+/// 同期が「向こうが編集した」と見る。表示なら Monaco を通らない。
+async function tourOpenSample() {
+    if (state.open) return true;
+    const want = state.notes.find((n) => (n.title || '').includes('ようこそ')) || state.notes[0];
+    if (!want) return false;
+    if (view !== 'read') await setView('read');
+    await openNote(want.path);
+    return !!state.open;
+}
+
+/// 案内を出す。`forced` なら、見たことがあっても出す（設定から呼ぶとき）。
+///
+/// **指す先が画面に無い段は、黙って飛ばす。** `#marks` は `#work` の中に
+/// あってノートを開くまで出ず、共有の段は持っていない人の列には無い ──
+/// 無いものを指して止まると、次へを押すまで進めない案内が行き止まりになる。
+/// **一段も残らなければ、何も出さない。**
+async function startTour(forced) {
+    if (tourOn) return;
+    const rows = TOUR.filter((r) => !(OFFICE && r.office === false));
+    const box = el('tour');
+    const bub = box.querySelector('.bub');
+    const text = bub.querySelector('.t');
+    const count = bub.querySelector('.n');
+    const next = bub.querySelector('.next');
+    const stop = bub.querySelector('.stop');
+    // 出す段だけ先に選ぶ ── 何段あるかを「1 / 4」と言うために、数が要る。
+    const plan = [];
+    for (const r of rows) {
+        if (r.open && !(await tourOpenSample())) continue;
+        if (r.at && !document.querySelector(r.at)) continue;
+        plan.push(r);
+    }
+    if (!plan.length) {
+        if (forced) say('いまは案内するところがありません');
+        window.amber.remember({ toured: true });
+        return;
+    }
+    tourOn = true;
+    box.hidden = false;
+    let n = 0;
+    return new Promise((done) => {
+        const shut = () => {
+            if (!tourOn) return;
+            tourOn = false;
+            tourStop = null;
+            box.hidden = true;
+            window.amber.remember({ toured: true });
+            done();
+        };
+        const draw = () => {
+            const r = plan[n];
+            text.textContent = r.say;
+            count.textContent = (n + 1) + ' / ' + plan.length;
+            next.textContent = n === plan.length - 1 ? 'はじめる' : '次へ';
+            // **測るのは書いたあと** ── 文の長さで吹き出しの高さが変わる。
+            tourPlace(r.at ? document.querySelector(r.at) : null);
+        };
+        next.onclick = () => { n += 1; if (n >= plan.length) shut(); else draw(); };
+        stop.onclick = shut;
+        tourStop = shut;
+        draw();
+    });
+}
+
+/// 初めての人に、続けて出す。**ようこそ画面を片したあと。**
+async function tourIfFirst(saved) {
+    if (saved.toured) return;
+    await startTour(false);
+}
+
+/* ── ようこそ画面（依頼 654） ── */
 
 /// 初めて開いた人に見せる三行（**本人が決めた文**・2026-09-27）。
 ///
@@ -13154,8 +13311,9 @@ let helloShut = null;
 /// 初めてかどうか。**「ノートが空か」では決めない** ── 消して閉じた人に
 /// 毎回出るのは、いちばん嫌われる作りかた（`seedWelcome` と同じ考え）。
 async function helloIfFirst(saved) {
-    if (saved.greeted) return;
+    if (saved.greeted) return false;
     await showHello();
+    return true;
 }
 
 /// **Google のサインインは、ここだけ**（依頼 654）── ようこそ画面（`#hello`）と
@@ -13906,7 +14064,12 @@ const escapeAttr = escapeHtml;
     // 一覧も左の列もできていない画面に重ねると、片した瞬間に空の画面が出る。
     // 会社向けのビルドかどうかは `officeReady` が決まってから訊く（サインインの
     // ボタンを出すかが変わる）。
-    officeReady.then(() => helloIfFirst(saved));
+    officeReady.then(async () => {
+        // **案内を出すのは、この起動でようこそ画面を出した人にだけ。**
+        // 前から使っている人（`greeted` を憶えている人）の画面に、ある日
+        // 突然かぶせない ── もう一度見たい人には ⌘⇧P の「はじめの案内」。
+        if (await helloIfFirst(saved)) await tourIfFirst(saved);
+    });
 
     let t = null;
     el('find').oninput = () => {

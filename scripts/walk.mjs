@@ -2520,6 +2520,90 @@ await step('ようこそ画面：会社向けのビルドは二行で、サイ�
     if (go !== 'ノートの保存場所を選ぶ') return 'ボタン: ' + go;
     return true;`, true);
 
+await step('はじめの案内：五段出て、指す先に輪が掛かる', `
+    const p = startTour(true);
+    // **案内は待たされる**（サンプルを一本開いてから出る）── 呼んだ直後は、まだ出ていない。
+    await new Promise((g) => setTimeout(g, 500));
+    const box = el('tour');
+    if (box.hidden) return '案内が出ていません';
+    const bub = box.querySelector('.bub');
+    const ring = box.querySelector('.ring');
+    const seen = [];
+    for (let i = 0; i < 9; i++) {
+        if (box.hidden) break;
+        seen.push(bub.querySelector('.t').textContent);
+        const want = document.querySelector('#rail .dest[data-kind="cal"]');
+        if (i === 0) {
+            if (ring.hidden) return '一段目に輪がありません';
+            const r = want.getBoundingClientRect();
+            const g = ring.getBoundingClientRect();
+            if (Math.abs(r.left - g.left) > 8 || Math.abs(r.top - g.top) > 8) return '輪がカレンダーからずれています';
+        }
+        bub.querySelector('.next').click();
+    }
+    await p;
+    if (seen.length !== 5) return seen.length + ' 段: ' + seen.join(' / ');
+    if (!seen[0].includes('予定表はここから')) return seen[0];
+    if (!seen[1].includes('ノートはここから')) return seen[1];
+    if (!seen[2].includes('買い物リスト')) return seen[2];
+    if (!seen[3].includes('フォルダとタグ')) return seen[3];
+    if (!seen[4].includes('ここから押すだけ')) return seen[4];
+    if (!el('tour').hidden) return '片づいていません';
+    return true;`, true);
+await step('はじめの案内：指す先が画面に無い段は、黙って飛ばす', `
+    // 指す先を一つ消してみる。**ノートを閉じる手は使えない** ── 最後の段は
+    // サンプルを自分で開くので、閉じても五段のままになる。
+    const head = document.querySelector('#rail .head[data-head="フォルダ"]');
+    if (!head) return 'フォルダの見出しがありません';
+    head.setAttribute('data-head', 'ちがう名前');
+    const p = startTour(true);
+    // **案内は待たされる**（サンプルを一本開いてから出る）── 呼んだ直後は、まだ出ていない。
+    await new Promise((g) => setTimeout(g, 500));
+    const bub = document.querySelector('#tour .bub');
+    const n = bub.querySelector('.n').textContent;
+    bub.querySelector('.stop').click();
+    await p;
+    head.setAttribute('data-head', 'フォルダ');
+    if (n !== '1 / 4') return '段の数: ' + n;
+    return true;`, true);
+await step('はじめの案内：やめると片づく・もう一度は ⌘⇧P から', `
+    const p = startTour(true);
+    // **案内は待たされる**（サンプルを一本開いてから出る）── 呼んだ直後は、まだ出ていない。
+    await new Promise((g) => setTimeout(g, 500));
+    if (el('tour').hidden) return '案内が出ていません';
+    document.querySelector('#tour .bub .stop').click();
+    await p;
+    if (!el('tour').hidden) return '片づいていません';
+    if (!CMDS.some((c) => c.id === 'tour')) return '命令の表に「はじめの案内」がありません';
+    return true;`, true);
+await step('はじめの案内：Esc でも片づく（塞がない）', `
+    const p = startTour(true);
+    // **案内は待たされる**（サンプルを一本開いてから出る）── 呼んだ直後は、まだ出ていない。
+    await new Promise((g) => setTimeout(g, 500));
+    if (el('tour').hidden) return '案内が出ていません';
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
+    await p;
+    if (!el('tour').hidden) return 'Esc で片づきません';
+    return true;`, true);
+await step('はじめの案内：会社向けのビルドは、共有の段が落ちる', `
+    const was = OFFICE;
+    OFFICE = true;
+    const p = startTour(true);
+    // **案内は待たされる**（サンプルを一本開いてから出る）── 呼んだ直後は、まだ出ていない。
+    await new Promise((g) => setTimeout(g, 500));
+    const bub = document.querySelector('#tour .bub');
+    const seen = [];
+    for (let i = 0; i < 9; i++) {
+        if (el('tour').hidden) break;
+        seen.push(bub.querySelector('.t').textContent);
+        bub.querySelector('.next').click();
+    }
+    await p;
+    OFFICE = was;
+    if (seen.some((t) => t.includes('買い物リスト'))) return '共有の段が残っています';
+    if (seen.length !== 4) return seen.length + ' 段';
+    return true;`, true);
+
 // 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => relOf(x.book) === '歩き試し'
