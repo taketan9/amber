@@ -748,6 +748,10 @@ el('findbtn').innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true" fill="non
 el('findbtn').onclick = () => (el('findbox').hidden ? openFind() : closeFind());
 el('findoff').onclick = () => { closeFind(); el('find').blur(); };
 el('guestclose').onclick = closeGuest;
+// 帯の三つ（依頼 658）── **押すものは「保存」だけ大きく**、取り込みは
+// 小さい文字リンク。何もしなければ、元のファイルがそのまま更新される。
+el('guestsave').onclick = () => save();
+el('guestadopt').onclick = () => guestAdopt();
 for (const b of el('tablebar').querySelectorAll('button')) {
     // 押した瞬間に caret を失わないように、`mousedown` を止める。
     b.onmousedown = (e) => e.preventDefault();
@@ -7871,7 +7875,10 @@ let autoSave = true;
 function drawSaveNow() {
     const b = el('savenow');
     if (!b) return;
+    // **単発の一本には、帯の「保存」がある**（依頼 658）── こちらは出さない。
     b.hidden = autoSave || !state.open || !state.dirty || state.guest;
+    const g = el('guestsave');
+    if (g) g.hidden = !state.guest || !state.dirty;
 }
 
 /// ノートから離れるとき。自動保存なら黙って書く。切っているなら一度だけ確認。
@@ -11269,21 +11276,43 @@ async function openGuest(path) {
     // 書きかけを置いていかない ── 戻ったときに消えている、を作らない。
     if (state.dirty) await save();
     // 戻り先を憶える。**開くより先に。** 途中で失敗してもパスが残る。
-    if (!state.guest) guestBack = { open: state.open, dest: state.dest, view };
+    if (!state.guest) {
+        guestBack = { open: state.open, dest: state.dest, view, autoSave };
+        // **他人のファイルは、勝手に保存しない**（依頼 658・本人が決めた）──
+        // 既定は「入」で、打った 0.9 秒後に書く。一覧を眺めていてうっかり
+        // 触ると、気づかないうちに向こうのファイルが変わる。
+        autoSave = false;
+    }
+    // 案内の途中に来たら、案内はやめる（依頼 658）。
+    if (tourOn && tourStop) tourStop();
     state.guest = true;
     document.body.classList.add('guest');
     el('guestbar').hidden = false;
     el('guestwhere').textContent = shortPath(path);
+    // **`.txt` は素のまま（編集）で開く**（本人が決めた）── 表示で開くと
+    // `# ` が見出しに、`* ` が箇条に組み直され、保存で amber の書き方に寄る
+    // （表の空セルが全角空白で埋まる類の丸めも当たる）。`.md` の往復は
+    // `round-test.js` が総当たりで守っているが、`.txt` を丸める理由は無い。
+    if (/\.txt$/i.test(path)) view = 'write';
     await openNote(path, { guest: note });
 }
 
-function closeGuest() {
+async function closeGuest() {
     if (!state.guest) return;
+    // **書きかけを黙って捨てない**（依頼 658）── 単発は自動保存を切っている
+    // ので、確かめずに閉じると打ったものが消える。前は見ていなかった。
+    if (state.dirty) {
+        const name = leafOf(state.open && state.open.path) || 'このファイル';
+        if (await askYes('「' + name + '」の書きかけを保存しますか')) await save();
+    }
     state.guest = false;
+    state.dirty = false;
     document.body.classList.remove('guest');
     el('guestbar').hidden = true;
     const back = guestBack;
     guestBack = null;
+    // 自動保存を元に戻す ── 切ったのは、外の一本のあいだだけ。
+    if (back && typeof back.autoSave === 'boolean') autoSave = back.autoSave;
     state.dest = back?.dest || { kind: 'all', what: '' };
     if (back?.view) view = back.view;
     state.open = null;
@@ -13083,6 +13112,171 @@ function signInTrouble(err) {
     return 'サインインできませんでした: ' + e;
 }
 
+/// **外から開いた一本を、ambər に取り込む**（依頼 658・本人が決めた）。
+///
+/// **写すのではなく、移す。** 元のファイルは消える ── 押す前に、そう書いてある
+/// 画面で一度訊く。知らずに押す道は作らない。
+///
+/// 運ぶのは core（`adopt`）── 写す → 画像も運ぶ → 中身が同じか確かめる →
+/// **そこで初めて元を消す**。一本でも運べなければ、何も消さない。
+async function guestAdopt() {
+    if (!state.guest || !state.open) return;
+    const at = state.open.path;
+    // 取り込み先。**二つ以上あるなら選ばせる** ── 勝手に一つ目へ入れない。
+    let place = state.places[0];
+    if (state.places.length > 1) {
+        const pick = await askPick('どこに取り込みますか', state.places.map((p) => ({
+            name: p.name, sub: shortPath(p.dir), value: p.dir,
+        })), null, true);
+        if (!pick) return;
+        place = state.places.find((p) => p.dir === pick);
+    }
+    if (!place) { say('取り込む先がありません'); return; }
+    // **「元のファイルは消えます」を、押す前にはっきり書く。**
+    // 知らずに押す道は作らない（本人が「本当に消す」を選んだ）。
+    const txt = /\.txt$/i.test(at);
+    const why2 = '元のファイルは消えます。'
+        + (txt ? ' 一覧に出るように、名前を .md にします。' : '');
+    const go = await askPick('「' + leafOf(at) + '」を ' + place.name + ' に取り込みますか',
+        [{ name: '取り込む', sub: why2, value: 'go' }], why2, true);
+    if (go !== 'go') return;
+    // 書きかけがあるなら先に書く ── 写したあとに書くと、写しに入らない。
+    if (state.dirty) await save();
+    let got;
+    try {
+        got = await ask('adopt', { path: at, to: place.dir });
+    } catch (e) {
+        say('取り込めませんでした: ' + why(e));
+        return;
+    }
+    state.dirty = false;
+    await closeGuest();
+    await reload({ quiet: true });
+    await openNote(got.path);
+    say('取り込みました' + (got.renamed ? '（同じ名前があったので、名前を足しました）' : '')
+        + (got.images ? ' ・ 画像 ' + got.images + ' 枚も一緒に' : ''));
+}
+
+/* ── 運ぶ確認（依頼 655） ── */
+
+/// 「どのフォルダにも入っていないノート」を指す札（core の `notebook::LOOSE`）。
+const LOOSE = '';
+
+/// この保存ディレクトリのノートを、**最上位のフォルダごと**に数える。
+///
+/// **入れ子は親に数える** ── `仕事/2026/見積.md` は `仕事` の一本。深いところ
+/// まで並べると、選ぶものが一画面に収まらない。
+///
+/// **直下のノートを落とさない。** 本人の保存ディレクトリの直下には
+/// `パスワード.md` のようなノートが何本もあり、フォルダだけ並べると
+/// **それが黙って上がる**。
+function countTops(place) {
+    const out = new Map();
+    for (const n of state.notes) {
+        if (n.root !== place.dir) continue;
+        const rel = relOf(n.book || place.dir);
+        const top = rel ? rel.split('/')[0] : LOOSE;
+        out.set(top, (out.get(top) || 0) + 1);
+    }
+    return [...out.entries()].sort((a, b) => (a[0] === LOOSE) - (b[0] === LOOSE)
+        || b[1] - a[1] || a[0].localeCompare(b[0], 'ja'));
+}
+
+/// 向こうの一覧を取るところ。**試験のための差し替え口**（`ringNow` と同じ形）──
+/// preload が `window.amber` を凍らせるので、あちらは差し替えられない。
+let driveListNow = () => window.amber.driveList();
+
+/// サインインした直後に一度だけ。返すのは、同期を始めたかどうか。
+///
+/// **上げるを既定にして、そのあと外せる**（本人が決めた）。外すのは最上位の
+/// フォルダごと。**外しても向こうのものは消さない** ── これから運ばないだけで、
+/// 消すと家族の端末からも消える。
+///
+/// **向こうに既にノートがあるなら、言い方が変わる**（本人の字）──
+/// 「Drive に ambər のノートがあります。この端末に反映させます。」
+/// 機種変・二台目・入れ直しは、こちらの形になる。
+///
+/// **保存ディレクトリが二つ以上あるときは出さない** ── 初回のための画面で、
+/// そこまで来た人はもう自分で決めている。
+async function firstSyncSheet() {
+    const place = state.places[0];
+    if (!place || state.places.length > 1 || OFFICE) return false;
+    let remote = [];
+    try {
+        remote = remoteOf(await driveListNow(), place);
+    } catch (e) {
+        // **繋がらない日は、この画面を出さない。** 出しても押した先で転ぶだけで、
+        // 「同期する」を押したのに何も起きない、が残る。ふだんの帯が言う。
+        say('Drive に繋がりませんでした: ' + why(e));
+        return false;
+    }
+    const there = remote.filter((x) => /\.(md|markdown)$/i.test(x.rel)).length;
+    const tops = countTops(place);
+    const here = tops.reduce((a, [, n]) => a + n, 0);
+    const box = el('syncfirst');
+    const rows = box.querySelector('.rows');
+    const skip = new Set();
+
+    const name = (top) => (top === LOOSE ? 'フォルダに入っていないノート' : top);
+    const draw = () => {
+        rows.innerHTML = '';
+        for (const [top, n] of tops) {
+            const r = document.createElement('div');
+            r.className = 'r' + (skip.has(top) ? ' off' : '');
+            const nm = document.createElement('span');
+            nm.className = 'nm';
+            nm.textContent = name(top);
+            const cnt = document.createElement('span');
+            cnt.className = 'n';
+            cnt.textContent = n + ' 本';
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = skip.has(top) ? 'アップロードする' : 'アップロードしない';
+            b.onclick = () => { if (skip.has(top)) skip.delete(top); else skip.add(top); draw(); };
+            r.append(nm, cnt, b);
+            rows.append(r);
+        }
+        rows.hidden = !tops.length;
+    };
+
+    // **言い方は、どちら向きかで変える**（本人の字）。
+    const head = [];
+    if (there) head.push('Drive に ' + BRAND + ' のノートがあります。この端末に反映させます。');
+    if (here) head.push(there ? 'この端末のノートも、Drive にアップロードします。'
+        : 'この端末のノートを、Drive にアップロードします。');
+    if (!head.length) head.push('この端末と Drive を、これから同じにします。');
+    box.querySelector('.hd').innerHTML = head.join('<br>');
+    box.querySelector('.sub').textContent = there
+        ? '向こうにあるノート ' + there + ' 本。この端末のノート ' + here + ' 本。'
+        : 'この端末のノート ' + here + ' 本。';
+    draw();
+    box.hidden = false;
+    return new Promise((done) => {
+        const shut = async (go) => {
+            box.hidden = true;
+            if (!go) {
+                // **「あとで」は、運ばない。** サインインしたまま既定が
+                // 「同期する」だと、押した覚えのないものが上がる。
+                place.sync = 'none';
+                savePlaces();
+                drawSyncState();
+                done(false);
+                return;
+            }
+            place.sync = 'drive';
+            savePlaces();
+            if (skip.size) {
+                await ask('skipset', { path: place.dir, skip: [...skip] });
+            }
+            drawSyncState();
+            await syncNow('手');
+            done(true);
+        };
+        box.querySelector('.go').onclick = () => shut(true);
+        box.querySelector('.later').onclick = () => shut(false);
+    });
+}
+
 /* ── はじめの案内（依頼 656） ── */
 
 /// 五つの吹き出し。**文は本人が書いた**（2026-09-27）。
@@ -13177,6 +13371,9 @@ async function tourOpenSample() {
 /// **一段も残らなければ、何も出さない。**
 async function startTour(forced) {
     if (tourOn) return;
+    // **外から開いた一本を見ているときは、案内しない**（依頼 658）── その人は
+    // 開きたいファイルがあって来たので、上に幕をかぶせない（実際に重なった）。
+    if (state.guest) { if (forced) say('外のファイルを閉じてから、もう一度どうぞ'); return; }
     const rows = TOUR.filter((r) => !(OFFICE && r.office === false));
     const box = el('tour');
     const bub = box.querySelector('.bub');
@@ -13238,12 +13435,14 @@ async function tourIfFirst(saved) {
 /// 「Markdown で書きます」と言い、三行目で「Markdown を知らなくても」と
 /// 打ち消していた（一つ前の吹き出しで身構えさせて、次で慰める形）。
 ///
-/// **会社向けのビルドでは一行目を落とす**（依頼 602）── 共有が閉じているので、
-/// 「家族やグループと」はそこでは嘘になる。
+/// **会社向けのビルドには出さない**（本人が決めた・2026-09-28）── 三つのうち
+/// 二つが共有の話で、依頼 602 で共有を閉じてあるそこでは嘘になる。残る一行
+/// だけを見せても売り込みにならないし、会社で使う人は**既に何のアプリか
+/// 知っている**（自分で組んだか、人から渡された）── 要るのは置き場所だけ。
 const HELLO_SELL = [
-    ['家族やグループと、同じノートを。', '予定表も一緒に使えます'],
-    ['読みやすく、きれいに。', '見出しも表も、そのまま整います'],
-    ['記法を知らなくても、ボタンで書けます', '（中身は Markdown です）'],
+    ['家族やグループと、同じカレンダーを。', '予定表を共有できます。'],
+    ['家族やグループと、同じノートを。', '買い物リストや旅行表など共有できます。'],
+    ['プロの使うマークダウンで、美しく。', 'ボタンを押すだけで簡単にマークダウンを記載できます。'],
 ];
 
 /// ようこそ画面を出しているか。
@@ -13263,21 +13462,20 @@ function showHello() {
     const skip = box.querySelector('.skip');
     box.querySelector('.brand').innerHTML = BRAND + ' へようこそ';
     sell.innerHTML = '';
-    for (const [head, rest] of HELLO_SELL.slice(OFFICE ? 1 : 0)) {
+    for (const [head, rest] of HELLO_SELL) {
         const li = document.createElement('li');
         const b = document.createElement('b');
         b.textContent = head;
         const tail = document.createElement('span');
         tail.className = 'rest';
         tail.textContent = rest;
-        li.append(b, document.createTextNode(' '), tail);
+        li.append(b, tail);
         sell.append(li);
     }
-    // **会社向けのビルドには、サインインさせる先が無い**（依頼 602 で Drive と
-    // 共有を閉じてある）。代わりに置き場所を訊く ── 会社ではノートの置き場所が
-    // 決まっている（共有フォルダや、ロックの指定）ことが多い。
-    go.textContent = OFFICE ? 'ノートの保存場所を選ぶ' : 'Google で始める';
-    skip.textContent = OFFICE ? 'あとで決める' : 'いまはしない';
+    // **何が起きるかを、ボタンに書く**（本人・2026-09-28）── 「始める」だけだと、
+    // 押した先で Google の同意画面が出て驚かれる。逃げ道も同じ言葉で揃える。
+    go.textContent = 'Google アカウント連携して始める';
+    skip.textContent = 'いまはアカウント連携しない';
     helloOn = true;
     box.hidden = false;
     document.body.classList.add('hello');
@@ -13293,7 +13491,6 @@ function showHello() {
             done(road);
         };
         go.onclick = async () => {
-            if (OFFICE) { shut('place'); await cmdPlaces(); return; }
             // **ここでは片さない。** ブラウザが開いているあいだ画面を残して
             // おかないと、戻ってきた人が「押したのに何も起きなかった」画面を
             // 見る（サインインは十数秒かかる）。
@@ -13311,9 +13508,16 @@ let helloShut = null;
 /// 初めてかどうか。**「ノートが空か」では決めない** ── 消して閉じた人に
 /// 毎回出るのは、いちばん嫌われる作りかた（`seedWelcome` と同じ考え）。
 async function helloIfFirst(saved) {
-    if (saved.greeted) return false;
-    await showHello();
-    return true;
+    if (saved.greeted) return null;
+    // **会社向けのビルドには、ようこそ画面を出さない**（本人が決めた・2026-09-28）。
+    // 要るのは置き場所だけ ── 会社ではノートの置き場所が決まっている
+    // （共有フォルダや、ロックの指定）ことが多い。
+    if (OFFICE) {
+        window.amber.remember({ greeted: true });
+        await cmdPlaces();
+        return 'place';
+    }
+    return showHello();
 }
 
 /// **Google のサインインは、ここだけ**（依頼 654）── ようこそ画面（`#hello`）と
@@ -14068,7 +14272,12 @@ const escapeAttr = escapeHtml;
         // **案内を出すのは、この起動でようこそ画面を出した人にだけ。**
         // 前から使っている人（`greeted` を憶えている人）の画面に、ある日
         // 突然かぶせない ── もう一度見たい人には ⌘⇧P の「はじめの案内」。
-        if (await helloIfFirst(saved)) await tourIfFirst(saved);
+        const road = await helloIfFirst(saved);
+        if (!road) return;
+        // サインインまで行けた人には、**何を運ぶかを先に見せる**（依頼 655）──
+        // 上げ先が決まる前に「運びます」は出せないので、ここより前には置けない。
+        if (road === 'in') await firstSyncSheet();
+        await tourIfFirst(saved);
     });
 
     let t = null;

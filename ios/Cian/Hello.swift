@@ -29,9 +29,9 @@ struct Hello: View {
 
     /// デスクトップ版の `HELLO_SELL` と同じ三行。**二つの amber で同じ字**。
     private static let sell: [(String, String)] = [
-        ("家族やグループと、同じノートを。", "予定表も一緒に使えます"),
-        ("読みやすく、きれいに。", "見出しも表も、そのまま整います"),
-        ("記法を知らなくても、ボタンで書けます", "（中身は Markdown です）"),
+        ("家族やグループと、同じカレンダーを。", "予定表を共有できます。"),
+        ("家族やグループと、同じノートを。", "買い物リストや旅行表など共有できます。"),
+        ("プロの使うマークダウンで、美しく。", "ボタンを押すだけで簡単にマークダウンを記載できます。"),
     ]
 
     var body: some View {
@@ -45,9 +45,13 @@ struct Hello: View {
                 .accessibilityLabel("ambər へようこそ")
             VStack(alignment: .leading, spacing: 15) {
                 ForEach(Self.sell, id: \.0) { head, rest in
-                    (Text(head).font(.callout.weight(.semibold))
-                        + Text(" " + rest).font(.callout).foregroundColor(.secondary))
-                        .fixedSize(horizontal: false, vertical: true)
+                    // **説明は、見出しの下の行に。** 見出しの尻に続けると
+                    // 折り返しが途中で切れて読みにくい（実際にそうなった）。
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(head).font(.callout.weight(.semibold))
+                        Text(rest).font(.callout).foregroundStyle(.secondary)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
             if let said {
@@ -59,7 +63,8 @@ struct Hello: View {
                 Button {
                     start()
                 } label: {
-                    Text(busy ? "ブラウザで許可してください…" : "Google で始める")
+                    // **何が起きるかを、ボタンに書く**（本人・2026-09-28）。
+                    Text(busy ? "ブラウザで許可してください…" : "Google アカウント連携して始める")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
@@ -68,7 +73,7 @@ struct Hello: View {
                 .disabled(busy)
                 // **逃げ道は文字リンク**（本人が決めた）── ボタンにすると
                 // 二択に見えて、どちらでもよいことになる。
-                Button("いまはしない") { shut(false) }
+                Button("いまはアカウント連携しない") { shut(false) }
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .disabled(busy)

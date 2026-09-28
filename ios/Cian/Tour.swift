@@ -119,6 +119,10 @@ final class Tour: ObservableObject {
     /// 進めない案内が行き止まりになる。**一段も残らなければ、何も出さない。**
     func start(office: Bool, forced: Bool) {
         guard !on else { return }
+        // **外から渡された一本を開いているときは、案内しない**（依頼 659）──
+        // その人は開きたいファイルがあって来たので、上に幕をかぶせない
+        // （シミュレータで実際に重なった）。
+        guard !Guest.shared.on else { return }
         plan = Self.steps.filter { $0.office || !office }
         guard !plan.isEmpty else {
             UserDefaults.standard.set(true, forKey: Self.touredKey)
@@ -200,7 +204,7 @@ struct TourHooks: ViewModifier {
     }
 }
 
-/// 案内の幕。**アプリのいちばん外側に一枚**だけ掛ける ── 押し出した先の
+/// 案内の幕。**アプリのいちばん外側にだけ掛ける** ── 押し出した先の
 /// 画面にも同じ幕が要るので、根に置いて全部を覆う。
 struct TourVeil: View {
     @ObservedObject var tour = Tour.shared
@@ -244,7 +248,7 @@ struct TourVeil: View {
         .ignoresSafeArea()
     }
 
-    /// 幕 ── 指す先のまわりを四枚で囲う。指す先が無ければ一枚で覆う。
+    /// 幕 ── 指す先のまわりを四つの板で囲う。指す先が無ければ、まるごと覆う。
     @ViewBuilder
     private func shade(_ hole: CGRect?, _ size: CGSize) -> some View {
         let ink = Color.black.opacity(0.5)

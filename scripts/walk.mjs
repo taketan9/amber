@@ -2479,6 +2479,65 @@ if (NOTES2) {
         return true;`), true);
 }
 
+// 十九の三。外から開く（依頼 658）── amber のフォルダの外にある一本を、
+// 単発で開く。**索引にも机にも載せない。**
+await step('外から開く：帯に「元のファイルを直しています」とパスが出る', `
+    const out = state.root.split('/').slice(0, -1).join('/') + '/外の試し.md';
+    await ask('write', { path: out, text: ['# 外の試し', '', 'これは amber のフォルダの外にあります。'].join(String.fromCharCode(10)), force: true });
+    await openGuest(out);
+    const bar = el('guestbar');
+    const what = bar.querySelector('.what').textContent;
+    const where = el('guestwhere').textContent;
+    const shut = el('guestclose').hidden;
+    if (bar.hidden) return '帯が出ていません';
+    if (what !== '元のファイルを直しています') return '帯: ' + what;
+    if (!where.includes('外の試し.md')) return '道: ' + where;
+    if (shut) return '閉じるがありません';
+    // 索引には載っていない。
+    if (state.notes.some((n) => n.path === out)) return '一覧に出ています';
+    await closeGuest();
+    return true;`, true);
+await step('外から開く：そのあいだは自動保存を切る（他人のファイルを黙って書かない）', `
+    const out = state.root.split('/').slice(0, -1).join('/') + '/外の試し.md';
+    const was = autoSave;
+    autoSave = true;
+    await openGuest(out);
+    const inside = autoSave;
+    await closeGuest();
+    const after = autoSave;
+    autoSave = was;
+    if (inside !== false) return '単発のあいだ、自動保存が入ったままです';
+    if (after !== true) return '閉じたあと、自動保存が戻っていません';
+    return true;`, true);
+await step('外から開く：.txt は素のまま（編集）で開く', `
+    const out = state.root.split('/').slice(0, -1).join('/') + '/外の試し.txt';
+    await ask('write', { path: out, text: ['# これは見出しではない', '* これも箇条ではない'].join(String.fromCharCode(10)), force: true });
+    const wasView = view;
+    await openGuest(out);
+    const now = view;
+    await closeGuest();
+    view = wasView;
+    applyView();
+    if (now !== 'write') return '画面: ' + now;
+    return true;`, true);
+await step('外から開く：取り込むと、元が消えて .md で入る', `
+    const out = state.root.split('/').slice(0, -1).join('/') + '/取り込む試し.txt';
+    await ask('write', { path: out, text: ['たまご', 'ぎゅうにゅう'].join(String.fromCharCode(10)), force: true });
+    await openGuest(out);
+    const got = await ask('adopt', { path: out, to: state.places[0].dir });
+    await closeGuest();
+    await reload({ quiet: true });
+    if (!got.path.endsWith('取り込む試し.md')) return '置き先: ' + got.path;
+    // **元は本当に消える**（本人が決めた）。
+    let gone = false;
+    try { await ask('read', { path: out }); } catch { gone = true; }
+    if (!gone) return '元が残っています';
+    // 取り込んだものは、一覧に出る。
+    if (!state.notes.some((n) => n.path === got.path)) return '一覧に出ていません';
+    await ask('delete', { path: got.path });
+    await reload({ quiet: true });
+    return true;`, true);
+
 // 二十。ようこそ画面（依頼 654）── **既定では出さない状態で始めている**
 // （`walk.sh` が `greeted` を憶えさせる）ので、ここでは直に呼んで確かめる。
 await step('ようこそ画面：三行と、大きな一つと、小さな文字リンク', `
@@ -2492,8 +2551,8 @@ await step('ようこそ画面：三行と、大きな一つと、小さな文�
     if (!lis[2].includes('ボタンで書けます')) return lis[2];
     const go = box.querySelector('.go').textContent;
     const skip = box.querySelector('.skip').textContent;
-    if (go !== 'Google で始める') return 'ボタン: ' + go;
-    if (skip !== 'いまはしない') return 'リンク: ' + skip;
+    if (go !== 'Google アカウント連携して始める') return 'ボタン: ' + go;
+    if (skip !== 'いまはアカウント連携しない') return 'リンク: ' + skip;
     box.querySelector('.skip').click();
     if (await p !== 'skip') return '道が違います';
     if (!el('hello').hidden) return '片づいていません';
@@ -2505,103 +2564,15 @@ await step('ようこそ画面：Esc でも片づく（塞がない）', `
     if (await p !== 'skip') return '道が違います';
     if (!el('hello').hidden) return 'Esc で片づきません';
     return true;`, true);
-await step('ようこそ画面：会社向けのビルドは二行で、サインインの代わりに保存場所', `
+await step('ようこそ画面：会社向けのビルドには、出さない', `
     const was = OFFICE;
     OFFICE = true;
-    const p = showHello();
-    const box = el('hello');
-    const lis = [...box.querySelectorAll('.sell li')].map((x) => x.textContent);
-    const go = box.querySelector('.go').textContent;
-    box.querySelector('.skip').click();
-    await p;
+    // **画面ごと出さない**（本人が決めた・2026-09-28）── 三つの売りのうち
+    // 二つが共有の話で、依頼 602 で共有を閉じたそこでは嘘になる。
+    const road = await helloIfFirst({ greeted: false });
     OFFICE = was;
-    if (lis.length !== 2) return '売りが ' + lis.length + ' 行';
-    if (lis.some((t) => t.includes('家族やグループと'))) return '共有の行が残っています';
-    if (go !== 'ノートの保存場所を選ぶ') return 'ボタン: ' + go;
-    return true;`, true);
-
-await step('はじめの案内：五段出て、指す先に輪が掛かる', `
-    const p = startTour(true);
-    // **案内は待たされる**（サンプルを一本開いてから出る）── 呼んだ直後は、まだ出ていない。
-    await new Promise((g) => setTimeout(g, 500));
-    const box = el('tour');
-    if (box.hidden) return '案内が出ていません';
-    const bub = box.querySelector('.bub');
-    const ring = box.querySelector('.ring');
-    const seen = [];
-    for (let i = 0; i < 9; i++) {
-        if (box.hidden) break;
-        seen.push(bub.querySelector('.t').textContent);
-        const want = document.querySelector('#rail .dest[data-kind="cal"]');
-        if (i === 0) {
-            if (ring.hidden) return '一段目に輪がありません';
-            const r = want.getBoundingClientRect();
-            const g = ring.getBoundingClientRect();
-            if (Math.abs(r.left - g.left) > 8 || Math.abs(r.top - g.top) > 8) return '輪がカレンダーからずれています';
-        }
-        bub.querySelector('.next').click();
-    }
-    await p;
-    if (seen.length !== 5) return seen.length + ' 段: ' + seen.join(' / ');
-    if (!seen[0].includes('予定表はここから')) return seen[0];
-    if (!seen[1].includes('ノートはここから')) return seen[1];
-    if (!seen[2].includes('買い物リスト')) return seen[2];
-    if (!seen[3].includes('フォルダとタグ')) return seen[3];
-    if (!seen[4].includes('ここから押すだけ')) return seen[4];
-    if (!el('tour').hidden) return '片づいていません';
-    return true;`, true);
-await step('はじめの案内：指す先が画面に無い段は、黙って飛ばす', `
-    // 指す先を一つ消してみる。**ノートを閉じる手は使えない** ── 最後の段は
-    // サンプルを自分で開くので、閉じても五段のままになる。
-    const head = document.querySelector('#rail .head[data-head="フォルダ"]');
-    if (!head) return 'フォルダの見出しがありません';
-    head.setAttribute('data-head', 'ちがう名前');
-    const p = startTour(true);
-    // **案内は待たされる**（サンプルを一本開いてから出る）── 呼んだ直後は、まだ出ていない。
-    await new Promise((g) => setTimeout(g, 500));
-    const bub = document.querySelector('#tour .bub');
-    const n = bub.querySelector('.n').textContent;
-    bub.querySelector('.stop').click();
-    await p;
-    head.setAttribute('data-head', 'フォルダ');
-    if (n !== '1 / 4') return '段の数: ' + n;
-    return true;`, true);
-await step('はじめの案内：やめると片づく・もう一度は ⌘⇧P から', `
-    const p = startTour(true);
-    // **案内は待たされる**（サンプルを一本開いてから出る）── 呼んだ直後は、まだ出ていない。
-    await new Promise((g) => setTimeout(g, 500));
-    if (el('tour').hidden) return '案内が出ていません';
-    document.querySelector('#tour .bub .stop').click();
-    await p;
-    if (!el('tour').hidden) return '片づいていません';
-    if (!CMDS.some((c) => c.id === 'tour')) return '命令の表に「はじめの案内」がありません';
-    return true;`, true);
-await step('はじめの案内：Esc でも片づく（塞がない）', `
-    const p = startTour(true);
-    // **案内は待たされる**（サンプルを一本開いてから出る）── 呼んだ直後は、まだ出ていない。
-    await new Promise((g) => setTimeout(g, 500));
-    if (el('tour').hidden) return '案内が出ていません';
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
-    await p;
-    if (!el('tour').hidden) return 'Esc で片づきません';
-    return true;`, true);
-await step('はじめの案内：会社向けのビルドは、共有の段が落ちる', `
-    const was = OFFICE;
-    OFFICE = true;
-    const p = startTour(true);
-    // **案内は待たされる**（サンプルを一本開いてから出る）── 呼んだ直後は、まだ出ていない。
-    await new Promise((g) => setTimeout(g, 500));
-    const bub = document.querySelector('#tour .bub');
-    const seen = [];
-    for (let i = 0; i < 9; i++) {
-        if (el('tour').hidden) break;
-        seen.push(bub.querySelector('.t').textContent);
-        bub.querySelector('.next').click();
-    }
-    await p;
-    OFFICE = was;
-    if (seen.some((t) => t.includes('買い物リスト'))) return '共有の段が残っています';
-    if (seen.length !== 4) return seen.length + ' 段';
+    if (!el('hello').hidden) { el('hello').hidden = true; return 'ようこそ画面が出ました'; }
+    if (road !== 'place') return '道が違います: ' + road;
     return true;`, true);
 
 // 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）

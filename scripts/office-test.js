@@ -80,32 +80,19 @@ console.log('会社向けのビルドでは、外へ運ぶものが出ない');
     ok(gone.length === 5, '閉じたのは五つだけ', gone);
 }
 
-console.log('会社向けのビルドの、はじめの一枚（依頼 654）');
+console.log('会社向けのビルドの、ようこそ画面（依頼 654）');
 {
-    // **本物の枝を通す。** 「一行目が落ちる」を検査の側で書き写すと、
-    // 画面の側だけ直した日に黙る ── 切り出した枝をそのまま走らせる。
-    const sellSrc = cutOut('const HELLO_SELL = [', '\n];');
-    const pick = (re, what) => {
-        const m = re.exec(src);
-        if (!m) { console.error('gui/renderer.js から切り出せません: ' + what); process.exit(2); }
-        return m[0];
-    };
-    const sliceSrc = pick(/HELLO_SELL\.slice\([^)]*\)/, 'はじめの一枚の切り出し');
-    const goSrc = pick(/OFFICE \? '[^']*' : 'Google で始める'/, 'はじめの一枚のボタン');
-    const run = (office, tail) => (0, eval)('(function () {\n'
-        + 'const OFFICE = ' + (office ? 'true' : 'false') + ';\n'
-        + sellSrc + '\nreturn ' + tail + ';\n})')();
-
-    const full = run(false, sliceSrc).map((r) => r.join(' '));
-    const office = run(true, sliceSrc).map((r) => r.join(' '));
-    ok(full.length === 3, '通常のビルドは三行', full);
-    ok(office.length === 2, '会社向けのビルドは二行', office);
-    // **共有が閉じているので、「家族やグループと」はそこでは嘘になる。**
-    ok(full.some((t) => t.includes('家族やグループと')), '通常のビルドは共有を売る', full);
-    ok(!office.some((t) => t.includes('家族やグループと')), '会社向けのビルドは共有を売らない', office);
-    // サインインさせる先が無いので、代わりに置き場所を訊く。
-    ok(run(false, goSrc) === 'Google で始める', '通常のビルドはサインインへ', run(false, goSrc));
-    ok(!/Google/.test(run(true, goSrc)), '会社向けのビルドはサインインへ行かない', run(true, goSrc));
+    // **本物の関所を通す。** 「OFFICE と書いてある」だけ見る検査は、
+    // 説明の中の文字を数えて通ったことがある（下の註の七度目）。
+    //
+    // 会社向けには**ようこそ画面ごと出さない**（本人が決めた・2026-09-28）──
+    // 三つの売りのうち二つが共有の話で、依頼 602 で共有を閉じたそこでは嘘になる。
+    const m = /if \(OFFICE\) \{\s*\n\s*window\.amber\.remember\(\{ greeted: true \}\);\s*\n\s*await cmdPlaces\(\);\s*\n\s*return 'place';/.exec(src);
+    ok(!!m, '会社向けのビルドでは、ようこそ画面を出さずに保存場所を訊く');
+    // **ようこそ画面の側には、もう会社向けの枝を持たせない** ── 二か所で
+    // 決めると、片方だけ直した日に食い違う。
+    const cut = cutOut('function showHello()', '\n}');
+    ok(!/OFFICE/.test(cut), 'ようこそ画面そのものは、版を見ない');
 }
 
 console.log('会社向けのビルドの、はじめの案内（依頼 656）');
@@ -129,6 +116,24 @@ console.log('会社向けのビルドの、はじめの案内（依頼 656）');
     ok(!office.some((t) => t.includes('共有に便利です')), '会社向けのビルドは共有を案内しない', office);
     ok(office.some((t) => t.includes('予定表はここから')), '会社向けのビルドにも予定表は残る', office);
     ok(office.some((t) => t.includes('ここから押すだけ')), '会社向けのビルドにも書く道具は残る', office);
+}
+
+console.log('会社向けのビルドの、運ぶ確認（依頼 655）');
+{
+    // **本物の関所を通す。** 「OFFICE と書いてある」だけ見る検査は、
+    // 説明の中の文字を数えて通ったことがある（下の註の七度目）。
+    const m = /if \(!place[^\n]*OFFICE\) return false;/.exec(src);
+    if (!m) { console.error('gui/renderer.js から運ぶ確認の関所を切り出せません'); process.exit(2); }
+    const run = (office, places) => (0, eval)(
+        '(function (place, state, OFFICE) {\n' + m[0] + '\nreturn "出す";\n})'
+    )(places[0], { places }, office);
+    const one = [{ dir: '/x' }];
+    ok(run(false, one) === '出す', '通常のビルドでは、保存ディレクトリ一つで出す');
+    // 会社向けには Drive も共有も無いので、サインインさせる先が無い。
+    ok(run(true, one) === false, '会社向けのビルドでは出さない');
+    // 初回のための画面 ── 二つ目を足した人は、もう自分で決めている。
+    ok(run(false, [{ dir: '/x' }, { dir: '/y' }]) === false, '保存ディレクトリが二つ以上なら出さない');
+    ok(run(false, []) === false, '保存ディレクトリが無ければ出さない');
 }
 
 console.log('版のラベルの読み方');

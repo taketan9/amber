@@ -32,6 +32,38 @@ pub struct Book {
     /// 記録するのは共有へ入れるときだけ。通常の「フォルダへ移動」では記録しない ──
     /// 人が自分で選んで動かしたものに、戻し先は要らない。
     pub came: BTreeMap<String, String>,
+    /// **この端末で、同期に出さない最上位のフォルダ**（依頼 655）。ルート直下の
+    /// フォルダ名だけを持つ ── 入れ子は親に従う。
+    ///
+    /// 空の文字列（[`LOOSE`]）は「どのフォルダにも入っていないノート」を指す。
+    /// 本人の保存ディレクトリの直下には `パスワード.md` のようなノートが何本も
+    /// あり、フォルダだけ並べると**それが黙って上がる**。
+    ///
+    /// **この端末だけの決めごと。** `.amber/settings.json` は同期に出ないので、
+    /// 別の端末は別の決めごとを持てる ── 会社の Mac では出さず、家の Mac では
+    /// 出す、が素直に書ける。
+    ///
+    /// **外しても、向こうにあるものは消さない**（本人が決めた・2026-09-27）。
+    /// これから運ばないだけ。消すのは、本人が別に「向こうからも消す」と
+    /// 言ったときだけ。
+    pub skip: Vec<String>,
+}
+
+/// どのフォルダにも入っていないノートを指す札（[`Book::skip`] の中で）。
+pub const LOOSE: &str = "";
+
+/// その相対パスが、同期に出さないところにあるか。
+///
+/// **見るのは最上位だけ。** `仕事/2026/見積.md` は `仕事` を外せば外れる ──
+/// 深いところまで一つずつ選ばせると、選ぶものが一画面に収まらない。
+pub fn skipped(rel: &str, skip: &[String]) -> bool {
+    if skip.is_empty() {
+        return false;
+    }
+    let top = rel.split('/').next().unwrap_or("");
+    // 直下のノート（`買い物.md`）は、区切りが無いので `top` がファイル名になる。
+    let top = if rel.contains('/') { top } else { LOOSE };
+    skip.iter().any(|s| s == top)
 }
 
 /// 共有フォルダであることを示すファイル。**設定ではなく、フォルダ自身が持つ。**
@@ -195,6 +227,9 @@ pub fn read(root: &Path) -> Book {
             }
         }
     }
+    if let Some(a) = v.get("skip").and_then(|s| s.as_array()) {
+        b.skip = a.iter().filter_map(|s| s.as_str()).map(str::to_string).collect();
+    }
     b
 }
 
@@ -206,7 +241,8 @@ pub fn write(root: &Path, b: &Book) -> anyhow::Result<()> {
     if let Some(dir) = at.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let v = serde_json::json!({ "colors": b.colors, "stars": b.stars, "came": b.came });
+    let v = serde_json::json!({ "colors": b.colors, "stars": b.stars, "came": b.came,
+                                "skip": b.skip });
     std::fs::write(at, serde_json::to_string_pretty(&v)?)?;
     Ok(())
 }
@@ -444,6 +480,111 @@ pub fn bring(files: &[std::path::PathBuf], to: &Path) -> anyhow::Result<Brought>
         }
     }
     Ok(Brought { put, renamed, failed })
+}
+
+/// 取り込んだ結果 ── 置いた道、連れてきた画像の数、名前を変えたか。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Adopted {
+    pub path: PathBuf,
+    pub images: usize,
+    pub renamed: bool,
+}
+
+/// **外から開いた一本を、保存ディレクトリへ取り込む**（依頼 658・本人が決めた）。
+///
+/// 写す → **画像も運ぶ** → 中身が同じか確かめる → **そこで初めて元を消す**。
+/// 一本でも運べなければ、何も消さない。`notebook::move_dir` が「ここで初めて
+/// 削除する。すべて移動先に書き終わっている」とやっているのと同じ順。
+///
+/// **`.txt` は `.md` に改名する。** 一覧に載るのは `.md` と `.markdown` だけで
+/// （`note::list`）、同期も同じ（`cloud::is_note`）── そのまま写すと
+/// 「取り込んだのに一覧に出ない・同期でも運ばれない」になり、**元は消えている。**
+///
+/// **元の画像は消さない。** 同じフォルダの別のノートが同じ画像を指している
+/// かもしれない ── 消してよいと言えるのは、そこを全部読んだときだけ。
+/// こちらへは写しが来るので、リンクは切れない。
+///
+/// 名前がぶつかったら `-2`…`-99`（`bring` と同じ作法・上書きはしない）。
+/// **画像の名前がぶつかって中身が違うときは、本文のリンクも書き換える** ──
+/// 書き換えないと、よそのノートの画像を指すことになる。
+pub fn adopt(note: &Path, to: &Path) -> anyhow::Result<Adopted> {
+    let Some(stem) = note.file_stem().map(|s| s.to_string_lossy().to_string()) else {
+        anyhow::bail!("名前が読めません");
+    };
+    let ext = note
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    // **一覧に載る形にする。** `.txt` は `.md` へ。
+    let ext = if ext == "markdown" { "markdown" } else { "md" };
+    std::fs::create_dir_all(to)?;
+    let text = std::fs::read_to_string(note)?;
+    let (dest, renamed) = free_name(to, &stem, ext);
+
+    // 画像を先に運ぶ ── 本文の書き換えが要るかどうかが、ここで決まる。
+    let here = note.parent().unwrap_or(Path::new("."));
+    let mut text = text;
+    let mut images = 0usize;
+    for at in crate::spare::points_at(&text, here) {
+        if !at.is_file() {
+            continue;
+        }
+        let Ok(rel) = at.strip_prefix(here) else { continue };
+        let Some(rel_str) = rel.to_str() else { continue };
+        let want = to.join(rel);
+        let bytes = std::fs::read(&at)?;
+        if want.exists() {
+            if std::fs::read(&want).unwrap_or_default() == bytes {
+                images += 1;
+                continue;
+            }
+            // 同じ名前で中身が違う ── 別の名前で置いて、本文も直す。
+            let istem = want.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            let iext = want.extension().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            let dir = want.parent().unwrap_or(to).to_path_buf();
+            let (fresh, _) = free_name(&dir, &istem, &iext);
+            let Some(fresh_name) = fresh.file_name().and_then(|s| s.to_str()) else { continue };
+            std::fs::write(&fresh, &bytes)?;
+            let from_link = rel_str.to_string();
+            let to_link = rel
+                .parent()
+                .map(|p| p.join(fresh_name).to_string_lossy().to_string())
+                .unwrap_or_else(|| fresh_name.to_string());
+            text = text.replace(&from_link, &to_link);
+            images += 1;
+            continue;
+        }
+        if let Some(dir) = want.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(&want, &bytes)?;
+        images += 1;
+    }
+
+    std::fs::write(&dest, &text)?;
+    // **確かめてから消す。** 書けたつもりで書けていない日に、元まで無くさない。
+    if std::fs::read_to_string(&dest)? != text {
+        anyhow::bail!("写したものが元と違います: {}", dest.display());
+    }
+    std::fs::remove_file(note)?;
+    Ok(Adopted { path: dest, images, renamed })
+}
+
+/// 空いている名前を選ぶ（`<幹>.<拡張子>`、埋まっていたら `-2`…`-99`）。
+///
+/// **上書きはしない。** 同じ名前の自分のノートを消す道は作らない。
+/// 99 で諦めるのは `bring` と同じ ── そこまで来たら名前を付け直すのは人の仕事。
+fn free_name(dir: &Path, stem: &str, ext: &str) -> (PathBuf, bool) {
+    let mut at = dir.join(format!("{stem}.{ext}"));
+    if !at.exists() {
+        return (at, false);
+    }
+    let mut n = 2;
+    while at.exists() && n <= 99 {
+        at = dir.join(format!("{stem}-{n}.{ext}"));
+        n += 1;
+    }
+    (at, true)
 }
 
 /// バックアップを書き戻す。返すのは (書き戻した数, 手を付けなかった数)。
@@ -690,5 +831,116 @@ mod tests {
         std::fs::write(dir.path().join(".cian").join("settings.json"), r#"{"stars":["いま"]}"#)
             .unwrap();
         assert_eq!(read(dir.path()).stars, vec!["いま".to_string()]);
+    }
+
+    #[test]
+    fn 取り込みは_画像を連れて_元を消す() {
+        let d = tempfile::tempdir().unwrap();
+        let out = d.path().join("外");
+        let root = d.path().join("ノート");
+        std::fs::create_dir_all(out.join("attachments")).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(out.join("attachments/図-1.png"), b"PNG1").unwrap();
+        let note = out.join("メモ.md");
+        std::fs::write(&note, "# メモ\n\n![](attachments/図-1.png)\n").unwrap();
+
+        let got = adopt(&note, &root).unwrap();
+        assert_eq!(got.path, root.join("メモ.md"));
+        assert_eq!(got.images, 1);
+        assert!(!got.renamed);
+        // 画像が付いてこないと、取り込んだ先でリンクが切れる。
+        assert!(root.join("attachments/図-1.png").is_file());
+        // **元は消える**（本人が決めた・2026-09-27）。
+        assert!(!note.exists());
+        // **元の画像は消さない** ── 同じフォルダの別のノートが指しているかもしれない。
+        assert!(out.join("attachments/図-1.png").is_file());
+    }
+
+    #[test]
+    fn 取り込みで_txt_は_md_になる() {
+        let d = tempfile::tempdir().unwrap();
+        let out = d.path().join("外");
+        let root = d.path().join("ノート");
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        let note = out.join("買い物.txt");
+        std::fs::write(&note, "たまご\nぎゅうにゅう\n").unwrap();
+        // そのまま写すと、一覧に載らず同期でも運ばれない ── しかも元は消えている。
+        let got = adopt(&note, &root).unwrap();
+        assert_eq!(got.path, root.join("買い物.md"));
+        assert_eq!(std::fs::read_to_string(&got.path).unwrap(), "たまご\nぎゅうにゅう\n");
+        assert!(!note.exists());
+    }
+
+    #[test]
+    fn 取り込みは_同じ名前を上書きしない() {
+        let d = tempfile::tempdir().unwrap();
+        let out = d.path().join("外");
+        let root = d.path().join("ノート");
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("メモ.md"), "# もとからある\n").unwrap();
+        let note = out.join("メモ.md");
+        std::fs::write(&note, "# 外から来た\n").unwrap();
+
+        let got = adopt(&note, &root).unwrap();
+        assert_eq!(got.path, root.join("メモ-2.md"));
+        assert!(got.renamed);
+        assert_eq!(std::fs::read_to_string(root.join("メモ.md")).unwrap(), "# もとからある\n");
+    }
+
+    #[test]
+    fn 画像の名前がぶつかったら_本文のリンクも直す() {
+        let d = tempfile::tempdir().unwrap();
+        let out = d.path().join("外");
+        let root = d.path().join("ノート");
+        std::fs::create_dir_all(out.join("attachments")).unwrap();
+        std::fs::create_dir_all(root.join("attachments")).unwrap();
+        // 同じ名前・違う中身。**直さないと、よそのノートの画像を指すことになる。**
+        std::fs::write(out.join("attachments/図.png"), b"AAAA").unwrap();
+        std::fs::write(root.join("attachments/図.png"), b"BBBB").unwrap();
+        let note = out.join("メモ.md");
+        std::fs::write(&note, "# メモ\n\n![](attachments/図.png)\n").unwrap();
+
+        let got = adopt(&note, &root).unwrap();
+        let text = std::fs::read_to_string(&got.path).unwrap();
+        assert!(text.contains("attachments/図-2.png"), "{text}");
+        assert_eq!(std::fs::read(root.join("attachments/図-2.png")).unwrap(), b"AAAA");
+        // もとからあった画像は、そのまま。
+        assert_eq!(std::fs::read(root.join("attachments/図.png")).unwrap(), b"BBBB");
+    }
+
+    #[test]
+    fn 同期に出さないのは_最上位で決まる() {
+        let skip = vec!["仕事".to_string()];
+        assert!(skipped("仕事/見積.md", &skip));
+        // **入れ子は親に従う。** 深いところまで一つずつ選ばせない。
+        assert!(skipped("仕事/2026/見積.md", &skip));
+        assert!(skipped("仕事/attachments/図-1.png", &skip));
+        assert!(!skipped("家族/買い物.md", &skip));
+        // 名前が前と同じだけのフォルダは、別のフォルダ。
+        assert!(!skipped("仕事用/見積.md", &skip));
+        // 何も決めていなければ、何も外さない。
+        assert!(!skipped("仕事/見積.md", &[]));
+    }
+
+    #[test]
+    fn フォルダに入っていないノートは_空の札で外れる() {
+        // 本人の保存ディレクトリの直下には `パスワード.md` のようなノートが
+        // 何本もある ── フォルダだけ並べると、それが黙って上がる。
+        let loose = vec![LOOSE.to_string()];
+        assert!(skipped("パスワード.md", &loose));
+        assert!(!skipped("仕事/見積.md", &loose));
+        // 逆に、フォルダだけ外したときは直下のノートは残る。
+        let work = vec!["仕事".to_string()];
+        assert!(!skipped("パスワード.md", &work));
+    }
+
+    #[test]
+    fn 同期に出さないフォルダは_書いて読み戻せる() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = Book { skip: vec!["仕事".to_string(), LOOSE.to_string()], ..Default::default() };
+        write(dir.path(), &b).unwrap();
+        assert_eq!(read(dir.path()).skip, vec!["仕事".to_string(), LOOSE.to_string()]);
     }
 }

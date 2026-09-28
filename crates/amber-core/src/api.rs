@@ -470,7 +470,19 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .collect();
             // 画像も一緒に（依頼 497）。
             here.extend(crate::sync::assets(&root));
-            let there: Vec<crate::sync::There> = p["remote"]
+            // **この端末で「同期に出さない」と決めたフォルダは、居ないものとして
+            // 組む**（依頼 655）── こちらの一覧からも、向こうの一覧からも、
+            // 前に運んだ憶えからも外す。
+            //
+            // **三つとも外すのが肝。** こちらだけ外すと「手元から消えた」と
+            // 読まれて、向こうのものを消す段ができる ── 外したフォルダの
+            // ノートを、家族の端末から消すことになる。本人が決めたのは
+            // 「これから運ばないだけ。向こうのものは消さない」。
+            let skip = crate::notebook::read(&root).skip;
+            if !skip.is_empty() {
+                here.retain(|h| !crate::notebook::skipped(&h.rel, &skip));
+            }
+            let mut there: Vec<crate::sync::There> = p["remote"]
                 .as_array()
                 .map(|a| {
                     a.iter()
@@ -484,7 +496,13 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         .collect()
                 })
                 .unwrap_or_default();
-            let was = crate::sync::recall(&root, who);
+            if !skip.is_empty() {
+                there.retain(|t| !crate::notebook::skipped(&t.rel, &skip));
+            }
+            let mut was = crate::sync::recall(&root, who);
+            if !skip.is_empty() {
+                was.retain(|w| !crate::notebook::skipped(&w.rel, &skip));
+            }
             // こちらで改名して、まだ向こうに伝えていないもの（依頼 492）。
             let moves = crate::sync::moves(&root, who);
             let steps: Vec<serde_json::Value> = crate::sync::plan_with_moves(&here, &there, &was, &moves)
@@ -842,6 +860,30 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "notes": crate::caltag::set(notes, &tags) }))
         }
 
+        // **この端末で、同期に出さないフォルダ**（依頼 655）。最上位の名前だけ。
+        // 空の文字列は「どのフォルダにも入っていないノート」。
+        //
+        // 数えるのは画面の仕事（一覧をもう持っている）。ここは憶えるだけ。
+        "skip" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            Ok(serde_json::json!({ "skip": crate::notebook::read(&root).skip }))
+        }
+
+        // 書き換える。**丸ごと置き換える** ── 足す・外すを別々にすると、
+        // 二つの画面から同時に触ったときに片方の決めごとが消える。
+        "skipset" => {
+            let root = std::path::PathBuf::from(arg(p, "path"));
+            let mut book = crate::notebook::read(&root);
+            book.skip = p["skip"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|t| t.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            book.skip.sort();
+            book.skip.dedup();
+            crate::notebook::write(&root, &book)?;
+            Ok(serde_json::json!({ "skip": book.skip }))
+        }
+
         "palette" => Ok(serde_json::json!({
             "colors": crate::notebook::PALETTE
                 .iter()
@@ -880,6 +922,23 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .unwrap_or_default();
             let r = crate::notebook::bring(&files, &to)?;
             Ok(serde_json::json!({ "put": r.put, "renamed": r.renamed, "failed": r.failed }))
+        }
+
+        // **外から開いた一本を、保存ディレクトリへ取り込む**（依頼 658）。
+        //
+        // 写す → 画像も運ぶ → 確かめる → **そこで初めて元を消す**。
+        // `.txt` は `.md` に改名する（一覧に載るのはそれだけ）。
+        "adopt" => {
+            let note = std::path::PathBuf::from(arg(p, "path"));
+            let to = std::path::PathBuf::from(arg(p, "to"));
+            keep_out(p, &note)?;
+            keep_out(p, &to.join("取り込むもの.md"))?;
+            let r = crate::notebook::adopt(&note, &to)?;
+            Ok(serde_json::json!({
+                "path": r.path.display().to_string(),
+                "images": r.images,
+                "renamed": r.renamed,
+            }))
         }
 
         "restore" => {
@@ -1626,6 +1685,46 @@ mod tests {
     /// 終日の予定は、その日に amber を開いた瞬間に鳴らす（本人・2026-09-22）。
     /// 「今日か」は core が決める ── 今日の終日だけを返し、ほかの日と時刻の
     /// あるものは返さない（時刻のあるものは OS の目覚ましが鳴らす）。
+    #[test]
+    fn 同期に出さないフォルダは_運ぶ段にも_消す段にも出ない() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::create_dir_all(root.join("仕事")).unwrap();
+        std::fs::create_dir_all(root.join("家族")).unwrap();
+        std::fs::write(root.join("仕事/見積.md"), "# 見積\n").unwrap();
+        std::fs::write(root.join("家族/買い物.md"), "# 買い物\n").unwrap();
+        std::fs::write(root.join("パスワード.md"), "# ないしょ\n").unwrap();
+
+        let plan = |remote: serde_json::Value| {
+            let r = call("syncplan", &serde_json::json!({
+                "path": root.to_string_lossy(), "who": "drive", "remote": remote,
+            })).unwrap();
+            r["steps"].as_array().unwrap().iter()
+                .map(|s| (s["do"].as_str().unwrap().to_string(), s["rel"].as_str().unwrap().to_string()))
+                .collect::<Vec<_>>()
+        };
+
+        // まだ何も外していない ── 三本とも上げる段が出る。
+        let all = plan(serde_json::json!([]));
+        assert_eq!(all.len(), 3, "{all:?}");
+        assert!(all.iter().all(|(w, _)| w == "up"), "{all:?}");
+
+        // **仕事と、フォルダに入っていないノートを外す。**
+        call("skipset", &serde_json::json!({
+            "path": root.to_string_lossy(), "skip": ["仕事", crate::notebook::LOOSE],
+        })).unwrap();
+        // 向こうには、外したものが既に置いてある（前に運んだぶん）。
+        let after = plan(serde_json::json!([
+            { "rel": "仕事/見積.md", "id": "a", "tag": "1" },
+            { "rel": "パスワード.md", "id": "b", "tag": "1" },
+        ]));
+        // **残るのは家族の一本だけ。** 外したものは上げも下ろしもしない。
+        assert_eq!(after, vec![("up".to_string(), "家族/買い物.md".to_string())], "{after:?}");
+        // **向こうのものを消す段が出てはいけない**（本人が決めた・2026-09-27）──
+        // 消すと、家族の端末からも消える。
+        assert!(!after.iter().any(|(w, _)| w.contains("消")), "{after:?}");
+    }
+
     #[test]
     fn 今日が終日の日のノートだけを返す() {
         let d = tempfile::tempdir().unwrap();

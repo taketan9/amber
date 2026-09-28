@@ -1117,6 +1117,51 @@ body.vim #vim { display: block; }
 }
 #veil[hidden] { display: none !important; }
 /* 予定を登録するダイアログ（依頼 493）── ダイアログと同じ高さ・同じ紙。 */
+/* **運ぶ確認**（依頼 655）── サインインの直後に一度だけ。上げるを既定に
+   して、最上位のフォルダごとに外せる。**外しても向こうのものは消さない**
+   （本人が決めた）── これから運ばないだけ。 */
+#syncfirst {
+  position: fixed; inset: 0; z-index: 96; display: flex; justify-content: center;
+  align-items: center; background: rgba(0,0,0,.52); -webkit-app-region: no-drag;
+}
+#syncfirst[hidden] { display: none !important; }
+#syncfirst .box {
+  width: min(440px, 88vw); max-height: 82vh; background: var(--paper);
+  border: 1px solid var(--line); border-radius: 15px; box-shadow: 0 20px 56px rgba(0,0,0,.34);
+  padding: 20px 22px 16px; display: flex; flex-direction: column; gap: 14px;
+}
+#syncfirst .hd { font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.6; }
+#syncfirst .sub { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+#syncfirst .rows { display: flex; flex-direction: column; gap: 1px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--line); }
+#syncfirst .rows .r {
+  display: flex; align-items: center; gap: 10px; padding: 8px 11px; background: var(--paper);
+  font-size: 12.5px; color: var(--ink);
+}
+#syncfirst .rows .r .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+#syncfirst .rows .r .n { color: var(--ink-3); font-size: 11.5px; flex: none; }
+/* 外した段は、外したと見て分かる形に ── 文字を薄くするだけだと、
+   「押せていないのか、外れているのか」が見分けられない。 */
+#syncfirst .rows .r.off .nm { color: var(--ink-3); text-decoration: line-through; }
+#syncfirst .rows .r button {
+  flex: none; border: 1px solid var(--line-2); border-radius: 8px; padding: 3px 9px;
+  font-size: 11.5px; color: var(--ink-2); background: var(--bg); cursor: pointer;
+}
+#syncfirst .rows .r button:hover { background: var(--hover); }
+#syncfirst .rows .r.off button { border-color: var(--amber-deep); color: var(--ink);
+  background: color-mix(in srgb, var(--amber) 22%, var(--paper)); font-weight: 600; }
+#syncfirst .acts { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
+/* 琥珀の上の字は `#3a2408` で固定（ようこそ画面と同じ理由）。 */
+#syncfirst .acts .go {
+  padding: 9px 18px; border-radius: 10px; border: 1px solid var(--amber-deep);
+  background: var(--amber); color: #3a2408; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+#syncfirst .acts .later {
+  border: none; background: none; padding: 5px; font-size: 11.5px; color: var(--ink-3);
+  cursor: pointer; text-decoration: underline;
+}
+#syncfirst .acts .later:hover { color: var(--ink-2); }
 /* **はじめの案内**（依頼 656）── 初めての人に、左の列を上から四つと、
    書く道具の帯を一つ。**次へを押すまで進めない**（本人が決めた）ので、
    後ろは押せない。指している先だけ輪で囲って、そこが明るく見えるようにする。 */
@@ -1168,9 +1213,10 @@ body.vim #vim { display: block; }
   flex-direction: column; gap: 13px; }
 #hello .sell li { font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
 #hello .sell b { color: var(--ink); font-weight: 600; }
-/* **添えの一言は、まとめて折る。** 素のまま書くと「（中身は Markdown です）」の
-   末尾だけが次の行に落ちて、一字だけの行ができる。 */
-#hello .sell .rest { display: inline-block; }
+/* **添えの一文は、見出しの下の行に。** 本人が書いた形（見出し＋説明）を
+   そのまま出す ── 見出しの尻に続けると、折り返しが途中で切れて読みにくい
+   （iPhone で「予定表を／共有できます。」と割れた）。 */
+#hello .sell .rest { display: block; margin-top: 3px; color: var(--ink-3); }
 /* **琥珀の上の字は `#3a2408` で固定**（引き出しの札や帯のボタンと同じ）──
    `var(--ink)` にすると、暗い装いで字まで明るくなって琥珀に沈む。 */
 #hello .go {
@@ -1549,6 +1595,23 @@ body.mac.guest #guestbar { padding-top: 30px; }
   -webkit-app-region: no-drag;
 }
 #guestclose:hover { background: var(--amber); color: #3a2408; }
+/* **「保存」だけ大きく**（依頼 658・本人）── 押すものが一つだと分かる形。
+   琥珀の上の字は `#3a2408` で固定（ようこそ画面と同じ理由）。 */
+#guestsave {
+  flex: none; padding: 3px 14px; border-radius: 7px; font-size: 12px; font-weight: 700;
+  background: var(--amber); border: 1px solid var(--amber-deep); color: #3a2408;
+  -webkit-app-region: no-drag;
+}
+#guestsave:hover { background: var(--amber-deep); }
+#guestsave[hidden] { display: none !important; }
+/* 取り込みは小さい文字リンク ── ボタンにすると二択に見えて、どちらでも
+   よいことになる（ようこそ画面の逃げ道と同じ扱い）。 */
+#guestadopt {
+  flex: none; border: none; background: none; padding: 2px; font-size: 11.5px;
+  color: var(--ink-3); text-decoration: underline; -webkit-app-region: no-drag;
+}
+#guestadopt:hover { color: var(--ink-2); }
+#guestadopt[hidden] { display: none !important; }
 /* 単発のときは、左の二列を出さない ── 索引の外にあるものなので。 */
 body.guest #rail, body.guest #list { display: none; }
 body.guest #top { padding-top: 12px; }
@@ -1993,9 +2056,14 @@ body.dropping::after {
   </div>
   <div class="grab" id="grab2" data-for="list"></div>
   <div id="pane">
+    <!-- 外から開いた一本の帯（依頼 658）。**押すものは「保存」だけ大きく** ──
+         本人「圧倒的に　もとのファイルを更新する　が優勢になる UI」。
+         取り込みは小さい文字リンクで、押したら一度訊く。 -->
     <div id="guestbar" hidden>
-      <span class="what">ほかの場所のノートを、一時的に開いています</span>
+      <span class="what">元のファイルを直しています</span>
       <span id="guestwhere"></span>
+      <button id="guestsave">保存</button>
+      <button id="guestadopt">ambər に取り込む</button>
       <button id="guestclose">閉じて一覧に戻る</button>
     </div>
     <div id="top" hidden>
@@ -2212,6 +2280,13 @@ body.dropping::after {
       <div class="ft"><span class="n"></span><button type="button" class="stop">やめる</button><button type="button" class="next"></button></div>
     </div>
   </div>
+  <!-- 運ぶ確認（依頼 655）。中身は `firstSyncSheet` が入れる。 -->
+  <div id="syncfirst" hidden><div class="box">
+    <div class="hd"></div>
+    <div class="sub"></div>
+    <div class="rows"></div>
+    <div class="acts"><button type="button" class="later">あとで</button><button type="button" class="go">同期する</button></div>
+  </div></div>
   <div id="more" hidden></div>
   <!-- 絵文字の板（依頼 418）。**探す欄・束の帯・盤**の三段。 -->
   <div id="emoji" hidden>
