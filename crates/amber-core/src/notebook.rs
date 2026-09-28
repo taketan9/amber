@@ -530,7 +530,12 @@ pub fn adopt(note: &Path, to: &Path) -> anyhow::Result<Adopted> {
             continue;
         }
         let Ok(rel) = at.strip_prefix(here) else { continue };
-        let Some(rel_str) = rel.to_str() else { continue };
+        // **本文の中の道は、いつも `/`。** `Path` の文字にすると Windows では
+        // `attachments\\図.png` になり、ノートに書いてある `attachments/図.png` と
+        // 一致しない ── 書き換えが当たらないか、当たってもバックスラッシュの
+        // リンクを書き込む。**Windows では一生出ない類を、CI が捕まえた**
+        // （2026-09-28・v3.2.6 のリリースが落ちた）。
+        let rel_str = slashed(rel);
         let want = to.join(rel);
         let bytes = std::fs::read(&at)?;
         if want.exists() {
@@ -545,12 +550,11 @@ pub fn adopt(note: &Path, to: &Path) -> anyhow::Result<Adopted> {
             let (fresh, _) = free_name(&dir, &istem, &iext);
             let Some(fresh_name) = fresh.file_name().and_then(|s| s.to_str()) else { continue };
             std::fs::write(&fresh, &bytes)?;
-            let from_link = rel_str.to_string();
-            let to_link = rel
-                .parent()
-                .map(|p| p.join(fresh_name).to_string_lossy().to_string())
-                .unwrap_or_else(|| fresh_name.to_string());
-            text = text.replace(&from_link, &to_link);
+            let to_link = match rel.parent().map(slashed).filter(|p| !p.is_empty()) {
+                Some(dir) => format!("{dir}/{fresh_name}"),
+                None => fresh_name.to_string(),
+            };
+            text = text.replace(&rel_str, &to_link);
             images += 1;
             continue;
         }
@@ -568,6 +572,17 @@ pub fn adopt(note: &Path, to: &Path) -> anyhow::Result<Adopted> {
     }
     std::fs::remove_file(note)?;
     Ok(Adopted { path: dest, images, renamed })
+}
+
+/// 道を、本文に書く形（`/` 区切り）に直す。
+///
+/// **`Path` の文字をそのまま使わない。** Windows では区切りが `\` になり、
+/// Markdown のリンクと一致しない ── 三度踏んでいる（依頼 596・603 ほか）。
+fn slashed(p: &Path) -> String {
+    p.components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// 空いている名前を選ぶ（`<幹>.<拡張子>`、埋まっていたら `-2`…`-99`）。
@@ -834,6 +849,15 @@ mod tests {
     }
 
     #[test]
+    fn 本文に書く道は_いつもスラッシュ() {
+        // **`Path` の文字をそのまま使うと、Windows では `\` になる。**
+        // ここは組み立てから作るので、Windows でも Mac でも同じ問いになる。
+        let p: PathBuf = ["attachments", "図.png"].iter().collect();
+        assert_eq!(slashed(&p), "attachments/図.png");
+        assert_eq!(slashed(Path::new("")), "");
+    }
+
+    #[test]
     fn 取り込みは_画像を連れて_元を消す() {
         let d = tempfile::tempdir().unwrap();
         let out = d.path().join("外");
@@ -905,6 +929,9 @@ mod tests {
         let got = adopt(&note, &root).unwrap();
         let text = std::fs::read_to_string(&got.path).unwrap();
         assert!(text.contains("attachments/図-2.png"), "{text}");
+        // **バックスラッシュのリンクを書き込まない。** Windows で実際に
+        // `attachments\\図-2.png` になっていた（v3.2.6 のリリースが落ちた）。
+        assert!(!text.contains('\\'), "{text}");
         assert_eq!(std::fs::read(root.join("attachments/図-2.png")).unwrap(), b"AAAA");
         // もとからあった画像は、そのまま。
         assert_eq!(std::fs::read(root.join("attachments/図.png")).unwrap(), b"BBBB");
