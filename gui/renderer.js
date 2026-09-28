@@ -13505,6 +13505,29 @@ function showHello() {
 /// Esc で片すための取っ手（`keydown` の一本道から呼ぶ）。
 let helloShut = null;
 
+/// 会社向けのビルドの初回に、置き場所を確かめる（依頼 654）。
+///
+/// **答えられる形で訊く**（会社で踏んだ・2026-09-29）。
+///
+/// 前は「保存ディレクトリ」（増やす・名前を変える・外すの画面）を出していた。
+/// あれには**「これでよい」が無い** ── crmaine の同梱版が作った
+/// `~/Documents/amber` を `firstRoot()` が見つけて**もう使える状態**なのに
+/// 訊かれるので、本人は同じフォルダを選び直した。`putPlace` が
+/// 「もう入っています」と言って、**何も起きなかった**。
+///
+/// いまは二つだけ ── このまま使うか、別のフォルダにするか。
+/// 別のフォルダは**付け替える**（`placeMove`）── 足すと、空のほうが
+/// 一覧に残って二つ並ぶ。
+async function officeFirstPlace() {
+    const p = state.places[0];
+    if (!p) return;
+    const go = await askPick('ノートの保存場所', [
+        { name: 'このまま使う', sub: shortPath(p.dir), value: 'keep' },
+        { name: '別のフォルダにする', sub: '会社で置き場所が決まっているとき', value: 'move' },
+    ], 'ここに置いた .md が、そのままノートになります', true);
+    if (go === 'move') await placeMove(p);
+}
+
 /// 初めてかどうか。**「ノートが空か」では決めない** ── 消して閉じた人に
 /// 毎回出るのは、いちばん嫌われる作りかた（`seedWelcome` と同じ考え）。
 async function helloIfFirst(saved) {
@@ -13514,7 +13537,7 @@ async function helloIfFirst(saved) {
     // （共有フォルダや、ロックの指定）ことが多い。
     if (OFFICE) {
         window.amber.remember({ greeted: true });
-        await cmdPlaces();
+        await officeFirstPlace();
         return 'place';
     }
     return showHello();
@@ -14264,22 +14287,6 @@ const escapeAttr = escapeHtml;
     drawOrder();
     booted = true;
     if (pendingGuest) { const at = pendingGuest; pendingGuest = null; openGuest(at); }
-    // **初めての人には、ようこそ画面**（依頼 654）。**立ち上がりきってから** ──
-    // 一覧も左の列もできていない画面に重ねると、片した瞬間に空の画面が出る。
-    // 会社向けのビルドかどうかは `officeReady` が決まってから訊く（サインインの
-    // ボタンを出すかが変わる）。
-    officeReady.then(async () => {
-        // **案内を出すのは、この起動でようこそ画面を出した人にだけ。**
-        // 前から使っている人（`greeted` を憶えている人）の画面に、ある日
-        // 突然かぶせない ── もう一度見たい人には ⌘⇧P の「はじめの案内」。
-        const road = await helloIfFirst(saved);
-        if (!road) return;
-        // サインインまで行けた人には、**何を運ぶかを先に見せる**（依頼 655）──
-        // 上げ先が決まる前に「運びます」は出せないので、ここより前には置けない。
-        if (road === 'in') await firstSyncSheet();
-        await tourIfFirst(saved);
-    });
-
     let t = null;
     el('find').oninput = () => {
         state.filter = el('find').value;
@@ -14305,6 +14312,29 @@ const escapeAttr = escapeHtml;
     const first = (saved.open && back.includes(saved.open)) ? saved.open : back[0];
     if (first) { showing = first; await openNote(first, { keep: true }); }
     else if (saved.open && state.notes.some((n) => n.path === saved.open)) await openNote(saved.open);
+
+    // **初めての人には、ようこそ画面**（依頼 654）。**一覧を読み終えてから**
+    // （2026-09-29 に会社で踏んだ）。一覧も左の列もできていない画面に重ねると、
+    // 片した瞬間に空の画面が出る ── それだけではなかった。
+    //
+    // 前はここより上に置いていて、`await reload()` を待っていなかった ──
+    // 会社向けの「保存場所はこれでよいか」が `state.notes` を見て決めるのに、
+    // その時点では**まだ空**で、ノートが三本あるのに訊いてしまった。
+    // 案内（サンプルを開く）と運ぶ確認（本数を数える）も同じものを見ているので、
+    // あちらは押すのを待つあいだに読み終わって**たまたま**出ていなかった。
+    //
+    // 会社向けのビルドかどうかは `officeReady` が決まってから訊く。
+    officeReady.then(async () => {
+        // **案内を出すのは、この起動でようこそ画面を出した人にだけ。**
+        // 前から使っている人（`greeted` を憶えている人）の画面に、ある日
+        // 突然かぶせない ── もう一度見たい人には ⌘⇧P の「はじめの案内」。
+        const road = await helloIfFirst(saved);
+        if (!road) return;
+        // サインインまで行けた人には、**何を運ぶかを先に見せる**（依頼 655）──
+        // 上げ先が決まる前に「運びます」は出せないので、ここより前には置けない。
+        if (road === 'in') await firstSyncSheet();
+        await tourIfFirst(saved);
+    });
 
     // **終日の予定は、その日に開いた瞬間に鳴らす**（`ringAllday`）。
     rangAllday = saved.rangAllday || {};

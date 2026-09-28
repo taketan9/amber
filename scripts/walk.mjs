@@ -2564,6 +2564,30 @@ await step('ようこそ画面：Esc でも片づく（塞がない）', `
     if (await p !== 'skip') return '道が違います';
     if (!el('hello').hidden) return 'Esc で片づきません';
     return true;`, true);
+await step('会社向け：保存場所の問いに、答えがある', `
+    const was = OFFICE;
+    OFFICE = true;
+    const p = officeFirstPlace();
+    await new Promise((g) => setTimeout(g, 500));
+    const names = [...document.querySelectorAll('#veil #sheet .items .it')]
+        .map((x) => x.textContent);
+    const head = document.querySelector('#veil #sheet .hd');
+    const title = head ? head.textContent : '';
+    // **「このまま使う」で閉じられること**が肝 ── 前は増やす画面が出ていて、
+    // 同じフォルダを選び直すと「もう入っています」で何も起きなかった。
+    const keep = [...document.querySelectorAll('#veil #sheet .items .it')]
+        .find((x) => x.textContent.includes('このまま使う'));
+    if (!keep) { closeSheet(null); await p; OFFICE = was; return '選べるもの: ' + names.join(' / '); }
+    keep.click();
+    await p;
+    OFFICE = was;
+    if (!title.includes('ノートの保存場所')) return '見出し: ' + title;
+    if (names.length !== 2) return '選べるものが ' + names.length + ' つ';
+    if (!names.some((t) => t.includes('別のフォルダにする'))) return names.join(' / ');
+    if (!el('veil').hidden) { closeSheet(null); return '片づいていません'; }
+    // いまの保存ディレクトリは、そのまま。
+    if (state.places.length !== 1) return '場所が ' + state.places.length + ' つ';
+    return true;`, true);
 await step('ようこそ画面：会社向けのビルドには、出さない', `
     const was = OFFICE;
     OFFICE = true;

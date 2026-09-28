@@ -87,8 +87,15 @@ console.log('会社向けのビルドの、ようこそ画面（依頼 654）');
     //
     // 会社向けには**ようこそ画面ごと出さない**（本人が決めた・2026-09-28）──
     // 三つの売りのうち二つが共有の話で、依頼 602 で共有を閉じたそこでは嘘になる。
-    const m = /if \(OFFICE\) \{\s*\n\s*window\.amber\.remember\(\{ greeted: true \}\);\s*\n\s*await cmdPlaces\(\);\s*\n\s*return 'place';/.exec(src);
+    const m = /if \(OFFICE\) \{\s*\n\s*window\.amber\.remember\(\{ greeted: true \}\);\s*\n\s*await officeFirstPlace\(\);\s*\n\s*return 'place';/.exec(src);
     ok(!!m, '会社向けのビルドでは、ようこそ画面を出さずに保存場所を訊く');
+    // **訊くなら、答えられる形で**（2026-09-29 に会社で踏んだ）── 前は
+    // 「保存ディレクトリ」（増やす・名前を変える・外すの画面）を出していて、
+    // 「これでよい」が無かった。
+    const ask = cutOut('async function officeFirstPlace()', '\n}');
+    ok(/このまま使う/.test(ask), '「このまま使う」がある');
+    ok(/placeMove\(p\)/.test(ask), '別のフォルダは、足すのではなく付け替える');
+    ok(!/cmdPlaces/.test(ask), '増やす画面は出さない');
     // **ようこそ画面の側には、もう会社向けの枝を持たせない** ── 二か所で
     // 決めると、片方だけ直した日に食い違う。
     const cut = cutOut('function showHello()', '\n}');
