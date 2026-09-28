@@ -8,6 +8,9 @@
  * ── 三度踏んだ（2026-09-09）。註にも書けない。改行が要るなら
  * String.fromCharCode(10)。
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 export const PORT = process.env.PORT || 9333;
 /// 試し場のノートが置いてある道（`walk.sh` が渡す）。
 export const NOTES = process.env.NOTES || '';
@@ -85,6 +88,15 @@ export async function run(src) {
             // **固まったデスクトップ版に、残りの段を押しても意味が無い** ── 一段ごとに十秒
             // 待って二時間かける前に、**どこで回っているか**を取って止まる。
             // 回りっぱなしの JS も `Debugger.pause` なら止められる（次の割り込みで）。
+            // **「応えない」を、ぜんぶ「固まっている」と言わない。**
+            //
+            // 殺されたときも同じ顔をする ── 2026-09-28、走査が四回とも別々の段で
+            // 「固まっている」と落ちた。ログを見たら毎回 `SIGKILL` で、二十秒ごとに
+            // 数えたら**もう一つのセッション（`~/workspace/crmaine`）が自分の
+            // Electron を立ち上げた瞬間に、こちらが消えて**いた（あちらが起動前に
+            // Electron をまとめて殺している）。**環境を調べて一時間溶かした。**
+            const killed = wasKilled();
+            if (killed) return { bad: killed, killed: true };
             const where = await whereStuck();
             return { bad: 'デスクトップ版が固まっている（1+1 も返らない）', frozen: true, where };
         }
@@ -95,6 +107,26 @@ export async function run(src) {
         return { bad: String(bad.exception?.description || bad.text).split('\n')[0].slice(0, 300) };
     }
     return { value: r.result?.result?.value };
+}
+
+/// 外から殺されたか ── `walk.sh` が書いているアプリのログの終わりを見る。
+///
+/// **殺されたのと固まったのは、同じ顔をしている。** どちらも `1+1` が返らない。
+/// 見分けないと、コードと環境を疑って時間を溶かす（実際に溶かした）。
+function wasKilled() {
+    const at = join(process.env.TMPDIR || '/tmp', 'amber-walk', 'win.log');
+    let tail = '';
+    try {
+        tail = readFileSync(at, 'utf8').slice(-4000);
+    } catch {
+        return null;
+    }
+    const m = /exited with signal (\w+)/.exec(tail);
+    if (!m) return null;
+    return 'デスクトップ版が外から殺されました（' + m[1] + '）'
+        + ' ── 機械やコードの問題ではありません。'
+        + 'ほかのセッションが Electron をまとめて殺していないか見てください'
+        + '（`pkill` は amber の道で絞る）。';
 }
 
 /* ── 見張りながら、一つ動かす ── */
