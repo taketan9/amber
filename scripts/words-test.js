@@ -93,6 +93,80 @@ if (own.length) {
     console.log('  その日から同じノートが端末によって違う言葉で出ます。');
 }
 
+/* ── はじめの案内とようこそ画面の文（依頼 654・656・657） ──
+ *
+ * **二つの amber で同じ字。** 家族で両方を使うとき、同じボタンの説明が
+ * 端末によって違うのは、いちばん質の悪いずれ方 ── どちらが正しいのか
+ * 誰にも分からない。文は本人が書いたものなので、片方だけ直せば鳴る。
+ */
+const lines = (text, from, to) => {
+    const a = text.indexOf(from);
+    if (a < 0) return null;
+    const b = text.indexOf(to, a);
+    if (b < 0) return null;
+    return text.slice(a, b);
+};
+/// 人に見せる字だけを、出てきた順に。
+///
+/// **`say:` の値だけ見る。** 引用符の中をぜんぶ拾うと、指す先の選択子
+/// （`#rail .head[data-head="フォルダ"]`）まで数に入って、あるはずのない
+/// ずれを毎回報せる（実際に一度そうなった）。
+///
+/// JS は `\n`、Swift も `\n` で書くので、そのまま並べて比べられる。
+const quoted = (chunk) => [...chunk.matchAll(/say:\s*(?:'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)")/g)]
+    .map((m) => (m[1] === undefined ? m[2] : m[1]));
+
+{
+    const win = read('gui/renderer.js');
+    const phone = read('ios/Cian/Tour.swift');
+    const a = lines(win, 'const TOUR = [', '\n];');
+    const b = lines(phone, 'static let steps: [Step] = [', '\n    ]');
+    if (!a || !b) {
+        bad += 1;
+        console.log('✗ はじめの案内の文を切り出せません（' + (a ? 'iPhone' : 'ウィンドウ') + '）');
+    } else {
+        const x = quoted(a);
+        const y = quoted(b);
+        if (x.join('\u0000') !== y.join('\u0000')) {
+            bad += 1;
+            console.log('✗ はじめの案内の文が、ウィンドウと iPhone で違います');
+            for (let i = 0; i < Math.max(x.length, y.length); i += 1) {
+                if (x[i] !== y[i]) console.log('  ' + (i + 1) + ': 窓「' + (x[i] || '') + '」/ iPhone「' + (y[i] || '') + '」');
+            }
+        } else {
+            console.log('✓ はじめの案内の文は、両方で同じ（' + x.length + ' 件）');
+        }
+    }
+}
+
+/// ようこそ画面は組みの並び（`['見出し', '添え']`）なので、引用符の中を
+/// 順に拾う。ここに選択子は入らない。
+const phrases = (chunk) => [...chunk.matchAll(/'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)"/g)]
+    .map((m) => (m[1] === undefined ? m[2] : m[1]));
+
+{
+    const win = read('gui/renderer.js');
+    const phone = read('ios/Cian/Hello.swift');
+    const a = lines(win, 'const HELLO_SELL = [', '\n];');
+    const b = lines(phone, 'private static let sell: [(String, String)] = [', '\n    ]');
+    if (!a || !b) {
+        bad += 1;
+        console.log('✗ ようこそ画面の文を切り出せません（' + (a ? 'iPhone' : 'ウィンドウ') + '）');
+    } else {
+        const x = phrases(a);
+        const y = phrases(b);
+        if (x.join('\u0000') !== y.join('\u0000')) {
+            bad += 1;
+            console.log('✗ ようこそ画面の文が、ウィンドウと iPhone で違います');
+            for (let i = 0; i < Math.max(x.length, y.length); i += 1) {
+                if (x[i] !== y[i]) console.log('  ' + (i + 1) + ': 窓「' + (x[i] || '') + '」/ iPhone「' + (y[i] || '') + '」');
+            }
+        } else {
+            console.log('✓ ようこそ画面の文は、両方で同じ（' + x.length + ' 件）');
+        }
+    }
+}
+
 console.log('');
 if (bad) {
     console.log(KINDS.length + ' 件中 ' + bad + ' 件ずれています');

@@ -313,6 +313,24 @@ struct Where: View {
                     Text("インポートした .md はこのフォルダにコピーされます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。「不要添付削除」は、ノートから使われていない画像を小さく見て、選んでゴミ箱へ。")
                 }
 
+                // **もう一度見る道**（依頼 656）── はじめの案内は一度きりで、
+                // 次へを押すまで進めない作りなので、読まずに押し流した人の
+                // 戻り道が要る。デスクトップ版は ⌘⇧P の「はじめの案内」。
+                Section {
+                    Button {
+                        dismiss()
+                        // 設定の画面が閉じきってから ── 重ねると、閉じる
+                        // 動きの裏で幕が出て、指す先が動いたままになる。
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            Tour.shared.start(office: false, forced: true)
+                        }
+                    } label: {
+                        Label("はじめの案内", systemImage: "hand.point.up.left")
+                    }
+                } footer: {
+                    Text("予定表・ノート・共有・フォルダ・書く道具を、順に指してひとまわり案内します。何度押しても同じものが出ます。")
+                }
+
                 Section {
                     Button {
                         let n = store.addWelcome()

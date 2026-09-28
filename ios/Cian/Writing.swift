@@ -122,6 +122,8 @@ struct NoteView: View {
             }
             steps
             }
+            // はじめの案内の最後の段が指す先（依頼 656）。
+            .tourAnchor("marks")
         }
         .background(.bar)
     }

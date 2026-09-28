@@ -12,6 +12,12 @@ struct ContentView: View {
     @StateObject private var desk = Desk()
     @ObservedObject private var ring = Ring.shared
     @State private var picking = false
+    /// 初めて開いた人に、ようこそ画面を出しているか（依頼 654）。
+    /// **「ノートが空か」では決めない** ── 消して閉じた人に毎回出るのは、
+    /// いちばん嫌われる作りかた（`seedWelcome` と同じ考え）。
+    @State private var greeting = !Hello.seen
+    /// はじめの案内（依頼 656）── 最後の段でノートを開いてほしいと言ってくる。
+    @ObservedObject private var tour = Tour.shared
     @State private var naming = false
     @State private var booking = false
     /// ただ 1 つのファイル選択が、今回は何を訊かれているか。
@@ -144,6 +150,23 @@ struct ContentView: View {
         .sheet(item: $past) { w in
             Past(store: store, at: w.at, isBook: w.book)
         }
+        // **ようこそ画面は、いちばん手前**（依頼 654）。閉じるまで何も触らせない
+        // ので `fullScreenCover` ── 下の一覧が見えていると、読まずに横を押す。
+        .fullScreenCover(isPresented: $greeting) {
+            Hello(sync: Syncing.shared) { _ in
+                greeting = false
+                // **案内を出すのは、この起動でようこそ画面を出した人にだけ**
+                // （依頼 656）── 前から使っている人の画面に、ある日突然
+                // かぶせない。もう一度見たい人には、設定の「はじめの案内」。
+                if !Tour.seen { Tour.shared.start(office: false, forced: false) }
+            }
+        }
+        // 最後の段は、ノートの下の帯を指す ── 一覧の画面には無いので、
+        // 案内に言われたらサンプルを一本開く。**開くのは一覧の仕事**
+        // （どのノートがあるかを知っているのはこちら）。
+        .modifier(TourHooks(openSample: openSample,
+                            // 案内が終わったら、そこで初めて通知を訊く（依頼 654）。
+                            afterTour: { Task { _ = await Bell.ask(); store.catchUp() } }))
         .sheet(isPresented: $showCal) {
             Calendaring(store: store, open: { note in
                 desk.open(note, store)
@@ -257,7 +280,13 @@ struct ContentView: View {
             // 端末が別のことをしているあいだに繰り返しが溜めたぶん。
             // 入ってきたときに一度だけ訊く ── なぜ水曜の 9 時ではなく
             // この瞬間なのかは `Bell` を見よ。
-            _ = await Bell.ask()
+            //
+            // **初めての人には、ここで訊かない**（依頼 654）── 通知の確認が
+            // ようこそ画面の上に出る（シミュレータで実際に出た）。**初めて
+            // 開いた人が最初に見るものが、OS の許可を訊く画面**になるうえ、
+            // なぜ要るのかを一度も読まないまま答えることになる。案内が
+            // 終わってから訊く（下の `onChange`）。
+            if !greeting { _ = await Bell.ask() }
             store.catchUp()
         }
         // **`.fileImporter` は 1 つだけ。** 同じ View に 2 つ置くと 1 つに
@@ -607,6 +636,19 @@ struct ContentView: View {
         catch { store.trouble = error.localizedDescription; return nil }
     }
 
+    /// 案内の最後の段のために、サンプルを一本開く（依頼 656）。
+    ///
+    /// **開くのは一覧の仕事** ── どのノートがあるかを知っているのはこちら。
+    private func openSample() {
+        guard !showing else { return }
+        let note = store.notes.first { ($0.title ?? "").contains("ようこそ") } ?? store.notes.first
+        guard let note else { return }
+        desk.open(note, store)
+        showing = true
+        // 「表示」画面が最初の絵を出すまで、幕は待つ。
+        tour.opened()
+    }
+
     private var empty: some View {
         ContentUnavailableView {
             Label("ノートの保存場所", systemImage: "folder.badge.questionmark")
@@ -746,6 +788,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 0, trailing: 16))
+                        .tourAnchor("cal")
                         // **一つだけの、押させたいボタン。** デスクトップ版と同じ形 ── 塊に
                         // せず、琥珀は丸だけに残す。
                         Button { naming = true } label: {
@@ -764,6 +807,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 0, trailing: 16))
+                        .tourAnchor("new")
                         Button { store.flat.toggle() } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: store.flat ? "tray.full.fill" : "tray.full")
@@ -1017,6 +1061,7 @@ struct ContentView: View {
                             .buttonStyle(.borderless)
                             .accessibilityLabel("フォルダを作る・選ぶ")
                         }
+                        .tourAnchor("book")
                     }
                 }
                 if store.at.isEmpty, ownBooks.isEmpty {
