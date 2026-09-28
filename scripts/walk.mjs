@@ -2479,6 +2479,47 @@ if (NOTES2) {
         return true;`), true);
 }
 
+// 二十。ようこそ画面（依頼 654）── **既定では出さない状態で始めている**
+// （`walk.sh` が `greeted` を憶えさせる）ので、ここでは直に呼んで確かめる。
+await step('ようこそ画面：三行と、大きな一つと、小さな文字リンク', `
+    const p = showHello();
+    const box = el('hello');
+    if (box.hidden) return '一枚が出ていません';
+    const lis = [...box.querySelectorAll('.sell li')].map((x) => x.textContent);
+    if (lis.length !== 3) return '売りが ' + lis.length + ' 行';
+    if (!lis[0].includes('家族やグループと')) return lis[0];
+    if (!lis[1].includes('読みやすく')) return lis[1];
+    if (!lis[2].includes('ボタンで書けます')) return lis[2];
+    const go = box.querySelector('.go').textContent;
+    const skip = box.querySelector('.skip').textContent;
+    if (go !== 'Google で始める') return 'ボタン: ' + go;
+    if (skip !== 'いまはしない') return 'リンク: ' + skip;
+    box.querySelector('.skip').click();
+    if (await p !== 'skip') return '道が違います';
+    if (!el('hello').hidden) return '片づいていません';
+    return true;`, true);
+await step('ようこそ画面：Esc でも片づく（塞がない）', `
+    const p = showHello();
+    if (el('hello').hidden) return '一枚が出ていません';
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
+    if (await p !== 'skip') return '道が違います';
+    if (!el('hello').hidden) return 'Esc で片づきません';
+    return true;`, true);
+await step('ようこそ画面：会社向けのビルドは二行で、サインインの代わりに保存場所', `
+    const was = OFFICE;
+    OFFICE = true;
+    const p = showHello();
+    const box = el('hello');
+    const lis = [...box.querySelectorAll('.sell li')].map((x) => x.textContent);
+    const go = box.querySelector('.go').textContent;
+    box.querySelector('.skip').click();
+    await p;
+    OFFICE = was;
+    if (lis.length !== 2) return '売りが ' + lis.length + ' 行';
+    if (lis.some((t) => t.includes('家族やグループと'))) return '共有の行が残っています';
+    if (go !== 'ノートの保存場所を選ぶ') return 'ボタン: ' + go;
+    return true;`, true);
+
 // 二十一。後始末 ── 歩いた跡を消す（ゴミ箱へは入れない: OS の外へ出る）
 await step('片づける', `
     for (const n of state.notes.filter((x) => relOf(x.book) === '歩き試し'

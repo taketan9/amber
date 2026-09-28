@@ -8341,6 +8341,10 @@ document.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') {
         // **手前にあるものから閉じる。** ダイアログが開いているのに大きい画面が
         // 戻ると、閉じたつもりのものが残る。
+        // ようこそ画面（依頼 654）は、いちばん手前 ── 小さい文字リンクと同じ道。
+        // **塞がない。** Esc が効かないようこそ画面は、押すところを見つけられなかった
+        // 人にとって行き止まりになる。
+        if (helloOn && helloShut) { e.preventDefault(); helloShut('skip'); return; }
         if (!el('lens').hidden) { e.preventDefault(); closeLens(); return; }
         if (!el('emoji').hidden) { e.preventDefault(); closeEmoji(); return; }
         if (!el('more').hidden) { e.preventDefault(); closeMenu(); return; }
@@ -13068,6 +13072,115 @@ function signInTrouble(err) {
     return 'サインインできませんでした: ' + e;
 }
 
+/* ── はじめの一枚（依頼 654） ── */
+
+/// 初めて開いた人に見せる三行（**本人が決めた文**・2026-09-27）。
+///
+/// **Markdown は最後に一度だけ。** 狙っているのは記法を知らない人なので、
+/// 先に「きれい・簡単」を見せて、種明かしを後ろへ回す ── 前の案は二行目で
+/// 「Markdown で書きます」と言い、三行目で「Markdown を知らなくても」と
+/// 打ち消していた（一つ前の吹き出しで身構えさせて、次で慰める形）。
+///
+/// **会社向けのビルドでは一行目を落とす**（依頼 602）── 共有が閉じているので、
+/// 「家族やグループと」はそこでは嘘になる。
+const HELLO_SELL = [
+    ['家族やグループと、同じノートを。', '予定表も一緒に使えます'],
+    ['読みやすく、きれいに。', '見出しも表も、そのまま整います'],
+    ['記法を知らなくても、ボタンで書けます', '（中身は Markdown です）'],
+];
+
+/// ようこそ画面を出しているか。
+let helloOn = false;
+
+/// ようこそ画面を組んで、どの道を選んだかで片す。返すのは `'in'`（サインインした）・
+/// `'skip'`（いまはしない）・`'place'`（会社向けで保存場所を選んだ）。
+///
+/// **押すものは二つだけ。** 大きな一つと、小さな文字リンク一つ ──
+/// 三つ目を足すと「どれでもよい」に見えて、初回の狙い（同期まで進めさせる）が
+/// 消える。Esc は小さいほうと同じ扱い（塞ぐと、行き止まりになる）。
+function showHello() {
+    const box = el('hello');
+    if (!box) return Promise.resolve('skip');
+    const sell = box.querySelector('.sell');
+    const go = box.querySelector('.go');
+    const skip = box.querySelector('.skip');
+    box.querySelector('.brand').innerHTML = BRAND + ' へようこそ';
+    sell.innerHTML = '';
+    for (const [head, rest] of HELLO_SELL.slice(OFFICE ? 1 : 0)) {
+        const li = document.createElement('li');
+        const b = document.createElement('b');
+        b.textContent = head;
+        const tail = document.createElement('span');
+        tail.className = 'rest';
+        tail.textContent = rest;
+        li.append(b, document.createTextNode(' '), tail);
+        sell.append(li);
+    }
+    // **会社向けのビルドには、サインインさせる先が無い**（依頼 602 で Drive と
+    // 共有を閉じてある）。代わりに置き場所を訊く ── 会社ではノートの置き場所が
+    // 決まっている（共有フォルダや、ロックの指定）ことが多い。
+    go.textContent = OFFICE ? 'ノートの保存場所を選ぶ' : 'Google で始める';
+    skip.textContent = OFFICE ? 'あとで決める' : 'いまはしない';
+    helloOn = true;
+    box.hidden = false;
+    document.body.classList.add('hello');
+    return new Promise((done) => {
+        const shut = (road) => {
+            if (!helloOn) return;
+            helloOn = false;
+            box.hidden = true;
+            document.body.classList.remove('hello');
+            // **憶えるのは片したとき。** 開いたときに憶えると、途中で落ちた回に
+            // 二度と出なくなる（初めての人が、初めての画面を一度も見られない）。
+            window.amber.remember({ greeted: true });
+            done(road);
+        };
+        go.onclick = async () => {
+            if (OFFICE) { shut('place'); await cmdPlaces(); return; }
+            // **ここでは片さない。** ブラウザが開いているあいだ画面を残して
+            // おかないと、戻ってきた人が「押したのに何も起きなかった」画面を
+            // 見る（サインインは十数秒かかる）。
+            const ok = await signInNow();
+            shut(ok ? 'in' : 'skip');
+        };
+        skip.onclick = () => shut('skip');
+        helloShut = shut;
+    });
+}
+
+/// Esc で片すための取っ手（`keydown` の一本道から呼ぶ）。
+let helloShut = null;
+
+/// 初めてかどうか。**「ノートが空か」では決めない** ── 消して閉じた人に
+/// 毎回出るのは、いちばん嫌われる作りかた（`seedWelcome` と同じ考え）。
+async function helloIfFirst(saved) {
+    if (saved.greeted) return;
+    await showHello();
+}
+
+/// **Google のサインインは、ここだけ**（依頼 654）── ようこそ画面（`#hello`）と
+/// 「同期」の命令の両方から呼ぶ。二か所に書くと、片方だけ直した日に
+/// 「デスクトップ版のどこから入ったかで振る舞いが違う」ができる。
+///
+/// 返すのは入れたかどうか。**断られても、もう一度勧めない**（本人が決めた）──
+/// 二度目の誘いは嫌われる。
+async function signInNow() {
+    say('ブラウザで Google にサインインしてください…');
+    let got;
+    try { got = await window.amber.driveSignIn(); } catch (e) { got = { error: why(e) }; }
+    if (!got || got.error) {
+        // **消えない形で言う。** 帯の一言は数秒で消え、見逃すと「押したのに
+        // 何も起きない」にしか見えない（実際に見逃された・2026-09-11）。
+        await askPick('サインインできませんでした', [{ name: '閉じる', value: 0 }],
+            signInTrouble(got ? got.error : '返事がありません'), true);
+        return false;
+    }
+    await loadSync();
+    const who = got.who || {};
+    say('Google にサインインしました' + (who.email ? '（' + who.email + '）' : ''));
+    return true;
+}
+
 /// 「同期」。**押すのは3 つ、打つのは Google のパスワードだけ**（本人が決めた・
 /// 2026-09-11・案 甲）── amber の中で「Google でサインイン」を押す →
 /// ブラウザで「許可」→ デスクトップ版に戻る。URL は打たせない。
@@ -13078,19 +13191,7 @@ async function cmdSync() {
             { name: 'Google でサインイン', sub: 'ブラウザが開きます。「許可」を押したら、このデスクトップ版に戻ってください', value: 'in' },
         ], 'Mac と iPhone で同じノートを使えるようにします。amber が触れるのは、amber が作ったファイルだけです', true);
         if (go !== 'in') return;
-        say('ブラウザで Google にサインインしてください…');
-        let got;
-        try { got = await window.amber.driveSignIn(); } catch (e) { got = { error: why(e) }; }
-        if (!got || got.error) {
-            // **消えない形で言う。** 帯の一言は数秒で消え、見逃すと「押したのに
-            // 何も起きない」にしか見えない（実際に見逃された・2026-09-11）。
-            await askPick('サインインできませんでした', [{ name: '閉じる', value: 0 }],
-                signInTrouble(got ? got.error : '返事がありません'), true);
-            return;
-        }
-        await loadSync();
-        const who = got.who || {};
-        say('Google にサインインしました' + (who.email ? '（' + who.email + '）' : ''));
+        await signInNow();
         return;
     }
     const go = await askPick('同期', [
@@ -13801,6 +13902,11 @@ const escapeAttr = escapeHtml;
     drawOrder();
     booted = true;
     if (pendingGuest) { const at = pendingGuest; pendingGuest = null; openGuest(at); }
+    // **初めての人には、ようこそ画面**（依頼 654）。**立ち上がりきってから** ──
+    // 一覧も左の列もできていない画面に重ねると、片した瞬間に空の画面が出る。
+    // 会社向けのビルドかどうかは `officeReady` が決まってから訊く（サインインの
+    // ボタンを出すかが変わる）。
+    officeReady.then(() => helloIfFirst(saved));
 
     let t = null;
     el('find').oninput = () => {

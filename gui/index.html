@@ -1117,6 +1117,44 @@ body.vim #vim { display: block; }
 }
 #veil[hidden] { display: none !important; }
 /* 予定を登録するダイアログ（依頼 493）── ダイアログと同じ高さ・同じ紙。 */
+/* **はじめの一枚**（依頼 654）── 初めて開いた人に、まず三つだけ見せる。
+   後ろを暗くして、押すものを二つに絞る（大きな「Google で始める」と、
+   小さな文字リンク）。**逃げ道を小さくするが、必ず置く** ── Apple の
+   5.1.1(v) は「主な機能に要らないサインインを強いてはいけない」と書いて
+   いるので、ここを塞ぐと iPhone 版が審査で止まる。 */
+#hello {
+  position: fixed; inset: 0; z-index: 95; display: flex; justify-content: center;
+  align-items: center; background: rgba(0,0,0,.52); -webkit-app-region: no-drag;
+}
+#hello[hidden] { display: none !important; }
+#hello .box {
+  width: min(430px, 86vw); background: var(--paper); border: 1px solid var(--line);
+  border-radius: 16px; box-shadow: 0 22px 60px rgba(0,0,0,.34);
+  padding: 26px 26px 18px; display: flex; flex-direction: column; gap: 18px;
+}
+#hello .brand { font-size: 25px; font-weight: 700; color: var(--ink); letter-spacing: .01em; }
+#hello .brand .s { color: var(--brand-s); }
+#hello .sell { list-style: none; margin: 0; padding: 0; display: flex;
+  flex-direction: column; gap: 13px; }
+#hello .sell li { font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+#hello .sell b { color: var(--ink); font-weight: 600; }
+/* **添えの一言は、まとめて折る。** 素のまま書くと「（中身は Markdown です）」の
+   末尾だけが次の行に落ちて、一字だけの行ができる。 */
+#hello .sell .rest { display: inline-block; }
+/* **琥珀の上の字は `#3a2408` で固定**（引き出しの札や帯のボタンと同じ）──
+   `var(--ink)` にすると、暗い装いで字まで明るくなって琥珀に沈む。 */
+#hello .go {
+  margin-top: 2px; padding: 11px 14px; border-radius: 11px; border: 1px solid var(--amber-deep);
+  background: var(--amber); color: #3a2408; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+#hello .go:hover { background: var(--amber-deep); }
+/* **逃げ道は文字リンク**（本人が決めた）── ボタンにすると二択に見えて、
+   どちらでもよいことになる。 */
+#hello .skip {
+  align-self: center; border: none; background: none; padding: 4px;
+  font-size: 11.5px; color: var(--ink-3); cursor: pointer; text-decoration: underline;
+}
+#hello .skip:hover { color: var(--ink-2); }
 #evform, #newform {
   position: fixed; inset: 0; z-index: 80; display: flex; justify-content: center;
   align-items: flex-start; padding-top: 12vh; background: rgba(0,0,0,.28);
@@ -2126,6 +2164,14 @@ body.dropping::after {
     <input type="text" spellcheck="false">
     <div class="items"></div>
     <div class="foot"></div>
+  </div></div>
+  <!-- ようこそ画面（依頼 654）。中身は `drawHello` が入れる ── 会社向けの
+       ビルドでは一行少なく、サインインのボタンも出ないので、文は一か所で決める。 -->
+  <div id="hello" hidden><div class="box">
+    <div class="brand"></div>
+    <ul class="sell"></ul>
+    <button type="button" class="go"></button>
+    <button type="button" class="skip"></button>
   </div></div>
   <div id="more" hidden></div>
   <!-- 絵文字の板（依頼 418）。**探す欄・束の帯・盤**の三段。 -->

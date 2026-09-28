@@ -255,6 +255,13 @@ sleep 0.5
 # 向けてみたが、まっさらな引き出しで開いたデスクトップ版は数分で固まった（Chromium が鍵束に
 # 訊きに行って、裏の側が止まる ── 2026-09-11・二度）。設定は上の写しと戻しで守り、
 # **走っているあいだは本人のアプリを触らない**（本人が変えた見方が巻き戻る）。
+# **ようこそ画面は、憶えた状態で始める**（依頼 654）── `$HOME` を作り替えて
+# いるので設定はまっさらで、そのままだと初めての人と見なされて `#hello` が
+# 画面ぜんぶを覆う。**282 段が一段目から通らなくなる。** 台本（`AMBER_DO`）で
+# `showHello()` を直に呼ぶ段があるので、既定では出さない。
+mkdir -p "$work/home/Library/Application Support/amber"
+printf '%s\n' '{ "greeted": true }' > "$work/home/Library/Application Support/amber/amber.json"
+
 # `AMBER_AWAKE` ── 後ろに隠れたテスト用のアプリを App Nap に止めさせない（`main.js`）。
 # **`--use-mock-keychain` が要る。** `$HOME` を作り替えているので、Chromium が
 # 鍵束を `$HOME/Library/Keychains` に探しに行って見つからず、**本人の画面に

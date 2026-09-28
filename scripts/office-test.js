@@ -80,6 +80,34 @@ console.log('会社向けのビルドでは、外へ運ぶものが出ない');
     ok(gone.length === 5, '閉じたのは五つだけ', gone);
 }
 
+console.log('会社向けのビルドの、はじめの一枚（依頼 654）');
+{
+    // **本物の枝を通す。** 「一行目が落ちる」を検査の側で書き写すと、
+    // 画面の側だけ直した日に黙る ── 切り出した枝をそのまま走らせる。
+    const sellSrc = cutOut('const HELLO_SELL = [', '\n];');
+    const pick = (re, what) => {
+        const m = re.exec(src);
+        if (!m) { console.error('gui/renderer.js から切り出せません: ' + what); process.exit(2); }
+        return m[0];
+    };
+    const sliceSrc = pick(/HELLO_SELL\.slice\([^)]*\)/, 'はじめの一枚の切り出し');
+    const goSrc = pick(/OFFICE \? '[^']*' : 'Google で始める'/, 'はじめの一枚のボタン');
+    const run = (office, tail) => (0, eval)('(function () {\n'
+        + 'const OFFICE = ' + (office ? 'true' : 'false') + ';\n'
+        + sellSrc + '\nreturn ' + tail + ';\n})')();
+
+    const full = run(false, sliceSrc).map((r) => r.join(' '));
+    const office = run(true, sliceSrc).map((r) => r.join(' '));
+    ok(full.length === 3, '通常のビルドは三行', full);
+    ok(office.length === 2, '会社向けのビルドは二行', office);
+    // **共有が閉じているので、「家族やグループと」はそこでは嘘になる。**
+    ok(full.some((t) => t.includes('家族やグループと')), '通常のビルドは共有を売る', full);
+    ok(!office.some((t) => t.includes('家族やグループと')), '会社向けのビルドは共有を売らない', office);
+    // サインインさせる先が無いので、代わりに置き場所を訊く。
+    ok(run(false, goSrc) === 'Google で始める', '通常のビルドはサインインへ', run(false, goSrc));
+    ok(!/Google/.test(run(true, goSrc)), '会社向けのビルドはサインインへ行かない', run(true, goSrc));
+}
+
 console.log('版のラベルの読み方');
 {
     // `main.js` は `edition.json` を隣から読む。**環境変数が勝つ**
