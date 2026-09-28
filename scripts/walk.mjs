@@ -2546,9 +2546,9 @@ await step('ようこそ画面：三行と、大きな一つと、小さな文�
     if (box.hidden) return '一枚が出ていません';
     const lis = [...box.querySelectorAll('.sell li')].map((x) => x.textContent);
     if (lis.length !== 3) return '売りが ' + lis.length + ' 行';
-    if (!lis[0].includes('家族やグループと')) return lis[0];
-    if (!lis[1].includes('読みやすく')) return lis[1];
-    if (!lis[2].includes('ボタンで書けます')) return lis[2];
+    if (!lis[0].includes('同じカレンダーを')) return lis[0];
+    if (!lis[1].includes('同じノートを')) return lis[1];
+    if (!lis[2].includes('マークダウン')) return lis[2];
     const go = box.querySelector('.go').textContent;
     const skip = box.querySelector('.skip').textContent;
     if (go !== 'Google アカウント連携して始める') return 'ボタン: ' + go;
@@ -2569,9 +2569,15 @@ await step('ようこそ画面：会社向けのビルドには、出さない',
     OFFICE = true;
     // **画面ごと出さない**（本人が決めた・2026-09-28）── 三つの売りのうち
     // 二つが共有の話で、依頼 602 で共有を閉じたそこでは嘘になる。
-    const road = await helloIfFirst({ greeted: false });
+    const p = helloIfFirst({ greeted: false });
+    await new Promise((g) => setTimeout(g, 500));
+    const shown = !el('hello').hidden;
+    // **保存場所を訊く小画面が出る。** 閉じてやらないと返ってこない
+    // （answering と同じ話 ── 訊いてくるものには答える。**台本にバックティックは書かない**）。
+    if (!el('veil').hidden) closeSheet(null);
+    const road = await p;
     OFFICE = was;
-    if (!el('hello').hidden) { el('hello').hidden = true; return 'ようこそ画面が出ました'; }
+    if (shown) { el('hello').hidden = true; return 'ようこそ画面が出ました'; }
     if (road !== 'place') return '道が違います: ' + road;
     return true;`, true);
 
