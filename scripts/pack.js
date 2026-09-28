@@ -213,6 +213,13 @@ function mac(out) {
     // 予定表を読む言い分（amber-cal が求める）。無いと macOS は小デスクトップ版も出さずに断る。
     set('NSCalendarsFullAccessUsageDescription', 'カレンダーに予定を並べ、登録するため');
     set('NSCalendarsUsageDescription', 'カレンダーに予定を並べ、登録するため');
+    // **`.md` を開けると名乗る**（依頼 658）。
+    //
+    // 中身はもう出来ていた ── `openGuest` が外の一本を単発で開き、`main.js` は
+    // `open-file`（Finder の「このアプリケーションで開く」）を待ち受けている。
+    // **なのに一度も鳴りようがなかった** ── ここで名乗っていなかったので、
+    // Finder の一覧に amber が並ばず、既定のアプリにも選べなかった。
+    docTypes(plist);
     fillApp(path.join(res, 'app'), server, 'amber-server', cal);
     verify(path.join(res, 'app'), 'amber-server');
     // 署名（その場のもの）。配布の署名や公証には Apple の証明書が要る。
@@ -226,6 +233,40 @@ function mac(out) {
         execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, zip]);
         console.log('zip: ' + zip + '  (' + sizeOf(zip) + ')');
     }
+}
+
+/// `.md` / `.markdown` / `.txt` を開けると Info.plist に書く。
+///
+/// **`PlistBuddy` は配列を一段ずつ足す。** `Add :Key array` してから
+/// `Add :Key:0 dict`、その中の `Add :Key:0:CFBundleTypeName string ...`。
+/// 一度で書ける書き方は無い。
+///
+/// **役目は `Editor`。** `Viewer` にすると「開く」には出るが既定のアプリには
+/// 選べず、`open-file` は人が毎回選んだときしか鳴らない。
+///
+/// `LSItemContentTypes` は UTI ── Markdown は `net.daringfireball.markdown`
+/// （Apple が用意しているもの）、テキストは `public.plain-text`。
+function docTypes(plist) {
+    const run = (...a) => {
+        try { execFileSync('/usr/libexec/PlistBuddy', [...a, plist], { stdio: 'ignore' }); }
+        catch { /* 既にあるなら、そのまま */ }
+    };
+    run('-c', 'Delete :CFBundleDocumentTypes');
+    run('-c', 'Add :CFBundleDocumentTypes array');
+    const kinds = [
+        ['Markdown のノート', ['net.daringfireball.markdown']],
+        ['テキスト', ['public.plain-text']],
+    ];
+    kinds.forEach(([name, utis], i) => {
+        run('-c', `Add :CFBundleDocumentTypes:${i} dict`);
+        run('-c', `Add :CFBundleDocumentTypes:${i}:CFBundleTypeName string ${name}`);
+        run('-c', `Add :CFBundleDocumentTypes:${i}:CFBundleTypeRole string Editor`);
+        run('-c', `Add :CFBundleDocumentTypes:${i}:LSHandlerRank string Alternate`);
+        run('-c', `Add :CFBundleDocumentTypes:${i}:LSItemContentTypes array`);
+        utis.forEach((u, k) => {
+            run('-c', `Add :CFBundleDocumentTypes:${i}:LSItemContentTypes:${k} string ${u}`);
+        });
+    });
 }
 
 // ── Windows ──────────────────────────────────────────────────────────

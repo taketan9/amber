@@ -164,6 +164,19 @@ struct ContentView: View {
         // 最後の段は、ノートの下の帯を指す ── 一覧の画面には無いので、
         // 案内に言われたらサンプルを一本開く。**開くのは一覧の仕事**
         // （どのノートがあるかを知っているのはこちら）。
+        // 外から渡された一本を、机に載せる（依頼 659）。**索引には載せない** ──
+        // amber のフォルダの外にあるものなので、一覧には出ない。
+        .modifier(GuestHooks(open: { note in
+            desk.open(note, store)
+            showing = true
+        }, opened: { at in
+            // 取り込んだあと ── 一覧を読み直して、取り込んだ先を開き直す。
+            store.reload()
+            if let one = store.notes.first(where: { $0.path == at }) {
+                desk.open(one, store)
+                showing = true
+            }
+        }))
         .modifier(TourHooks(openSample: openSample,
                             // 案内が終わったら、そこで初めて通知を訊く（依頼 654）。
                             afterTour: { Task { _ = await Bell.ask(); store.catchUp() } }))

@@ -30,6 +30,40 @@
 	     何に使うのか分からないまま許可を訊かれることになる。 -->
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>この iPhone の予定表を、ambər のカレンダーに並べます。予定を足すときにも使います。</string>
+	<!-- **`.md` を開けると名乗る**（依頼 659）── これが無いと、「ファイル」や
+	     共有シートの「ほかのアプリで開く」に ambər が並ばない。
+	     `LSSupportsOpeningDocumentsInPlace` は**自分のフォルダを見せるため**の
+	     もので、外から受け取る話ではなかった。
+
+	     役目は `Editor` ── `Viewer` だと開くだけで、直したものを書き戻せない。
+	     `net.daringfireball.markdown` は Apple が用意している UTI。 -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Markdown のノート</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>net.daringfireball.markdown</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>テキスト</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.plain-text</string>
+			</array>
+		</dict>
+	</array>
 	<!-- The two that make the notes folder a real place. `in place` is what
 	     lets cian read the files where they live instead of a copy — a copy
 	     would sync back to nowhere. -->

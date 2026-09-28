@@ -589,10 +589,48 @@ struct DeskView: View {
     ///
     @AppStorage("cian.autosave") private var autosave = true
 
+    /// 自分で保存するか。**外から渡された一本は、勝手に書かない**（依頼 659・
+    /// デスクトップ版と同じ）── 眺めていてうっかり触ると、気づかないうちに
+    /// 向こうのファイルが変わる。帯に「保存」を出して、押したときだけ書く。
+    private var autoWrite: Bool { autosave && !onGuest }
+
     private var here: Desk.Tab? { desk.current }
+
+    /// 外から渡された一本（依頼 659）。
+    @ObservedObject private var guest = Guest.shared
+    /// 取り込むか訊いている最中。
+    @State private var adopting = false
+
+    /// いま見ているのが、外から渡された一本か。
+    private var onGuest: Bool { guest.on && desk.showing == guest.note?.path }
+
+    /// **外のファイルを直していると、帯で言う**（依頼 658・659）。
+    ///
+    /// **押すものは何も置かない**（本人「圧倒的に　もとのファイルを更新する　が
+    /// 優勢になる UI」）── 何もしなければ元がそのまま更新される。取り込みは
+    /// 小さい文字リンクで、押したら一度訊く。
+    private var guestBand: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("元のファイルを直しています")
+                    .font(.caption.weight(.semibold)).foregroundStyle(Color("AccentColor"))
+                // **末尾から削らない** ── ファイルの名前は後ろのほうが効く。
+                Text(guest.note?.path ?? "")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+            Button("ambər に取り込む") { adopting = true }
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color("AccentColor").opacity(0.12))
+    }
 
     private var pages: some View {
         VStack(spacing: 0) {
+            if onGuest { guestBand }
             if desk.tabs.count > 1 { strip }
             // 開いているノートをスワイプで行き来する。ドットは `.never` ──
             // 上の帯が「いくつあって、いまどれか」を既に言っていて、
@@ -628,6 +666,19 @@ struct DeskView: View {
             .sheet(item: Binding(get: { pasting.map { Past.Which(at: $0, book: false) } },
                                  set: { if $0 == nil { pasting = nil } })) { w in
                 Past(store: store, at: w.at, isBook: w.book)
+            }
+            // **「元のファイルは消えます」を、押す前にはっきり書く**（依頼 658・
+            // 本人が「本当に消す」を選んだ）── 知らずに押す道は作らない。
+            .alert("ambər に取り込みますか", isPresented: $adopting) {
+                Button("やめる", role: .cancel) {}
+                Button("取り込む") {
+                    guard let dir = store.rootURL?.path else { return }
+                    guest.adopt(into: dir)
+                }
+            } message: {
+                Text("元のファイルは消えます。"
+                    + ((guest.note?.path ?? "").lowercased().hasSuffix(".txt")
+                        ? "一覧に出るように、名前を .md にします。" : ""))
             }
             .sheet(isPresented: $touring) {
                 Touring(heads: (here?.blocks ?? []).filter { $0.kind == "heading" }) { line in
@@ -698,23 +749,23 @@ struct DeskView: View {
             // 間引いてある ── 打鍵ごとの保存は、一文で 40 回ファイルを
             // 書き直すことになり、同期フォルダではそれが向こうの端末に
             // 40 回気づかせることになる。
-            .onChange(of: here?.text ?? "") { _, _ in if autosave { later() } }
+            .onChange(of: here?.text ?? "") { _, _ in if autoWrite { later() } }
             // 離れる瞬間も保存に値する ── 端末は断りなくアプリを止められる
             // ので、タイマーだけの保存では最後に打ったものが失われる。
             //
             // 自動保存が off でも、離れる瞬間は打ったものを失ってよい
             // 瞬間ではない ── これは保存ではなく、保存を*提案する*最後の
             // 機会。on のときは、これが保存そのものになる。
-            .onChange(of: phase) { _, going in if going != .active, autosave { now() } }
+            .onChange(of: phase) { _, going in if going != .active, autoWrite { now() } }
             .onDisappear {
                 saving?.cancel()
-                if autosave { now() } else if here?.dirty == true { leaving = true }
+                if autoWrite { now() } else if here?.dirty == true { leaving = true }
             }
     }
 
     @ToolbarContentBuilder
     private var chrome: some ToolbarContent {
-        if !autosave {
+        if !autoWrite {
             ToolbarItem(id: "save", placement: .topBarTrailing) {
                 Button("保存") { now() }.disabled(here?.dirty != true)
             }
@@ -725,7 +776,7 @@ struct DeskView: View {
             // ノートは、安心して離れられないノートだから。
             Group {
                 if here?.dirty == true {
-                    Label(autosave ? "保存中" : "未保存", systemImage: "circle.fill")
+                    Label(autoWrite ? "保存中" : "未保存", systemImage: "circle.fill")
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 } else {
