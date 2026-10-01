@@ -126,7 +126,7 @@ struct Feeds: View {
                 } header: {
                     Text("読んでいる予定表")
                 } footer: {
-                    Text("読むだけです。向こうの予定表は何も変わりません。"
+                    Text("読むだけです。同期先の予定表は何も変わりません。"
                          + "アドレスはこの iPhone の中だけに置きます。")
                 }
                 Section {
@@ -153,7 +153,7 @@ struct Feeds: View {
                         Color.black.opacity(0.25).ignoresSafeArea()
                         VStack(spacing: 10) {
                             ProgressView()
-                            Text("取りに行っています…").font(.footnote)
+                            Text("取りに行っています").font(.footnote)
                         }
                         .padding(22)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))

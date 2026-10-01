@@ -449,7 +449,7 @@ struct NoteView: View {
                     Button("原寸で見る") { peeking = picURL(held?.at ?? "") }
                     // **画像の大きさは、押して選べる**（依頼 420）── 記法を
                     // 覚えていない人が、いちばん変えたがるのがこれ。
-                    Button("大きさ…") { sizing = true }
+                    Button("大きさを指定") { sizing = true }
                     Button("消す", role: .destructive) { hand.did("drop") }
                     Button("やめる", role: .cancel) {}
                 }

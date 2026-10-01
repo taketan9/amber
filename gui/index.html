@@ -1543,6 +1543,10 @@ body.vim #vim { display: block; }
 }
 #more button:hover { background: var(--hover); }
 #more button .k { margin-left: auto; font-size: 11px; color: var(--ink-3); }
+/* **さらに開く段の、右向きの矢印**（依頼 664）── 三点リーダーをやめたので、
+   「押すとまだ先がある」ことを言う印が要る。左右の列を畳むボタンと同じ線。 */
+#more button .arw { margin-left: auto; display: inline-flex; align-items: center; color: var(--ink-3); }
+#more button .arw svg { width: 13px; height: 13px; }
 /* いまどうなっているかは**右端に揃える** ── 名前のすぐ後ろに置くと、
    命令ごとに違う位置で始まって、目が毎回探しに行く。 */
 /* **予定の中身を出すダイアログ**（依頼 574）── 件名は折り返して全部出す。
@@ -2087,7 +2091,7 @@ body.dropping::after {
            言われた。幅は `#meta` を固定してから空いている。 -->
       <button id="tocbtn" title="目次（⌘⇧O）"></button>
       <button id="dots" title="このノートにすること（右押しでも同じ）">ノート ▾</button>
-      <button id="bell" title="通知設定 ── いつ知らせるか" hidden></button>
+      <button id="bell" title="通知 ── いつ知らせるか" hidden></button>
       <button id="back" title="一つ戻す（⌘Z）" hidden></button>
       <button id="fwd" title="やり直す（⌘⇧Z）" hidden></button>
       <button id="gear" title="ambər の設定と見た目（⌘⇧P で全部）"></button>
@@ -2232,7 +2236,7 @@ body.dropping::after {
   <div id="newform" hidden><div class="box">
     <div class="hd">新しいノート</div>
     <label class="f"><span>タイトル</span><input id="nntitle" type="text" spellcheck="false" placeholder="例: 買い物メモ（空のままでもかまいません）"></label>
-    <div class="hint">空のままなら、本文の1行目がタイトルになります</div>
+    <div class="hint">空のままなら、本文の一行目がタイトルになります</div>
     <div class="f"><span>タグ</span>
       <div id="nntags" class="chips"></div>
       <input id="nntag" type="text" spellcheck="false" placeholder="タグを打って Enter（あとからでも付けられます）">
@@ -2251,7 +2255,7 @@ body.dropping::after {
       <span class="sz"></span>
       <span class="grow"></span>
       <button data-do="fit">画面に合わせる</button>
-      <button data-do="size">大きさ…</button>
+      <button data-do="size">大きさを指定</button>
       <button data-do="drop">消す</button>
       <button data-do="close">閉じる</button>
     </div>
@@ -2304,7 +2308,7 @@ body.dropping::after {
       <span class="sum"></span>
       <span class="grow"></span>
       <button class="all">すべて選ぶ</button>
-      <button class="go">ゴミ箱へ入れる</button>
+      <button class="go"></button>
       <button class="x">閉じる</button>
     </div>
     <div class="warn" hidden></div>

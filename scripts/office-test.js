@@ -143,6 +143,17 @@ console.log('会社向けのビルドの、運ぶ確認（依頼 655）');
     ok(run(false, []) === false, '保存ディレクトリが無ければ出さない');
 }
 
+console.log('会社向けのビルドは、絵を GPU に任せない（2026-10-01）');
+{
+    const main = fs.readFileSync(path.join(__dirname, '..', 'gui', 'main.js'), 'utf8');
+    const at = main.indexOf("if (edition() === 'office') app.disableHardwareAcceleration();");
+    ok(at >= 0, '会社向けのときだけ、GPU に任せないと言っている');
+    // **呼ぶ場所が肝。** `whenReady` のあとでは効かない ── 文字が在るだけの
+    // 検査だと、置き場所を動かした日に黙って効かなくなる。
+    const ready = main.indexOf('app.whenReady().then(() => {');
+    ok(at >= 0 && ready >= 0 && at < ready, 'それを頼むのは、立ち上がりより前');
+}
+
 console.log('版のラベルの読み方');
 {
     // `main.js` は `edition.json` を隣から読む。**環境変数が勝つ**

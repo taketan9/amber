@@ -201,7 +201,7 @@ struct Where: View {
                         Button {
                             Task { await sync.now("手") }
                         } label: {
-                            Label(sync.busy ? "同期しています…" : "いま同期する", systemImage: "arrow.triangle.2.circlepath")
+                            Label(sync.busy ? "同期しています" : "いま同期する", systemImage: "arrow.triangle.2.circlepath")
                         }
                         .disabled(sync.busy)
                         Button(role: .destructive) {
@@ -222,7 +222,7 @@ struct Where: View {
                                 }
                             }
                         } label: {
-                            Label(signingIn ? "ブラウザで「許可」を押してください…" : "Google でサインイン", systemImage: "person.crop.circle.badge.checkmark")
+                            Label(signingIn ? "ブラウザで「許可」を押してください" : "Google でサインイン", systemImage: "person.crop.circle.badge.checkmark")
                         }
                         .disabled(signingIn)
                     }
@@ -310,7 +310,7 @@ struct Where: View {
                 } header: {
                     Text("バックアップとインポート")
                 } footer: {
-                    Text("インポートした .md はこのフォルダにコピーされます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。「不要添付削除」は、ノートから使われていない画像を小さく見て、選んでゴミ箱へ。")
+                    Text("取り込んだ .md は、このフォルダに写されます。元のファイルはそのまま。同じ名前があるときは番号を付けて、いまあるノートは上書きしません。\n\n「不要添付削除」は、どのノートも使っていない画像を小さく見て、選んでゴミ箱へ。")
                 }
 
                 // **もう一度見る道**（依頼 656）── はじめの案内は一度きりで、
@@ -432,7 +432,7 @@ struct Where: View {
                         Color.black.opacity(0.25).ignoresSafeArea()
                         VStack(spacing: 10) {
                             ProgressView()
-                            Text("取りに行っています…").font(.footnote)
+                            Text("取りに行っています").font(.footnote)
                         }
                         .padding(22)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
@@ -495,7 +495,7 @@ struct PlaceSheet: View {
                     .labelsHidden()
                     if p.sync == "drive", !sync.signedIn {
                         Button { signIn() } label: {
-                            Label(signingIn ? "ブラウザで「許可」を押してください…" : "Google でサインイン",
+                            Label(signingIn ? "ブラウザで「許可」を押してください" : "Google でサインイン",
                                   systemImage: "person.crop.circle.badge.checkmark")
                         }
                         .disabled(signingIn)
@@ -517,7 +517,7 @@ struct PlaceSheet: View {
                 }
                 Section {
                     LabeledContent("いま", value: store.trail(of: p).joined(separator: " › "))
-                    Button { choose() } label: { Label("場所を変える…", systemImage: "folder") }
+                    Button { choose() } label: { Label("場所を変更する", systemImage: "folder") }
                     if !p.own, !store.places.contains(where: { $0.own }) {
                         Button { store.relocateToOwn(id) } label: { Label("この iPhone の中にする", systemImage: "iphone") }
                     }
@@ -531,7 +531,7 @@ struct PlaceSheet: View {
                         .disabled(store.places.count < 2)
                 } footer: {
                     Text(store.places.count < 2
-                         ? "最後の一つは外せません（動かすなら「場所を変える…」）"
+                         ? "保存ディレクトリは、少なくとも一つ必要です。別のディレクトリにするなら「場所を変更する」を選択"
                          : "ambər の一覧から外します。フォルダとノートはそのまま残ります")
                 }
             }

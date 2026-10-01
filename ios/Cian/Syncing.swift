@@ -307,7 +307,7 @@ final class Syncing: ObservableObject {
     var line: String {
         if let store, !store.places.contains(where: { $0.sync == "drive" }) { return "同期していません ・ どの保存ディレクトリも「同期しない」" }
         if !signedIn { return "同期していません" }
-        if busy { return "同期しています…" }
+        if busy { return "同期しています" }
         var out = "同期しています"
         if let last { out += " ・ 最終 " + Self.hhmm(last) }
         if let who, !who.email.isEmpty { out += " ・ " + who.email }

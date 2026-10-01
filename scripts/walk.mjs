@@ -2424,7 +2424,7 @@ if (NOTES2) {
         await new Promise((g) => setTimeout(g, 250));
         const t = el('more').textContent;
         el('more').hidden = true;
-        for (const w of ['同期先', '名前を変える', '場所を変える…', '外す', 'この中にフォルダを作る']) if (!t.includes(w)) return 'メニューに「' + w + '」が無い: ' + t;
+        for (const w of ['同期先', '名前を変える', '場所を変更する', '外す', 'この中にフォルダを作る']) if (!t.includes(w)) return 'メニューに「' + w + '」が無い: ' + t;
         return true;`, true);
     if (DRIVE2) {
         await step('同期：二つ目を Drive にすると、運んだ列に保存ディレクトリの名前が付く', `

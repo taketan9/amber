@@ -40,7 +40,7 @@ struct Sparing: View {
         NavigationStack {
             Group {
                 if looking {
-                    ProgressView("数えています…")
+                    ProgressView("数えています")
                 } else if pictures.isEmpty {
                     ContentUnavailableView(
                         "使われていない画像はありません",

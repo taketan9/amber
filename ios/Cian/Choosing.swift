@@ -12,7 +12,7 @@ struct Choosing: View {
     @Environment(\.dismiss) private var dismiss
 
     private var tab: Desk.Tab? { desk.tabs.first { $0.id == id } }
-    private var who: String { (tab?.who.isEmpty == false ? tab?.who : nil) ?? "向こう" }
+    private var who: String { (tab?.who.isEmpty == false ? tab?.who : nil) ?? "ほかの端末" }
 
     var body: some View {
         NavigationStack {

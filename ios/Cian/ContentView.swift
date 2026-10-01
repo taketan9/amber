@@ -668,7 +668,7 @@ struct ContentView: View {
         } description: {
             // 「フォルダを選ぶ」ではなく、そう名乗らせる ── 要点は、
             // Mac が既に持っているフォルダをそのまま指せること。
-            Text("マークダウンのノートがあるフォルダを選びます。iCloud Drive・Google Drive・Dropbox のどれでも構いません。")
+            Text("ノートのあるフォルダを選びます。iCloud Drive・Google Drive・Dropbox のどれでも構いません。")
         } actions: {
             Button("保存場所を見る") { picking = true }.buttonStyle(.borderedProminent)
         }

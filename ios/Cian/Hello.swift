@@ -64,7 +64,7 @@ struct Hello: View {
                     start()
                 } label: {
                     // **何が起きるかを、ボタンに書く**（本人・2026-09-28）。
-                    Text(busy ? "ブラウザで許可してください…" : "Google アカウント連携して始める")
+                    Text(busy ? "ブラウザで許可してください" : "Google アカウント連携して始める")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)

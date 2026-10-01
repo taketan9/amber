@@ -63,6 +63,10 @@ const fileURL = (at) => {
 /// このデスクトップ版が乗っている土台。**画面に出す言葉が、ここで変わる。**
 const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent);
 
+/// ゴミ箱の呼び名。**その土台に実在する名前を出す**（本人・2026-10-02）──
+/// macOS は「ゴミ箱」、Windows は「ごみ箱」。どちらも正式名で、綴りだけが違う。
+const BIN = MAC ? 'ゴミ箱' : 'ごみ箱';
+
 /// キーの並びを、その土台の言葉で。
 ///
 /// **表には mac の記号で書いておく**（`⌘⇧O`）── 一つの書き方に揃えておけば、
@@ -74,6 +78,15 @@ const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent);
 /// `+` で繋ぐ（`Ctrl+Shift+O`）のが、それぞれの土地の書き方。
 const keyText = (k) => {
     if (!k || MAC) return k || '';
+    // **空白で区切られていたら、一つずつ言い換える**（本人が会社の端末で
+    // 見た・2026-10-02）── `⌘1 ⌘2 ⌘3 ⌘4` のように**組を並べて**書くところが
+    // あり、まとめて一つの組として読んでいたので `Ctrl+Ctrl+Ctrl+Ctrl+1 2 3 4`
+    // が出ていた。`⌥ 押し` のような説明は下で分けるので、ここでは
+    // **記号で始まる塊が二つ以上あるときだけ**割る。
+    const group = k.split(/\s+/).filter(Boolean);
+    if (group.length > 1 && group.every((g) => /^[⌘⌃⇧⌥]/.test(g))) {
+        return group.map((g) => keyText(g)).join(' ');
+    }
     const map = { '⌘': 'Ctrl', '⌃': 'Ctrl', '⇧': 'Shift', '⌥': 'Alt' };
     const parts = [];
     let rest = '';
@@ -847,7 +860,8 @@ function drawList() {
                 popMenu([
                     { name: '開く', run: () => openNote(at) },
                     { name: '新しいタブで開く', key: '⌥ 押し', run: () => openNote(at, { tab: true }) },
-                    { name: 'このノートにすること…', sep: true, run: async () => {
+                    { html: 'そのほか<span class="arw">' + CHEV_ICON(true) + '</span>',
+                      sep: true, run: async () => {
                         await openNote(at);
                         openMenu({ right: e.clientX + 190, bottom: e.clientY });
                     } },
@@ -918,7 +932,7 @@ async function cmdClip() {
     } catch { /* 読めなくても、打てばよい */ }
     const url = await askText('Web からインポート', seed, 'ページの URL を貼ってください');
     if (url === null || !url.trim()) return;
-    say('取りに行っています…');
+    say('取りに行っています');
     const got = await window.amber.fetchPage(url.trim());
     if (!got || got.error) { say('インポートできません: ' + (got?.error || '返事がありません')); return; }
     let md = '';
@@ -1150,7 +1164,7 @@ function pickedMenu(at) {
         { name: n + ' 件をブックマークに登録する', run: () => manyStar(true) },
         { name: n + ' 件のブックマークを外す', run: () => manyStar(false) },
         { name: '選ぶのをやめる', key: 'Esc', sep: true, run: unpickAll },
-        { name: n + ' 件をゴミ箱へ入れる', sep: true, run: () => manyDelete() },
+        { name: n + ' 件を' + BIN + 'へ入れる', sep: true, run: () => manyDelete() },
     ], at);
 }
 
@@ -1291,8 +1305,8 @@ async function manyDelete() {
     const knew = noBin();
     const head = notes.length + ' 件を';
     if (!await askYes(knew
-        ? head + '消しますか（ここにはゴミ箱が無いので、戻せません）'
-        : head + 'ゴミ箱へ入れますか')) return;
+        ? head + '消しますか（ここには' + BIN + 'が無いので、戻せません）'
+        : head + BIN + 'へ入れますか')) return;
     let binned = 0;
     let erased = 0;
     let failed = 0;
@@ -1304,7 +1318,7 @@ async function manyDelete() {
         markNoBin(true);
         if (!asked) {
             asked = true;
-            const go = await askYes('ゴミ箱へ入れられませんでした'
+            const go = await askYes(BIN + 'へ入れられませんでした'
                 + (got && got.why ? '（' + got.why + '）' : '')
                 + '。残りをこのまま消しますか。もう戻せません');
             if (!go) break;
@@ -1315,7 +1329,7 @@ async function manyDelete() {
     if (state.open && state.picked.has(state.open.path)) { state.open = null; state.dirty = false; applyView(); }
     unpickAll();
     await reload({ quiet: true });
-    say((binned ? binned + ' 件をゴミ箱へ入れました' : '')
+    say((binned ? binned + ' 件を' + BIN + 'へ入れました' : '')
         + (binned && erased ? '／' : '') + (erased ? erased + ' 件を消しました' : '')
         + (failed ? '／' + failed + ' 件は消せませんでした' : '')
         || '何も消しませんでした');
@@ -1612,7 +1626,8 @@ function drawStrip() {
                 { name: 'このノート以外をすべて閉じる', dim: tabs.length < 2,
                   run: () => { for (const o of tabs.slice()) if (o.path !== t.path) closeTab(o.path); } },
                 { name: '一覧でこのノートを選ぶ', sep: true, run: () => openNote(t.path, { keep: true }) },
-                { name: 'Finder で表示', run: () => window.amber.reveal(t.path) },
+                { name: MAC ? 'Finder で表示' : 'エクスプローラーで表示',
+                  run: () => window.amber.reveal(t.path) },
             ], { x: e.clientX, y: e.clientY });
         };
     }
@@ -3383,7 +3398,31 @@ function checkFenceReturn(box) {
     const tail = document.createRange();
     tail.setStart(r.endContainer, r.endOffset);
     tail.setEnd(code, code.childNodes.length);
-    const nl = document.createTextNode(tail.toString() === '' ? '\n\n' : '\n');
+    const after = tail.toString();
+
+    // **空の行で、もう一度 Enter を押したら枠から出る**（本人・2026-10-01
+    // 「改行を2回したら外にでるっていうルールがコードには適用されてなさそう」）。
+    //
+    // 前は枠の中に改行を入れ続けるだけで、**下へ抜ける道が無かった** ──
+    // 枠が最後のかたまりだと、その先に何も書けない。箇条書きや引用と同じ作法。
+    const head = document.createRange();
+    head.setStart(code, 0);
+    head.setEnd(r.endContainer, r.endOffset);
+    if (head.toString().endsWith('\n') && after.replace(/\n+$/, '') === '') {
+        // 後ろの空行を落とす ── 残すと、出たあとの枠の末尾に空の一行が残る。
+        tail.deleteContents();
+        const n2 = r.endContainer;
+        if (n2.nodeType === 3 && r.endOffset > 0 && n2.data[r.endOffset - 1] === '\n') {
+            n2.deleteData(r.endOffset - 1, 1);
+        }
+        const out = document.createElement('p');
+        out.append(document.createElement('br'));
+        pre.after(out);
+        landBackIn(out, 0);
+        return true;
+    }
+
+    const nl = document.createTextNode(after === '' ? '\n\n' : '\n');
     r.insertNode(nl);
     const to = document.createRange();
     to.setStart(nl, 1);
@@ -4531,7 +4570,7 @@ async function syncRead(leaving) {
     const body = readToMd();
     if (body === null) {
         // **黙って止まらない。** 打った文字が消えたように見えるのがいちばん悪い。
-        say('保存できません ── 図かコード枠の元の文字が取れません。'
+        say('保存できません ── 図かコード枠の元の文字が取れません'
             + '「コード」で直してください');
         el('state').textContent = '保存できません';
         drawSaveNow();
@@ -4802,7 +4841,7 @@ async function readSourceEdit(change, node, stay, upto) {
     const blocks = [...box.children].map((n) =>
         richBlock(n) ? n.dataset.md : (blockToMd(n) ?? ''));
     if (blocks.some((b) => b === undefined)) {
-        say('ここからは書き戻せません（図の元の文字が取れません）');
+        say('この画面からは書き戻せません（図の元の文字が取れません）');
         return;
     }
     try {
@@ -6702,7 +6741,7 @@ function studioFlow() {
     });
     const addEdge = tag('button', 'add', '＋ 線を足す');
     addEdge.onclick = () => {
-        if (d.rows.length < 2) { say('線を引くには、箱が二つ要ります'); return; }
+        if (d.rows.length < 2) { say('線を引くには、箱が二つ必要です'); return; }
         d.edges.push({ from: d.rows[0].id, b: '', to: d.rows[1].id });
         studioDraw(); studioShow();
     };
@@ -6839,7 +6878,7 @@ el('studioswap').onclick = () => {
         // 文字 → 表。読めなければ、表にせず言う ── 読めない文字を無理に
         // 表へ入れると、読めなかったところが消える。
         const back = mmdParse(studio.text);
-        if (!back) { say('いまの文字は表にできません。文字のまま直してください'); return; }
+        if (!back) { say('いまの文字は表にできません（コード画面で直してください）'); return; }
         studio.data = back;
         studio.raw = false;
     } else {
@@ -6969,7 +7008,7 @@ el('read').addEventListener('click', async (e) => {
         if (rich && el('read').contains(rich)) {
             // **画像は、押したら原寸で開く**（依頼 637）── 紙の幅に
             // 合わせて描いているので、文字の入った画面写真は縮んで読めない。
-            // 前はダイアログ（大きさ…／消す）を出していたが、その二つは原寸のデスクトップ版の
+            // 前はダイアログ（大きさを指定／消す）を出していたが、その二つは原寸のデスクトップ版の
             // 中に置いた ── 押して真っ先にしたいのは「大きく見る」ほう。
             if (rich.tagName === 'FIGURE') { openLens(rich); return; }
             popMenu([
@@ -7529,7 +7568,7 @@ function drawBand() {
         b.innerHTML = '';
         return;
     }
-    const who = (incoming.who || '向こう');
+    const who = (incoming.who || 'ほかの端末');
     b.hidden = false;
     if (spots.length || fields.length) {
         // **ぶつかった場所がある** ── 数と、飛ぶパスと、まとめて選ぶ道
@@ -7625,7 +7664,7 @@ function placeGadgets() {
     for (const g of rd.querySelectorAll('.gadget')) g.remove();
     if (!incoming || !incoming.spots || !incoming.spots.length) return;
     const rows = rowsOf(whole());
-    const who = incoming.who || '向こう';
+    const who = incoming.who || 'ほかの端末';
     incoming.spots.forEach((spot, n) => {
         const at = spotAt(rows, spot);
         if (at < 0) return;
@@ -7800,14 +7839,14 @@ async function mergeIn(path, ours, was) {
         const got2 = await ask('read', { path });
         theirs = got2 && typeof got2.text === 'string' ? got2.text : null;
     } catch (e) {
-        say('向こうの中身を読めません: ' + why(e));
+        say('同期先のノートを読めません: ' + why(e));
         return null;
     }
     // **空が返ってきたら、混ぜない。** 読めなかったのか本当に空なのかを
     // 見分けられないまま混ぜると、**混ざった結果も空**になり、それを
     // そのまま書き戻す ── 一度それでノートを消した。
     if (theirs === null) {
-        say('向こうの中身を読めません');
+        say('同期先のノートを読めません');
         return null;
     }
     let got;
@@ -7845,7 +7884,7 @@ async function mergeIn(path, ours, was) {
         came: got.came || [],
         both: got.both || [],
         eyes: !!got.eyes,
-        who: '向こう',
+        who: 'ほかの端末',
         spots: (got.spots || []).map((sp) => ({
             ours: rows.slice(sp.ours[0], sp.ours[0] + sp.ours[1]),
             theirs: rows.slice(sp.theirs[0], sp.theirs[0] + sp.theirs[1]),
@@ -8614,6 +8653,7 @@ async function cmdSpare() {
 
 function drawSpare() {
     const box = el('spare');
+    box.querySelector('.go').textContent = BIN + 'へ入れる';
     const grid = box.querySelector('.grid');
     const sum = box.querySelector('.sum');
     if (!spareRows.length) {
@@ -8669,7 +8709,7 @@ el('spare').addEventListener('click', async (e) => {
         const n = sparePicked.size;
         if (!n) return;
         // **ゴミ箱へ。** 消すのではないので戻せるが、それでも一度は訊く。
-        if (!await askYes(n + ' 枚をゴミ箱へ入れますか')) return;
+        if (!await askYes(n + ' 枚を' + BIN + 'へ入れますか')) return;
         let done = 0;
         const left = [];
         for (const at of sparePicked) {
@@ -8677,7 +8717,7 @@ el('spare').addEventListener('click', async (e) => {
             if (ok === true) done += 1; else left.push(at);
         }
         box.hidden = true;
-        say(done + ' 枚をゴミ箱へ入れました'
+        say(done + ' 枚を' + BIN + 'へ入れました'
             + (left.length ? '（' + left.length + ' 枚は入れられませんでした）' : ''));
     }
 });
@@ -9588,11 +9628,16 @@ function popEvent(s, at) {
 /// 押す前にそう言う ── 「共有」を押した瞬間に何が起きるか分からないのが、
 /// いちばん怖い。
 async function cmdMakeGroup() {
-    if (!await askYes('グループカレンダーを作りますか。\n\n'
-        + '「' + GROUP_NAME + '」という新しいカレンダーを作ります。'
+    // **見出しは一行、わけは下の欄へ**（本人・2026-10-01）。前は見出しの中に
+    // `\n\n` を書いていたが、見出しは一行で出るので**ただの空白になっていた**。
+    const go = await askPick('グループカレンダーを作りますか', [
+        { name: 'はい', value: true },
+        { name: 'やめる', value: false },
+    ], '「' + GROUP_NAME + '」という新しいカレンダーを作ります。'
         + 'このカレンダーに入れた予定だけが、招待した人に見えます。'
-        + '今ある予定はそのままで、共有されません。')) return;
-    say('カレンダーを作成しています…');
+        + '今ある予定はそのままで、共有されません。', true);
+    if (go !== true) return;
+    say('カレンダーを作成しています');
     const got = await window.amber.calMake(GROUP_NAME);
     if (!got || got.error) {
         say('作成できませんでした: ' + ((got && got.error) || 'Google から応答がありません'));
@@ -9646,7 +9691,7 @@ async function cmdDropGroup() {
 async function cmdInvite() {
     if (!groupCal) return;
     await window.amber.calShare(groupCal.id);
-    say('Google カレンダーの共有設定を開きました。相手のメールアドレスを入力してください');
+    say('相手のメールアドレスを入力してください（Google カレンダーの共有設定を開きました）');
 }
 
 async function cmdWhoPick() {
@@ -9741,7 +9786,7 @@ async function cmdTeamOff() {
 /// 読むのは、人が読めと言ったときか、決めた時刻。
 async function cmdTeamNow() {
     if (!teamFile) return;
-    say('読みにいっています…');
+    say('読みにいっています');
     await teamLoad();
     if (!el('cal').hidden) await drawCal();
     say(teamBad ? '読めません: ' + teamBad
@@ -10330,7 +10375,7 @@ async function cmdCalSettings() {
         rows.push({ name: (calWeekend ? '✓　' : '　　') + '土日表示', value: '*weekend', sub: calWeekend ? '' : '月〜金だけ出しています' });
         rows.push({ name: 'カラー設定 ── ' + (calHereColor ? colorName(calHereColor) : '緑（既定）'), value: '*color', sub: '押すと選べます' });
         rows.push({ name: '出す時間帯 ── ' + calFrom + '時 〜 ' + calTill + '時', value: '*hours',
-            sub: '日・週・並べて に出す幅。狭いほど一つ一つが読みやすくなります' });
+            sub: '「日」「週」「並べて」に出す幅。狭いほど一つ一つが読みやすくなります' });
         const pick = await askPick('カレンダー表示設定', rows, '押すと出し入れできます。閉じるまで続けて選べます', true);
         if (pick === null) break;
         if (pick === '*weekend') { calWeekend = !calWeekend; window.amber.remember({ calWeekend }); continue; }
@@ -10380,7 +10425,7 @@ async function cmdSubscribe() {
     const url = await askText('カレンダー設定追加', '',
         'Google カレンダーなら「設定 → カレンダーの統合 → 非公開 URL（iCal 形式）」');
     if (url === null || !url.trim()) return;
-    say('取りに行っています…');
+    say('取りに行っています');
     const got = await window.amber.fetchPage(url.trim(), 'calendar');
     if (!got || got.error) { say('インポートできません: ' + (got?.error || '返事がありません')); return; }
     let name = '';
@@ -10405,7 +10450,7 @@ async function cmdUnsubscribe() {
     if (!away.length) { say('読んでいる予定表はありません'); return; }
     const pick = await askPick('カレンダー設定解除',
         away.map((a) => ({ name: a.name, sub: readableUrl(a.url).slice(0, 60), value: a.url })),
-        '選ぶと、読むのをやめます（向こうの予定表は何も変わりません）', true);
+        '選ぶと、カレンダーの同期が止まります（同期先の予定表は何も変わりません）', true);
     if (pick === null) return;
     away = away.filter((a) => a.url !== pick);
     window.amber.remember({ away });
@@ -10512,7 +10557,7 @@ const CMDS = [
     // 別にあると、同じことを頼むパスが二つになる。
     // **⚙ には出さない**（本人・2026-09-11）── 左の列にカレンダーが居る。表には残す。
     { id: 'cal', name: 'カレンダー', sub: '予定と、その日のノートを 1 つで', run: cmdCalendar },
-    { id: 'sub', name: 'カレンダー設定追加', sub: 'Google カレンダーなどの iCal の URL を読みます',
+    { id: 'sub', name: 'カレンダー設定追加', sub: 'iCal の URL を読みます（Google カレンダーなど）',
       app: true, net: true, run: cmdSubscribe },
     { id: 'unsub', name: 'カレンダー設定解除', app: true, net: true, run: cmdUnsubscribe },
     { id: 'calset', name: 'カレンダー表示設定', sub: 'どの予定表を出すか・土日を出すか', app: true, run: cmdCalSettings },
@@ -10526,7 +10571,7 @@ const CMDS = [
     // 出し方: 「何をしますか」（⌘⇧P）で `csv` と打つ。合言葉は
     // `TEAM_WORD` の一行 ── 変えたければそこを変える。
     { id: 'team', name: 'チームの予定表を読む（CSV）', word: TEAM_WORD,
-      sub: '別の道具が書き出したファイルを、人ごとに並べます', run: cmdTeam },
+      sub: 'ほかのアプリが書き出した予定表を、人ごとに並べます', run: cmdTeam },
     { id: 'teamoff', name: 'チームの予定表を読むのをやめる', word: TEAM_WORD,
       run: cmdTeamOff },
     { id: 'when', name: '期間で絞る', run: () => openDrawer('when') },
@@ -10562,7 +10607,7 @@ const CMDS = [
     { id: 'closetab', name: 'このタブを閉じる', need: 'note', menu: true,
       run: () => closeTab(showing) },
     { id: 'zen', name: 'ノートだけを大きく', key: 'F12', need: 'note', menu: true, run: () => setZen(!zen) },
-    { id: 'delete', name: 'ゴミ箱へ入れる', need: 'note', menu: true, sep: true, run: cmdDelete },
+    { id: 'delete', name: BIN + 'へ入れる', need: 'note', menu: true, sep: true, run: cmdDelete },
 
     // ── amber のこと（⚙）
     // **キーは「ショートカット一覧」へ渡した。** ここに `⌘⇧/` と書いて
@@ -10582,10 +10627,10 @@ const CMDS = [
     { id: 'bring', name: 'インポート', sub: 'ほかの .md をノートに', app: true, sep: true, run: cmdBring },
     // **OneNote は「インポート」の隣**（依頼 621・本人に見取り図を見せて通った）。
     // 会社向けのビルドにも出す ── ネットワークに出ず、手元の `.onepkg` を読むだけ。
-    { id: 'onenote', name: 'OneNote を取り込む', sub: 'OneNote が書き出した .onepkg / .one から', app: true, run: cmdOneNote },
+    { id: 'onenote', name: 'OneNote を取り込む', sub: 'OneNote が書き出した .onepkg / .one から取り込みます', app: true, run: cmdOneNote },
     { id: 'welcome', name: 'サンプルのノートを入れる', app: true, run: cmdWelcome },
     { id: 'spare', name: '使われていない画像', app: true,
-      sub: 'どのノートも使っていない画像を、選んでゴミ箱へ', run: cmdSpare },
+      sub: 'どのノートも使っていない画像を、選んで' + BIN + 'へ', run: cmdSpare },
     { id: 'backup', name: 'バックアップ', app: true, run: cmdBackup },
     { id: 'restore', name: 'バックアップから戻す', app: true, run: cmdRestore },
     // **足す・変える・外す・同期先、を一つの入口で**（依頼 511・本人「保存
@@ -10630,10 +10675,10 @@ const CMDS = [
 const LOOSE_KEYS = [
     ['一覧を上下する', '↑ ↓ / J K', '一覧を見ているとき'],
     ['そのノートを開いて打つ', 'Enter', '一覧を見ているとき'],
-    ['ゴミ箱へ入れる', 'Delete', '選んでいるノートを（確認してから）'],
+    [BIN + 'へ入れる', 'Delete', '選んでいるノートを（確認してから）'],
     ['ノートを探す', '/', '一覧を見ているとき'],
     ['閉じる・やめる', 'Esc', 'ポップアップ・ツール・大きい画面から'],
-    ['次のマスへ', 'Tab', '表の中で（⇧Tab で前へ、最後で押すと行が増える）'],
+    ['次のマスへ', 'Tab', '表の中で（' + keyText('⇧Tab') + ' で前へ、最後で押すと行が増える）'],
 ];
 
 /// ショートカットの一覧（⌘⇧/）。**探せれば、覚えなくていい。**
@@ -11032,7 +11077,7 @@ function railMenu(kind, what, at) {
             { name: '過去バージョン', sub: 'この中のノートすべて', run: () => cmdHistory(what, true) },
             { name: '同期先', sub: SYNC_WORDS[p.sync], sep: true, run: () => placeSyncSheet(p) },
             { name: '名前を変える', run: () => placeRename(p) },
-            { name: '場所を変える…', sub: shortPath(p.dir), run: () => placeMove(p) },
+            { name: '場所を変更する', sub: shortPath(p.dir), run: () => placeMove(p) },
             { name: '外す', sub: 'ノートはそのまま残ります', run: () => placeDrop(p) },
         ], at);
         return;
@@ -11151,7 +11196,7 @@ async function railDrop(kind, what) {
     const hit = underRail(kind, what);
     const what2 = kind === 'book' ? 'フォルダ' : (kind === 'tag' ? 'タグ' : 'ブックマーク');
     const ask2 = kind === 'book'
-        ? '「' + bookLabel(what) + '」を、中の ' + hit.length + ' 件ごとゴミ箱へ入れますか'
+        ? '「' + bookLabel(what) + '」を、中の ' + hit.length + ' 件ごと' + BIN + 'へ入れますか'
         : kind === 'star'
             ? 'ブックマークグループ「' + what + '」を消しますか'
                 + (hit.length ? '（中の ' + hit.length + ' 件はブックマークの直下へ）' : '')
@@ -11161,7 +11206,7 @@ async function railDrop(kind, what) {
         if (kind === 'book') {
             const gone = await window.amber.trash(what);
             if (gone !== true) {
-                say('ゴミ箱へ入れられません' + (gone && gone.why ? ': ' + gone.why : ''));
+                say(BIN + 'へ入れられません' + (gone && gone.why ? ': ' + gone.why : ''));
                 return;
             }
         } else if (kind === 'star') {
@@ -11180,7 +11225,7 @@ async function railDrop(kind, what) {
         state.open = null;
         applyView();
         await reload({ quiet: true });
-        say(kind === 'book' ? 'ゴミ箱へ入れました'
+        say(kind === 'book' ? BIN + 'へ入れました'
             : kind === 'star' ? '「' + what + '」を消しました'
                 : '外しました（' + hit.length + ' 件）');
     } catch (e) {
@@ -11915,7 +11960,7 @@ async function cmdShare(folder, off) {
             + 'あとは、このフォルダをクラウド側でグループの人に分けてください。'
             + '（いま開きますか）')
             ? window.amber.reveal(folder)
-            : say('あとで、フォルダを右押し →「グループへ招待」からでもできます');
+            : say('フォルダを右押し→「グループへ招待」から後でも設定できます');
     } catch (e) {
         say('できません: ' + why(e));
     }
@@ -12123,8 +12168,8 @@ async function cmdDelete() {
     // 「ゴミ箱へ入れますか」→「入れられません」→「では消しますか」は、
     // 三度目には嘘をついているのと同じ。
     const first = noBin()
-        ? '「' + name + '」を消しますか（ここにはゴミ箱が無いので、戻せません）'
-        : '「' + name + '」をゴミ箱へ入れますか';
+        ? '「' + name + '」を消しますか（ここには' + BIN + 'が無いので、戻せません）'
+        : '「' + name + '」を' + BIN + 'へ入れますか';
     // 訊く**前に**分かっていたか ── 断られたあとで訊き直すかどうかは、
     // これで決まる（もう承知をもらっているなら、二度は訊かない）。
     const knew = noBin();
@@ -12154,7 +12199,7 @@ async function cmdDelete() {
         if (!knew) {
             // 初めて断られた回だけ、ここで訊く。二度目からは、上の一回で
             // 「戻せません」と言ったうえで はい をもらっている。
-            const go = await askYes('ゴミ箱へ入れられませんでした'
+            const go = await askYes(BIN + 'へ入れられませんでした'
                 + (why2 ? '（' + why2 + '）' : '')
                 + '。このまま消しますか。もう戻せません');
             if (!go) return;
@@ -12173,7 +12218,7 @@ async function cmdDelete() {
     state.dirty = false;
     applyView();
     await reload({ quiet: true });
-    say('ゴミ箱へ入れました');
+    say(BIN + 'へ入れました');
 }
 
 /// 通知。**仕掛けるのはデスクトップ版でもできる。鳴らすのはiPhone。**
@@ -12450,8 +12495,8 @@ async function pickOneNote(known) {
     const mb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
     const day = (t) => { const d = new Date(t * 1000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
     const items = found.map((f) => ({ name: f.name + '.onepkg', sub: [where(f.path), day(f.modified), mb(f.bytes)].join(' · '), value: f.path }));
-    items.push({ name: 'ファイルを選ぶ…', sub: '.onepkg / .one', value: ' file' });
-    items.push({ name: 'フォルダを選ぶ…', sub: '.one が入ったフォルダ', value: ' dir' });
+    items.push({ name: 'ファイルを選ぶ', sub: '.onepkg / .one', value: ' file' });
+    items.push({ name: 'フォルダを選ぶ', sub: '.one が入ったフォルダ', value: ' dir' });
     const go = await askPick('OneNote を取り込む', items,
         '書き出し方: OneNote の ファイル → エクスポート → ノートブック → .onepkg', true);
     if (go === null) return null;
@@ -12478,7 +12523,7 @@ async function oneNoteOut(known) {
     const items = [];
     if (docs) items.push({ name: 'ドキュメント／OneNote', sub: '新しい保存ディレクトリとして足します（おすすめ）', value: 'new' });
     if (here) items.push({ name: '「' + bookName(here) + '」の中の「OneNote」フォルダ', sub: 'いまの保存ディレクトリの下に作ります', value: 'in' });
-    items.push({ name: 'フォルダを選ぶ…', sub: '選んだフォルダを保存ディレクトリとして足します', value: 'pick' });
+    items.push({ name: 'フォルダを選ぶ', sub: '選んだフォルダを保存ディレクトリとして足します', value: 'pick' });
     const go = await askPick('どこへ書き出しますか', items,
         '一度決めたら憶えます。あとで ⚙ →「保存ディレクトリの追加・変更・削除」から外すと、次にまた訊きます', true);
     if (go === null) return null;
@@ -12499,7 +12544,7 @@ async function oneNoteOut(known) {
 async function runOneNote(from, to) {
     oneRun = { name: leafOf(from), rows: [], over: false, pages: 0, pictures: 0, failed: 0, to };
     const run = oneRun;
-    run.title = '「' + run.name + '」を読んでいます…';
+    run.title = '「' + run.name + '」を読んでいます';
     oneShow();
     let got;
     try {
@@ -12590,7 +12635,7 @@ function oneShow() {
     // **読んでいる間も、行を一つ出す** ── 題だけのダイアログは、止まっているのか
     // 動いているのか分からない（「裏で動いているのか？」と訊かれた）。
     if (!run.over && !run.rows.length) {
-        items.push({ name: '▸ 読んでいます…', sub: '大きいノートブックは数分かかります', value: ' row' });
+        items.push({ name: '▸ 読んでいます', sub: '大きいノートブックは数分かかります', value: ' row' });
     }
     // **理由と元の文言は、横に並べず一行ずつ**（添え書きの欄は一行で切れる ──
     // 肝心の「どうすればいいか」が「…このパソコンに落ち…」で見えなかった）。
@@ -12938,7 +12983,7 @@ async function syncPlace(place, remote) {
                 const r = await window.amber.driveUpload({ rel: pre + s.rel, text: got.text, print, id: s.id });
                 done.push({ rel: s.rel, id: r.id, tag: r.tag });
                 const there = remote.find((x) => x.id === s.id);
-                noteIncoming(at, got, there && there.by ? there.by : '向こう');
+                noteIncoming(at, got, there && there.by ? there.by : 'ほかの端末');
                 one.clash += 1;
                 if (got.eyes) one.eyes += 1;
                 one.touched = true;
@@ -13054,7 +13099,7 @@ function drawSyncState() {
     }
     if (syncBusy) {
         hide(box);
-        line('busy', '同期しています…');
+        line('busy', '同期しています');
         return;
     }
     if (syncTrouble) {
@@ -13078,7 +13123,7 @@ function drawSyncState() {
             const parts = [];
             if (r.up) parts.push('アップロード' + r.up + '件');
             if (r.down) parts.push('ダウンロード' + r.down + '件');
-            if (r.gone) parts.push('ゴミ箱へ' + r.gone + '件');
+            if (r.gone) parts.push(BIN + 'へ' + r.gone + '件');
             if (r.clash) parts.push('同じ行を両方で直したノート' + r.clash + '件');
             if (r.moved) parts.push('名前の変更' + r.moved + '件');
             return parts;
@@ -13247,7 +13292,7 @@ async function firstSyncSheet() {
     if (!head.length) head.push('この端末と Drive を、これから同じにします。');
     box.querySelector('.hd').innerHTML = head.join('<br>');
     box.querySelector('.sub').textContent = there
-        ? '向こうにあるノート ' + there + ' 本。この端末のノート ' + here + ' 本。'
+        ? '同期先にあるノート ' + there + ' 本。この端末のノート ' + here + ' 本。'
         : 'この端末のノート ' + here + ' 本。';
     draw();
     box.hidden = false;
@@ -13550,7 +13595,7 @@ async function helloIfFirst(saved) {
 /// 返すのは入れたかどうか。**断られても、もう一度勧めない**（本人が決めた）──
 /// 二度目の誘いは嫌われる。
 async function signInNow() {
-    say('ブラウザで Google にサインインしてください…');
+    say('ブラウザで Google にサインインしてください');
     let got;
     try { got = await window.amber.driveSignIn(); } catch (e) { got = { error: why(e) }; }
     if (!got || got.error) {
@@ -13573,7 +13618,7 @@ async function cmdSync() {
     await loadSync();
     if (!syncAccount.signedIn) {
         const go = await askPick('同期', [
-            { name: 'Google でサインイン', sub: 'ブラウザが開きます。「許可」を押したら、このデスクトップ版に戻ってください', value: 'in' },
+            { name: 'Google でサインイン', sub: 'ブラウザが開きます。「許可」を押したら ambər に戻ってください', value: 'in' },
         ], 'Mac と iPhone で同じノートを使えるようにします。amber が触れるのは、amber が作ったファイルだけです', true);
         if (go !== 'in') return;
         await signInNow();
@@ -13629,7 +13674,7 @@ async function placeSheet(p) {
         ...(OFFICE ? [] : [{ name: '同期先', sub: SYNC_WORDS[p.sync]
             + (p.sync === 'drive' && !syncAccount.signedIn ? '（まだサインインしていません）' : ''), value: 'sync' }]),
         { name: '名前を変える', sub: '一覧での呼び名だけ。フォルダの名前は変わりません', value: 'name' },
-        { name: '場所を変える…', sub: 'いままでのノートも一緒に移せます', value: 'dir' },
+        { name: '場所を変更する', sub: 'いままでのノートも一緒に移せます', value: 'dir' },
         { name: '外す', sub: 'ambər の一覧から外します。フォルダとノートはそのまま', value: 'drop' },
     ], shortPath(p.dir), true);
     if (go === 'sync') await placeSyncSheet(p);
@@ -13788,7 +13833,7 @@ async function placeMove(p) {
 /// 一覧から外す。**ファイルは消さない**（外すのは ambər の憶えだけ）。
 async function placeDrop(p) {
     if (state.places.length < 2) {
-        say('最後の一つは外せません（動かすなら「場所を変える…」）');
+        say('保存ディレクトリは、少なくとも一つ必要です。別のディレクトリにするなら「場所を変更する」を選択');
         return false;
     }
     const n = state.notes.filter((x) => x.root === p.dir).length;
@@ -13868,7 +13913,7 @@ async function cmdAbout() {
 /// **打ちかけは触らない。** 読み直しで消えていいのは、まだ書いていない文字
 /// ではない ── 打っている最中に押しても、その一本は開いたまま残す。
 async function cmdRefresh() {
-    say('読み直しています…');
+    say('読み直しています');
     await rewatch();
     const at = state.open ? state.open.path : null;
     await reload({});

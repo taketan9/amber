@@ -39,6 +39,20 @@ if (process.env.AMBER_AWAKE) {
     app.whenReady().then(() => powerSaveBlocker.start('prevent-app-suspension'));
 }
 
+/// **会社向けのビルドは、絵を GPU に任せない**（本人が決めた・2026-10-01）。
+///
+/// 会社の Windows で、一時間ほど放置して戻ったら**画面が真っ黒**になった。
+/// 仮想の端末（AVD のような）では、絵を描くところが途中で使えなくなることが
+/// あり、そうなると amber は生きているのに絵だけが来ない ── 報告の多い型で、
+/// 回避策はどれも「GPU に任せない」。
+///
+/// **会社の端末はたいてい仮想**なので、既定で安全側に倒す。図の多い画面は
+/// 少し遅くなるが、黒くなるのとは比べものにならない。
+///
+/// **呼ぶのは `whenReady` より前。** あとからでは効かない。
+/// ふつうの版は今までどおり ── 手元で試すなら `amber.exe --disable-gpu`。
+if (edition() === 'office') app.disableHardwareAcceleration();
+
 /// 渡された `.md` は、開いたら**単発で**出す。
 ///
 /// 二つの道から来る:
@@ -293,6 +307,36 @@ function makeWindow() {
     win.webContents.on('render-process-gone', (_e, why) => {
         console.error(`[ウィンドウ] 描く側が消えました: ${why.reason} (exit ${why.exitCode})`);
     });
+    // **絵を描くところが死んだら、跡を残す**（本人・2026-10-01）。
+    //
+    // 画面が真っ黒になったとき、**どこにも何も残らなかった** ── 描く側が
+    // 死んだのか、絵だけが来ていないのかが、あとから見分けられない。
+    // 会社の Windows では落ちた理由を訊く相手がいないので、ここに出す。
+    app.on('child-process-gone', (_e, why) => {
+        console.error(`[ウィンドウ] ${why.type} が消えました: ${why.reason}`
+            + (why.exitCode === undefined ? '' : ` (exit ${why.exitCode})`)
+            + (why.serviceName ? ` / ${why.serviceName}` : ''));
+    });
+    // **戻ってきたら、描き直させる**（本人・2026-10-01「ほかのアプリを使って
+    // から amber に戻したら、画面が真っ黒になった」── 会社の Windows、一時間ほど
+    // 放置したあと）。
+    //
+    // **描く側は生きていて、絵だけが来ていない。** 隠れているあいだに描く面を
+    // 失い、戻しても描き直さないことがある ── Electron と Chromium の古くから
+    // ある型で、macOS でも Windows でも報告がある（electron#27765・#39572・
+    // #42378 ほか）。回避策はどれも「大きさを変える」＝描き直させること。
+    // `invalidate` はそれを明示的に頼むもの。
+    //
+    // **ふだんは何も起きない。** 既に描けている画面を描き直しても、見た目は
+    // 変わらない（アプリを切り替えたときに一度だけ）。
+    //
+    // **これで足りないかもしれない。** 仮想の端末（AVD のような）では、
+    // 絵を描くところそのものが使えなくなることがある ── そのときは
+    // `amber.exe --disable-gpu` で、絵を CPU に描かせる（下の `child-process-gone`
+    // が、そうなったかどうかを言う）。
+    win.on('focus', () => { try { win.webContents.invalidate(); } catch { /* 閉じかけ */ } });
+    // 隠れていたものが出てきたときも。
+    win.on('show', () => { try { win.webContents.invalidate(); } catch { /* 閉じかけ */ } });
     win.loadFile(path.join(__dirname, 'index.html'));
     // 描く側が立ち上がってから渡す ── 先に送っても受け取る耳がない。
     win.webContents.once('did-finish-load', () => {

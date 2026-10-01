@@ -139,7 +139,7 @@ struct Shelving: View {
                         name = ""
                         making = true
                     } label: {
-                        Label("新しいブックマークグループ…", systemImage: "plus.rectangle.on.folder")
+                        Label("新しいブックマークグループ", systemImage: "plus.rectangle.on.folder")
                     }
                 }
             }

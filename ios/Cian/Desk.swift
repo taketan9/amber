@@ -303,7 +303,7 @@ final class Desk: ObservableObject {
             tabs[now].eyes = got.eyes
             tabs[now].spots = got.spots
             tabs[now].fields = got.fields
-            tabs[now].who = "向こう"
+            tabs[now].who = "ほかの端末"
             keepIncoming(tabs[now])
             redraw(id, store)
             store.freshen(tabs[now].note.path)
