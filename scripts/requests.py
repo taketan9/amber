@@ -1,28 +1,27 @@
 #!/usr/bin/env python3
-"""Is every promise in gui/REQUESTS.ja.md still kept?
+"""gui/REQUESTS.ja.md の約束は、いまも守られているか。
 
-The failure this exists for: a thing Taketan asked for was built, and then
-removed by a later design pass — mine — with a comment arguing against them.
-Nothing in the code said where that line had come from, so on the second look
-it was indistinguishable from a line I had chosen myself.
+**これが在る理由になった失敗** ── 本人が頼んで入ったものを、あとの設計の
+見直しで私が消し、しかも「こうすべきでない」という註まで添えた。
+コードのどこにも「その行がどこから来たか」が書いていなかったので、
+二度目に見たときには**自分で選んだ行と見分けがつかなかった。**
 
-This does not check that the code is good. It checks that a request Taketan
-made is still satisfied, and names the request when it is not. A failure here
-is not "fix the regex"; it is "you removed something that was asked for — go
-and ask before you do".
+ここはコードの良し悪しを見ない。**本人が頼んだことが、いまも満たされて
+いるか**だけを見て、満たされていなければその依頼の名前を言う。ここが
+落ちたときにやることは「正規表現を直す」ではない ──
+**「頼まれたものを消した。消す前に訊きに行く」である。**
 
-    python3 scripts/requests.py          # pass/fail
-    python3 scripts/requests.py --list   # what each row looks for
+    python3 scripts/requests.py          # 通ったか落ちたか
+    python3 scripts/requests.py --list   # 各行が何を見ているか
 
-Each row's check column is `path ~ regex` (must match) or `path !~ regex`
-(must not appear anywhere in the file).
+各行の検査の欄は `path ~ 正規表現`（合うこと）か `path !~ 正規表現`
+（ファイルのどこにも出ないこと）。
 
-The negative form is a separate operator on purpose. It was first written as
-a negative lookahead — `^(?!.*やめる).*$` — which passes on any file with one
-line that does not contain the word, i.e. always. Three rows were asserting
-nothing and saying they were fine, which is the failure mode this whole file
-exists to make impossible. Mutation-test every check: break it, watch it
-complain, put it back.
+**否定を別の演算子にしてあるのは、わざと。** はじめは否定の先読み
+（`^(?!.*やめる).*$`）で書いていたが、あれは**その語を含まない行が一行でも
+あれば通る** ── つまり、いつでも通る。三行が何も確かめないまま「守られて
+います」と言っていた。**このファイルが在るのは、まさにそれを起こさない
+ため。** 検査を足したら必ず変異テストする ── 壊して、鳴るのを見て、戻す。
 """
 
 from __future__ import annotations

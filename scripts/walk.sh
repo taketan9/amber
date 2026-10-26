@@ -20,7 +20,13 @@
 set -e
 here="${0:A:h}"
 root="${here:h}"
-work="${TMPDIR:-/tmp}/amber-walk"
+# **末尾の `/` を落としてから繋ぐ。** macOS の `TMPDIR` は `/` で終わるので、
+# そのまま繋ぐと `…/T//amber-walk` と重なる。アプリはパスを**文字として**
+# 見比べるので、`//` が保存ディレクトリに入ると**見張りの跳ね返りが
+# 自分のものだと分からなくなる** ── `lastWrote` が消えず、「二台目：
+# こちらで保存する」が落ちた（2026-10-17・二度続けて落として気づいた）。
+tmp="${TMPDIR:-/tmp}"
+work="${tmp%/}/amber-walk"
 mine="$HOME/Library/Application Support/amber/amber.json"
 port="${PORT:-9333}"
 
@@ -62,6 +68,24 @@ cat > "$notes2/持ち帰り/宿題.md" <<'MD'
 持ち帰りのフォルダの中。
 MD
 
+# **本人の amber が開いていたら、始めない**（依頼 667・2026-10-17）。
+#
+# 引き出し（`userData`）は隔離できないので、**二つのアプリが同じ
+# `amber.json` を取り合う。** こちらが試し場に向けた設定を、向こうが
+# すぐ本物のノートで上書きし、**総ざらいが本人のノートの上で走る。**
+# 終わりの戻しも、向こうがその間に変えた設定を踏み潰す。
+#
+# 2026-10-17 に実際に起きた ── 試験の画面が本人の `batchPro` のノートを開き、
+# 同期先が drive の `~/Documents/cian` を、**空の偽 Drive** に向けていた。
+# 止めずに進めば、ノートがゴミ箱へ入り得た。
+if pgrep -f 'Applications/amb.*\.app/Contents/MacOS/' >/dev/null 2>&1; then
+  echo "amber が開いています。終了してから、もう一度走らせてください。"
+  echo
+  echo "  設定ファイル（amber.json）を二つのアプリで取り合うので、"
+  echo "  試し場への向け替えが上書きされ、本人のノートの上で走ります。"
+  exit 1
+fi
+
 # 設定の写し（無ければ「無かった」と憶えておく）
 if [ -f "$mine" ]; then cp "$mine" "$work/amber.json.mine"; else touch "$work/なかった"; fi
 
@@ -76,8 +100,15 @@ if [ -f "$mine" ]; then cp "$mine" "$work/amber.json.mine"; else touch "$work/�
 #
 # 台本（`AMBER_DO`）で `showHello()` と `startTour()` を直に呼ぶ段があるので、
 # 出なくても確かめられる。
+#
+# **保存ディレクトリも、ここで試し場に向ける**（依頼 667）── `$HOME` を
+# 作り替えても、保存ディレクトリは**絶対パスで設定に入っている**ので効かない。
+# 本人が amber を実際に使いはじめてから、設定が本物のノートを指すようになり、
+# **総ざらいが本人のノートの上で走る状態になっていた**（2026-10-17 に実際に
+# そうなった）。同期先も切る ── こちらが立てるのは空の偽 Drive なので、
+# 本物のノートに向けたまま同期が走ると「向こうでぜんぶ消えた」と読める。
 mkdir -p "$(dirname "$mine")"
-AMBER_STATE="$mine" python3 "$root/scripts/walk-first.py"
+AMBER_STATE="$mine" AMBER_NOTES="$notes" python3 "$root/scripts/walk-first.py"
 
 # ── 試すノート。**書けるものを一通り**入れておく ──
 cp "$root/packaging/welcome/attachments/amber.png" "$notes/attachments/" 2>/dev/null || true

@@ -128,8 +128,18 @@ function comments(file, text) {
     const mark = ext === '.py' || ext === '.sh' || ext === '.yml' || ext === '.toml'
         ? /^\s*#(?!!)/ : /^\s*(\/\/\/|\/\/!|\/\/|\*|<!--)/;
     let fence = false;
+    // **Python は説明文（三連引用符）も見る**（2026-10-18）。`#` の行しか
+    // 見ていなかったので、`walk-first.py` の説明に混ぜた「窓」と「一枚」が
+    // 素通りした ── あの台本は説明の大半をそこに書いている。
+    let doc = false;
     text.split('\n').forEach((line, i) => {
         if (ext === '.md' && /^\s*(```|~~~)/.test(line)) { fence = !fence; return; }
+        if (ext === '.py') {
+            const ticks = (line.match(/"""/g) || []).length;
+            const inside = doc;
+            if (ticks % 2 === 1) doc = !doc;
+            if (inside || ticks) { out.push([i + 1, line, fence]); return; }
+        }
         if (mark.test(line) || (ext === '.md' && line.trim())) out.push([i + 1, line, fence]);
     });
     return out;

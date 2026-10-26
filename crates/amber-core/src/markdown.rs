@@ -131,7 +131,7 @@ pub fn inline(text: &str) -> Vec<Inline> {
             && chars[i + 1] == c
             && chars[i + 2] == c
         {
-            if let Some(end) = find_run3(&chars, i + 3, c) {
+            if let Some(end) = close_run(&chars, i, i + 3, c, 3) {
                 flush(&mut out, &mut buf);
                 out.push(Inline::BoldItalic(chars[i + 3..end].iter().collect()));
                 i = end + 3;
@@ -141,7 +141,7 @@ pub fn inline(text: &str) -> Vec<Inline> {
 
         // 太字 **…** または __…__
         if (c == '*' || c == '_') && i + 1 < chars.len() && chars[i + 1] == c {
-            if let Some(end) = find_run(&chars, i + 2, [c, c]) {
+            if let Some(end) = close_run(&chars, i, i + 2, c, 2) {
                 flush(&mut out, &mut buf);
                 out.push(Inline::Bold(chars[i + 2..end].iter().collect()));
                 i = end + 2;
@@ -162,12 +162,12 @@ pub fn inline(text: &str) -> Vec<Inline> {
         // 斜体 *…* または _…_。直後が空白なら除外する。これがあるので
         // `a * b * c` の途中が強調にならない。
         if c == '*' || c == '_' {
-            if let Some(end) = chars[i + 1..].iter().position(|&x| x == c) {
-                let inner: String = chars[i + 1..i + 1 + end].iter().collect();
+            if let Some(end) = close_run(&chars, i, i + 1, c, 1) {
+                let inner: String = chars[i + 1..end].iter().collect();
                 if !inner.is_empty() && !inner.starts_with(' ') {
                     flush(&mut out, &mut buf);
                     out.push(Inline::Italic(inner));
-                    i += end + 2;
+                    i = end + 1;
                     continue;
                 }
             }
@@ -250,6 +250,42 @@ fn url_stop(c: char) -> bool {
 }
 
 /// `from` 以降で、`mark` が 3 文字続く箇所の開始位置。
+/// `_` を強調の印として使ってよいか ── **語の中では使わない。**
+///
+/// CommonMark の決まりで、`_` は語の中（前後が字か数）では強調にならない
+/// （`*` はなる ── `a*b*c` は斜体）。amber はこれを見ていなかったので、
+/// **`READ_COUNT と LAST_UPDATED` が斜体として読まれていた。** 表示画面から
+/// 書き戻すと `READ*COUNT と LAST*UPDATED` になり、**ファイル名も Oracle の
+/// ビュー名も壊れる。** 本人の `batchPro` で 6 本・69 箇所が実際に化けていた
+/// （2026-10-17・依頼 666）。`_` が一つだけの `MAX_LEN` は対になれないので
+/// 無事だった ── 二つ以上あると化ける、という壊れ方だった。
+///
+/// `open` は開きの印の先頭、`close` は閉じの印の先頭、`run` は印の長さ。
+fn uscore_ok(chars: &[char], open: usize, close: usize, run: usize) -> bool {
+    let before = if open == 0 { None } else { Some(chars[open - 1]) };
+    let after = chars.get(close + run).copied();
+    !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+}
+
+/// 閉じの印を探す。`_` のときは**語の中に落ちた閉じを飛ばして、次を探す。**
+///
+/// 飛ばさずに諦めると、`_強調_ と MAX_LEN` のように後ろに語中の `_` がある文で
+/// 手前の本物の強調まで消える。
+fn close_run(chars: &[char], open: usize, from: usize, mark: char, run: usize) -> Option<usize> {
+    let mut at = from;
+    loop {
+        let end = match run {
+            3 => find_run3(chars, at, mark)?,
+            2 => find_run(chars, at, [mark, mark])?,
+            _ => at + chars[at..].iter().position(|&x| x == mark)?,
+        };
+        if mark != '_' || uscore_ok(chars, open, end, run) {
+            return Some(end);
+        }
+        at = end + 1;
+    }
+}
+
 fn find_run3(chars: &[char], from: usize, mark: char) -> Option<usize> {
     let mut i = from;
     while i + 2 < chars.len() {
@@ -1404,6 +1440,46 @@ mod tests {
             assert!(!out.contains("_両方"), "記号が文字として出ている {line}: {out}");
         }
         assert_eq!(inline("***両方***"), vec![Inline::BoldItalic("両方".into())]);
+    }
+
+    #[test]
+    fn 語の中のアンダースコアは_強調にしない() {
+        // **本人の `batchPro` で 6 本・69 箇所が実際に化けていた**（2026-10-17・
+        // 依頼 666）。`READ_COUNT と LAST_UPDATED` が斜体として読まれ、表示画面から
+        // 書き戻すと `READ*COUNT と LAST*UPDATED` になっていた ── ファイル名も
+        // Oracle のビュー名も壊れる。`_` が二つ以上ある行だけが化ける、という
+        // 壊れ方だった（一つなら対になれないので無事）。
+        for line in [
+            "表の READ_COUNT と LAST_UPDATED を見る",
+            "snake_case_name を二つ my_var_name 書く",
+            "run_batch.sh、run_sys.sh、run_java.sh",
+            "V$SERV_MOD_ACT_STATS で、MODULE ごとの累積統計が取れる",
+            "a_b と c_d",
+            "10_jdbc.txt、04_plsql_commit.txt",
+        ] {
+            let out = to_html(&lines(line));
+            assert!(!out.contains("<em>"), "語の中で斜体になった {line}: {out}");
+            assert!(!out.contains("<strong>"), "語の中で太字になった {line}: {out}");
+            // 文字はそのまま残る ── 消えてもいけない。
+            assert!(out.contains('_'), "アンダースコアが消えた {line}: {out}");
+        }
+    }
+
+    #[test]
+    fn 本物の強調は_語の中の記号があっても生きる() {
+        // 語の中の `_` を見つけたところで諦めると、**手前の本物の強調まで消える。**
+        // 飛ばして次の閉じを探すこと。
+        let out = to_html(&lines("_強調_ と MAX_LEN"));
+        assert!(out.contains("<em>強調</em>"), "{out}");
+        assert!(out.contains("MAX_LEN"), "{out}");
+        // **閉じの候補が語の中に落ちていても、次を探す。** ここで諦めると
+        // `_foo_bar_` の強調が丸ごと消える（CommonMark は中の `_` を字として
+        // 残したまま、いちばん後ろで閉じる）。
+        let mid = to_html(&lines("_foo_bar_"));
+        assert!(mid.contains("<em>foo_bar</em>"), "{mid}");
+        // `*` は語の中でも強調にする（CommonMark の決まり。`_` だけが別扱い）。
+        let star = to_html(&lines("a*b*c"));
+        assert!(star.contains("a<em>b</em>c"), "{star}");
     }
 
     #[test]
