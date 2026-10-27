@@ -63,6 +63,37 @@ const fileURL = (at) => {
 /// このデスクトップ版が乗っている土台。**画面に出す言葉が、ここで変わる。**
 const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent);
 
+/// **これは Markdown か**（依頼 668）。表示画面を持てるのは、これだけ。
+///
+/// `.py` を表示画面で開いて保存すると、`# ` が見出しに、`* ` が箇条に
+/// 組み直されて**動かないコードが出来る**。依頼 666 で一日かけたのが、
+/// まさにその型の事故だった。
+const isMd = (path) => /\.(md|markdown)$/i.test(String(path || ''));
+
+/// 拡張子から Monaco の言語を引く（依頼 668）。**無い拡張子は素のまま。**
+///
+/// Monaco には 81 言語が同梱されているので、資材は増えない。
+const LANGS = {
+    bat: 'bat', c: 'c', cc: 'cpp', cfg: 'ini', clj: 'clojure', conf: 'ini',
+    cpp: 'cpp', cs: 'csharp', css: 'css', csv: 'plaintext', dart: 'dart',
+    dockerfile: 'dockerfile', ex: 'elixir', fs: 'fsharp', go: 'go',
+    gradle: 'java', graphql: 'graphql', h: 'cpp', hpp: 'cpp', htm: 'html',
+    html: 'html', ini: 'ini', java: 'java', js: 'javascript', json: 'json',
+    jsonc: 'json', jsx: 'javascript', kt: 'kotlin', less: 'less', log: 'plaintext',
+    lua: 'lua', m: 'objective-c', md: 'markdown', markdown: 'markdown',
+    mjs: 'javascript', mm: 'objective-c', pl: 'perl', php: 'php', ps1: 'powershell',
+    py: 'python', r: 'r', rb: 'ruby', rs: 'rust', sass: 'scss', scala: 'scala',
+    scss: 'scss', sh: 'shell', sql: 'sql', swift: 'swift', tf: 'hcl',
+    toml: 'ini', ts: 'typescript', tsx: 'typescript', txt: 'plaintext',
+    vb: 'vb', xml: 'xml', yaml: 'yaml', yml: 'yaml', zsh: 'shell',
+};
+const langOf = (path) => {
+    const m = /\.([0-9A-Za-z]+)$/.exec(String(path || ''));
+    const name = String(path || '').split(/[\\/]/).pop().toLowerCase();
+    if (name === 'dockerfile' || name === 'makefile') return LANGS[name] || 'plaintext';
+    return (m && LANGS[m[1].toLowerCase()]) || 'plaintext';
+};
+
 /// ゴミ箱の呼び名。**その土台に実在する名前を出す**（本人・2026-10-02）──
 /// macOS は「ゴミ箱」、Windows は「ごみ箱」。どちらも正式名で、綴りだけが違う。
 const BIN = MAC ? 'ゴミ箱' : 'ごみ箱';
@@ -2044,6 +2075,12 @@ async function openNote(path, opts) {
     state.dirty = false;
     loading = true;
     editor.setValue(body);
+    // **コード画面の色を、拡張子に合わせる**（依頼 668）── `.py` は Python、
+    // `.json` は JSON として色が付く。知らない拡張子は素のまま。
+    // Markdown のノートは今までどおり `markdown`。
+    try {
+        monaco.editor.setModelLanguage(editor.getModel(), langOf(note.path));
+    } catch { /* 色が付かなくても直せる */ }
     loading = false;
     lastSaved = body;
     // 履歴に渡すのは「保存する前の姿」── 開いた時点の中身。
@@ -2327,6 +2364,87 @@ document.addEventListener('selectionchange', () => {
 });
 el('read').addEventListener('blur', () => { clearTimeout(readTimer); syncRead(true); }, true);
 
+/// 表示画面から写すとき、**枠の中を元の文字に戻す**（依頼 669）。
+///
+/// 表示画面の枠は Monaco が色を付けたあとの姿で、**空白が U+00A0、タブは
+/// 空白四つ**になっている（`codeOf` の註と同じ事情）。選んで ⌘C すると
+/// その姿がそのまま載るので、貼った先では**写したとおりに動かないコード**
+/// になる ── Python のようにインデントで意味が決まる言葉では、タブが空白に
+/// 変わるだけで通らない。枠の「コピー」の札は元の文字を返していたのに、
+/// 選んで写す道だけが画面から拾っていた（2026-10-17 に本物で確かめた ──
+/// 二万字の文書を全部選んで 39 個）。
+///
+/// **枠に触れていない選び方のときは、何もしない。** 文章の中の U+00A0 は
+/// 書いた人が入れたもので、こちらで消してよいものではない。
+el('read').addEventListener('copy', (e) => {
+    if (!e.clipboardData) return;
+    const sel = getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    const base = sel.getRangeAt(0).cloneRange();
+    if (!el('read').contains(base.commonAncestorContainer)) return;
+    const pres = [...el('read').querySelectorAll('pre')].filter((p) => base.intersectsNode(p));
+    if (!pres.length) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', copySel(sel, base, pres));
+    e.clipboardData.setData('text/html', copySelHtml(base));
+});
+
+/// 選んだところが、**画面の上でどう読めるか**。
+///
+/// `Range.toString()` では駄目 ── あれは文字の節をつなぐだけで、`<br>` を
+/// 改行にしない。枠の中は Monaco が `<br>` で行を分けているので、
+/// **コード枠がまるごと一行に潰れる**（2026-10-17 に実際にそうなった）。
+/// 載るのは `Selection.toString()` のほうなので、選び直して読む。
+function selText(sel, range) {
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return sel.toString();
+}
+
+/// 写す文字。**枠のところだけ、画面ではなく元の文字に差し替える。**
+function copySel(sel, base, pres) {
+    let text = sel.toString();
+    let at = 0;
+    for (const pre of pres) {
+        const all = document.createRange();
+        all.selectNodeContents(pre);
+        const part = base.cloneRange();
+        if (part.compareBoundaryPoints(Range.START_TO_START, all) < 0) {
+            part.setStart(all.startContainer, all.startOffset);
+        }
+        if (part.compareBoundaryPoints(Range.END_TO_END, all) > 0) {
+            part.setEnd(all.endContainer, all.endOffset);
+        }
+        // **枠をまるごと選んだときだけ、元の文字へ。** 途中から途中までの
+        // ときは、画面の字と元の字の対応が決められない ── 化けた空白だけ
+        // 戻して、タブは諦める。
+        const whole = part.compareBoundaryPoints(Range.START_TO_START, all) === 0
+            && part.compareBoundaryPoints(Range.END_TO_END, all) === 0;
+        const screen = selText(sel, part);
+        if (!screen) continue;
+        const hit = text.indexOf(screen, at);
+        if (hit < 0) continue;
+        const real = whole ? codeOf(pre) : screen.replace(/\u00a0/g, ' ');
+        text = text.slice(0, hit) + real + text.slice(hit + screen.length);
+        at = hit + real.length;
+    }
+    // **選び直したものを戻す。** 戻さないと、写したあとに選んである範囲が
+    // 最後の枠だけになる ── 続けて打つと、そこが消える。
+    sel.removeAllRanges();
+    sel.addRange(base);
+    return text;
+}
+
+/// 写す HTML。**色はそのまま持って行く** ── 貼った先が書式を読むなら、
+/// 色が付いているほうが読みやすい。持って行かないのは画面のための札だけ
+/// （`.cp`。あれは「コピー」という文字として貼り先に出てしまう）。
+function copySelHtml(range) {
+    const box = document.createElement('div');
+    box.append(range.cloneContents());
+    for (const b of box.querySelectorAll('.cp')) b.remove();
+    return box.innerHTML;
+}
+
 /// 貼り付けは**文字だけ**入れる ── ただし、よそから来た HTML は
 /// **Markdown の文字に直してから**（依頼 421）。
 ///
@@ -2345,7 +2463,7 @@ el('read').addEventListener('paste', (e) => {
         && justAPicture(e.clipboardData)) return;
     e.preventDefault();
     const html = e.clipboardData.getData('text/html');
-    const clean = html && html.trim() ? webClean(html, clipBase(html)) : null;
+    const clean = html && html.trim() ? noNbsp(webClean(html, clipBase(html))) : null;
     // **セルひとつは、表ではない**（依頼 616・本人「不思議なところで改行する」）。
     // Excel はセルを一つ写しても `<table>` で寄こすので、そのまま入れると
     // 文の途中に段が割り込んで**そこで行が切れる。** 文字だけ入れる。
@@ -2360,8 +2478,9 @@ el('read').addEventListener('paste', (e) => {
     // 混ざって一覧が消え、項目では一覧が入れ子になった（総当たりが捕まえた・
     // 2026-09-10・本人が決めた）。
     {
-        const plain = e.clipboardData.getData('text/plain')
-            || (clean ? [...clean.children].map((n) => n.textContent).join('\n') : '');
+        const plain = (e.clipboardData.getData('text/plain')
+            || (clean ? [...clean.children].map((n) => n.textContent).join('\n') : ''))
+            .replace(/\u00a0/g, ' ');
         const line = lineAt(el('read'));
         if (line && line.closest('td, th')) {
             document.execCommand('insertText', false, plain.replace(/\s*\n\s*/g, ' ').trim());
@@ -2388,8 +2507,29 @@ el('read').addEventListener('paste', (e) => {
         readChanged();
         return;
     }
-    document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
+    document.execCommand('insertText', false,
+        e.clipboardData.getData('text/plain').replace(/\u00a0/g, ' '));
 });
+
+/// **よそから来た切れない空白（U+00A0）を、ふつうの空白に直す**（依頼 669）。
+///
+/// Word は空の段落に `&nbsp;` を入れ、色つきのエディタはインデントを
+/// `&nbsp;` で作る。そのまま取ると**ファイルに U+00A0 が残る** ── 画面では
+/// 空白と見分けが付かないのに、そこから写したコードは動かず、検索も当たらない
+/// （本人「変な文字に化けていないか」・2026-10-17 に確かめたら Word から 1 個、
+/// 色つきのエディタから 4 個入っていた）。
+///
+/// **直すのは貼り付けのときだけ。** 既にノートに入っている U+00A0 は
+/// 書いた人が入れたものかもしれないので、こちらから触らない。
+function noNbsp(box) {
+    if (!box) return box;
+    const w = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = w.nextNode())) {
+        if (n.data.includes('\u00a0')) n.data = n.data.replace(/\u00a0/g, ' ');
+    }
+    return box;
+}
 
 /// セルひとつだけの表なら、その文字。ちがえば `null`（依頼 616）。
 ///
@@ -5537,6 +5677,13 @@ function goToLine(line) {
 }
 
 async function setView(v) {
+    // **Markdown 以外は、表示画面に行かせない**（依頼 668）。`⌘E` も帯の
+    // ボタンも、ここを通る ── 一か所で断る。表示画面で開いて保存すると
+    // `# ` が見出しに組み直され、**動かないコードが出来る。**
+    if (v !== 'write' && state.guest && state.open && !isMd(state.open.path)) {
+        say('表示できるのは Markdown だけです（このファイルはそのまま直せます）');
+        return;
+    }
     // **替える前に、どこに居たかを控える。** 替えたあとでは、もう
     // 前の画面の caret も巻き位置も残っていない。
     const at = whereAmI();
@@ -11307,10 +11454,11 @@ function shortPath(at) {
 }
 
 async function openGuest(path) {
-    if (!path || !/\.(md|markdown|txt)$/i.test(path)) {
-        say('開けるのは .md / .markdown / .txt です');
-        return;
-    }
+    // **拡張子で断らない**（依頼 668・本人「基本はマークダウンエディタだけど、
+    // マークダウン以外も編集できるようにしたい」）。読めるかどうかは core が
+    // 決める ── フォルダ・32MB 超・binary（先頭 8000 バイトに NUL）・
+    // UTF-8 でも Shift_JIS でもないもの、を断ってくれる。
+    if (!path) return;
     let note;
     try {
         note = await ask('note', { path });
@@ -11338,7 +11486,13 @@ async function openGuest(path) {
     // `# ` が見出しに、`* ` が箇条に組み直され、保存で amber の書き方に寄る
     // （表の空セルが全角空白で埋まる類の丸めも当たる）。`.md` の往復は
     // `round-test.js` が総当たりで守っているが、`.txt` を丸める理由は無い。
-    if (/\.txt$/i.test(path)) view = 'write';
+    // **Markdown 以外はコード画面で開く**（依頼 668。`.txt` は依頼 658 で
+    // 既にそうしていた）── 表示画面で開くと amber の書き方に寄る。
+    if (!isMd(path)) view = 'write';
+    // 取り込めるのは Markdown だけ（依頼 668・本人「テキストの編集はするが、
+    // アンバーに取り込みはしたくない」）── 一覧は front matter と題で
+    // 出来ているので、`.py` を並べると題の無い行が混ざる。
+    el('guestadopt').hidden = !isMd(path);
     await openNote(path, { guest: note });
 }
 

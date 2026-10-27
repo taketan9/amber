@@ -2521,9 +2521,10 @@ await step('外から開く：.txt は素のまま（編集）で開く', `
     if (now !== 'write') return '画面: ' + now;
     return true;`, true);
 await step('外から開く：取り込むと、元が消えて .md で入る', `
-    const out = state.root.split('/').slice(0, -1).join('/') + '/取り込む試し.txt';
+    const out = state.root.split('/').slice(0, -1).join('/') + '/取り込む試し.md';
     await ask('write', { path: out, text: ['たまご', 'ぎゅうにゅう'].join(String.fromCharCode(10)), force: true });
     await openGuest(out);
+    if (el('guestadopt').hidden) return 'Markdown なのに「取り込む」が出ていません';
     const got = await ask('adopt', { path: out, to: state.places[0].dir });
     await closeGuest();
     await reload({ quiet: true });
@@ -2536,6 +2537,135 @@ await step('外から開く：取り込むと、元が消えて .md で入る', 
     if (!state.notes.some((n) => n.path === got.path)) return '一覧に出ていません';
     await ask('delete', { path: got.path });
     await reload({ quiet: true });
+    return true;`, true);
+
+// 十九の四。**Markdown 以外のテキストも直せる**（依頼 668）── 基本は
+// マークダウンエディタだが、`.py` も `.log` も開いて直せる。
+// **表示画面を持てるのは Markdown だけ** ── `.py` を表示画面で開いて保存すると
+// 書き方が amber に寄り、動かないコードが出来る（依頼 666 と同じ型）。
+await step('ほかの形：.py はコード画面で開き、Python として色が付く', `
+    const out = state.root.split('/').slice(0, -1).join('/') + '/つくえ.py';
+    const src = ['#!/usr/bin/env python3', '', 'def main():', '    # これは見出しではない',
+        '    # * これも箇条ではない', '    return 1', ''].join(String.fromCharCode(10));
+    await ask('write', { path: out, text: src, force: true });
+    const wasView = view;
+    await openGuest(out);
+    await new Promise((g) => setTimeout(g, 400));
+    const now = view;
+    const lang = editor.getModel().getLanguageId();
+    const adopt = el('guestadopt').hidden;
+    await closeGuest();
+    view = wasView; applyView();
+    if (now !== 'write') return '画面: ' + now;
+    if (lang !== 'python') return '言語: ' + lang;
+    if (!adopt) return '「取り込む」が出ています';
+    return true;`, true);
+await step('ほかの形：.py は表示画面に行かせない', `
+    const out = state.root.split('/').slice(0, -1).join('/') + '/つくえ.py';
+    const wasView = view;
+    await openGuest(out);
+    await new Promise((g) => setTimeout(g, 400));
+    await setView('read');
+    await new Promise((g) => setTimeout(g, 400));
+    const afterRead = view;
+    await setView('split');
+    await new Promise((g) => setTimeout(g, 400));
+    const afterSplit = view;
+    await closeGuest();
+    view = wasView; applyView();
+    if (afterRead !== 'write') return '表示へ行けてしまいました: ' + afterRead;
+    if (afterSplit !== 'write') return '並べてへ行けてしまいました: ' + afterSplit;
+    return true;`, true);
+await step('ほかの形：.py は開いて保存しても、一字も変わらない', `
+    const out = state.root.split('/').slice(0, -1).join('/') + '/つくえ.py';
+    const before = (await ask('read', { path: out })).text;
+    await openGuest(out);
+    await new Promise((g) => setTimeout(g, 400));
+    state.dirty = true;
+    await save();
+    await new Promise((g) => setTimeout(g, 600));
+    await closeGuest();
+    const after = (await ask('read', { path: out })).text;
+    if (after !== before) return '変わりました: ' + JSON.stringify(after.slice(0, 120));
+    return true;`, true);
+await step('ほかの形：フォルダは開かない', `
+    const dir = state.places[0].dir;
+    const was = state.open && state.open.path;
+    await openGuest(dir);
+    await new Promise((g) => setTimeout(g, 500));
+    const now = state.open && state.open.path;
+    if (state.guest) { await closeGuest(); }
+    if (now === dir) return 'フォルダを開いてしまいました';
+    return true;`, true);
+
+// 十九の五。**写すと貼るの往復**（依頼 669・本人「大量の文書を amber から
+// 他環境、他環境から amber にコピペしたときの挙動がすごく怪しい。一部
+// ロストしていたり、変な文字に化けていないか」）。
+//
+// 表示画面の枠は Monaco が色を付けたあとの姿で、**空白が U+00A0、タブは
+// 空白四つ**。選んで写すとその姿がそのまま載るので、貼った先で
+// **写したとおりに動かないコード**になっていた。
+await step('写す：枠を選んで写すと、空白もタブも元のまま', `
+    const LF = String.fromCharCode(10);
+    const TAB = String.fromCharCode(9);
+    const NB = String.fromCharCode(160);
+    const F = String.fromCharCode(96, 96, 96);
+    const at = state.root + '/写しの試し.md';
+    const src = ['---', 'title: 写しの試し', '---', '', '# 写し', '', F + 'python',
+        'def f(x):', '    if x > 0:', '        return x * 2', TAB + 'return 0', F, ''].join(LF);
+    await ask('write', { path: at, text: src, force: true });
+    await reload({ quiet: true });
+    await openNote(at);
+    await setView('read');
+    await new Promise((g) => setTimeout(g, 1200));
+    const box = el('read');
+    const rg = document.createRange(); rg.selectNodeContents(box);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); box.focus();
+    const dt = new DataTransfer();
+    dt.setData('text/plain', sel.toString());
+    const bag = document.createElement('div'); bag.append(rg.cloneContents());
+    dt.setData('text/html', bag.innerHTML);
+    box.dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true }));
+    const got = dt.getData('text/plain');
+    sel.removeAllRanges();
+    await ask('delete', { path: at });
+    await reload({ quiet: true });
+    if (got.includes(NB)) return '切れない空白が ' + (got.split(NB).length - 1) + ' 個';
+    if (!got.includes(TAB + 'return 0')) return 'タブが空白になっています';
+    if (!got.includes('def f(x):' + LF + '    if x > 0:')) return '枠の改行が落ちています';
+    if (got.includes('コピー')) return '枠の札が混ざっています';
+    return true;`, true);
+
+// 貼る側。**よそのアプリはインデントと空の段落を `&nbsp;` で作る** ── Word と
+// 色つきのエディタで実際にそうだった。そのまま取るとファイルに U+00A0 が
+// 残り、画面では空白と見分けが付かないのに、写したコードが動かない。
+await step('貼る：よそから来た切れない空白は、ふつうの空白で入る', `
+    const LF = String.fromCharCode(10);
+    const NB = String.fromCharCode(160);
+    const at = state.root + '/貼りの試し.md';
+    await ask('write', { path: at, text: ['---', 'title: 貼りの試し', '---', '', '先頭の行', ''].join(LF), force: true });
+    await reload({ quiet: true });
+    await openNote(at);
+    await setView('read');
+    await new Promise((g) => setTimeout(g, 700));
+    const box = el('read');
+    const p = [...box.children].find((n) => n.tagName === 'P') || box.lastElementChild;
+    const rg = document.createRange(); rg.selectNodeContents(p); rg.collapse(false);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); box.focus();
+    const dt = new DataTransfer();
+    dt.setData('text/plain', '');
+    dt.setData('text/html', '<div><div>' + NB + NB + 'def f(x):</div>'
+        + '<div>' + NB + NB + NB + NB + 'return x</div></div>');
+    box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    await new Promise((g) => setTimeout(g, 500));
+    state.dirty = true;
+    await save();
+    await new Promise((g) => setTimeout(g, 600));
+    const back = (await ask('read', { path: at })).text;
+    await ask('delete', { path: at });
+    await reload({ quiet: true });
+    if (back.includes(NB)) return '切れない空白が ' + (back.split(NB).length - 1) + ' 個のこりました';
+    if (!back.includes('def f(x):')) return '貼ったものが落ちました';
     return true;`, true);
 
 // 二十。ようこそ画面（依頼 654）── **既定では出さない状態で始めている**

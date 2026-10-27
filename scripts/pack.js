@@ -253,9 +253,18 @@ function docTypes(plist) {
     };
     run('-c', 'Delete :CFBundleDocumentTypes');
     run('-c', 'Add :CFBundleDocumentTypes array');
+    // **ソースコードと、形の決まったテキストも受ける**（依頼 668・本人
+    // 「基本はマークダウンエディタだけど、マークダウン以外も編集できる
+    // ようにしたい」）── `public.source-code` と `public.script` は
+    // `.py` `.rb` `.swift` などの親、`public.json` `public.xml` は
+    // `public.text` には従うが `public.plain-text` には従わないので別に書く。
+    //
+    // **どれも `Alternate`。** 既定は奪わない（本人が決めた・案 A）。
     const kinds = [
         ['Markdown のノート', ['net.daringfireball.markdown']],
-        ['テキスト', ['public.plain-text']],
+        ['テキスト', ['public.plain-text', 'public.text', 'public.utf8-plain-text']],
+        ['ソースコード', ['public.source-code', 'public.script', 'public.shell-script']],
+        ['形の決まったテキスト', ['public.json', 'public.xml', 'public.yaml', 'public.comma-separated-values-text']],
     ];
     kinds.forEach(([name, utis], i) => {
         run('-c', `Add :CFBundleDocumentTypes:${i} dict`);

@@ -64,9 +64,11 @@ if (edition() === 'office') app.disableHardwareAcceleration();
 /// 置き場所は動かさない ── 一本開くたびに一覧が入れ替わると、
 /// 「さっきまでのノートが消えた」に見える。
 const guests = [];
+/// **拡張子で断らない**（依頼 668）── 読めるかどうかは core が決める。
+/// 旗（`--disable-gpu` など）と、`.` で始まる隠しファイルは拾わない。
 function noteArg(list) {
-    return list.find((a) => typeof a === 'string' && /\.(md|markdown|txt)$/i.test(a)
-        && !a.startsWith('-'));
+    return list.find((a) => typeof a === 'string' && !a.startsWith('-')
+        && /[^\\/]\.[0-9A-Za-z]+$/.test(a));
 }
 const fromArgv = noteArg(process.argv.slice(1));
 if (fromArgv) guests.push(path.resolve(fromArgv));
