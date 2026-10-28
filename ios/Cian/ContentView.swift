@@ -180,12 +180,6 @@ struct ContentView: View {
         .modifier(TourHooks(openSample: openSample,
                             // 案内が終わったら、そこで初めて通知を訊く（依頼 654）。
                             afterTour: { Task { _ = await Bell.ask(); store.catchUp() } }))
-        .sheet(isPresented: $showCal) {
-            Calendaring(store: store, open: { note in
-                desk.open(note, store)
-                showing = true
-            })
-        }
         .sheet(isPresented: $picking) {
             // シートが先に自分で閉じ、これらはひと呼吸あとに、
             // 表示が重なっていないここから開く。
@@ -1171,7 +1165,29 @@ struct ContentView: View {
         .refreshable { store.reload() }
         .modifier(Waking(store: store, desk: desk))
         // 開いているノートごとに 1 画面、その上にタブ。
-        .navigationDestination(isPresented: $showing) { DeskView(desk: desk, store: store) }
+        //
+        // **カレンダーも、浮かぶカードではなく画面**（依頼 670・本人「ポップ
+        // アップではなく、しっかり画面を切り替えてほしい」）── シートだと
+        // 上に一覧が覗いていて、下へ払えば閉じてしまう。押して進む画面に
+        // すると、左上は「‹ 戻る」になり、月の表に画面を全部渡せる。
+        //
+        // **行き先は一つにまとめる。** `navigationDestination(isPresented:)` を
+        // 同じ画面に二つ置くと、**あとに書いたほうだけが効く** ── 別々に
+        // 置いたら、カレンダーを押しても何も起きなかった（シミュレータで出た）。
+        .navigationDestination(isPresented: Binding(
+            get: { showing || showCal },
+            set: { on in if !on { showing = false; showCal = false } }
+        )) {
+            if showCal {
+                Calendaring(store: store, open: { note in
+                    desk.open(note, store)
+                    showCal = false
+                    showing = true
+                })
+            } else {
+                DeskView(desk: desk, store: store)
+            }
+        }
         // 作ったばかりのノートをそのまま開く。しかも**編集側で** ──
         // 書くために作ったのだから。
         //

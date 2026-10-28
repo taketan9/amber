@@ -13,7 +13,6 @@ struct Calendaring: View {
     @ObservedObject var store: NotesStore
     /// 押されたノートを開く先（一覧の側が引き受ける）。
     let open: (Note) -> Void
-    @Environment(\.dismiss) private var dismiss
 
     struct Slot: Identifiable, Hashable {
         let day: String
@@ -91,7 +90,7 @@ struct Calendaring: View {
     }
 
     var body: some View {
-        NavigationStack { inside }
+        inside
             .task {
                 // **押されて開いたときに訊く。** 起きた瞬間に訊くと、
                 // 何のために訊かれたのか分からないまま断られる。
@@ -106,6 +105,7 @@ struct Calendaring: View {
     /// 「時間内に型検査できません」で組めなくなる（実際になった）。
     private var inside: some View {
         VStack(spacing: 0) {
+            stepper
             // 月／週／日の切り替え（依頼 515）── デスクトップ版の表の上の3 つと同じ。
             // **何を出すかは、その右に一つ**（依頼 531・本人が絵を見て案ウ）──
             // 段をもう一つ足すと月の表が 85pt 下がる（画面の一割）。iPhone は
@@ -123,17 +123,13 @@ struct Calendaring: View {
             .padding(.horizontal, 12).padding(.top, 6)
             if mode == "month" {
                 grid
-                Divider()
-                day
             } else if mode == "week" {
                 week
             } else {
                 day
             }
         }
-        // **`Text` に数をそのまま渡さない。** SwiftUI は土地の決まりで
-        // 桁を区切るので、年が「2,026年」になる（実際になった）。
-        .navigationTitle(Text(verbatim: heading))
+        .navigationTitle("カレンダー")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { bar }
         .sheet(isPresented: $settings) {
@@ -198,43 +194,89 @@ struct Calendaring: View {
             add: add, rename: rename, drop: drop))
     }
 
-    @ToolbarContentBuilder private var bar: some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
-            Button("閉じる") { dismiss() }
+    /// 題と、前後へ動く矢印（依頼 670）。**右上の角に固めない。**
+    ///
+    /// いままでは歯車・矢印・今日・矢印が全部バーの右端にあった ── いちばん
+    /// よく押すものが、親指のいちばん届かないところに四つ並んでいたことになる。
+    /// 題の両脇に置くと、押すところが 56×44 取れる。
+    ///
+    /// **`Text` に数をそのまま渡さない。** SwiftUI は土地の決まりで桁を
+    /// 区切るので、年が「2,026年」になる（実際になった）。
+    private var stepper: some View {
+        HStack(spacing: 0) {
+            Button { step(-1) } label: {
+                Image(systemName: "chevron.left")
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 56, height: 44)
+            }
+            .accessibilityLabel("前へ")
+            Spacer(minLength: 0)
+            Text(verbatim: heading)
+                .font(.title2.weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+            Spacer(minLength: 0)
+            Button { step(1) } label: {
+                Image(systemName: "chevron.right")
+                    .font(.title3.weight(.semibold))
+                    .frame(width: 56, height: 44)
+            }
+            .accessibilityLabel("次へ")
         }
+        .padding(.horizontal, 4)
+    }
+
+    @ToolbarContentBuilder private var bar: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
             Button { settings = true } label: { Image(systemName: "gearshape") }
                 .accessibilityLabel("カレンダー表示設定")
-            Button { step(-1) } label: { Image(systemName: "chevron.left") }
             Button("今日") {
                 year = Calendar.current.component(.year, from: Date())
                 month = Calendar.current.component(.month, from: Date())
                 picked = Self.today
                 count()
             }
-            Button { step(1) } label: { Image(systemName: "chevron.right") }
         }
     }
 
     // MARK: 月の表
 
+    /// セルの高さと、一日に出す件数（依頼 670）。
+    ///
+    /// **月の表に画面を全部渡した**ので、46pt だった段を 118pt にできた。
+    /// 日付 24pt ＋ 札 4 枚 ＋「ほか N」で 118pt に収まる。
+    /// 一画面に五段は入り、六段の月だけ少し巻く（Urecy も同じ）。
+    private static let cellHigh: CGFloat = 118
+    private static let chips = 4
+    /// セルとセルのすき間。**端から端まで使う**（依頼 670・本人「Urecy だと
+    /// 一つのセルで 5 文字は表示できている」）── 外に 8pt の余白を置き、
+    /// すき間を 3pt 取っていたので、横が 34pt 減ってセルが 51pt しか無かった。
+    /// すき間を 1pt にして余白を落とすと 55pt になり、**一文字ぶん増える**。
+    private static let gap: CGFloat = 1
+
     private var grid: some View {
         VStack(spacing: 3) {
-            HStack(spacing: 3) {
+            // 曜日の段は巻かない ── 巻くと、何曜日の列を見ているか分からなくなる。
+            HStack(spacing: Self.gap) {
                 ForEach(Array(["月", "火", "水", "木", "金", "土", "日"].prefix(CalPrefs.weekend ? 7 : 5).enumerated()), id: \.offset) { i, w in
-                    Text(w).font(.caption2)
+                    Text(w).font(.footnote.weight(.semibold))
                         .foregroundStyle(i == 5 ? Color.blue : (i == 6 ? Color.red : Color.secondary))
                         .frame(maxWidth: .infinity)
                 }
             }
-            ForEach(weeks, id: \.self) { week in
-                HStack(spacing: 3) {
-                    // 土日を出さないときは月〜金だけ（依頼 515）。
-                    ForEach(Array(week.prefix(CalPrefs.weekend ? 7 : 5)), id: \.self) { d in cell(d) }
+            ScrollView {
+                VStack(spacing: Self.gap) {
+                    ForEach(weeks, id: \.self) { week in
+                        HStack(spacing: Self.gap) {
+                            // 土日を出さないときは月〜金だけ（依頼 515）。
+                            ForEach(Array(week.prefix(CalPrefs.weekend ? 7 : 5)), id: \.self) { d in cell(d) }
+                        }
+                    }
                 }
+                .padding(.bottom, 10)
             }
         }
-        .padding(.horizontal, 8)
         .padding(.top, 6)
     }
 
@@ -378,58 +420,93 @@ struct Calendaring: View {
 
     @ViewBuilder private func cell(_ d: String) -> some View {
         if d.isEmpty {
-            Color.clear.frame(maxWidth: .infinity, minHeight: 46)
+            Color.clear.frame(maxWidth: .infinity, minHeight: Self.cellHigh)
         } else {
             let mine = shown(on: d)
             let on = d == picked
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(String(Int(d.suffix(2)) ?? 0))
-                    .font(.caption2).monospacedDigit()
-                    .foregroundStyle(d == Self.today ? Color.accentColor : .secondary)
-                    .fontWeight(d == Self.today ? .bold : .regular)
-                ForEach(mine.prefix(2)) { s in
-                    // **塗ってあるものが、グループに見えている予定**（依頼 530）。
-                    // デスクトップ版とまったく同じ決まり ── 自分だけの予定は塗らない。
-                    // だれの用事かが分かっているものは、**その色の帯を左に**
-                    // 立てる（依頼 547）── セル目は文字が 8pt なので、色を文字に
-                    // 乗せると読めなくなる。
-                    HStack(spacing: 2) {
-                        tagBand(s, width: 2, height: 9)
-                        Text(s.title).font(.system(size: 8)).lineLimit(1)
-                            .foregroundStyle(s.isAway ? Color.blue
-                                : (s.isPhone ? CalPrefs.hereTint
-                                   : (s.isPlan ? Color.accentColor : Color.secondary)))
-                    }
-                    .padding(.horizontal, CalPrefs.inGroup(s) ? 3 : 0)
-                    .padding(.vertical, CalPrefs.inGroup(s) ? 1 : 0)
-                    .background(CalPrefs.inGroup(s)
-                        ? CalPrefs.hereTint.opacity(0.22) : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                }
-                if mine.count > 2 {
-                    Text("ほか \(mine.count - 2)").font(.system(size: 8)).foregroundStyle(.tertiary)
+                    .font(.system(size: 20, weight: d == Self.today ? .bold : .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(d == Self.today ? Color.accentColor : .primary)
+                ForEach(mine.prefix(Self.chips)) { s in dayChip(s) }
+                if mine.count > Self.chips {
+                    Text("ほか \(mine.count - Self.chips)")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .padding(.leading, 3)
                 }
                 Spacer(minLength: 0)
             }
             .padding(2)
-            .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: Self.cellHigh, alignment: .topLeading)
             .background(on ? Color.accentColor.opacity(0.12) : Color(.secondarySystemBackground))
             .overlay(RoundedRectangle(cornerRadius: 6)
                 .stroke(d == Self.today ? Color.accentColor : .clear, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
-            .onTapGesture { picked = d }
+            // **押したら「日」の画面へ**（依頼 670）── 月の下に日別リストを
+            // 置くのをやめたので、読む場所は日の画面になった。
+            .onTapGesture { picked = d; mode = "day" }
         }
+    }
+
+    /// 月の表の、一件ぶんの札（依頼 670）。
+    ///
+    /// **8pt の素の文字をやめて、色の付いた札にした**（本人「月の表示が小さい」）。
+    /// 字は 11pt で三つしか増えていないが、色の面に乗ると読める ── Urecy の
+    /// 月表示も同じ作りで、字は 10pt ほどしかない。効いているのは字の大きさ
+    /// ではなく、**色と、月の表に画面を全部渡したこと**。
+    ///
+    /// **しっかり塗ってあるものが、グループに見えている予定**（依頼 530）──
+    /// 自分だけの予定は薄い塗りにして、この決まりは残した。
+    /// だれの用事かは、左の色の帯で（依頼 547）。
+    @ViewBuilder private func dayChip(_ s: Slot) -> some View {
+        let tint = s.isAway ? Color.blue
+            : (s.isPhone ? CalPrefs.hereTint
+               : (s.isPlan ? Color.accentColor : Color.secondary))
+        let full = CalPrefs.inGroup(s)
+        let tints = tagTints(s)
+        // **文字を、セルの幅に口出しさせない。**
+        //
+        // `fixedSize()` を素のまま使うと、長い題の入ったセルだけ横に広がり、
+        // **隣の列を押して土曜日が画面の外へ出た**（シミュレータで出た）。
+        // 幅を決めるのは `Color.clear` のほうで、文字はその上に重ねて切る
+        // ── 重ねたものは、下の大きさに口出ししない。
+        Color.clear
+            .frame(height: 15)
+            .overlay(alignment: .leading) {
+                // **だれの用事かの帯が無いときは、すき間も取らない** ──
+                // 空の帯でも `HStack` の間隔は残り、文字の幅が 2pt 減る。
+                HStack(spacing: tints.isEmpty ? 0 : 2) {
+                    if !tints.isEmpty { tagBand(s, width: 2, height: 12) }
+                    // **「…」を付けずに切る**（Urecy と同じ）── セルは横 55pt
+                    // しか無く、「…」だけで一文字ぶん食う。「ドライブスル」
+                    // のように途中で切れていても、**五文字目まで読めるほうが
+                    // 分かる**（「ドラ…」では、ドライブスルーかドラッグストアか
+                    // 決まらない）。
+                    Text(s.title)
+                        .font(.system(size: 10.5))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .foregroundStyle(full ? Color.white : tint)
+                }
+                .padding(.leading, 1)
+            }
+            .clipped()
+            .background(full ? CalPrefs.hereTint : tint.opacity(0.16))
+            .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 
     // MARK: その日
 
     private var day: some View {
         List {
-            Section(spoken(picked)) {
+            // **段に見出しを付けない**（依頼 670）── すぐ上の題が
+            // 「10月7日（水）」と言っているので、同じ日付が二度出る。
+            Section {
                 let plans = slots.filter { $0.day == picked && $0.isPlan && CalPrefs.visible($0) }
                 if plans.isEmpty {
-                    Text("予定はありません").foregroundStyle(.secondary).font(.footnote)
+                    Text("予定はありません").foregroundStyle(.secondary).font(.body)
                 }
                 ForEach(plans) { s in row(s, time: true) }
             }
@@ -493,20 +570,27 @@ struct Calendaring: View {
                 return
             }
             guard let n = store.notes.first(where: { $0.path == s.path }) else { return }
-            dismiss()
+            // **自分では閉じない**（依頼 670）── 一覧へ戻ってからノートを
+            // 開くのは一覧の仕事で、こちらは「これが押された」とだけ言う。
             open(n)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 if time {
-                    Text(s.at ?? "終日").font(.caption).monospacedDigit()
-                        .foregroundStyle(.secondary).frame(width: 44, alignment: .leading)
+                    // 時刻は本文の大きさ（17pt）── 予定名より一段落として、
+                    // 「何時」と「何を」を目で分けられるようにする。
+                    Text(s.at ?? "終日").font(.body).monospacedDigit()
+                        .foregroundStyle(.secondary).frame(width: 62, alignment: .leading)
                 }
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     // 塗ってあるものが、グループに見えている予定（依頼 530）。
                     // だれの用事かは、左の帯の色で（依頼 547）。
                     HStack(spacing: 6) {
-                        tagBand(s, width: 3, height: 16)
+                        tagBand(s, width: 4, height: 24)
+                        // **予定名は見出しの大きさ**（依頼 670・本人「2 倍から
+                        // 3 倍くらい文字を大きく」）── 22pt。`title2` にして
+                        // あるので、アプリの「文字の大きさ」でさらに伸びる。
                         Text(s.title)
+                            .font(.title2)
                             .foregroundStyle(s.isAway ? Color.blue
                                 : (s.isPhone ? CalPrefs.hereTint : Color.primary))
                     }
@@ -520,11 +604,11 @@ struct Calendaring: View {
                     if s.noNote {
                         let under = [s.place, s.from].filter { !$0.isEmpty }.joined(separator: "・")
                         if !under.isEmpty {
-                            Text(under).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(under).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                         }
                     } else if let n = store.notes.first(where: { $0.path == s.path }),
                               !n.excerpt.isEmpty {
-                        Text(n.excerpt).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        Text(n.excerpt).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
             }
@@ -636,7 +720,7 @@ struct Calendaring: View {
                 Section {
                     let mine = shown(on: d)
                     if mine.isEmpty {
-                        Text("予定はありません").foregroundStyle(.secondary).font(.footnote)
+                        Text("予定はありません").foregroundStyle(.secondary).font(.body)
                     }
                     ForEach(mine) { s in row(s, time: true) }
                     Button {
@@ -646,10 +730,11 @@ struct Calendaring: View {
                         newEnd = ""
                         adding = true
                     } label: {
-                        Label("予定を登録する", systemImage: "plus").font(.footnote)
+                        Label("予定を登録する", systemImage: "plus").font(.body)
                     }
                 } header: {
                     Text(spoken(d) + "（" + Self.weekName(d) + "）" + (d == Self.today ? "　今日" : ""))
+                        .font(.headline)
                         .foregroundStyle(d == Self.today ? Color.accentColor : Color.secondary)
                 }
             }
