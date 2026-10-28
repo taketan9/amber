@@ -236,16 +236,16 @@ const NORMAL_TARGETS = [
 const QUICK_TARGETS = ['段落', '一覧の途中', 'セル', '表のセル', '枠の下の段落', '末尾の段落'];
 
 const FIXTURES = [
-    { name: 'ふつう', note: '網.md', md: NORMAL,
+    { name: 'ふつう', note: '総当たり.md', md: NORMAL,
       targets: QUICK ? NORMAL_TARGETS.filter((t) => QUICK_TARGETS.includes(t[0])) : NORMAL_TARGETS },
-    { name: '一行だけ', note: '網.md', md: 'たった一行のノート。',
+    { name: '一行だけ', note: '総当たり.md', md: 'たった一行のノート。',
       targets: [['その一行', 'たった一行のノート。', 'one']] },
-    { name: '見出しだけ', note: '網.md', md: '# 題だけ',
+    { name: '見出しだけ', note: '総当たり.md', md: '# 題だけ',
       targets: [['その見出し', '題だけ', 'h1only']] },
-    { name: '枠にはさまれた', note: '網.md',
+    { name: '枠にはさまれた', note: '総当たり.md',
       md: '```\nコード\n```\n\n真ん中の段落。\n\n```\nコード\n```',
       targets: [['真ん中の段落', '真ん中の段落。', 'between']] },
-    { name: '空', note: '網.md', md: '',
+    { name: '空', note: '総当たり.md', md: '',
       targets: [['空の画面', '', 'empty']] },
     { name: '前書きなし', note: '網なし.md', md: '一行目の段落。\n\n二行目の段落。',
       targets: [['頭の段落', '一行目の段落。', 'p'], ['末尾の段落', '二行目の段落。', 'last']] },
@@ -744,7 +744,7 @@ const t0 = Date.now();
         if (!state.notes.length) return { bad: 'ノートが一本も読めません' };
         // 総当たりは固定の名前で開き直すので、題に合わせた改名は切る（依頼 492）。
         nameAuto = false;
-        await openNote(${note('網.md')});
+        await openNote(${note('総当たり.md')});
         for (let i = 0; i < 40 && !editor; i += 1) await new Promise((g) => setTimeout(g, 100));
         return editor ? { ok: true } : { bad: 'エディタが起きません' };
     })()`);

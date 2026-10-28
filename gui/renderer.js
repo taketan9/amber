@@ -3695,6 +3695,44 @@ function pickedLines(box) {
     return one ? [one] : [];
 }
 
+/// 選びに重なる、箱の直下のかたまりを**枠で区切って**返す（依頼 674）。
+///
+/// 枠に触れていない選びでは `null` ── いつもどおり、一度で掛ける。
+function aroundFences(box) {
+    const sel = getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    const r = sel.getRangeAt(0);
+    const hit = [...box.children].filter((n) => r.intersectsNode(n));
+    if (!hit.some(isFence)) return null;
+    const runs = [];
+    let run = [];
+    for (const n of hit) {
+        if (isFence(n)) {
+            if (run.length) runs.push(run);
+            run = [];
+        } else {
+            run.push(n);
+        }
+    }
+    if (run.length) runs.push(run);
+    return runs;
+}
+
+/// コード枠か（図の枠も同じ扱い ── どちらも飾る相手ではない）。
+function isFence(n) {
+    return !!n && n.nodeType === 1 && n.tagName === 'PRE';
+}
+
+/// その並びのかたまりだけを選び直す。
+function pickBlocks(list) {
+    const r = document.createRange();
+    r.setStartBefore(list[0]);
+    r.setEndAfter(list[list.length - 1]);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+}
+
 /// 選んだ行の見出しを、段落に落とす（点を付ける前に）。
 function flattenHeads(box) {
     for (const line of pickedLines(box)) {
@@ -3777,6 +3815,25 @@ function tidyLists(box) {
 ///     書けず、`insertOrderedList` はセルの文字を消す（総当たりが捕まえた・
 ///     2026-09-10）。受けて、何もしない（`false` を返す）
 function blockAs(box, what) {
+    // **枠はそのまま、段落だけ飾る**（依頼 674・本人が決めた）。
+    //
+    // `execCommand` は選んだ範囲を丸ごと組み替えるので、枠を跨いで選ぶと
+    // **中のコードが行中コードに化け、空の枠が残った** ── 引用に至っては、
+    // 枠の前後の段落が消えた（総当たりの決めごと 丙・「選んで消すとき以外、
+    // 触れないかたまりは変わらない」）。太字や斜体は前から枠に触らずに
+    // 通っていたので、ここだけが取り残されていた。
+    //
+    // 枠で区切って、前後のかたまりに**それぞれ掛ける**。
+    const runs = aroundFences(box);
+    if (runs) {
+        let did = false;
+        for (const run of runs) {
+            pickBlocks(run);
+            if (blockAs(box, what)) did = true;
+        }
+        // 枠しか選んでいなければ、何も起きないのが正しい（断りではない）。
+        return runs.length ? did : true;
+    }
     const sel = getSelection();
     let n = sel && sel.rangeCount ? sel.anchorNode : null;
     if (n && n.nodeType === 3) n = n.parentElement;
@@ -3893,8 +3950,17 @@ function checkBack(box) {
 
     // **触れないかたまりの隣では、何も起きない。** caret の無いものが
     // 一打で消えるのは事故（芯の 2）── 消すパスは、押したときの吹き出し。
+    //
+    // **コード枠の隣でも、何も起きない**（依頼 674）── 依頼 644 で枠を
+    // 触れるようにしたとき、`richBlock` は枠に偽を返すようになった。
+    // 守りがそこだけを見ていたので、**枠の下の段落の行頭で押すと、既定の
+    // Backspace が段落を枠の中へ吸い込んでいた。** 入る先は `</code>` の
+    // 外で、`blockToMd` の `PRE` は `<code>` の中しか読まないため、
+    // **画面には出ているのに、保存すると消える**（総当たりが捕まえた）。
+    // 行末の `Delete`（`checkDel`）は「次が素の段落でなければ何もしない」で
+    // 既に枠を避けていたので、こちらだけが取り残されていた。
     const before = line.previousElementSibling;
-    if (before && richBlock(before)) return true;
+    if (before && (richBlock(before) || before.tagName === 'PRE')) return true;
 
     // **インデントには、何もしない。** `　` はただの文字なので、caret がその
     // 後ろに居れば既定の Backspace が一つ消す（芯の 1 がそのまま効く）。
