@@ -129,6 +129,7 @@ struct Calendaring: View {
                 day
             }
         }
+        .overlay(alignment: .bottomTrailing) { plusButton }
         .navigationTitle("カレンダー")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { bar }
@@ -227,6 +228,35 @@ struct Calendaring: View {
         .padding(.horizontal, 4)
     }
 
+    /// **予定を足す丸いボタン**（依頼 672・本人「予定を追加する プラスボタンが
+    /// ほしいなぁ」）。
+    ///
+    /// 月の表に画面を全部渡したとき、下の日別リストと一緒に「予定を登録する」も
+    /// 消えてしまい、**月から予定を足す道が無くなっていた。** 三つの画面
+    /// どれからでも押せるように、ここに一つ置く。
+    ///
+    /// 置くのは**右下** ── いちばんよく押すものを、親指の届くところに。
+    /// 形は一覧の「新しいノート」と同じ琥珀の丸で揃える。
+    /// 足す先は、いま選んである日（登録の画面がその日付を出す）。
+    private var plusButton: some View {
+        Button {
+            newTitle = ""
+            newAt = "09:00"
+            newEnd = ""
+            adding = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(Circle().fill(Color.accentColor))
+                .shadow(color: Color.accentColor.opacity(0.45), radius: 6, y: 2)
+        }
+        .accessibilityLabel("予定を登録する")
+        .padding(.trailing, 18)
+        .padding(.bottom, 18)
+    }
+
     @ToolbarContentBuilder private var bar: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
             Button { settings = true } label: { Image(systemName: "gearshape") }
@@ -274,7 +304,7 @@ struct Calendaring: View {
                         }
                     }
                 }
-                .padding(.bottom, 10)
+                .padding(.bottom, 86)
             }
         }
         .padding(.top, 6)
@@ -554,6 +584,7 @@ struct Calendaring: View {
             }
         }
         .listStyle(.insetGrouped)
+        .contentMargins(.bottom, 86, for: .scrollContent)
     }
 
     @ViewBuilder private func row(_ s: Slot, time: Bool) -> some View {
@@ -740,6 +771,7 @@ struct Calendaring: View {
             }
         }
         .listStyle(.insetGrouped)
+        .contentMargins(.bottom, 86, for: .scrollContent)
     }
 
     static func date(_ d: String) -> Date? {

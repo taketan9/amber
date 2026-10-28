@@ -2668,6 +2668,52 @@ await step('貼る：よそから来た切れない空白は、ふつうの空�
     if (!back.includes('def f(x):')) return '貼ったものが落ちました';
     return true;`, true);
 
+// 行頭の空白とタブ（依頼 673・本人「行頭にタブや空白があっても消していいよ」）。
+// **落とさないと、Chromium が行頭の空白を U+00A0 に置き換える** ── 画面では
+// 空白と見分けが付かないのに、ファイルには切れない空白が残る。
+// **枠の中へ貼るときは落とさない** ── あそこでは行頭が意味を持つ。
+await step('貼る：行頭のタブや空白は落ちる。ただし枠の中は残る', `
+    const LF = String.fromCharCode(10);
+    const TAB = String.fromCharCode(9);
+    const NB = String.fromCharCode(160);
+    const F = String.fromCharCode(96, 96, 96);
+    const at = state.root + '/行頭の試し.md';
+    await ask('write', { path: at, text: ['---', 'title: 行頭の試し', '---', '',
+        '先頭の行', '', F + 'python', 'def f(x):', F, ''].join(LF), force: true });
+    await reload({ quiet: true });
+    await openNote(at);
+    await setView('read');
+    await new Promise((g) => setTimeout(g, 900));
+    const box = el('read');
+    const paste = (node, text, toEnd) => {
+        const rg = document.createRange();
+        rg.selectNodeContents(node);
+        rg.collapse(!toEnd);
+        const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); box.focus();
+        const dt = new DataTransfer();
+        dt.setData('text/plain', text);
+        box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    };
+    const p = [...box.children].find((n) => n.tagName === 'P');
+    if (!p) return '段落が見つかりません';
+    paste(p, '一行目' + LF + TAB + 'タブ始まり' + LF + '  空白始まり', true);
+    await new Promise((g) => setTimeout(g, 400));
+    const pre = box.querySelector('pre > code');
+    if (!pre) return '枠が見つかりません';
+    paste(pre, LF + '    return x', true);
+    await new Promise((g) => setTimeout(g, 400));
+    state.dirty = true;
+    await save();
+    await new Promise((g) => setTimeout(g, 700));
+    const back = (await ask('read', { path: at })).text;
+    await ask('delete', { path: at });
+    await reload({ quiet: true });
+    if (back.includes(NB)) return '切れない空白が ' + (back.split(NB).length - 1) + ' 個のこりました';
+    if (!back.includes('タブ始まり')) return '貼ったものが落ちました';
+    if (/^[ ]+タブ始まり/m.test(back)) return '文章の行頭が落ちていません';
+    if (!back.includes('    return x')) return '枠の中のインデントまで落ちました';
+    return true;`, true);
+
 // 二十。ようこそ画面（依頼 654）── **既定では出さない状態で始めている**
 // （`walk.sh` が `greeted` を憶えさせる）ので、ここでは直に呼んで確かめる。
 await step('ようこそ画面：三行と、大きな一つと、小さな文字リンク', `

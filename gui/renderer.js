@@ -2462,6 +2462,9 @@ el('read').addEventListener('paste', (e) => {
     if ([...e.clipboardData.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'))
         && justAPicture(e.clipboardData)) return;
     e.preventDefault();
+    // **枠の中へ貼るときは、行頭をそのままにする**（依頼 673）── Python の
+    // インデントは意味なので、落とすと動かないコードになる。
+    const intoCode = inCode();
     const html = e.clipboardData.getData('text/html');
     const clean = html && html.trim() ? noNbsp(webClean(html, clipBase(html))) : null;
     // **セルひとつは、表ではない**（依頼 616・本人「不思議なところで改行する」）。
@@ -2478,9 +2481,8 @@ el('read').addEventListener('paste', (e) => {
     // 混ざって一覧が消え、項目では一覧が入れ子になった（総当たりが捕まえた・
     // 2026-09-10・本人が決めた）。
     {
-        const plain = (e.clipboardData.getData('text/plain')
-            || (clean ? [...clean.children].map((n) => n.textContent).join('\n') : ''))
-            .replace(/\u00a0/g, ' ');
+        const plain = noHead(intoCode, (e.clipboardData.getData('text/plain')
+            || (clean ? [...clean.children].map((n) => n.textContent).join('\n') : '')));
         const line = lineAt(el('read'));
         if (line && line.closest('td, th')) {
             document.execCommand('insertText', false, plain.replace(/\s*\n\s*/g, ' ').trim());
@@ -2508,8 +2510,37 @@ el('read').addEventListener('paste', (e) => {
         return;
     }
     document.execCommand('insertText', false,
-        e.clipboardData.getData('text/plain').replace(/\u00a0/g, ' '));
+        noHead(intoCode, e.clipboardData.getData('text/plain')));
 });
+
+/// caret が、コード枠の中に居るか（依頼 673）。
+///
+/// **`lineAt` では見つからない** ── あちらが行として数えるのは
+/// `li, p, div, h1〜h6, td, th` だけで、`pre` も `code` も入っていない。
+/// 枠の中では `null` が返るので「枠の中ではない」と読めてしまい、
+/// **枠へ貼ったコードのインデントが落ちた**（総ざらいが捕まえた）。
+function inCode() {
+    const sel = getSelection();
+    let n = sel && sel.rangeCount ? sel.anchorNode : null;
+    if (n && n.nodeType === 3) n = n.parentElement;
+    return !!(n && el('read').contains(n) && n.closest('pre'));
+}
+
+/// **貼る文字から、切れない空白と行頭の空白を落とす**（依頼 673）。
+///
+/// 切れない空白（U+00A0）はよそのアプリが入れたもの ── `noNbsp` の註。
+///
+/// **行頭の空白とタブも落とす**（本人「行頭にタブや空白があっても消していい」）
+/// ── 落とさないと、Chromium が**行頭の空白を見えるようにするため** U+00A0 に
+/// 置き換えてしまい、ファイルに切れない空白が残る（タブを一つ貼っただけで
+/// 一個入った）。Markdown の文章では、行頭の空白はそもそも描くときに畳まれる
+/// ので、落としても見た目は変わらない。
+///
+/// **枠の中へ貼るときは落とさない** ── あそこでは行頭が意味を持つ。
+function noHead(intoCode, text) {
+    const flat = text.replace(/\u00a0/g, ' ');
+    return intoCode ? flat : flat.replace(/^[ \t]+/gm, '');
+}
 
 /// **よそから来た切れない空白（U+00A0）を、ふつうの空白に直す**（依頼 669）。
 ///
