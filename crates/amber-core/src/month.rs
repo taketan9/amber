@@ -189,8 +189,8 @@ pub fn of(rows: &[crate::survey::Row], year: i32, month: u32) -> Vec<Slot> {
                 // **一度だけ読む。** 題も予定も、同じ頭の行から読む ── 前は
                 // `read` で一度、`read_to_string` でもう一度、まるごと読んで
                 // いた。
-                let Some(lines) = crate::note::head(&r.path, 60) else { continue };
-                let Some(note) = crate::note::from_head(&r.path, &lines) else { continue };
+                // 一覧と同じ憶えを使う（同じ頭の行から作ったもの・依頼 693）。
+                let Some((note, plan)) = crate::note::remembered_full(r) else { continue };
                 let k = Known {
                     when: now.map(|(w, _)| w).unwrap_or(0),
                     size: now.map(|(_, z)| z).unwrap_or(0),
@@ -200,7 +200,7 @@ pub fn of(rows: &[crate::survey::Row], year: i32, month: u32) -> Vec<Slot> {
                         note.title.clone()
                     },
                     created: note.created,
-                    plan: crate::note::remind_lines(&lines),
+                    plan,
                 };
                 if let Some(m) = store.as_mut() {
                     // 際限なく溜めない ── 途方もない数のノートを歩いた

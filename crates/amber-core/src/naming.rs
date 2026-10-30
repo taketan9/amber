@@ -352,19 +352,32 @@ fn rel_of(root: &Path, p: &Path) -> Option<String> {
 /// 揃う。返すのは改名した (前, 後) のパス。
 pub fn tidy_names(root: &Path) -> Vec<(PathBuf, PathBuf)> {
     let stop = std::sync::atomic::AtomicBool::new(false);
-    let (found, _) = crate::note::list(
+    // **名前は歩いた行だけで分かる** ── 頭を読むのは、時刻の名前のものだけ
+    // （起動のたびに全部のノートの頭を読んでいた・212ms → 30ms）
+    let walk = crate::survey::survey(
         root,
-        crate::survey::Limits { depth: 6, rows: 4000, hidden: false, ..Default::default() },
+        crate::survey::Limits { depth: 6, rows: crate::survey::ALL, hidden: false, size_budget: 0 },
         &stop,
     );
     let mut out = Vec::new();
-    for f in found {
-        let stem = stem_of(&f.note.path);
-        if !crate::note::made_up_name(&stem) {
+    for r in &walk.rows {
+        if r.is_dir {
             continue;
         }
-        if let Ok(Some((to, _))) = settle(root, &f.note.path) {
-            out.push((f.note.path.clone(), to));
+        let md = r.path.extension().and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"));
+        if !md || r.path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("~$")) {
+            continue;
+        }
+        if !crate::note::made_up_name(&stem_of(&r.path)) {
+            continue;
+        }
+        // `list` が落としていた「読めない一本」は、ここでも落とす。
+        if crate::note::read(&r.path, 60).is_none() {
+            continue;
+        }
+        if let Ok(Some((to, _))) = settle(root, &r.path) {
+            out.push((r.path.clone(), to));
         }
     }
     out

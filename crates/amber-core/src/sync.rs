@@ -262,8 +262,7 @@ pub fn assets(root: &std::path::Path) -> Vec<Here> {
                     }
                     let at = pic.path();
                     let Ok(rel) = at.strip_prefix(root) else { continue };
-                    let bytes = std::fs::read(&at).unwrap_or_default();
-                    out.push(Here { rel: rel.to_string_lossy().replace('\\', "/"), hash: fingerprint(&bytes) });
+                    out.push(Here { rel: rel.to_string_lossy().replace('\\', "/"), hash: print_of(&at) });
                 }
             } else if depth < 6 {
                 dirs.push((path, depth + 1));
@@ -467,6 +466,43 @@ pub fn forget_moves(root: &std::path::Path, who: &str, done: &[String]) {
 /// 暗号の強さは要らない（守るのではなく、変わったかを見るだけ）ので、
 /// **依存を増やさずに書ける FNV-1a** で足りる。同じ二本が違う指紋になること
 /// は無く、違う二本が同じになるのは 1800京分の1。
+/// ファイルの指紋。**変わっていなければ、前に読んだものを返す**（依頼 693）。
+/// しるしは更新時刻（ナノ秒）と長さ、二秒以内に書かれたものは信じない（`month` と同じ）。
+/// 読めなければ空の指紋 ── 前の `fs::read(..).unwrap_or_default()` と同じ答え。
+pub fn print_of(at: &std::path::Path) -> String {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    type Seen = Mutex<HashMap<std::path::PathBuf, (u64, u64, String)>>;
+    static SEEN: OnceLock<Seen> = OnceLock::new();
+    const GRACE: u64 = 2_000_000_000;
+    let mark = std::fs::metadata(at).ok().and_then(|m| {
+        let w = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos() as u64;
+        Some((w, m.len()))
+    });
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let store = SEEN.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((w, z)) = mark {
+        if now.saturating_sub(w) >= GRACE {
+            if let Some((cw, cz, h)) = store.lock().ok().and_then(|m| m.get(at).cloned()) {
+                if cw == w && cz == z {
+                    return h;
+                }
+            }
+        }
+    }
+    let h = fingerprint(&std::fs::read(at).unwrap_or_default());
+    if let (Some((w, z)), Ok(mut m)) = (mark, store.lock()) {
+        if m.len() > 50_000 {
+            m.clear();
+        }
+        m.insert(at.to_path_buf(), (w, z, h.clone()));
+    }
+    h
+}
+
 pub fn fingerprint(bytes: &[u8]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {

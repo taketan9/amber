@@ -688,10 +688,56 @@ pub fn list(
         if scratch(&r.path) {
             continue;
         }
-        let Some(note) = read(&r.path, 60) else { continue };
+        let Some(note) = remembered(r) else { continue };
         out.push(Found { rel: r.rel.clone(), note });
     }
     (out, found)
+}
+
+/// **変わっていなければ、読み直さない**（依頼 693・月の表の依頼 470/552 と同じ規則）。
+///
+/// しるしは歩いたときに取れている更新時刻と長さ（`Row`）── もう一度 stat しない。
+/// 書かれて二秒以内のものは信じない（racily clean）。
+fn remembered(r: &crate::survey::Row) -> Option<Note> {
+    remembered_full(r).map(|(n, _)| n)
+}
+
+/// 同じ憶えから、月の表が要る予定（`remind_lines`）も返す ── 起動のたびに
+/// 一覧と月の表が同じ頭を二度読まないように（依頼 693）。
+pub(crate) fn remembered_full(r: &crate::survey::Row) -> Option<(Note, Remind)> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    type Seen = Mutex<HashMap<PathBuf, (u64, u64, Note, Remind)>>;
+    static SEEN: OnceLock<Seen> = OnceLock::new();
+    const GRACE: u64 = 2_000_000_000;
+    let when = r
+        .modified
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let store = SEEN.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(w) = when {
+        if now.saturating_sub(w) >= GRACE {
+            if let Some((cw, cz, n, k)) = store.lock().ok().and_then(|m| m.get(&r.path).cloned()) {
+                if cw == w && cz == r.size {
+                    return Some((n, k));
+                }
+            }
+        }
+    }
+    let lines = head(&r.path, 60)?;
+    let note = from_head(&r.path, &lines)?;
+    let plan = remind_lines(&lines);
+    if let (Some(w), Ok(mut m)) = (when, store.lock()) {
+        if m.len() > 50_000 {
+            m.clear();
+        }
+        m.insert(r.path.clone(), (w, r.size, note.clone(), plan.clone()));
+    }
+    Some((note, plan))
 }
 
 /// **書きかけの置き土産か。** 人の書いたノートではないので、一覧に出さない。

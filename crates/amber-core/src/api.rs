@@ -49,9 +49,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }
             let limits = crate::survey::Limits {
                 depth: p["depth"].as_u64().unwrap_or(6) as usize,
-                rows: 4000,
+                rows: crate::survey::ALL,
                 hidden: false,
-                ..Default::default()
+                // フォルダの大きさは、ここではどこも読んでいない（数えるだけ時間を使う）
+                size_budget: 0,
             };
             // **開いたときに、前の隠しフォルダを引き取る。** `.cian` と
             // `.amber` の二つが人のノートのフォルダに並んでいるのを、放って
@@ -456,7 +457,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let stop = std::sync::atomic::AtomicBool::new(false);
             let (found, walk) = crate::note::list(
                 &root,
-                crate::survey::Limits { depth: 6, rows: 4000, hidden: false, ..Default::default() },
+                crate::survey::Limits { depth: 6, rows: crate::survey::ALL, hidden: false, size_budget: 0 },
                 &stop,
             );
             // **全部を数えられなかったら、組まない**（依頼 691）。数え切れなかった
@@ -472,9 +473,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 .iter()
                 .map(|f| crate::sync::Here {
                     rel: f.rel.clone(),
-                    hash: crate::sync::fingerprint(
-                        &std::fs::read(&f.note.path).unwrap_or_default(),
-                    ),
+                    // 変わっていないファイルは読み直さない（30 秒ごとに全部を読んでいた）
+                    hash: crate::sync::print_of(&f.note.path),
                 })
                 .collect();
             // 画像も一緒に（依頼 497）。
@@ -745,7 +745,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }
             let stop = std::sync::atomic::AtomicBool::new(false);
             let walk = crate::survey::survey(&root, crate::survey::Limits {
-                depth: 6, rows: 4000, hidden: false, ..Default::default()
+                depth: 6, rows: crate::survey::ALL, hidden: false, ..Default::default()
             }, &stop);
             Ok(serde_json::json!({ "shares": crate::notebook::shares(&root, &walk.rows) }))
         }
@@ -986,7 +986,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             if p["drop"].as_bool().unwrap_or(false) {
                 let n = crate::note::list(
                     &from,
-                    crate::survey::Limits { depth: 9, rows: 9999, hidden: false, ..Default::default() },
+                    crate::survey::Limits { depth: 9, rows: crate::survey::ALL, hidden: false, ..Default::default() },
                     &std::sync::atomic::AtomicBool::new(false),
                 )
                 .0
@@ -1092,7 +1092,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 &root,
                 &arg(p, "needle"),
                 cap,
-                crate::survey::Limits::default(),
+                // 一覧と同じ深さ・上限なしで探す（依頼 692）。既定（600 項目・3 階層）では
+                // 何年も使った人の「検収 移行」が 2 件しか当たらなかった
+                crate::survey::Limits { depth: 6, rows: crate::survey::ALL, ..Default::default() },
                 &cancel,
             )
             .into_iter()
@@ -1156,9 +1158,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }
             let limits = crate::survey::Limits {
                 depth: p["depth"].as_u64().unwrap_or(6) as usize,
-                rows: 4000,
+                rows: crate::survey::ALL,
                 hidden: false,
-                ..Default::default()
+                // フォルダの大きさは、ここではどこも読んでいない（数えるだけ時間を使う）
+                size_budget: 0,
             };
             let stop = std::sync::atomic::AtomicBool::new(false);
             let walk = crate::survey::survey(&dir, limits, &stop);
@@ -1199,9 +1202,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             use chrono::Datelike;
             let limits = crate::survey::Limits {
                 depth: p["depth"].as_u64().unwrap_or(6) as usize,
-                rows: 4000,
+                rows: crate::survey::ALL,
                 hidden: false,
-                ..Default::default()
+                // フォルダの大きさは、ここではどこも読んでいない（数えるだけ時間を使う）
+                size_budget: 0,
             };
             let stop = std::sync::atomic::AtomicBool::new(false);
             let walk = crate::survey::survey(&dir, limits, &stop);
@@ -1226,9 +1230,10 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             }
             let limits = crate::survey::Limits {
                 depth: p["depth"].as_u64().unwrap_or(6) as usize,
-                rows: 4000,
+                rows: crate::survey::ALL,
                 hidden: false,
-                ..Default::default()
+                // フォルダの大きさは、ここではどこも読んでいない（数えるだけ時間を使う）
+                size_budget: 0,
             };
             let stop = std::sync::atomic::AtomicBool::new(false);
             let walk = crate::survey::survey(&dir, limits, &stop);
@@ -1437,7 +1442,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                 }
                 "tag" => {
                     let limits = crate::survey::Limits {
-                        depth: 6, rows: 4000, hidden: false, ..Default::default()
+                        depth: 6, rows: crate::survey::ALL, hidden: false, ..Default::default()
                     };
                     let stop = std::sync::atomic::AtomicBool::new(false);
                     let (found, _) = crate::note::list(&root, limits, &stop);
@@ -2842,13 +2847,31 @@ mod tests_691 {
     fn 数え切れないときは同期を組まない() {
         let d = tempfile::tempdir().unwrap();
         let root = d.path();
-        for i in 0..4100 {
-            std::fs::write(root.join(format!("n{i:05}.md")), "x\n").unwrap();
-        }
+        // 深すぎるフォルダは数え切れない（項目の数の上限は外した・依頼 692）
+        let deep = root.join("1/2/3/4/5/6/7/8");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("奥.md"), "x\n").unwrap();
         let r = call("syncplan", &serde_json::json!({
             "path": root.display().to_string(), "who": "drive", "remote": [],
         }));
         assert!(r.is_err(), "{r:?}");
         assert!(format!("{:#}", r.unwrap_err()).contains("同期を止めています"));
+    }
+
+    // 依頼 692: 4,000 項目を超えても、一覧から消えず、同期も組める
+    #[test]
+    fn 四千本を超えても全部が出て同期も組める() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        for i in 0..4100 {
+            std::fs::write(root.join(format!("n{i:05}.md")), "x\n").unwrap();
+        }
+        let notes = call("notes", &serde_json::json!({ "path": root.display().to_string() })).unwrap();
+        let n = notes["notes"].as_array().map(|a| a.len()).unwrap_or(0);
+        assert_eq!(n, 4100, "{}", &notes.to_string()[..200.min(notes.to_string().len())]);
+        let r = call("syncplan", &serde_json::json!({
+            "path": root.display().to_string(), "who": "drive", "remote": [],
+        }));
+        assert!(r.is_ok(), "{r:?}");
     }
 }
