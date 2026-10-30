@@ -1205,6 +1205,33 @@ await step('カレンダー：出さない予定表のものは、どの見方�
     if (week) return '隠したのに週に出ています';
     return back ? true : '戻しても出ません';`, true);
 
+/* ── **端末の予定表に入った予定の色**（依頼 703・甲） ──────────────
+ *
+ * ノートの予定は前書きの `color:` で塗れる。だが画面から登録した予定は
+ * **端末の予定表に入ってノートを持たない**ので、色はメモ欄のいちばん
+ * 最後の行に置いてある（`#色:カーマイン`）。
+ *
+ * ここで見るのは**デスクトップ版がそれを読んで塗るか**。切り出すのは core
+ * なので、本物の core に訊いている ── 読み方が二つに割れていたら落ちる。
+ */
+await step('カレンダー：端末の予定表の予定も、メモ欄に書いた色で塗られる', `
+    // **drawCal は予定を作り直す**ので、差し込んだ一本を置いたまま
+    // 描かせることはできない。読むところ（readCalTags）と塗るところ
+    // （evPaint）を、それぞれ直に呼ぶ。
+    const memo = '駅前で待ち合わせ。' + String.fromCharCode(10) + String.fromCharCode(10) + '#色:カーマイン #全員に通知:10分前';
+    const 一本 = [{ day: '2026-09-11', at: '15:00', title: '歯医者', path: 'ev-1', kind: 'here', notes: memo, tags: [], color: '' }];
+    await readCalTags(一本);
+    if (一本[0].color !== 'カーマイン') return 'メモ欄の色を読めていません: ' + JSON.stringify(一本[0].color);
+    // 人が書いた文章は、タグ行として読まれていないこと。
+    const 読み = await window.amber.call('caltag', { notes: memo });
+    if (読み.body !== '駅前で待ち合わせ。') return '人の文章が変わっています: ' + JSON.stringify(読み.body);
+    if (読み.alarmMin !== 10) return '何分前かを読めていません: ' + JSON.stringify(読み.alarmMin);
+    if ((読み.tags || []).length) return '色を人の名前として読んでいます: ' + JSON.stringify(読み.tags);
+    // 色がそのまま札の塗りになること。書いていなければ何も足さないこと。
+    const 塗り = evPaint(一本[0]);
+    if (!塗り.includes('c0392b')) return '札の塗りになっていません: ' + JSON.stringify(塗り);
+    return evPaint({ color: '' }) === '' ? true : '色を書いていないのに塗っています';`, true);
+
 await step('カレンダー：みんなの表は人ごとに色が違い、右押しで色を選べる', `
     calView = 'week'; calGroup = true; calDay = '2026-09-09';
     const was = teamPeople;

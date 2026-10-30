@@ -847,24 +847,29 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
         "caltag" => {
             // **まとめて訊けるようにする**（依頼 539）── 月の表には予定が
             // 何十本も並ぶ。一本ずつ訊くと、その数だけ行き来することになる。
+            // **色と全員に通知するかも、同じ行から返す**（依頼 701・702）──
+            // 端末の予定表に入る予定は、ノートを持たないので前書きが無い。
+            // 置き場所はメモ欄の最後の行（本人が甲を選んだ・2026-10-31）。
+            let one = |notes: &str| {
+                let m = crate::caltag::marks(notes);
+                serde_json::json!({
+                    "tags": m.tags,
+                    "body": crate::caltag::body(notes),
+                    "color": m.color,
+                    "alarmAll": m.alarm_all,
+                    // 何分前かは、言葉から core が直す ── 画面に二つ目の
+                    // 読み方を置かない。
+                    "alarmMin": m.alarm_all.as_deref().and_then(crate::note::alarm_minutes),
+                })
+            };
             if let Some(many) = p["notes"].as_array() {
                 let out: Vec<_> = many
                     .iter()
-                    .map(|n| {
-                        let notes = n.as_str().unwrap_or_default();
-                        serde_json::json!({
-                            "tags": crate::caltag::tags(notes),
-                            "body": crate::caltag::body(notes),
-                        })
-                    })
+                    .map(|n| one(n.as_str().unwrap_or_default()))
                     .collect();
                 return Ok(serde_json::json!({ "each": out }));
             }
-            let notes = p["notes"].as_str().unwrap_or_default();
-            Ok(serde_json::json!({
-                "tags": crate::caltag::tags(notes),
-                "body": crate::caltag::body(notes),
-            }))
+            Ok(one(p["notes"].as_str().unwrap_or_default()))
         }
 
         // タグを書き換えた**メモ欄ぜんぶ**を返す。人の文章には触らない。
@@ -879,7 +884,19 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                         .collect()
                 })
                 .unwrap_or_default();
-            Ok(serde_json::json!({ "notes": crate::caltag::set(notes, &tags) }))
+            // **渡されなかったものは、いまのまま残す**（依頼 701・702）──
+            // タグだけを渡す呼び出しは前からあるので、そこで色が落ちると
+            // **人を一人足しただけで、同期した全員の色が消える。**
+            // 空の文字列を渡したときだけ、やめたことになる。
+            let mut m = crate::caltag::marks(notes);
+            m.tags = tags;
+            if let Some(c) = p["color"].as_str() {
+                m.color = (!c.trim().is_empty()).then(|| c.trim().to_string());
+            }
+            if let Some(a) = p["alarm"].as_str() {
+                m.alarm_all = (!a.trim().is_empty()).then(|| a.trim().to_string());
+            }
+            Ok(serde_json::json!({ "notes": crate::caltag::set_marks(notes, &m) }))
         }
 
         // **この端末で、同期に出さないフォルダ**（依頼 655）。最上位の名前だけ。

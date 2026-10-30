@@ -9059,12 +9059,18 @@ function paintHereColor() {
 /// **一度で訊く。** 月の表には予定が何十本も並ぶので、一本ずつ訊くと
 /// その数だけ行き来することになる。
 async function readCalTags(slots) {
-    const want = slots.filter((s) => inGroup(s) && s.notes);
+    // **色も、同じ一度の行き来で読む**（依頼 702・甲）── だれの用事かは
+    // グループの予定にしか入らないが、色は自分だけの予定にも入る。
+    // **よその予定表（`away`）のメモは覗かない** ── 筋合いが無い。
+    const want = slots.filter((s) => s.notes && (inGroup(s) || s.kind === 'here'));
     if (!want.length) return;
     try {
         const got = await window.amber.call('caltag', { notes: want.map((s) => s.notes) });
         const each = (got && got.each) || [];
-        want.forEach((s, i) => { s.tags = (each[i] && each[i].tags) || []; });
+        want.forEach((s, i) => {
+            if (inGroup(s)) s.tags = (each[i] && each[i].tags) || [];
+            s.color = (each[i] && each[i].color) || '';
+        });
     } catch { /* 読めなくても、予定そのものは出す */ }
 }
 
@@ -10241,13 +10247,17 @@ async function calAdd(day, at0) {
     if (hereOn) {
         // **選ばれた行き先に入れる**（依頼 544）。グループなら、そのカレンダーへ
         // 書き、誰の用事かをメモ欄の最後の行に置く（`caltagset` が文字を作る）。
+        // **色もメモ欄のいちばん最後の行に置く**（依頼 702・甲・本人が
+        // 2026-10-31 に決めた）── 端末の予定表に入る予定はノートを持たない
+        // ので、前書きに書く先が無い。ここに置けば予定そのものに付いて
+        // 旅をするので、同期した相手の amber でも同じ色で見える。
         let notes = '';
-        if (ev.toGroup && ev.tags.length) {
-            try {
-                const made = await window.amber.call('caltagset', { notes: '', tags: ev.tags });
-                notes = (made && made.notes) || '';
-            } catch { /* タグが書けなくても、予定そのものは足す */ }
-        }
+        try {
+            const made = await window.amber.call('caltagset', {
+                notes: '', tags: ev.toGroup ? ev.tags : [], color: colorName(calHereColor),
+            });
+            notes = (made && made.notes) || '';
+        } catch { /* タグが書けなくても、予定そのものは足す */ }
         const into = ev.toGroup && groupCal ? groupCal.name : '';
         const got = await window.amber.cal(['add', title, day, ev.start, ev.end, notes, into]);
         if (!got || got.error) {

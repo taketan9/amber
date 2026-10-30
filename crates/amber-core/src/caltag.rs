@@ -85,22 +85,76 @@ fn split(notes: &str) -> (usize, Option<&str>) {
     }
 }
 
+/// メモ欄の最後の行が持てるもの ── **だれの用事か**のほかに、**色**と
+/// **全員に通知するか**（依頼 701・702・本人が 2026-10-31 に甲を選んだ）。
+///
+/// # なぜ同じ一行に置くのか
+///
+/// 行を増やすと「どちらが新しいか」を決めなければならなくなる。一行なら、
+/// 読む・書く・消すがこれまでと同じ一か所で済む。
+///
+/// # 人の名前と、amber が置いたものを見分ける
+///
+/// amber が置くものは `#色:カーマイン` のように `:` の前に鍵を書く。**知っている
+/// 鍵だけを取り、知らないものは人の名前として残す** ── 人が `#A:B` と
+/// 書いていたら、それは人が書いた字である。逆にしたら、人のタグが黙って
+/// 消える。
+///
+/// # 見えることを承知の上で置いている
+///
+/// この行は Google カレンダーの画面にも出る。それでもここに置くと本人が
+/// 決めた（2026-10-31）── **色と通知が予定そのものに付いて旅をする**ので、
+/// 同期した相手の amber でも同じ色・同じ通知になる。amber の中に対応表を
+/// 持つ案は採らなかった（この書き出しの、ID の話と同じ理由）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Marks {
+    /// だれの用事か。
+    pub tags: Vec<String>,
+    /// 色の名前（`カーマイン` など）。
+    pub color: Option<String>,
+    /// 全員に通知するなら、何分前かの言葉（`10分前` など）。
+    /// 分に直すのは `crate::note::alarm_minutes`。
+    pub alarm_all: Option<String>,
+}
+
+/// 色の鍵。
+const COLOR_KEY: &str = "色:";
+/// 全員に通知するかの鍵。
+const ALARM_KEY: &str = "全員に通知:";
+
+/// メモ欄の最後の行を読む。
+pub fn marks(notes: &str) -> Marks {
+    let (_, line) = split(notes);
+    let mut out = Marks::default();
+    let Some(line) = line else { return out };
+    for word in line.split_whitespace() {
+        let rest = word.trim_start_matches('#');
+        if let Some(v) = rest.strip_prefix(COLOR_KEY) {
+            if out.color.is_none() && !v.is_empty() {
+                out.color = Some(v.to_string());
+            }
+            continue;
+        }
+        if let Some(v) = rest.strip_prefix(ALARM_KEY) {
+            if out.alarm_all.is_none() && !v.is_empty() {
+                out.alarm_all = Some(v.to_string());
+            }
+            continue;
+        }
+        if !rest.is_empty() && !out.tags.iter().any(|t| t == rest) {
+            out.tags.push(rest.to_string());
+        }
+    }
+    out
+}
+
 /// この予定に付いているタグ。**`#` は外して返す。**
 ///
 /// 同じタグが二度書いてあれば、最初の一つだけ。順は書いてある順 ──
 /// 並べ替えない（人が並べた順に意味があることがある）。
+/// **amber が置いたもの（`#色:…`）は含まない。**
 pub fn tags(notes: &str) -> Vec<String> {
-    let (_, line) = split(notes);
-    let mut out: Vec<String> = Vec::new();
-    if let Some(line) = line {
-        for word in line.split_whitespace() {
-            let name = word.trim_start_matches('#').to_string();
-            if !name.is_empty() && !out.contains(&name) {
-                out.push(name);
-            }
-        }
-    }
-    out
+    marks(notes).tags
 }
 
 /// タグ行を除いた、**人が書いた文章**。
@@ -116,23 +170,50 @@ pub fn body(notes: &str) -> &str {
 /// - 無ければ、本文のうしろに**空行を一つ置いて**足す。
 /// - 本文が空なら、タグ行だけを返す（頭に空行を置かない）。
 pub fn set(notes: &str, tags: &[String]) -> String {
+    // **色と通知は、そのまま残す。** タグだけを渡す呼び出しは前からあり
+    // （デスクトップ版の `caltagset`）、それで色が消えると
+    // **人を一人足しただけで、同期した全員の色が落ちる。**
+    let mut m = marks(notes);
+    m.tags = tags.to_vec();
+    set_marks(notes, &m)
+}
+
+/// タグ・色・全員に通知するかを、まとめて書き換える。
+///
+/// 並べる順は**人の名前が先、amber が置くものがあと** ── 読むのは人なので、
+/// 知りたいものが頭に来るほうがよい。何も無ければ、その行ごと消える。
+pub fn set_marks(notes: &str, m: &Marks) -> String {
     let nl = newline(notes);
     let body = body(notes);
+    let mut words: Vec<String> = Vec::new();
     let mut seen: Vec<&str> = Vec::new();
-    for t in tags {
+    for t in &m.tags {
         let name = t.trim().trim_start_matches('#').trim();
-        if !name.is_empty() && !name.contains(char::is_whitespace) && !seen.contains(&name) {
-            seen.push(name);
+        if name.is_empty() || name.contains(char::is_whitespace) || seen.contains(&name) {
+            continue;
         }
+        // **amber の鍵と同じ形の名前は書かない** ── 書いたら、読み直したとき
+        // 人の名前が色になる。
+        if name.starts_with(COLOR_KEY) || name.starts_with(ALARM_KEY) {
+            continue;
+        }
+        seen.push(name);
+        words.push(format!("#{name}"));
     }
-    if seen.is_empty() {
+    for (key, value) in [(COLOR_KEY, &m.color), (ALARM_KEY, &m.alarm_all)] {
+        let Some(v) = value.as_deref() else { continue };
+        let v = v.trim();
+        // **空白を含む値は書かない** ── 空白で区切って読むので、書いたら
+        // 読み直せない。黙って壊れた行を書くより、落とす。
+        if v.is_empty() || v.contains(char::is_whitespace) {
+            continue;
+        }
+        words.push(format!("#{key}{v}"));
+    }
+    if words.is_empty() {
         return body.to_string();
     }
-    let line = seen
-        .iter()
-        .map(|n| format!("#{n}"))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let line = words.join(" ");
     if body.is_empty() {
         line
     } else {
@@ -273,6 +354,80 @@ mod tests {
         // 黙って壊れた行を書くより、落とす。
         assert_eq!(set("", &v(&["山田 太郎"])), "");
         assert_eq!(set("", &v(&["太郎", "山田 太郎"])), "#太郎");
+    }
+
+    #[test]
+    fn 色と全員通知は_人の名前と同じ行に並ぶ() {
+        // 依頼 701・702（甲）。人の名前が先、amber が置くものがあと。
+        let m = Marks {
+            tags: v(&["太郎"]),
+            color: Some("カーマイン".into()),
+            alarm_all: Some("10分前".into()),
+        };
+        let out = set_marks("駅前で待ち合わせ。", &m);
+        assert_eq!(out, "駅前で待ち合わせ。\n\n#太郎 #色:カーマイン #全員に通知:10分前");
+        // 読み直すと同じものに戻り、**人の名前に amber のものが混ざらない**。
+        let got = marks(&out);
+        assert_eq!(got, m);
+        assert_eq!(tags(&out), v(&["太郎"]), "色は人の名前ではない");
+        assert_eq!(body(&out), "駅前で待ち合わせ。");
+    }
+
+    #[test]
+    fn 知らない鍵は_人の名前として残す() {
+        // **人が `#A:B` と書いていたら、それは人が書いた字である。**
+        // 逆にしたら、人のタグが黙って消える。
+        let got = marks("#太郎 #担当:次郎 #色:シアン");
+        assert_eq!(got.tags, v(&["太郎", "担当:次郎"]));
+        assert_eq!(got.color.as_deref(), Some("シアン"));
+        assert_eq!(got.alarm_all, None);
+    }
+
+    #[test]
+    fn タグだけを渡す呼び出しで_色が落ちない() {
+        // **これが落ちると、人を一人足しただけで同期した全員の色が消える。**
+        // デスクトップ版の `caltagset` はタグだけを渡してくる（前からある）。
+        let memo = "本文\n\n#太郎 #色:カーマイン #全員に通知:30分前";
+        let out = set(memo, &v(&["太郎", "花子"]));
+        assert_eq!(out, "本文\n\n#太郎 #花子 #色:カーマイン #全員に通知:30分前");
+        // タグを空にしても、色と通知は残る（消すのは `set_marks`）。
+        assert_eq!(set(memo, &[]), "本文\n\n#色:カーマイン #全員に通知:30分前");
+    }
+
+    #[test]
+    fn 色をやめると_その言葉だけが消える() {
+        let memo = "本文\n\n#太郎 #色:カーマイン";
+        let out = set_marks(memo, &Marks { tags: v(&["太郎"]), ..Default::default() });
+        assert_eq!(out, "本文\n\n#太郎");
+        // 何も残らなければ、行ごと消える。
+        assert_eq!(set_marks(memo, &Marks::default()), "本文");
+    }
+
+    #[test]
+    fn 空白を含む色や言葉は書かない() {
+        // 空白で区切って読むので、書いたら読み直せない。
+        let m = Marks {
+            tags: Vec::new(),
+            color: Some("カー マイン".into()),
+            alarm_all: Some("".into()),
+        };
+        assert_eq!(set_marks("", &m), "");
+        // 鍵と同じ形の名前も書かない ── 書くと、読み直したとき色になる。
+        let bad = Marks { tags: v(&["色:カーマイン"]), ..Default::default() };
+        assert_eq!(set_marks("", &bad), "");
+    }
+
+    #[test]
+    fn 色と通知の形は往復しても変わらない() {
+        for memo in [
+            "#色:アンバー",
+            "#全員に通知:前日",
+            "本文\n\n#太郎 #色:リーフ",
+            "本文\n二行目\n\n#家族 #色:シアン #全員に通知:1時間前",
+        ] {
+            let got = marks(memo);
+            assert_eq!(set_marks(memo, &got), memo.trim_end().to_string(), "{memo:?}");
+        }
     }
 
     #[test]

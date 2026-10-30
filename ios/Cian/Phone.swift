@@ -157,6 +157,40 @@ enum Phone {
         }
     }
 
+    /// **全員に通知する予定を、この端末の予定表から拾う**（依頼 701・甲）。
+    ///
+    /// 予定表のアラーム（`EKAlarm`）は**その端末にしか入らない**ので、
+    /// 同期した相手には届かない。メモ欄のいちばん最後の行に
+    /// `#全員に通知:10分前` と書いてある予定は、**受け取った端末が自分で
+    /// 仕掛ける。** 仕掛けるのは `NotesStore` の仕事で、ここは材料を返す。
+    ///
+    /// **何分前かを言葉から直すのは core**（`caltag` が `alarmMin` を返す）
+    /// ── ここで直すと、ノートの道と読み方が二つになる。
+    ///
+    /// 過ぎた時刻は返さない ── 仕掛けると、開いた瞬間に昔の予定が鳴る。
+    static func sharedAlarms(days: Int = 60) -> [(id: String, title: String, at: Date)] {
+        guard allowed else { return [] }
+        let now = Date()
+        guard let to = Calendar.current.date(byAdding: .day, value: days, to: now) else {
+            return []
+        }
+        let found = store.events(matching:
+            store.predicateForEvents(withStart: now, end: to, calendars: nil))
+        let memos = found.map { $0.notes ?? "" }
+        guard !memos.isEmpty,
+              let got = try? Cian.call("caltag", ["notes": memos]),
+              let each = got["each"] as? [[String: Any]] else { return [] }
+        var out: [(id: String, title: String, at: Date)] = []
+        for (i, e) in found.enumerated() where i < each.count {
+            guard let mins = each[i]["alarmMin"] as? Int,
+                  let start = e.startDate,
+                  let id = e.eventIdentifier else { continue }
+            let at = start.addingTimeInterval(-Double(mins) * 60)
+            if at > now { out.append((id: id, title: e.title ?? "", at: at)) }
+        }
+        return out
+    }
+
     /// 予定を消す。
     static func drop(_ id: String) throws {
         guard let e = store.event(withIdentifier: id) else { throw Trouble.gone }

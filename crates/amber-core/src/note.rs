@@ -2801,6 +2801,23 @@ pub fn remind(text: &str) -> Remind {
 
 /// 前書きから予定を読む。**行を渡す形** ── 頭だけ読んだものを、そのまま
 /// 使い回せる（同じファイルを二度読まないため・依頼 470）。
+/// 「10分前」のような言葉を、何分前かに直す（依頼 701）。
+///
+/// **知らない言葉なら `None`** ── 鳴らさないほうが、変な時刻に鳴るよりよい。
+/// ノートの前書き（`alarm:`）と、予定表のメモ欄（`#全員に通知:10分前`）の
+/// 両方がここに訊く ── **二か所で読み方が分かれると、同じ予定が端末に
+/// よって違う時刻に鳴る。**
+pub fn alarm_minutes(word: &str) -> Option<u32> {
+    match word.trim() {
+        "5分前" => Some(5),
+        "10分前" => Some(10),
+        "30分前" => Some(30),
+        "1時間前" => Some(60),
+        "前日" => Some(24 * 60),
+        _ => None,
+    }
+}
+
 pub fn remind_lines(lines: &[String]) -> Remind {
     let f = front(lines);
     let mut out = Remind::default();
@@ -2829,14 +2846,7 @@ pub fn remind_lines(lines: &[String]) -> Remind {
     }
     out.alarm_all = f.fields.get("alarm-who").is_some_and(|v| v.trim() == "全員");
     if let Some(v) = f.fields.get("alarm") {
-        out.alarm_min = match v.trim() {
-            "5分前" => Some(5),
-            "10分前" => Some(10),
-            "30分前" => Some(30),
-            "1時間前" => Some(60),
-            "前日" => Some(24 * 60),
-            _ => None,
-        };
+        out.alarm_min = alarm_minutes(v);
     }
     if let Some(v) = f.fields.get("last") {
         out.last = day(v.trim());

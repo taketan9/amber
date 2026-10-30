@@ -928,17 +928,39 @@ struct Calendaring: View {
     /// 入らないし、よその予定表のメモまで覗く筋合いが無い。**一度にまとめて
     /// 訊く**（`caltag` は文字の一覧を受ける）── 予定の数だけ入口を叩かない。
     private func readTags(_ all: [Slot]) -> [Slot] {
-        let want = all.indices.filter { CalPrefs.inGroup(all[$0]) && !all[$0].notes.isEmpty }
+        // **色は、この端末の予定表のものぜんぶから読む**（依頼 702・甲）──
+        // だれの用事かはグループの予定にしか入らないが、色は自分だけの
+        // 予定にも入る。**よその予定表のメモは覗かない**（`isAway` を外す）。
+        let want = all.indices.filter {
+            !all[$0].notes.isEmpty && (CalPrefs.inGroup(all[$0]) || all[$0].isPhone)
+        }
         guard !want.isEmpty else { return all }
         guard let got = try? Cian.call("caltag", ["notes": want.map { all[$0].notes }]),
               let each = got["each"] as? [[String: Any]] else { return all }
         var out = all
         for (i, k) in want.enumerated() where i < each.count {
-            out[k].tags = each[i]["tags"] as? [String] ?? []
+            // タグはグループの予定だけ ── 自分だけの予定に人の名前は入らない。
+            if CalPrefs.inGroup(out[k]) {
+                out[k].tags = each[i]["tags"] as? [String] ?? []
+            }
+            out[k].color = each[i]["color"] as? String ?? ""
         }
         // 見た名前は憶える ── 次に予定を登録するとき、打たずに選べる。
         for s in out { for t in s.tags { CalPrefs.rememberTag(t) } }
         return out
+    }
+
+    /// **自分の色の名前**（依頼 702）── ノートの前書きにも、予定表の
+    /// メモ欄にも、同じ名前を書く。
+    ///
+    /// **決めていなければ、何も書かない。** 既定の色を書き込むと、
+    /// 選んでいない人の予定にまで色の名前が入る（グループの予定なら、
+    /// その字は相手の Google カレンダーにも出る）。それに、どちらの端末も
+    /// 既定のままなら**二人が同じ色になる**ので、書いても見分けは付かない。
+    /// 色で見分けたい人は設定で選ぶ ── 本人が「変更できるようにしたい」と
+    /// 言ったのは、そこのこと。
+    private func myColorName() -> String {
+        CalPrefs.hereColor.isEmpty ? "" : CalPrefs.colorName(CalPrefs.hereColor)
     }
 
     /// 足す。**この iPhone の予定表が使えるならそちらへ**（依頼 460）──
@@ -954,12 +976,25 @@ struct Calendaring: View {
             // 書き、だれの用事かをメモ欄の最後の行に置く（文字を作るのは core の
             // `caltagset` ── デスクトップ版と同じ1 つに訊く）。
             let toGroup = newToGroup == true && !groupName.isEmpty
+            // **色と「全員に通知する」も、メモ欄のいちばん最後の行に置く**
+            // （依頼 701・702・本人が甲を選んだ・2026-10-31）。
+            //
+            // 端末の予定表に入る予定は**ノートを持たない**ので、前書きに
+            // 書く先が無い。ここに置くと予定そのものに付いて旅をするので、
+            // 同期した相手の amber でも同じ色・同じ通知になる。
+            // 文字を作るのは core の `caltagset` ── デスクトップ版と同じ
+            // 一か所に訊く。
+            //
+            // **色はいつも書く。** 書いておけば、あとで設定の色を変えても
+            // 古い予定の色は動かない（ノートの道と同じ約束）。
             var notes = ""
-            if toGroup && !newTags.isEmpty {
-                // タグが書けなくても、予定そのものは登録する。
-                if let out = try? Cian.call("caltagset", ["notes": "", "tags": newTags]) {
-                    notes = out["notes"] as? String ?? ""
-                }
+            var ask: [String: Any] = [
+                "notes": "", "tags": toGroup ? newTags : [], "color": myColorName(),
+            ]
+            if newAlarmFor == "全員" && !newAlarm.isEmpty { ask["alarm"] = newAlarm }
+            // タグが書けなくても、予定そのものは登録する。
+            if let out = try? Cian.call("caltagset", ask) {
+                notes = out["notes"] as? String ?? ""
             }
             do {
                 try Phone.add(title: title, day: picked, at: at.isEmpty ? nil : at,
@@ -986,7 +1021,7 @@ struct Calendaring: View {
             // **自分の色を書き込む**（依頼 702）── これがあるので、
             // 同期した先でも同じ色で出る。設定を変えても古い予定の色は
             // 変わらない（書いた時点の色が、そのノートの色）。
-            let mine = CalPrefs.colorName(CalPrefs.hereColor.isEmpty ? "#d9a400" : CalPrefs.hereColor)
+            let mine = myColorName()
             for (key, value) in [("remind", when), ("until", newUntil),
                                  ("alarm", newAlarm), ("alarm-who", newAlarmFor),
                                  ("color", mine)]

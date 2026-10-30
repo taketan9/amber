@@ -1229,6 +1229,9 @@ final class NotesStore: ObservableObject {
             ringAllday(root)
             ringShared(root)
         }
+        // 端末の予定表に入っている「全員に通知する」予定（依頼 701・甲）。
+        // ノートの有無とは別の道なので、保存ディレクトリが無くても見る。
+        ringSharedPlans()
     }
 
     /// **終日の予定は、その日に amber を開いた瞬間に鳴らす**（本人・2026-09-22）。
@@ -1259,26 +1262,53 @@ final class NotesStore: ObservableObject {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd HH:mm"
-        let c = UNUserNotificationCenter.current()
         for n in notes {
             guard let path = n["path"] as? String,
                   let at = n["at"] as? String, let when = f.date(from: at) else { continue }
-            let id = "\(path)#shared"
-            c.removePendingNotificationRequests(withIdentifiers: [id])
             // **過ぎた時刻には仕掛けない** ── 仕掛けると、同期した瞬間に
-            // 昔の予定がまとめて鳴る。
-            guard when > Date() else { continue }
-            let body = UNMutableNotificationContent()
-            body.title = n["title"] as? String ?? ""
-            body.body = "まもなくです"
-            body.sound = .default
-            body.userInfo = ["path": path]
-            let parts = Calendar.current.dateComponents(
-                [.year, .month, .day, .hour, .minute], from: when)
-            c.add(UNNotificationRequest(
-                identifier: id, content: body,
-                trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)))
+            // 昔の予定がまとめて鳴る（`ringOne` が落とす）。
+            ringOne(id: "\(path)#shared", title: n["title"] as? String ?? "",
+                    at: when, path: path)
         }
+    }
+
+    /// **端末の予定表に入っている「全員に通知する」予定**（依頼 701・甲）。
+    ///
+    /// `alarm-who: 全員` を前書きに書けるのはノートの予定だけ。画面から
+    /// 登録した予定は端末の予定表に入るので、そちらは**メモ欄のいちばん
+    /// 最後の行**に書いてある（`#全員に通知:10分前`）。拾うのは `Phone`、
+    /// 何分前かを決めるのは core、仕掛けるのはここ。
+    ///
+    /// **消された予定の通知は取り消す** ── 残すと「消したのに鳴った」に
+    /// なる。鍵の終わりが `#shared` のもののうち、いま要らないものを外す。
+    func ringSharedPlans() {
+        let want = Phone.sharedAlarms()
+        let keep = Set(want.map { "\($0.id)#shared" })
+        let c = UNUserNotificationCenter.current()
+        c.getPendingNotificationRequests { waiting in
+            let stale = waiting.map(\.identifier)
+                .filter { $0.hasSuffix("#shared") && !keep.contains($0) }
+            if !stale.isEmpty { c.removePendingNotificationRequests(withIdentifiers: stale) }
+        }
+        for a in want { ringOne(id: "\(a.id)#shared", title: a.title, at: a.at, path: a.id) }
+    }
+
+    /// 一本だけ仕掛ける。**同じ鍵なら積み上がらない**（鍵はノートのパス、
+    /// または予定の名札）。過ぎた時刻は仕掛けない。
+    private func ringOne(id: String, title: String, at: Date, path: String) {
+        let c = UNUserNotificationCenter.current()
+        c.removePendingNotificationRequests(withIdentifiers: [id])
+        guard at > Date() else { return }
+        let body = UNMutableNotificationContent()
+        body.title = title
+        body.body = "まもなくです"
+        body.sound = .default
+        body.userInfo = ["path": path]
+        let parts = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute], from: at)
+        c.add(UNNotificationRequest(
+            identifier: id, content: body,
+            trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)))
     }
 
     func ringAllday(_ root: URL) {

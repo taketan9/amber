@@ -78,7 +78,12 @@ MD
 # 2026-10-17 に実際に起きた ── 試験の画面が本人の `batchPro` のノートを開き、
 # 同期先が drive の `~/Documents/cian` を、**空の偽 Drive** に向けていた。
 # 止めずに進めば、ノートがゴミ箱へ入り得た。
-if pgrep -f 'Applications/amb.*\.app/Contents/MacOS/' >/dev/null 2>&1; then
+# **配られているアプリの名前は `cian.app`**（2026-10-31 に気づいた）。
+# 表示名は amber だが、束ねた名前は cian のまま ── バンドル ID と同じ理由で
+# 変えられない。それを `amb` で始まると思い込んで書いたので、**この見張りは
+# 依頼 667 で書かれてから一度も鳴っていなかった。** 気づいたのは、本人の
+# amber が開いたまま総ざらいが走り出したのを見たとき。両方を見る。
+if pgrep -f 'Applications/(amb|cian).*\.app/Contents/MacOS/' >/dev/null 2>&1; then
   echo "amber が開いています。終了してから、もう一度走らせてください。"
   echo
   echo "  設定ファイル（amber.json）を二つのアプリで取り合うので、"
