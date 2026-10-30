@@ -2448,6 +2448,58 @@ if (NOTES2) {
                 bad.push({ name: '同期：一つ目のフォルダが二つ目に紛れない', why: ['二つ目/仕事/ が向こうにあります'] });
             }
         }
+        // **Drive 同期のぶつかり**（依頼 682）── ここを見る段が、デスクトップ版には
+        // 一つも無かった。外からファイルが書き換わる場合の段（「同じ行」）はあるが、
+        // あちらは Drive を通らないので `syncPlace` の `clash` を一度も踏まない。
+        // iPhone にだけ段があったおかげで、依頼 675・676 の効き目がそこで分かった
+        // ── 同じ穴がもう一度開いても、デスクトップ版では誰も気づけなかった。
+        await step('同期：Drive で同じ行を両方が直すと、両方残って選び口が出る', `
+            const LF = String.fromCharCode(10);
+            const at = state.root + '/ぶつかり.md';
+            await ask('write', { path: at, text: ['---', 'title: ぶつかり', '---', '',
+                'ひとつめの行。', '合わせる行。', ''].join(LF), force: true });
+            await reload({ quiet: true });
+            const r = await syncNow('手');
+            if (!r) return '運びませんでした';
+            if (r.trouble.length) return '困りごと: ' + r.trouble[0];
+            return true;`, true);
+        tally.ran += 1;
+        {
+            // **向こうがその行を直す。** ここから先が「分かれたあと」。
+            const got = await drive2('/_get?rel=' + encodeURIComponent('ぶつかり.md'));
+            const far = String(got.text || '').replace('合わせる行。', '向こうが直した行。');
+            await drive2('/_put', { rel: 'ぶつかり.md', text: far, by: '太郎の Mac' });
+        }
+        await step('同期：Drive のぶつかりは、両方残して選び口を出す', `
+            const LF = String.fromCharCode(10);
+            const at = state.root + '/ぶつかり.md';
+            // **こちらも同じ行を直す**（分かれたあとに、両方が触る）。
+            const was = (await ask('read', { path: at })).text;
+            await ask('write', { path: at,
+                text: was.replace('合わせる行。', 'こちらが直した行。') + LF + 'こちらで足した行。' + LF,
+                force: true });
+            await reload({ quiet: true });
+            const r = await syncNow('手');
+            if (!r) return '運びませんでした';
+            if (r.trouble.length) return '困りごと: ' + r.trouble[0];
+            if (r.clash !== 1) return 'ぶつかりが ' + r.clash + ' 件です（1 のはず）';
+            const out = (await ask('read', { path: at })).text;
+            if (!out.includes('こちらが直した行。')) return 'こちらの行が消えました';
+            if (!out.includes('向こうが直した行。')) return '向こうの行が消えました（両方残るはず）';
+            if (!out.includes('こちらで足した行。')) return 'こちらが足した行が消えました';
+            // **選び口は incomings に入る。** incoming のほうは
+            // 「いま開いているノートのぶん」だけなので、開いていない
+            // ノートでは空のまま（noteIncoming の最後）。
+            // ここに逆引用符は書けない ── step のテンプレートが途中で切れる。
+            const got = incomings[at];
+            if (!got || !got.spots || got.spots.length !== 1) {
+                return 'ぶつかった場所が ' + (got && got.spots ? got.spots.length : 'なし') + ' か所です（1 のはず）';
+            }
+            if (got.who !== '太郎の Mac') return '相手の名前が ' + got.who + ' です';
+            delete incomings[at];
+            await ask('delete', { path: at });
+            await reload({ quiet: true });
+            return true;`, true);
         await step('同期：ふだんの一行には、保存ディレクトリの名前が出ない', `
             syncFresh = null; drawSyncState();
             const t = el('syncmark').textContent;

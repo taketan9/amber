@@ -86,6 +86,33 @@ if pgrep -f 'Applications/amb.*\.app/Contents/MacOS/' >/dev/null 2>&1; then
   exit 1
 fi
 
+# **よその試験が走っていたら、空くまで待つ**（依頼 683・本人が決めた）。
+#
+# この Mac では Electron の試験を二つ同時に回せない ── swap が 6GB しかなく、
+# 描く側がページングで止まる。止まると「デスクトップ版が固まっている
+# （1+1 も返らない）」で落ち、**落ちる段が毎回ばらける**ので、コードの不具合と
+# 見分けがつかない。2026-10-30 だけで三度、無関係な段を追いかけた。
+#
+# 見るのは**作業場から起こした Electron の本体**（`gui/node_modules/.../MacOS/Electron`）。
+# 下働き（Helper）は道に `Frameworks` が入るので当たらない。この見張りは自分を
+# 起こす前に走るので、自分自身は数えない。
+busy() { pgrep -f 'gui/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron' 2>/dev/null | wc -l | tr -d ' '; }
+if [ "$(busy)" != "0" ]; then
+  echo "よその試験が走っています。空くまで待ちます（最大 30 分）。"
+  for _ in $(seq 1 90); do
+    sleep 20
+    [ "$(busy)" = "0" ] && break
+  done
+  if [ "$(busy)" != "0" ]; then
+    echo "まだ走っています。向こうが終わってから、もう一度走らせてください。"
+    echo
+    echo "  二つ同時に回すと描く側がページングで止まり、"
+    echo "  関係のない段で「固まっている」と落ちます。"
+    exit 1
+  fi
+  echo "空きました。始めます。"
+fi
+
 # 設定の写し（無ければ「無かった」と憶えておく）
 if [ -f "$mine" ]; then cp "$mine" "$work/amber.json.mine"; else touch "$work/なかった"; fi
 

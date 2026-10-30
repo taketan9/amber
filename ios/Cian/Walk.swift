@@ -511,13 +511,20 @@ enum Walk {
             let there = await talk("/_get?rel=" + ("太郎のメモ.md".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""))
             let far = (there["text"] as? String ?? "").replacingOccurrences(of: "こちらは十個", with: "向こうは六個")
             _ = await talk("/_put", ["rel": "太郎のメモ.md", "text": far, "by": "太郎の Mac"])
+            // **分かれたあとに、こちらも同じ行を直す**（依頼 682）。ここを足すまで、
+            // この段は名前と違うことを見ていた ── 手元がその行を直したのは
+            // 一回目の同期より前なので、分かれたあとに直しているのは向こうだけ。
+            // それでは「向こうを採る」が正しい答えで、ぶつかりようがない。
+            // 依頼 675・676 で分かれる前の姿が正しく取れるようになったとたん、
+            // 三者混ぜが本来の働きをして、この段が落ちた。
+            desk.tabs[at].text = desk.tabs[at].text.replacingOccurrences(of: "こちらは十個", with: "こちらは九個")
             desk.tabs[at].text += "\nこちらでもう一行。\n"
             _ = try desk.save(note.path, store)
             guard let r = await sync.now("手") else { return "運びませんでした" }
             if r.clash != 1 { return "ぶつかりが \(r.clash)（\(r.trouble.joined(separator: " / ")))" }
             guard let now = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "目印が消えました" }
             let tab = desk.tabs[now]
-            if !tab.whole.contains("十個") || !tab.whole.contains("六個") { return "両方残っていません" }
+            if !tab.whole.contains("九個") || !tab.whole.contains("六個") { return "両方残っていません" }
             if tab.spots.count != 1 { return "ぶつかった場所が \(tab.spots.count) です" }
             if tab.who != "太郎の Mac" { return "相手の名前が \(tab.who) です" }
             return nil
@@ -527,14 +534,14 @@ enum Walk {
             desk.chooseSpot(note.path, 0, "ours", store)
             guard let now = desk.tabs.firstIndex(where: { $0.id == note.path }) else { return "目印が消えました" }
             let tab = desk.tabs[now]
-            if tab.whole.contains("六個") || !tab.whole.contains("十個") { return "選んだあとの文字が違います" }
+            if tab.whole.contains("六個") || !tab.whole.contains("九個") { return "選んだあとの文字が違います" }
             if tab.clashing { return "選び口が残っています" }
             guard let r = await sync.now("手") else { return "運びませんでした" }
             if r.up != 1 { return "上がったのが \(r.up) 本" }
             let there = await talk("/_get?rel=" + ("太郎のメモ.md".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""))
             let t = there["text"] as? String ?? ""
             desk.close(note.path)
-            return t.contains("十個") && !t.contains("六個") ? nil : "向こうの文字が違います"
+            return t.contains("九個") && !t.contains("六個") ? nil : "向こうの文字が違います"
         }
         // ファイル名は題に合わせる（依頼 502）── 離れたときと、時刻名の揃え直し。
         await step("名前：一行目でタイトルが決まるノートは、離れたときに名前が揃う") {
