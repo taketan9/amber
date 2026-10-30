@@ -368,7 +368,8 @@ pub fn remember(root: &std::path::Path, who: &str, done: &[Was], gone: &[String]
     if let Some(dir) = at.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    std::fs::write(at, serde_json::to_string_pretty(&v)?)?;
+    // 仮の名を経て書きます（途中で落ちても、憶えが空にならないように・依頼 677）
+    crate::text::put(&at, serde_json::to_string_pretty(&v)?.as_bytes())?;
     Ok(())
 }
 
@@ -418,7 +419,7 @@ pub fn moved(root: &std::path::Path, from: &str, to: &str, record: bool) {
             let _ = std::fs::create_dir_all(dir);
         }
         if let Ok(text) = serde_json::to_string_pretty(&v) {
-            let _ = std::fs::write(at, text);
+            let _ = crate::text::put(&at, text.as_bytes());
         }
     }
 }
@@ -454,7 +455,7 @@ pub fn forget_moves(root: &std::path::Path, who: &str, done: &[String]) {
         }
     }
     if let Ok(text) = serde_json::to_string_pretty(&v) {
-        let _ = std::fs::write(at, text);
+        let _ = crate::text::put(&at, text.as_bytes());
     }
 }
 

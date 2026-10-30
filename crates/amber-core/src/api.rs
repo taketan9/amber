@@ -454,11 +454,20 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             let root = std::path::PathBuf::from(arg(p, "path"));
             let who = p["who"].as_str().unwrap_or("drive");
             let stop = std::sync::atomic::AtomicBool::new(false);
-            let (found, _) = crate::note::list(
+            let (found, walk) = crate::note::list(
                 &root,
                 crate::survey::Limits { depth: 6, rows: 4000, hidden: false, ..Default::default() },
                 &stop,
             );
+            // **全部を数えられなかったら、組まない**（依頼 691）。数え切れなかった
+            // ノートは「こちらで消した」と読まれ、Drive から消す段ができていました
+            // （5,383 本で 2,978 本を消しにいった）。上限そのものをどうするかは本人が決める
+            if walk.partial() {
+                anyhow::bail!(
+                    "ノートが多すぎるか、フォルダが深すぎて、全部を数えられませんでした（{} 件で打ち切り）── 消してしまわないよう、同期を止めています",
+                    walk.rows.len()
+                );
+            }
             let mut here: Vec<crate::sync::Here> = found
                 .iter()
                 .map(|f| crate::sync::Here {
@@ -613,6 +622,8 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             std::fs::rename(&tmp, &path)?;
             Ok(serde_json::json!({
                 "ok": true,
+                // 書いた中身の指紋（`synced` に渡すため・依頼 675）
+                "print": crate::sync::fingerprint(text.as_bytes()),
                 "stamp": crate::stamp::of(&path).as_ref().map(stamp_json),
             }))
         }
@@ -641,11 +652,17 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     a.iter()
                         .filter_map(|v| {
                             let rel = v.get("rel")?.as_str()?.to_string();
-                            // 指紋は、いまディスクにあるものから取り直す ──
-                            // 呼ぶ側に計算させると、二つの土台で違う答えが出る。
-                            let hash = crate::sync::fingerprint(
-                                &std::fs::read(root.join(&rel)).unwrap_or_default(),
-                            );
+                            // **運んだ中身の指紋**を憶える（依頼 675）。呼ぶ側が渡す指紋は
+                            // `syncprint` / `syncdown` ＝ この土台が数えたもの。
+                            // ディスクから取り直していたので、同期の途中で打った字が
+                            // 「運び終えた」ことになり、上がらないまま後で上書きされていました。
+                            // 渡されないもの（改名だけ）は、いまのディスクから取ります
+                            let hash = match v.get("hash").and_then(|h| h.as_str()) {
+                                Some(h) if !h.is_empty() => h.to_string(),
+                                _ => crate::sync::fingerprint(
+                                    &std::fs::read(root.join(&rel)).unwrap_or_default(),
+                                ),
+                            };
                             Some(crate::sync::Was {
                                 rel,
                                 hash,
@@ -671,7 +688,12 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     let at = dir.join(&d.hash);
                     if !at.exists() {
                         if let Ok(bytes) = std::fs::read(root.join(&d.rel)) {
-                            let _ = std::fs::write(&at, bytes);
+                            // **運んだ姿と同じときだけ**取っておきます。途中で書き換わって
+                            // いたら、それは分かれる前の姿ではありません（無ければ、
+                            // 混ぜるときに全部を人が選ぶ ―― 失うよりよい）
+                            if crate::sync::fingerprint(&bytes) == d.hash {
+                                let _ = std::fs::write(&at, bytes);
+                            }
                         }
                     }
                 }
@@ -1513,7 +1535,7 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             };
             let made = crate::note::carry_out(&path, day)?;
             let text = std::fs::read_to_string(&path)?;
-            std::fs::write(&path, crate::note::set_field(&text, "last", Some(&on)))?;
+            crate::text::put(&path, crate::note::set_field(&text, "last", Some(&on)).as_bytes())?;
             Ok(serde_json::json!({ "path": made.display().to_string() }))
         }
 
@@ -2768,5 +2790,65 @@ mod tests {
         )
         .unwrap();
         assert_eq!(out["text"], "- [x] 牛乳\n- [x] 珈琲\n");
+    }
+}
+
+#[cfg(test)]
+mod tests_675 {
+    use super::call;
+
+    // 依頼 675: 同期の途中で打った字を「運び終えた」ことにしない
+    #[test]
+    fn 同期の途中で書き換わったノートは次の同期で上がる() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::write(root.join("週報.md"), "一行目\n").unwrap();
+        let carried = crate::sync::fingerprint("一行目\n".as_bytes());
+        // 上げたあと、synced の前に一行足された
+        std::fs::write(root.join("週報.md"), "一行目\n二行目\n").unwrap();
+        call("synced", &serde_json::json!({
+            "path": root.display().to_string(), "who": "drive",
+            "done": [{ "rel": "週報.md", "id": "X1", "tag": "t1", "hash": carried }],
+            "gone": [],
+        })).unwrap();
+        let was = crate::sync::recall(root, "drive");
+        assert_eq!(was[0].hash, carried, "運んだ中身の指紋を憶える");
+        // 分かれる前の姿は、運んだ姿と違うので取っておかない
+        assert!(!root.join(".amber/base").join(&carried).exists());
+        // 次の計画は、足した行を上げる
+        let plan = call("syncplan", &serde_json::json!({
+            "path": root.display().to_string(), "who": "drive",
+            "remote": [{ "rel": "週報.md", "id": "X1", "tag": "t1" }],
+        })).unwrap();
+        let steps = plan["steps"].as_array().unwrap();
+        assert!(steps.iter().any(|s| s["do"] == "up"), "{plan}");
+    }
+
+    #[test]
+    fn 下ろした中身の指紋を返す() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a.md");
+        let r = call("syncdown", &serde_json::json!({ "path": p.display().to_string(), "text": "x\n" })).unwrap();
+        assert_eq!(r["print"], crate::sync::fingerprint(b"x\n"));
+    }
+}
+
+#[cfg(test)]
+mod tests_691 {
+    use super::call;
+
+    // 依頼 691: 数え切れないときは同期を組まない（消す段を作らない）
+    #[test]
+    fn 数え切れないときは同期を組まない() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        for i in 0..4100 {
+            std::fs::write(root.join(format!("n{i:05}.md")), "x\n").unwrap();
+        }
+        let r = call("syncplan", &serde_json::json!({
+            "path": root.display().to_string(), "who": "drive", "remote": [],
+        }));
+        assert!(r.is_err(), "{r:?}");
+        assert!(format!("{:#}", r.unwrap_err()).contains("同期を止めています"));
     }
 }

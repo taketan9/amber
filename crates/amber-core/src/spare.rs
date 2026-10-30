@@ -54,6 +54,10 @@ pub fn is_picture(name: &str) -> bool {
 fn targets(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let b: Vec<char> = text.chars().collect();
+    // 文字の番号 → バイトの位置。**毎回頭から数え直さない**（依頼 678）──
+    // `s` の字が出るたびに数え直していたので、400KB のノートで 31 秒かかり、
+    // そのあいだ保存も一覧も返りませんでした
+    let at: Vec<usize> = text.char_indices().map(|(n, _)| n).collect();
     let mut i = 0;
     while i < b.len() {
         if b[i] == ']' && i + 1 < b.len() && b[i + 1] == '(' {
@@ -72,8 +76,8 @@ fn targets(text: &str) -> Vec<String> {
             }
             out.push(got);
             i = j;
-        } else if b[i] == 's' && text[byte_at(&b, i)..].starts_with("src=") {
-            let rest = &text[byte_at(&b, i) + 4..];
+        } else if b[i] == 's' && text[at[i]..].starts_with("src=") {
+            let rest = &text[at[i] + 4..];
             let quote = rest.chars().next();
             if let Some(q) = quote.filter(|c| *c == '"' || *c == '\'') {
                 if let Some(end) = rest[1..].find(q) {
@@ -84,11 +88,6 @@ fn targets(text: &str) -> Vec<String> {
         i += 1;
     }
     out
-}
-
-/// 文字の位置を、バイトの位置に。
-fn byte_at(chars: &[char], upto: usize) -> usize {
-    chars[..upto].iter().map(|c| c.len_utf8()).sum()
 }
 
 /// このノートが参照しているファイル ── パスにして返す。
@@ -154,7 +153,9 @@ fn percent(s: &str) -> String {
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(n) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+            // **`%` の後ろが日本語でも落ちない**（依頼 678）。文字の途中で切ると
+            // panic して、そのフォルダの移動・同期の改名が全部「内部で落ちました」でした
+            if let Some(Ok(n)) = s.get(i + 1..i + 3).map(|h| u8::from_str_radix(h, 16)) {
                 out.push(n);
                 i += 3;
                 continue;
@@ -356,5 +357,27 @@ mod tests {
 
         let got = super::find(root, &walk(root));
         assert!(got.spare.is_empty(), "{:?}", got.spare.iter().map(|s| &s.rel).collect::<Vec<_>>());
+    }
+}
+
+#[cfg(test)]
+mod tests_675 {
+    // 依頼 678: `%` の後ろが日本語でも落ちない／大きなノートで二乗にならない
+    #[test]
+    fn 百分率の後ろが日本語でも落ちない() {
+        assert_eq!(super::percent("資料/売上100%増.xlsx"), "資料/売上100%増.xlsx");
+        assert_eq!(super::percent("%E6%AC%A1.png"), "次.png");
+    }
+
+    #[test]
+    fn 大きなノートのリンク拾いが速い() {
+        let mut big = String::new();
+        for i in 0..20_000 {
+            big.push_str(&format!("this is some text {i} <img src=\"a{i}.png\"> [x](b{i}.md)\n"));
+        }
+        let t = std::time::Instant::now();
+        let got = super::points_at(&big, std::path::Path::new("/n/x.md"));
+        assert!(got.len() >= 40_000, "拾えた数: {}", got.len());
+        assert!(t.elapsed().as_secs_f64() < 2.0, "遅すぎます: {:?}", t.elapsed());
     }
 }

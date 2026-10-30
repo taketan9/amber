@@ -146,9 +146,15 @@ fn rule(value: &str) -> Rule {
 fn repeats(start: NaiveDate, r: &Rule, from: NaiveDate, to: NaiveDate) -> Vec<NaiveDate> {
     let mut out = Vec::new();
     let mut seen = 0u32;
-    let mut d = start;
+    // **見る幅の頭から数え始める**（依頼 679）。開始日から1日ずつ 4000 日（約11年）で
+    // 打ち切っていたので、1990年からの誕生日や 2014年からの毎週の定例が、今の月に
+    // 1件も出ませんでした。当たりの判定は開始日からの差だけで決まるので、途中から
+    // 数えても同じ日に当たります。`COUNT` だけは頭から数える必要があるので、
+    // そのときは頭から（上限は百年ぶん）
+    let mut d = if r.count.is_none() && from > start { from } else { start };
+    let cap = if r.count.is_some() { 40_000 } else { 4000 };
     let mut steps = 0;
-    while d <= to && steps < 4000 {
+    while d <= to && steps < cap {
         steps += 1;
         if let Some(n) = r.count {
             if seen >= n {
@@ -391,5 +397,23 @@ RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=WE\nSUMMARY:隔週\nEND:VEVENT\nEND:VCALENDAR
 RRULE:FREQ=DAILY\nSUMMARY:毎日\nEND:VEVENT\nEND:VCALENDAR\n";
         let got = super::month(text, 2026, 9);
         assert_eq!(got.len(), 30, "九月ぶんだけ");
+    }
+}
+
+#[cfg(test)]
+mod tests_675 {
+    // 依頼 679: 何年も前から繰り返している予定が、今の月にも出る
+    fn cal(dtstart: &str, rrule: &str) -> String {
+        format!("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:x\r\nDTSTART;VALUE=DATE:{dtstart}\r\nRRULE:{rrule}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+    }
+
+    #[test]
+    fn 昔からの繰り返しが今の月に出る() {
+        assert_eq!(super::month(&cal("19900101", "FREQ=YEARLY"), 2026, 1).len(), 1);
+        let weekly = super::month(&cal("20140106", "FREQ=WEEKLY"), 2026, 10);
+        assert_eq!(weekly.len(), 4, "2026年10月の月曜は4回");
+        // COUNT は頭から数える（3回で終わった繰り返しは、今は出ない）
+        assert!(super::month(&cal("20200101", "FREQ=YEARLY;COUNT=3"), 2026, 1).is_empty());
+        assert_eq!(super::month(&cal("20200101", "FREQ=YEARLY;COUNT=10"), 2026, 1).len(), 1);
     }
 }

@@ -11672,6 +11672,13 @@ window.amber.onChanged((names) => {
     // （`が` = `か` + `゛`）、文字の上では同じ名前が一致しなくなる。外れても
     // 数え直すだけで害は無いが、**日本語の名前のノートだけ遅い**になる。
     const nfc = (s) => String(s).normalize('NFC');
+    // **仮の名（`.amber-part`）の動きは数えない**（依頼 677）。保存は仮の名に
+    // 書いてから置き換えるので、見張りには仮の名も届く ―― 数えると自分の
+    // 跳ね返りだと分からず、打ち消しを憶えたままになり、そのあと向こうの
+    // 直しまで無視していました（総ざらいが捕まえた）
+    const part = (n) => String(n).endsWith('.amber-part');
+    if (names && names.length && names.every(part)) return;
+    names = (names || []).filter((n) => !part(n));
     // **打ち消すのは、自分の書き込みの跳ね返り一回だけ。**
     //
     // 憶えたまま消さないと、そのノートが外で何度変わっても無視し続ける。
@@ -13139,6 +13146,11 @@ async function syncNow(reason) {
 ///
 /// core（`syncplan`・`synced`）は保存ディレクトリ一つしか知らない ── 帳画面
 /// （`.amber/sync.json`）もそこにある。Drive の上の道だけ `pre` を頭に付ける。
+// ファイルと同じ姿の本文（依頼 676）。`read().text` は終わりの改行を持たないので、
+// ディスクから読んだ「分かれる前の姿」と混ぜると最後の行が `パンパン` とつながりました。
+// 上げる中身も、ファイルと同じ姿にそろえます
+const asFiled = (r) => (r.text || '') + (r.trailing_eol ? '\n' : '');
+
 async function syncPlace(place, remote) {
     const root = place.dir;
     const pre = place.at ? place.at + '/' : '';
@@ -13160,18 +13172,21 @@ async function syncPlace(place, remote) {
                 // 画像は bytes のまま（描く側を通さない・依頼 497）。
                 const r = s.bin
                     ? await window.amber.driveUploadFile({ rel: pre + s.rel, file: at, print, id: s.id || undefined })
-                    : await window.amber.driveUpload({ rel: pre + s.rel, text: (await ask('read', { path: at })).text, print, id: s.id || undefined });
-                done.push({ rel: s.rel, id: r.id, tag: r.tag });
+                    : await window.amber.driveUpload({ rel: pre + s.rel, text: asFiled(await ask('read', { path: at })), print, id: s.id || undefined });
+                // **運んだ姿の指紋を渡す**（依頼 675）。渡さないと、同期の途中で打った字まで
+                // 「上げた」ことになり、二度と上がらないまま、向こうの直しで上書きされます
+                done.push({ rel: s.rel, id: r.id, tag: r.tag, hash: print });
                 one.up += 1;
             } else if (s.do === 'down') {
+                let downPrint = '';
                 if (s.bin) {
                     await window.amber.driveDownloadFile({ id: s.id, to: at });
                 } else {
                     const text = await window.amber.driveDownload(s.id);
-                    await ask('syncdown', { path: at, text });
+                    downPrint = (await ask('syncdown', { path: at, text })).print || '';
                 }
                 const there = remote.find((x) => x.id === s.id);
-                done.push({ rel: s.rel, id: s.id, tag: there ? there.tag : '' });
+                done.push({ rel: s.rel, id: s.id, tag: there ? there.tag : '', hash: downPrint });
                 one.down += 1;
                 one.touched = true;
                 if (isOpen) one.openTouched = true;
@@ -13187,7 +13202,7 @@ async function syncPlace(place, remote) {
                 await window.amber.driveDownloadFile({ id: s.id, to: beside });
                 const print = (await ask('syncprint', { path: at })).print;
                 const r = await window.amber.driveUploadFile({ rel: pre + s.rel, file: at, print, id: s.id });
-                done.push({ rel: s.rel, id: r.id, tag: r.tag });
+                done.push({ rel: s.rel, id: r.id, tag: r.tag, hash: print });
                 one.up += 1;
                 one.down += 1;
                 one.touched = true;
@@ -13224,15 +13239,14 @@ async function syncPlace(place, remote) {
                 // 取っておいたもの（無ければ空 ── ぜんぶがぶつかった場所になり、
                 // 両方残って人が選ぶ。失うよりよい）。
                 const theirs = await window.amber.driveDownload(s.id);
-                const ours = (await ask('read', { path: at })).text;
+                const ours = asFiled(await ask('read', { path: at }));
                 const base = s.base ? (await ask('baseread', { path: root, hash: s.base })).text : null;
                 const got = await ask('merge', { was: base || '', ours, theirs });
                 // 混ぜる前のこちらを履歴に（Git の ORIG_HEAD の写し）。
                 try { await ask('keep', { root, path: at, text: ours, gap: 0, force: true }); } catch { /* 履歴が置けなくても混ぜる */ }
-                await ask('syncdown', { path: at, text: got.text });
-                const print = (await ask('syncprint', { path: at })).print;
+                const print = (await ask('syncdown', { path: at, text: got.text })).print;
                 const r = await window.amber.driveUpload({ rel: pre + s.rel, text: got.text, print, id: s.id });
-                done.push({ rel: s.rel, id: r.id, tag: r.tag });
+                done.push({ rel: s.rel, id: r.id, tag: r.tag, hash: print });
                 const there = remote.find((x) => x.id === s.id);
                 noteIncoming(at, got, there && there.by ? there.by : 'ほかの端末');
                 one.clash += 1;

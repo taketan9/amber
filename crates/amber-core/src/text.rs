@@ -150,8 +150,57 @@ pub fn write(path: &Path, file: &TextFile) -> Result<()> {
             Encoding::ShiftJis => &[][..],
         });
     }
+    if file.encoding == Encoding::ShiftJis {
+        // **書けない字があれば、書かずに断る**（依頼 677）。encoding_rs は
+        // 書けない字を `&#128512;` のような数値参照に置き換えて「成功」と返すので、
+        // 保存できたように見えて、開き直すと本文に `&#128512;` が入っていました
+        let lost = not_in_shift_jis(&text);
+        if !lost.is_empty() {
+            anyhow::bail!(
+                "このノートは Shift_JIS で保存しています。次の字は Shift_JIS に無いので保存できません: {}",
+                lost.iter().collect::<String>()
+            );
+        }
+    }
     bytes.extend_from_slice(&file.encoding.encode(&text));
-    std::fs::write(path, bytes).with_context(|| format!("write {}", path.display()))
+    put(path, &bytes).with_context(|| format!("write {}", path.display()))
+}
+
+/// Shift_JIS で書けない字（重ねずに、出てきた順）。
+fn not_in_shift_jis(text: &str) -> Vec<char> {
+    let mut out: Vec<char> = Vec::new();
+    if !encoding_rs::SHIFT_JIS.encode(text).2 {
+        return out;
+    }
+    let mut buf = [0u8; 4];
+    for c in text.chars() {
+        if !out.contains(&c) && encoding_rs::SHIFT_JIS.encode(c.encode_utf8(&mut buf)).2 {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// **仮の名に書いてから置き換える**（依頼 677）。じかに上書きすると、ディスクが
+/// 満杯のときや途中で落ちたとき、ノートが 0 バイトで残りました ── 保存は
+/// 「書けません」で失敗するのに、中身はもう空です（同期で他の端末にも広がる）。
+///
+/// リンクのノートはリンク先を書き換え（リンクは残す）、権限も引き継ぎます。
+pub(crate) fn put(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut name = real.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    name.push(".amber-part");
+    let tmp = real.with_file_name(name);
+    let done = std::fs::write(&tmp, bytes).and_then(|_| {
+        if let Ok(m) = std::fs::metadata(&real) {
+            let _ = std::fs::set_permissions(&tmp, m.permissions());
+        }
+        std::fs::rename(&tmp, &real)
+    });
+    if done.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    done
 }
 
 /// まだ無いノートを書くための、まっさらな姿。UTF-8 と LF。
@@ -197,5 +246,41 @@ mod tests {
         assert!(!f.trailing_eol);
         write(&at, &f).unwrap();
         assert_eq!(std::fs::read(&at).unwrap(), b"a\nb");
+    }
+}
+
+#[cfg(test)]
+mod tests_675 {
+    use super::*;
+
+    // 依頼 677: Shift_JIS に無い字は、書かずに断る（`&#128512;` に化かさない）
+    #[test]
+    fn shift_jis_に無い字は書かずに断る() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("sj.md");
+        std::fs::write(&p, encoding_rs::SHIFT_JIS.encode("あい").0).unwrap();
+        let mut f = read(&p).unwrap();
+        assert_eq!(f.encoding, Encoding::ShiftJis);
+        f.lines = vec!["あい😀髙".to_string()];
+        let e = write(&p, &f).unwrap_err();
+        assert!(format!("{e:#}").contains('😀'), "{e:#}");
+        assert_eq!(read(&p).unwrap().lines, vec!["あい".to_string()], "元のまま残る");
+    }
+
+    // 依頼 677: 仮の名を経て書く（途中で落ちても 0 バイトにしない）
+    #[test]
+    fn 仮の名を経て書き_残骸を残さない() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("n.md");
+        std::fs::write(&p, "old\n").unwrap();
+        let mut f = read(&p).unwrap();
+        f.lines = vec!["new".to_string()];
+        write(&p, &f).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "new\n");
+        let names: Vec<_> = std::fs::read_dir(d.path()).unwrap().flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, vec!["n.md".to_string()]);
+        // 書けない場所なら、元のファイルは残る
+        assert!(put(&d.path().join("無い/x.md"), b"x").is_err());
     }
 }

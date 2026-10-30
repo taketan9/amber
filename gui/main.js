@@ -124,7 +124,12 @@ function remember(patch) {
     const now = { ...recall(), ...patch };
     try {
         fs.mkdirSync(path.dirname(STATE), { recursive: true });
-        fs.writeFileSync(STATE, JSON.stringify(now, null, 2));
+        // **仮の名に書いてから置き換える**（依頼 681）。じかに書くと、書いている途中に
+        // 読んだ側が `{}` を受け取り、次の書き込みで保存場所・見た目が全部消えます
+        // （crmaine の amber モードと同時に開くと、その幅が広がります）
+        const tmp = `${STATE}.${process.pid}.part`;
+        fs.writeFileSync(tmp, JSON.stringify(now, null, 2));
+        fs.renameSync(tmp, STATE);
     } catch (e) {
         // 憶えられないのは不便だが、書けないことでデスクトップ版が閉じる理由はない。
         console.error('憶えられませんでした:', e.message);

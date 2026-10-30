@@ -168,19 +168,22 @@ final class Syncing: ObservableObject {
                             newId = try await Drive.shared.upload(rel: pre + rel, bytes: try Data(contentsOf: URL(fileURLWithPath: at)),
                                                                   print: print, id: id.isEmpty ? nil : id)
                         } else {
-                            let text = try Cian.call("read", ["path": at])["text"] as? String ?? ""
+                            let text = Self.asFiled(try Cian.call("read", ["path": at]))
                             newId = try await Drive.shared.upload(rel: pre + rel, text: text, print: print, id: id.isEmpty ? nil : id)
                         }
-                        done.append(["rel": rel, "id": newId, "tag": print])
+                        // 運んだ姿の指紋を渡す（依頼 675・デスクトップ版と同じ）。渡さないと、同期の途中で
+                        // 打った字まで「上げた」ことになり、後で向こうの直しに上書きされます
+                        done.append(["rel": rel, "id": newId, "tag": print, "hash": print])
                         report.up += 1
                     case "down":
+                        var downPrint = ""
                         if bin {
                             try Self.put(try await Drive.shared.downloadBytes(id), at: at)
                         } else {
                             let text = try await Drive.shared.download(id)
-                            _ = try Cian.call("syncdown", ["path": at, "text": text])
+                            downPrint = try Cian.call("syncdown", ["path": at, "text": text])["print"] as? String ?? ""
                         }
-                        done.append(["rel": rel, "id": id, "tag": there?.tag ?? ""])
+                        done.append(["rel": rel, "id": id, "tag": there?.tag ?? "", "hash": downPrint])
                         report.down += 1
                         report.touched.insert(at)
                     case "drophere":
@@ -216,14 +219,14 @@ final class Syncing: ObservableObject {
                         try Self.put(try await Drive.shared.downloadBytes(id), at: beside)
                         let print = try Cian.call("syncprint", ["path": at])["print"] as? String ?? ""
                         let newId = try await Drive.shared.upload(rel: pre + rel, bytes: try Data(contentsOf: URL(fileURLWithPath: at)), print: print, id: id)
-                        done.append(["rel": rel, "id": newId, "tag": print])
+                        done.append(["rel": rel, "id": newId, "tag": print, "hash": print])
                         report.up += 1
                         report.down += 1
                         report.touched.insert(at)
                     case "clash":
                         // 両方が変わった ── 混ぜる。分かれる前の姿は synced が取っておいたもの。
                         let theirs = try await Drive.shared.download(id)
-                        let ours = try Cian.call("read", ["path": at])["text"] as? String ?? ""
+                        let ours = Self.asFiled(try Cian.call("read", ["path": at]))
                         var base = ""
                         if let hash = s["base"] as? String, !hash.isEmpty {
                             base = try Cian.call("baseread", ["path": root, "hash": hash])["text"] as? String ?? ""
@@ -231,10 +234,9 @@ final class Syncing: ObservableObject {
                         let got = try Cian.call("merge", ["was": base, "ours": ours, "theirs": theirs])
                         let text = got["text"] as? String ?? ours
                         _ = try? Cian.call("keep", ["root": root, "path": at, "text": ours, "gap": 0, "force": true])
-                        _ = try Cian.call("syncdown", ["path": at, "text": text])
-                        let print = try Cian.call("syncprint", ["path": at])["print"] as? String ?? ""
+                        let print = try Cian.call("syncdown", ["path": at, "text": text])["print"] as? String ?? ""
                         let newId = try await Drive.shared.upload(rel: pre + rel, text: text, print: print, id: id)
-                        done.append(["rel": rel, "id": newId, "tag": print])
+                        done.append(["rel": rel, "id": newId, "tag": print, "hash": print])
                         let merged = NotesStore.Merged.from(got, text: text)
                         desk?.incoming(at, merged, who: (there?.by.isEmpty == false ? there!.by : "向こう"), store)
                         report.clash += 1
@@ -330,6 +332,13 @@ final class Syncing: ObservableObject {
         try bytes.write(to: tmp)
         if FileManager.default.fileExists(atPath: path) { try FileManager.default.removeItem(at: url) }
         try FileManager.default.moveItem(at: tmp, to: url)
+    }
+
+    /// ファイルと同じ姿の本文（依頼 676・デスクトップ版の `asFiled` と同じ）。`read` の `text` は
+    /// 終わりの改行を持たないので、分かれる前の姿と混ぜると最後の行がつながりました
+    private static func asFiled(_ r: [String: Any]) -> String {
+        let text = r["text"] as? String ?? ""
+        return (r["trailing_eol"] as? Bool ?? false) ? text + "\n" : text
     }
 
     private static func numbered(_ path: String, _ n: Int) -> String {
