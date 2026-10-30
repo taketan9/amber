@@ -99,6 +99,18 @@ enum CalPrefs {
         tagsKnown = all
     }
 
+    /// **カレンダーを既定の画面にしておくか**（依頼 697・本人「一度カレンダーに
+    /// 遷移したら、意図的にノートに戻る を押下しない限り カレンダーをデフォルト
+    /// 表示にしてほしい」）。
+    ///
+    /// カレンダーを開いた時点で立ち、「ノートに戻る」を押したときだけ倒れる。
+    /// アプリを開き直したときも、立っていればカレンダーから始まる。
+    /// 鍵は `amber.` で始める ── `cian.` は消えると困るものだけ。
+    static var stay: Bool {
+        get { UserDefaults.standard.bool(forKey: "amber.cal.stay") }
+        set { UserDefaults.standard.set(newValue, forKey: "amber.cal.stay") }
+    }
+
     /// 何を出しているか（`me` / `group` / `both`）。**既定は両方**。
     static var side: String {
         get { UserDefaults.standard.string(forKey: sideKey) ?? "both" }
@@ -149,6 +161,7 @@ struct CalSettings: View {
     @State private var hide = CalPrefs.hide
     @State private var weekend = CalPrefs.weekend
     @State private var color = CalPrefs.hereColor
+    @State private var group = CalPrefs.groupName
 
     var body: some View {
         NavigationStack {
@@ -173,7 +186,46 @@ struct CalSettings: View {
                 } footer: {
                     Text(weekend ? "" : "月〜金だけ出しています")
                 }
-                Section("カラー設定（個人カレンダーの色）") {
+                // **グループの予定表を、端末にあるものから選ぶ**（依頼 698・本人
+                // 「最初に設定をして、選択するような形にできないかな」）。
+                //
+                // いままで名前は `ambər グループ` 固定で、選ぶ道が無かった ──
+                // amber が作ったものしかグループになれず、**前から家族で使って
+                // いる予定表**を指せなかった。名前は憶えるだけなので、端末に
+                // ある予定表のどれでも指せる。
+                //
+                // **id は持たない。** あれは amber が作ったときだけ分かるもので
+                // （招待と削除に使う）、人が選んだ予定表には無い。空にしておけば、
+                // 招待と削除の口は出ない ── そこは Google の画面の仕事。
+                Section {
+                    Picker("グループの予定表", selection: Binding(
+                        get: { group },
+                        set: { name in
+                            group = name
+                            CalPrefs.groupName = name
+                            if CalPrefs.groupWord != name { CalPrefs.groupId = "" }
+                            CalPrefs.groupAsked = true
+                            changed()
+                        })) {
+                        Text("使わない").tag("")
+                        ForEach(Phone.calendars, id: \.self) { Text($0).tag($0) }
+                    }
+                } header: {
+                    Text("グループ")
+                } footer: {
+                    Text(group.isEmpty
+                         ? "家族やグループと分け合う予定表を選ぶと、その予定が色分けされ、「自分だけ／グループ」で絞り込めます"
+                         : "「\(group)」の予定を、グループの予定として扱います")
+                }
+                // **「自分の色」一つで両方を塗る**（依頼 702・本人が乙を選んだ）。
+                //
+                // 前は「個人カレンダーの色」で、端末の予定表から来た予定だけを
+                // 塗っていた。いまは**自分が作る予定の色**でもあり、作るときに
+                // ノートの前書きへ `color:` として書き込む ── だから
+                // **同期している全員に、同じ色で見える**。
+                // 分けなかったのは、欲しいのが「誰が作ったか」の色分けだから
+                // （分けると、自分の予定なのに出どころで二色になる）。
+                Section("自分の色") {
                     ForEach(CalPrefs.colors, id: \.hex) { c in
                         Button {
                             color = c.hex

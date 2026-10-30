@@ -1218,6 +1218,56 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     .collect::<Vec<_>>(),
             }))
         }
+        // **全員に通知する予定**（依頼 701）。
+        //
+        // 予定表のアラーム（`EKAlarm`）は**その端末にしか入らない**ので、
+        // 同期した相手には届かない。届かせる道は一つ ── **各端末が、同期で
+        // 来たノートを読んで、自分で仕掛ける。** その材料をここで返す。
+        //
+        // 返すのは `alarm-who: 全員` と書いてあるものだけ。無いものは
+        // 作った端末の仕事で、ここは知らない。
+        "alarms" => {
+            let dir = std::path::PathBuf::from(arg(p, "path"));
+            if !dir.is_dir() {
+                anyhow::bail!("{} を開けません", dir.display());
+            }
+            let limits = crate::survey::Limits {
+                depth: p["depth"].as_u64().unwrap_or(6) as usize,
+                rows: crate::survey::ALL,
+                hidden: false,
+                size_budget: 0,
+            };
+            let stop = std::sync::atomic::AtomicBool::new(false);
+            let walk = crate::survey::survey(&dir, limits, &stop);
+            let mut out = Vec::new();
+            for r in &walk.rows {
+                if r.is_dir {
+                    continue;
+                }
+                let name = r.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let low = name.to_lowercase();
+                if !(low.ends_with(".md") || low.ends_with(".markdown")) {
+                    continue;
+                }
+                let Some((note, plan)) = crate::note::remembered_full(r) else { continue };
+                if !plan.alarm_all {
+                    continue;
+                }
+                let Some(once) = plan.once else { continue };
+                // **鳴らす時刻は、予定の時刻から前へずらす。**
+                let at = once - chrono::Duration::minutes(plan.alarm_min.unwrap_or(0) as i64);
+                out.push(serde_json::json!({
+                    "path": r.path.to_string_lossy(),
+                    "title": if note.title.is_empty() {
+                        name.trim_end_matches(".md").to_string()
+                    } else {
+                        note.title.clone()
+                    },
+                    "at": at.format("%Y-%m-%d %H:%M").to_string(),
+                }));
+            }
+            Ok(serde_json::json!({ "notes": out }))
+        }
         "month" => {
             let dir = std::path::PathBuf::from(arg(p, "path"));
             if !dir.is_dir() {
@@ -1245,6 +1295,9 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
                     "title": s.title,
                     "path": s.path,
                     "kind": s.kind.word(),
+                    // 色と、全員に通知するか（依頼 701・702）── 前書きから来る。
+                    "color": s.color,
+                    "alarmAll": s.alarm_all,
                 })).collect::<Vec<_>>(),
             }))
         }

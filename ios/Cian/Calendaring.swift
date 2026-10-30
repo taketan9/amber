@@ -13,6 +13,7 @@ struct Calendaring: View {
     @ObservedObject var store: NotesStore
     /// 押されたノートを開く先（一覧の側が引き受ける）。
     let open: (Note) -> Void
+    @Environment(\.dismiss) private var dismiss
 
     struct Slot: Identifiable, Hashable {
         let day: String
@@ -28,6 +29,8 @@ struct Calendaring: View {
         var notes: String = ""
         /// メモ欄から読んだ、だれの用事か。切り出すのは core（`caltag`）。
         var tags: [String] = []
+        /// その予定の色の名前（依頼 702・前書きの `color:`）。空なら出どころの色。
+        var color: String = ""
         var id: String { day + (at ?? "") + path + kind + title }
         var isPlan: Bool { kind != "note" }
         var isAway: Bool { kind == "away" }
@@ -74,11 +77,20 @@ struct Calendaring: View {
     @State private var newToGroup: Bool?
     /// だれの用事か（グループに出すときだけ）。
     @State private var newTags: [String] = []
+    /// いつまで・アラーム（依頼 700・701）。
+    @State private var newUntil = ""
+    @State private var newAlarm = ""
+    @State private var newAlarmFor = ""
     /// 直している、この iPhone の予定。
     @State private var editing: Slot?
     @State private var editTitle = ""
     /// 月／週／日（依頼 515・デスクトップ版と同じ3 つ）。
-    @State private var mode = CalPrefs.view
+    ///
+    /// **開いたときは、いつも月**（依頼 697・本人）── 前に日を見ていても、
+    /// 次に開くのは月から。カレンダーを開く理由はたいてい「今月どうなって
+    /// いるか」で、前回の続きではない。`CalPrefs.view` は憶え続けるので、
+    /// 開いているあいだの行き来はそのまま効く。
+    @State private var mode = "month"
     @State private var settings = false
     /// 表示設定を変えたら描き直すための数。
     @State private var prefsTick = 0
@@ -132,6 +144,7 @@ struct Calendaring: View {
         .overlay(alignment: .bottomTrailing) { plusButton }
         .navigationTitle("カレンダー")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
         .toolbar { bar }
         .sheet(isPresented: $settings) {
             CalSettings(changed: { prefsTick += 1; count() })
@@ -191,6 +204,7 @@ struct Calendaring: View {
             trouble: $trouble, adding: $adding, editing: $editing,
             newTitle: $newTitle, newAt: $newAt, newEnd: $newEnd, editTitle: $editTitle,
             newToGroup: $newToGroup, newTags: $newTags,
+            newUntil: $newUntil, newAlarm: $newAlarm, newAlarmFor: $newAlarmFor,
             day: spoken(picked), toPhone: Phone.allowed, groupName: groupName,
             add: add, rename: rename, drop: drop))
     }
@@ -258,6 +272,23 @@ struct Calendaring: View {
     }
 
     @ToolbarContentBuilder private var bar: some ToolbarContent {
+        // **「＜」ではなく「ノートに戻る」**（依頼 697・本人）── 矢印だけだと
+        // どこへ戻るのか分からない。押すまではカレンダーが既定の画面なので、
+        // **この札が「出口はここ」と言う役**も持つ。
+        ToolbarItem(placement: .topBarLeading) {
+            Button {
+                CalPrefs.stay = false
+                dismiss()
+            } label: {
+                // **`Label` は使わない** ── バーの `Label` は字を落として
+                // 絵だけになることがあり、実際にそうなった（シミュレータ）。
+                // 並べて置けば、字は必ず出る。
+                HStack(spacing: 3) {
+                    Image(systemName: "chevron.backward")
+                    Text("ノートに戻る")
+                }
+            }
+        }
         ToolbarItemGroup(placement: .topBarTrailing) {
             Button { settings = true } label: { Image(systemName: "gearshape") }
                 .accessibilityLabel("カレンダー表示設定")
@@ -306,6 +337,20 @@ struct Calendaring: View {
                 }
                 .padding(.bottom, 86)
             }
+            // **横に払うと、前の月・次の月**（依頼 697・本人）。
+            //
+            // **縦の巻きを邪魔しない** ── 横に 40pt 以上動き、かつ縦より
+            // 横のほうが大きいときだけ月を替える。`simultaneousGesture` に
+            // しないと、巻くための指が払いとして取られて表が動かなくなる。
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 40)
+                    .onEnded { g in
+                        let x = g.translation.width
+                        let y = g.translation.height
+                        guard abs(x) > abs(y) * 1.5 else { return }
+                        step(x < 0 ? 1 : -1)
+                    }
+            )
         }
         .padding(.top, 6)
     }
@@ -490,10 +535,24 @@ struct Calendaring: View {
     /// **しっかり塗ってあるものが、グループに見えている予定**（依頼 530）──
     /// 自分だけの予定は薄い塗りにして、この決まりは残した。
     /// だれの用事かは、左の色の帯で（依頼 547）。
+    /// その予定の色（依頼 702）。
+    ///
+    /// **ノートに書いてある色がいちばん強い** ── 前書きの `color:` は人が
+    /// 決めたもので、出どころより優先する。書いていなければ、いままでどおり
+    /// 出どころの色（よそは青・この端末は自分の色・自分のノートは琥珀）。
+    /// 知らない名前は無視する ── 変な色で塗るより、いつもの色のほうがよい。
+    private func tint(of s: Slot) -> Color {
+        if !s.color.isEmpty, let c = CalPrefs.colors.first(where: { $0.name == s.color }),
+           let got = Color(hex: c.hex) {
+            return got
+        }
+        if s.isAway { return .blue }
+        if s.isPhone { return CalPrefs.hereTint }
+        return s.isPlan ? .accentColor : .secondary
+    }
+
     @ViewBuilder private func dayChip(_ s: Slot) -> some View {
-        let tint = s.isAway ? Color.blue
-            : (s.isPhone ? CalPrefs.hereTint
-               : (s.isPlan ? Color.accentColor : Color.secondary))
+        let tint = tint(of: s)
         let full = CalPrefs.inGroup(s)
         let tints = tagTints(s)
         // **文字を、セルの幅に口出しさせない。**
@@ -587,6 +646,12 @@ struct Calendaring: View {
         .contentMargins(.bottom, 86, for: .scrollContent)
     }
 
+    /// 週・日の一行。
+    ///
+    /// **押せるのは行ぜんぶ**（依頼 697・本人「文字以外の箇所をタップしても
+    /// その予定を編集できるようにしてほしい」）── 前は字の形のところしか
+    /// 当たらず、右の余白を押しても何も起きなかった。横いっぱいに広げて、
+    /// 透明なところにも当たり判定を置く。
     @ViewBuilder private func row(_ s: Slot, time: Bool) -> some View {
         Button {
             // **よその予定にはノートが無い。** 押しても何も起きないより、
@@ -620,10 +685,15 @@ struct Calendaring: View {
                         // **予定名は見出しの大きさ**（依頼 670・本人「2 倍から
                         // 3 倍くらい文字を大きく」）── 22pt。`title2` にして
                         // あるので、アプリの「文字の大きさ」でさらに伸びる。
+                        //
+                        // 色は `tint(of:)` が決める（依頼 702）── 前書きに
+                        // `color:` があればそれ、無ければ出どころの色。
+                        // **自分のノートの予定で色を書いていなければ、黒のまま**
+                        // ── 一覧の文字と同じ読みやすさを崩さない。
                         Text(s.title)
                             .font(.title2)
-                            .foregroundStyle(s.isAway ? Color.blue
-                                : (s.isPhone ? CalPrefs.hereTint : Color.primary))
+                            .foregroundStyle(s.color.isEmpty && !s.isAway && !s.isPhone
+                                             ? Color.primary : tint(of: s))
                     }
                     .padding(.horizontal, CalPrefs.inGroup(s) ? 5 : 0)
                     .padding(.vertical, CalPrefs.inGroup(s) ? 2 : 0)
@@ -642,7 +712,10 @@ struct Calendaring: View {
                         Text(n.excerpt).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
+                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -826,7 +899,8 @@ struct Calendaring: View {
                              at: $0["at"] as? String,
                              title: $0["title"] as? String ?? "",
                              path: $0["path"] as? String ?? "",
-                             kind: $0["kind"] as? String ?? "note")
+                             kind: $0["kind"] as? String ?? "note",
+                             color: $0["color"] as? String ?? "")
                     }
                 }
                 // この iPhone の予定表（許可されているときだけ）。
@@ -890,6 +964,8 @@ struct Calendaring: View {
             do {
                 try Phone.add(title: title, day: picked, at: at.isEmpty ? nil : at,
                               end: end.isEmpty ? nil : end,
+                              until: newUntil.isEmpty ? nil : newUntil,
+                              alarm: newAlarm.isEmpty ? nil : newAlarm,
                               notes: notes, into: toGroup ? groupName : "")
                 count()
             } catch {
@@ -904,10 +980,21 @@ struct Calendaring: View {
                 return
             }
             let (text, stamp) = try store.open(made)
-            let out = try Cian.call("setfield", [
-                "text": text, "key": "remind", "value": when,
-            ])
-            _ = try store.save(made, text: out["text"] as? String ?? text, stamp: stamp)
+            var body = text
+            // **前書きに置くのは、入れたものだけ**（依頼 700・701）── 空の鍵を
+            // 残すと、読む側が毎回「終わりがある」「アラームがある」と数える。
+            // **自分の色を書き込む**（依頼 702）── これがあるので、
+            // 同期した先でも同じ色で出る。設定を変えても古い予定の色は
+            // 変わらない（書いた時点の色が、そのノートの色）。
+            let mine = CalPrefs.colorName(CalPrefs.hereColor.isEmpty ? "#d9a400" : CalPrefs.hereColor)
+            for (key, value) in [("remind", when), ("until", newUntil),
+                                 ("alarm", newAlarm), ("alarm-who", newAlarmFor),
+                                 ("color", mine)]
+            where !value.isEmpty {
+                let out = try Cian.call("setfield", ["text": body, "key": key, "value": value])
+                body = out["text"] as? String ?? body
+            }
+            _ = try store.save(made, text: body, stamp: stamp)
             store.reload()
             count()
         } catch {
@@ -930,6 +1017,9 @@ private struct Asking: ViewModifier {
     @Binding var editTitle: String
     @Binding var newToGroup: Bool?
     @Binding var newTags: [String]
+    @Binding var newUntil: String
+    @Binding var newAlarm: String
+    @Binding var newAlarmFor: String
     let day: String
     let toPhone: Bool
     let groupName: String
@@ -947,7 +1037,9 @@ private struct Asking: ViewModifier {
             .sheet(isPresented: $adding) {
                 EventForm(day: day, toPhone: toPhone, groupName: groupName,
                           title: $newTitle, at: $newAt, end: $newEnd,
-                          toGroup: $newToGroup, tags: $newTags, add: add)
+                          toGroup: $newToGroup, tags: $newTags,
+                          untilDay: $newUntil, alarmAt: $newAlarm, alarmFor: $newAlarmFor,
+                          add: add)
                     .presentationDetents([.large])
             }
             // この iPhone の予定は、**押したら直せる**（よその予定表と
@@ -977,6 +1069,11 @@ struct EventForm: View {
     @Binding var end: String
     @Binding var toGroup: Bool?
     @Binding var tags: [String]
+    /// いつまで（依頼 700）。`yyyy-MM-dd`。日をまたがないなら空。
+    @Binding var untilDay: String
+    /// アラームと、鳴らす人（依頼 701）。付けないなら空。
+    @Binding var alarmAt: String
+    @Binding var alarmFor: String
     let add: () -> Void
     /// **選びは、このダイアログが持つ**（依頼 547）── `@Binding` を直に触ると、
     /// 一つ選ぶたびに外の画面まで描き直されて、選んだマークが消える（画面で出た）。
@@ -997,6 +1094,12 @@ struct EventForm: View {
     @State private var canGroup = false
     @State private var naming = false
     @State private var typed = ""
+    /// 終わりの日とアラーム（依頼 699・まだ絵を見てもらうところ）。
+    @State private var manyDays = false
+    @State private var until = Date()
+    @State private var alarm = "なし"
+    @State private var alarmWho = "自分だけ"
+    static let alarms = ["なし", "5分前", "10分前", "30分前", "1時間前", "前日"]
 
     static let times: [String] = (0..<24).flatMap { h in ["00", "15", "30", "45"].map { String(format: "%02d:", h) + $0 } }
 
@@ -1056,8 +1159,42 @@ struct EventForm: View {
                         .onChange(of: start) { _, now in till = Self.plus(now, 60) }
                     Picker("終了", selection: $till) { ForEach(Self.times, id: \.self) { Text($0).tag($0) } }
                         .disabled(allDay)
+                    // **「日をまたぐ」と「いつまで」**（依頼 699・本人が字を決めた）。
+                    //
+                    // はじめ「何日もつづく」「終わりの日」と書いたが、本人に
+                    // 止められた ── **「終わりの日」は世の終わりに読める**し、
+                    // 「何日もつづく」はうんざりしている響きがある。
+                    // 「日をまたぐ」なら、終日の何日間も、22:00〜翌 02:00 のような
+                    // 夜をまたぐ予定も、同じ一言で読める。
+                    //
+                    // **畳まない**（本人が絵を見て甲を選んだ）── アラームは
+                    // ついでに付けるもので、一回押さないと見えない場所にあると
+                    // 使われない。全部ひらいても一画面に収まることを画面で確かめた。
+                    Toggle("日をまたぐ", isOn: $manyDays)
+                    if manyDays {
+                        DatePicker("いつまで", selection: $until, displayedComponents: .date)
+                    }
                 } footer: {
                     if !said.isEmpty { Text(said).foregroundStyle(.red) }
+                }
+                Section {
+                    Picker("アラーム", selection: $alarm) {
+                        ForEach(Self.alarms, id: \.self) { Text($0).tag($0) }
+                    }
+                    if alarm != "なし" {
+                        // **「鳴らす」とは言わない**（依頼 701・本人「鳴らすは変だ」）
+                        // ── 鳴るのは端末で、人ではない。切っておけば自分の端末
+                        // だけ、入れれば同期している全員の端末に届く。
+                        // 前書きの `alarm-who` に残るので、変えれば全員に伝わる。
+                        Toggle("全員に通知する", isOn: Binding(
+                            get: { alarmWho == "全員" },
+                            set: { alarmWho = $0 ? "全員" : "自分だけ" }))
+                    }
+                } footer: {
+                    // **誰に届くかだけ言う**（依頼 701・本人が字を決めた）。
+                    // 「次の同期で届く」という時間差もあるが、本人が自明と
+                    // 判断した ── 実際に困ったら、そのとき足す。
+                    if alarmWho == "全員" { Text("同期相手に通知されます") }
                 }
             }
             .navigationTitle("予定を登録する")
@@ -1104,8 +1241,23 @@ struct EventForm: View {
         end = allDay ? "" : till
         toGroup = toG
         tags = who
+        // **日をまたがないなら、鍵そのものを書かない**（依頼 700）── 空の
+        // `until:` が前書きに残ると、読む側は「終わりがある」と思って毎回数える。
+        untilDay = manyDays ? Self.ymd(until) : ""
+        alarmAt = alarm == "なし" ? "" : alarm
+        // **自分だけなら、鍵を書かない**（依頼 701）── 既定を前書きに
+        // 並べても、読む側の仕事が増えるだけ。
+        alarmFor = (alarm == "なし" || alarmWho != "全員") ? "" : "全員"
         add()
         dismiss()
+    }
+
+    /// `Date` を `yyyy-MM-dd` に（前書きに書く形）。
+    static func ymd(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: d)
     }
 
     static func plus(_ t: String, _ min: Int) -> String {

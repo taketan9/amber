@@ -100,7 +100,13 @@ enum Phone {
     /// `into` に予定表の名前を渡すと、そこへ書く（依頼 545）──
     /// グループカレンダーは端末に降りてきた1 つなので、**名前でしか指せない**。
     /// `notes` はメモ欄（誰の用事かのタグが、その最後の行に入る）。
+    /// 予定を一つ足す。
+    ///
+    /// `until` は**日をまたぐ予定の最後の日**（依頼 700・`yyyy-MM-dd`）。
+    /// `alarm` は「10分前」のような言葉（依頼 701）── 端末の予定表に
+    /// 置くので、**鳴らすのは OS** で、amber が起きている必要はない。
     static func add(title: String, day: String, at: String?, end: String? = nil,
+                    until: String? = nil, alarm: String? = nil,
                     notes: String = "", into: String = "") throws {
         var target = store.defaultCalendarForNewEvents
         if !into.isEmpty {
@@ -124,8 +130,31 @@ enum Phone {
         } else {
             e.endDate = start.addingTimeInterval(60 * 60)
         }
+        // **日をまたぐなら、終わりの日まで伸ばす**（依頼 700）。終日なら
+        // その日いっぱい、時刻つきなら終わりの時刻まで。
+        if let until, let last = when(until, at == nil ? nil : end), last > e.endDate ?? start {
+            e.endDate = last
+        }
+        // **アラームは端末の予定表に預ける**（依頼 701）── OS が鳴らすので、
+        // amber が起きていなくても鳴る。
+        if let alarm, let before = Self.before(alarm) {
+            e.addAlarm(EKAlarm(relativeOffset: before))
+        }
         if !notes.isEmpty { e.notes = notes }
         try store.save(e, span: .thisEvent)
+    }
+
+    /// 「10分前」のような言葉を、秒（負の数）に（依頼 701）。
+    /// 知らない言葉なら `nil` ── 鳴らさないほうが、変な時刻に鳴るよりよい。
+    static func before(_ word: String) -> TimeInterval? {
+        switch word {
+        case "5分前": return -5 * 60
+        case "10分前": return -10 * 60
+        case "30分前": return -30 * 60
+        case "1時間前": return -60 * 60
+        case "前日": return -24 * 60 * 60
+        default: return nil
+        }
     }
 
     /// 予定を消す。

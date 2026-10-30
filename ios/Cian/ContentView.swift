@@ -38,9 +38,26 @@ struct ContentView: View {
     /// いま離れたフォルダ。中のノートを持っていくか訊いているあいだだけ保持する。
     @State private var moving: URL?
     @State private var moved: String?
-    @State private var showing = false
+    /// この一覧から進める先（依頼 697）。**道で持つ。**
+    ///
+    /// 前は `showing` と `showCal` の二つの旗で、行き先は一つの
+    /// `navigationDestination` の中で選んでいた。それだと**ノートから戻ると
+    /// 一覧まで落ちる** ── 予定を押して開いたノートから「戻る」を押したら、
+    /// カレンダーへ帰りたい（本人）。道にすると `[.cal, .desk]` から
+    /// `.desk` が外れるだけで、何も足さずにそうなる。
+    enum Going: Hashable { case cal, desk }
+    @State private var path: [Going] = []
     /// カレンダーが出ているか（依頼 454）。
-    @State private var showCal = false
+    /// ノートを開いているか（道の先が `.desk` か）。
+    private var showing: Bool { path.last == .desk }
+    /// ノートの画面へ進む。二度押しても積み上がらない。
+    private func openDesk() { if path.last != .desk { path.append(.desk) } }
+    /// カレンダーの画面へ進む。**ここから先はカレンダーが既定の画面**
+    /// （依頼 697・「ノートに戻る」を押すまで）。
+    private func openCal() {
+        CalPrefs.stay = true
+        if path.first != .cal { path = [.cal] }
+    }
     /// 指がどのフォルダの行の上にあるか、そしてそれが `..` かどうか。
     @State private var into: String?
     @State private var outside = false
@@ -72,7 +89,7 @@ struct ContentView: View {
     @State private var wide: CGFloat = 393
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if store.rootName.isEmpty {
                     empty
@@ -168,13 +185,13 @@ struct ContentView: View {
         // amber のフォルダの外にあるものなので、一覧には出ない。
         .modifier(GuestHooks(open: { note in
             desk.open(note, store)
-            showing = true
+            openDesk()
         }, opened: { at in
             // 取り込んだあと ── 一覧を読み直して、取り込んだ先を開き直す。
             store.reload()
             if let one = store.notes.first(where: { $0.path == at }) {
                 desk.open(one, store)
-                showing = true
+                openDesk()
             }
         }))
         .modifier(TourHooks(openSample: openSample,
@@ -278,6 +295,10 @@ struct ContentView: View {
         .onChange(of: ring.wanted) { _, _ in answer() }
         .onChange(of: store.notes) { _, _ in answer() }
         .task {
+            // **前にカレンダーで終えていたら、カレンダーから始める**
+            // （依頼 697・本人「意図的にノートに戻る を押下しない限り
+            // カレンダーをデフォルト表示にしてほしい」）。
+            if CalPrefs.stay && path.isEmpty { path = [.cal] }
             store.restore()
             // 同期（依頼 500）── フォルダと机を渡して、サインインしていれば時計を回す。
             Syncing.shared.store = store
@@ -335,7 +356,7 @@ struct ContentView: View {
                 // ほかの場所の .md を一時的に開く（一覧には入れない・依頼 517）。
                 if let u = urls.first, let n = store.openOutside(u) {
                     desk.open(n, store)
-                    showing = true
+                    openDesk()
                 }
             case (.zip, .success(let urls)):
                 guard let zip = urls.first else { break }
@@ -374,14 +395,14 @@ struct ContentView: View {
                     // iPhone も同じに ── 打ちたくなったら、画面のどこを叩いても
                     // その場で編集画面に入る（`NoteView`）。
                     desk.open(note, store)
-                    showing = true
+                    openDesk()
                 }
             }, known: store.allTags, stencils: store.stencils, fromStencil: { t in
                 do {
                     guard let made = try store.fromStencil(t),
                           let note = store.notes.first(where: { $0.path == made }) else { return }
                     desk.open(note, store)
-                    showing = true
+                    openDesk()
                 } catch { store.trouble = error.localizedDescription }
             }, seedStencils: {
                 let n = store.addStencils()
@@ -403,7 +424,7 @@ struct ContentView: View {
     private func row(_ note: Note) -> some View {
                 Button {
                 desk.open(note, store)
-                showing = true
+                openDesk()
             } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
@@ -500,7 +521,7 @@ struct ContentView: View {
                     // 「⌥ 押し」と同じことをする。
                     Button {
                         desk.open(note, store)
-                        showing = true
+                        openDesk()
                     } label: {
                         Label("新しいタブで開く", systemImage: "rectangle.stack.badge.plus")
                     }
@@ -597,7 +618,7 @@ struct ContentView: View {
         guard let note = store.notes.first(where: { $0.path == want }) else { return }
         ring.wanted = nil
         desk.open(note, store)
-        showing = true
+        openDesk()
     }
 
     private func moveTo(_ note: Note, _ book: String?) {
@@ -651,7 +672,7 @@ struct ContentView: View {
         let note = store.notes.first { ($0.title ?? "").contains("ようこそ") } ?? store.notes.first
         guard let note else { return }
         desk.open(note, store)
-        showing = true
+        openDesk()
         // 「表示」画面が最初の絵を出すまで、幕は待つ。
         tour.opened()
     }
@@ -783,7 +804,7 @@ struct ContentView: View {
                         // **カレンダー**（依頼 454）── デスクトップ版の左の列でもいちばん上。
                         // **三つの段は同じ大きさ・同じ色**（本人・2026-09-12）── マークは 26pt の
                         // 枠にアクセント色、文字は 16pt の太め。「新しいノート」と揃える。
-                        Button { showCal = true } label: {
+                        Button { openCal() } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "calendar")
                                     .font(.system(size: 18, weight: .semibold))
@@ -877,7 +898,7 @@ struct ContentView: View {
                         NavigationLink("すべて見る") {
                             Stars(store: store) { note in
                                 desk.open(note, store)
-                                showing = true
+                                openDesk()
                             }
                         }
                         .font(.caption)
@@ -1091,7 +1112,7 @@ struct ContentView: View {
             if treeing2 {
                 Nest(store: store, open: { note in
                     desk.open(note, store)
-                    showing = true
+                    openDesk()
                 }, row: { note in AnyView(row(note)) })
             } else {
                 // 並び順に沿った見出しの下に置く ── `bands` を見よ。
@@ -1138,7 +1159,7 @@ struct ContentView: View {
                     // 素直。フォルダを一つ潜っただけの「進む」より、
                     // 待っているノートのほうを先に見る。
                     if !desk.showing.isEmpty && desk.current != nil {
-                        showing = true
+                        openDesk()
                     } else {
                         go { _ = store.back() }
                     }
@@ -1171,20 +1192,19 @@ struct ContentView: View {
         // 上に一覧が覗いていて、下へ払えば閉じてしまう。押して進む画面に
         // すると、左上は「‹ 戻る」になり、月の表に画面を全部渡せる。
         //
-        // **行き先は一つにまとめる。** `navigationDestination(isPresented:)` を
-        // 同じ画面に二つ置くと、**あとに書いたほうだけが効く** ── 別々に
-        // 置いたら、カレンダーを押しても何も起きなかった（シミュレータで出た）。
-        .navigationDestination(isPresented: Binding(
-            get: { showing || showCal },
-            set: { on in if !on { showing = false; showCal = false } }
-        )) {
-            if showCal {
+        // **行き先は道で選ぶ。** `navigationDestination(isPresented:)` を
+        // 同じ画面に二つ置くと**あとに書いたほうだけが効く**ので（依頼 670 で
+        // 踏んだ）、旗を二つ並べるのはやめた。道なら値で分かれる。
+        .navigationDestination(for: Going.self) { go in
+            switch go {
+            case .cal:
+                // 予定を押したら、カレンダーの**上に**ノートを積む ──
+                // 戻るとカレンダーへ帰る（依頼 697）。
                 Calendaring(store: store, open: { note in
                     desk.open(note, store)
-                    showCal = false
-                    showing = true
+                    openDesk()
                 })
-            } else {
+            case .desk:
                 DeskView(desk: desk, store: store)
             }
         }

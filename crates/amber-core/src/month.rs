@@ -80,6 +80,30 @@ fn now_nanos() -> u64 {
         .unwrap_or(0)
 }
 
+/// 始まりの**次の日**から終わりの日まで（依頼 700）。
+///
+/// 始まりの日は呼ぶ側が既に並べているので、ここでは出さない。
+/// `until` が無い・始まりより前・同じ日なら、何も返さない。
+/// **百日で打ち切る** ── 書き間違いで `until: 2099-01-01` と入っても、
+/// 月の表が何万行にもならないように。
+fn spans(start: chrono::NaiveDate, until: Option<chrono::NaiveDate>,
+         from: chrono::NaiveDate, to: chrono::NaiveDate) -> Vec<chrono::NaiveDate> {
+    let Some(last) = until else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut d = start;
+    for _ in 0..100 {
+        let Some(next) = d.succ_opt() else { break };
+        if next > last {
+            break;
+        }
+        d = next;
+        if d >= from && d <= to {
+            out.push(d);
+        }
+    }
+    out
+}
+
 /// その日にあるもの、一つ。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Slot {
@@ -90,6 +114,10 @@ pub struct Slot {
     /// もとのノート（押したら開く先）。
     pub path: String,
     pub kind: Kind,
+    /// その予定の色の名前（依頼 702・前書きの `color:`）。無ければ `None`。
+    pub color: Option<String>,
+    /// 同期している全員の端末に通知するか（依頼 701・前書きの `alarm-who: 全員`）。
+    pub alarm_all: bool,
 }
 
 /// 何としてそこに居るか。
@@ -223,7 +251,8 @@ pub fn of(rows: &[crate::survey::Row], year: i32, month: u32) -> Vec<Slot> {
         if let Some(d) = known.created.and_then(local_day) {
             if d >= from && d <= to {
                 out.push(Slot { day: d, at: None, title: title.clone(),
-                                path: path.clone(), kind: Kind::Note });
+                                path: path.clone(), kind: Kind::Note,
+                                color: None, alarm_all: false });
             }
         }
 
@@ -232,7 +261,18 @@ pub fn of(rows: &[crate::survey::Row], year: i32, month: u32) -> Vec<Slot> {
             let d = once.date();
             if d >= from && d <= to {
                 out.push(Slot { day: d, at: Some(once.time()), title: title.clone(),
-                                path: path.clone(), kind: Kind::Once });
+                                path: path.clone(), kind: Kind::Once,
+                                color: plan.color.clone(), alarm_all: plan.alarm_all });
+            }
+            // **日をまたぐぶんも並べる**（依頼 700）── 始まった日だけに出すと、
+            // 二日目を見ている人には何も無いように見える。
+            // **二日目から先に時刻は付けない** ── 付けると「毎日 22 時から」に
+            // 読める。終わる日の時刻だけは、終わりとして出す。
+            for d in spans(d, plan.until, from, to) {
+                let at = if Some(d) == plan.until { plan.until_at } else { None };
+                out.push(Slot { day: d, at, title: title.clone(),
+                                path: path.clone(), kind: Kind::Once,
+                                color: plan.color.clone(), alarm_all: plan.alarm_all });
             }
         }
         // **時刻の無い一度きり（終日）も、その日に出す**（2026-09-22）。前は
@@ -241,14 +281,21 @@ pub fn of(rows: &[crate::survey::Row], year: i32, month: u32) -> Vec<Slot> {
         if let Some(d) = plan.day {
             if d >= from && d <= to {
                 out.push(Slot { day: d, at: None, title: title.clone(),
-                                path: path.clone(), kind: Kind::Once });
+                                path: path.clone(), kind: Kind::Once,
+                                color: plan.color.clone(), alarm_all: plan.alarm_all });
+            }
+            for d2 in spans(d, plan.until, from, to) {
+                out.push(Slot { day: d2, at: None, title: title.clone(),
+                                path: path.clone(), kind: Kind::Once,
+                                color: plan.color.clone(), alarm_all: plan.alarm_all });
             }
         }
         if let Some((every, h, m)) = plan.every {
             let at = chrono::NaiveTime::from_hms_opt(h, m, 0);
             for d in lands(every, from, to) {
                 out.push(Slot { day: d, at, title: title.clone(),
-                                path: path.clone(), kind: Kind::Repeat });
+                                path: path.clone(), kind: Kind::Repeat,
+                                color: plan.color.clone(), alarm_all: plan.alarm_all });
             }
         }
     }
@@ -269,6 +316,73 @@ mod tests {
         let stop = std::sync::atomic::AtomicBool::new(false);
         let limits = crate::survey::Limits { depth: 4, rows: 200, hidden: false, ..Default::default() };
         crate::survey::survey(root, limits, &stop).rows
+    }
+
+    #[test]
+    fn 日をまたぐ予定は_終わりの日まで並ぶ() {
+        // 依頼 700。`remind:` が始まりで `until:` が終わり。
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::write(root.join("旅行.md"),
+            "---\ntitle: 家族旅行\nremind: 2026-11-02\nuntil: 2026-11-05\n---\n\n三泊四日。\n").unwrap();
+        let got = super::of(&walk(root), 2026, 11);
+        let days: Vec<String> = got.iter()
+            .filter(|s| s.title == "家族旅行" && s.kind == super::Kind::Once)
+            .map(|s| s.day.to_string())
+            .collect();
+        assert_eq!(days, ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05"]);
+    }
+
+    #[test]
+    fn 日をまたぐ予定の_二日目から先に時刻は付かない() {
+        // 付けると「毎日 22 時から」に読める。終わる日の時刻だけ、終わりとして出す。
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::write(root.join("当番.md"),
+            "---\ntitle: 夜の当番\nremind: 2026-11-07 22:00\nuntil: 2026-11-08 02:00\n---\n\n夜。\n").unwrap();
+        let got = super::of(&walk(root), 2026, 11);
+        let mine: Vec<(String, Option<String>)> = got.iter()
+            .filter(|s| s.title == "夜の当番")
+            .map(|s| (s.day.to_string(), s.at.map(|t| t.format("%H:%M").to_string())))
+            .collect();
+        assert_eq!(mine, [
+            ("2026-11-07".to_string(), Some("22:00".to_string())),
+            ("2026-11-08".to_string(), Some("02:00".to_string())),
+        ]);
+    }
+
+    #[test]
+    fn 終わりの日が遠すぎても_百日で打ち切る() {
+        // 書き間違いで `until: 2099-01-01` と入っても、月の表が何万行にもならない。
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::write(root.join("ずっと.md"),
+            "---\ntitle: ずっと\nremind: 2026-11-01\nuntil: 2099-01-01\n---\n\n長い。\n").unwrap();
+        let got = super::of(&walk(root), 2026, 11);
+        let n = got.iter().filter(|s| s.title == "ずっと" && s.kind == super::Kind::Once).count();
+        assert_eq!(n, 30, "十一月は三十日ぶんだけ（百日の打ち切りは翌月以降に効く）");
+        // 二月先は、打ち切りのぶんだけ減る。
+        let far = super::of(&walk(root), 2027, 3);
+        let m = far.iter().filter(|s| s.title == "ずっと").count();
+        assert_eq!(m, 0, "百日を越えた先には出ない");
+    }
+
+    #[test]
+    fn 色と_全員に通知するかが_予定に乗る() {
+        // 依頼 701・702。どちらも前書きから来る。
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::write(root.join("面談.md"),
+            "---\ntitle: 面談\nremind: 2026-11-10 14:00\ncolor: カーマイン\nalarm: 10分前\nalarm-who: 全員\n---\n\n話す。\n").unwrap();
+        std::fs::write(root.join("素.md"),
+            "---\ntitle: 素のまま\nremind: 2026-11-11 09:00\n---\n\n何も書かない。\n").unwrap();
+        let got = super::of(&walk(root), 2026, 11);
+        let one = got.iter().find(|s| s.title == "面談").unwrap();
+        assert_eq!(one.color.as_deref(), Some("カーマイン"));
+        assert!(one.alarm_all);
+        let bare = got.iter().find(|s| s.title == "素のまま").unwrap();
+        assert_eq!(bare.color, None, "書いていなければ色は付かない");
+        assert!(!bare.alarm_all, "書いていなければ自分だけ");
     }
 
     #[test]

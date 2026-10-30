@@ -9020,6 +9020,18 @@ const CAL_COLORS = [
     ['#7a5c3a', 'セピア'], ['#5a6b7f', 'スレート'],
 ];
 const colorName = (hex) => (CAL_COLORS.find(([h]) => h === hex) || [])[1] || hex;
+/// 色の名前から色そのものへ（依頼 702）。知らない名前は空 ── 変な色で
+/// 塗るより、いつもの色のままのほうがよい。
+const colorHex = (name) => (CAL_COLORS.find(([, n]) => n === name) || [])[0] || '';
+/// ノートに書いてある色を、札と行に当てる（依頼 702）。
+///
+/// **前書きの `color:` がいちばん強い** ── 人が決めたものなので、出どころ
+/// （よそ＝青、端末＝自分の色）より優先する。書いていなければ何も足さず、
+/// いままでの見た目のまま。iPhone の `tint(of:)` と同じ決まり。
+function evPaint(s) {
+    const hex = colorHex(s.color || '');
+    return hex ? ' style="color:' + escapeAttr(hex) + '"' : '';
+}
 /// 自動で配る五色（本人・2026-09-12「見栄えのよい五色に絞る。五人以上は
 /// ループで」）── 並んだ順に ローズ・アンバー・リーフ・バイオレット・シアン、
 /// 六人目はまたローズ。
@@ -9409,7 +9421,7 @@ async function drawCal() {
             // 色はタグ（誰の用事か）にだけ使うので、見えているかどうかは
             // 塗りで言う ── 10px のマークは、月の表の一行では小さすぎる。
             '<span class="ev ' + s.kind + (inGroup(s) ? ' sh' : ' lo')
-            + evMark(s) + '"' + evId(s) + tagPaint(s)
+            + evMark(s) + '"' + evId(s) + tagPaint(s) + evPaint(s)
             + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '') + '>'
             + (s.at ? escapeHtml(s.at) + ' ' : '') + escapeHtml(s.title) + '</span>').join('');
         const rest = sorted.length > 3 ? '<span class="more">ほか ' + (sorted.length - 3) + '</span>' : '';
@@ -9488,6 +9500,7 @@ function drawHours() {
         return '<div><div class="hd' + mark + '">' + weekName(d) + ' '
             + Number(d.slice(8)) + '</div>'
             + whole.map((s) => '<div class="ad ' + s.kind + evMark(s) + '"' + evId(s)
+                + evPaint(s)
                 + (s.path ? ' data-at="' + escapeAttr(s.path) + '"' : '')
                 + '>' + escapeHtml(s.title) + '</div>').join('') + '</div>';
     }).join('');

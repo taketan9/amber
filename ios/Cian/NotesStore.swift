@@ -1225,7 +1225,10 @@ final class NotesStore: ObservableObject {
             }
         }
         if made > 0 { reload() }
-        if let root { ringAllday(root) }
+        if let root {
+            ringAllday(root)
+            ringShared(root)
+        }
     }
 
     /// **終日の予定は、その日に amber を開いた瞬間に鳴らす**（本人・2026-09-22）。
@@ -1242,6 +1245,42 @@ final class NotesStore: ObservableObject {
     ///
     /// 出すのは「いますぐ」の通知。アプリが前に出ていても、`Ring`
     /// （`willPresent`）が上から出す。
+    /// **全員に通知する予定を、この端末でも仕掛ける**（依頼 701）。
+    ///
+    /// 予定表のアラームはその端末にしか入らないので、同期した相手には
+    /// 届かない。`alarm-who: 全員` と書いてあるノートは、**受け取った端末が
+    /// 自分で仕掛ける** ── だから同期が回ってから効く。
+    ///
+    /// **仕掛け直しても積み上がらない。** 鍵はノートのパスなので、同じ
+    /// ノートを五回直しても五回鳴らない（`Bell.set` と同じ決まり）。
+    func ringShared(_ root: URL) {
+        guard let r = try? Cian.call("alarms", ["path": root.path]),
+              let notes = r["notes"] as? [[String: Any]] else { return }
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        let c = UNUserNotificationCenter.current()
+        for n in notes {
+            guard let path = n["path"] as? String,
+                  let at = n["at"] as? String, let when = f.date(from: at) else { continue }
+            let id = "\(path)#shared"
+            c.removePendingNotificationRequests(withIdentifiers: [id])
+            // **過ぎた時刻には仕掛けない** ── 仕掛けると、同期した瞬間に
+            // 昔の予定がまとめて鳴る。
+            guard when > Date() else { continue }
+            let body = UNMutableNotificationContent()
+            body.title = n["title"] as? String ?? ""
+            body.body = "まもなくです"
+            body.sound = .default
+            body.userInfo = ["path": path]
+            let parts = Calendar.current.dateComponents(
+                [.year, .month, .day, .hour, .minute], from: when)
+            c.add(UNNotificationRequest(
+                identifier: id, content: body,
+                trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)))
+        }
+    }
+
     func ringAllday(_ root: URL) {
         guard let r = try? Cian.call("allday", ["path": root.path]),
               let day = r["day"] as? String,

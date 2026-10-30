@@ -2747,6 +2747,32 @@ pub struct Remind {
     /// `once` とは別に持つ ── **鳴らす時刻を勝手に決めない**。終日の予定を
     /// 朝の何時に知らせるかは本人が決めること（まだ決めていない）。
     pub day: Option<chrono::NaiveDate>,
+    /// `until: 2026-11-03` ── **何日もつづく予定の、最後の日**（依頼 700）。
+    ///
+    /// `remind:` が始まりで、こちらが終わり。終日の何日間も、
+    /// `remind: 2026-11-01 22:00` ＋ `until: 2026-11-02 02:00` のように
+    /// 夜をまたぐ予定も、同じ鍵で書ける。
+    ///
+    /// **`remind:` の書き方は一字も変えていない** ── 鍵を足しただけなので、
+    /// いままでのノートはそのまま読める。
+    pub until: Option<chrono::NaiveDate>,
+    /// `until: 2026-11-02 02:00` の時刻のほう（無ければ終日）。
+    pub until_at: Option<chrono::NaiveTime>,
+    /// `color: アンバー` ── **その予定の色**（依頼 702）。
+    ///
+    /// 名前で持つ（`#d9a400` ではなく）── ファイルを直に読んでも何色か
+    /// 分かり、あとで色味を調整しても古いノートがそのまま追従する。
+    /// 名前はデスクトップ版の `CAL_COLORS` と同じ八つ。
+    ///
+    /// **ノートの中に書く。** 別の表に持つと amber が隠しDBを持つことになり、
+    /// 「色を変えたら同期した全員に同じ色で見える」も別の仕掛けが要る。
+    /// 前書きに書けば、ノートが運ばれるだけで全員に伝わる。
+    pub color: Option<String>,
+    /// `alarm-who: 全員` ── **同期している全員の端末に通知するか**（依頼 701）。
+    /// 無ければ自分の端末だけ。
+    pub alarm_all: bool,
+    /// `alarm: 10分前` ── 何分前に通知するか（依頼 701）。無ければ `None`。
+    pub alarm_min: Option<u32>,
     /// `repeat: weekly wed 09:00` ── 繰り返し。
     pub every: Option<(Every, u32, u32)>,
     /// `last: 2026-09-03` ── この繰り返しを最後に実行した日。ノートの中に持つのは、
@@ -2785,6 +2811,32 @@ pub fn remind_lines(lines: &[String]) -> Remind {
         if out.once.is_none() {
             out.day = day(v.trim());
         }
+    }
+    if let Some(v) = f.fields.get("until") {
+        // 時刻つきなら両方、日付だけなら日付だけ（依頼 700）。
+        if let Some(t) = when(v) {
+            out.until = Some(t.date());
+            out.until_at = Some(t.time());
+        } else {
+            out.until = day(v.trim());
+        }
+    }
+    if let Some(v) = f.fields.get("color") {
+        let name = v.trim();
+        if !name.is_empty() {
+            out.color = Some(name.to_string());
+        }
+    }
+    out.alarm_all = f.fields.get("alarm-who").is_some_and(|v| v.trim() == "全員");
+    if let Some(v) = f.fields.get("alarm") {
+        out.alarm_min = match v.trim() {
+            "5分前" => Some(5),
+            "10分前" => Some(10),
+            "30分前" => Some(30),
+            "1時間前" => Some(60),
+            "前日" => Some(24 * 60),
+            _ => None,
+        };
     }
     if let Some(v) = f.fields.get("last") {
         out.last = day(v.trim());
