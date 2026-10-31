@@ -26,6 +26,48 @@
 いまの署名は**無料の個人チーム**なので、入れたアプリは **7 日で起動しなくなる**。
 切れたらこの道具をもう一度走らせる。
 
+**入れ直しただけでは延びない**（2026-10-31 に確かめた）。証書は Xcode が手元に
+持っているものをそのまま使い回すので、期限も元のまま。**控えを消してから**
+入れ直すと、その日から 7 日になる。消しても、iPhone に入っているアプリは
+元の期限まで動く ── 消して失敗しても損はしない。
+
+```bash
+rm -f ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovision
+./scripts/phone-install.sh
+```
+
+### 自分で延ばし続ける（依頼 709）
+
+上の二行を、この Mac に預けられる。
+
+```bash
+cp packaging/resign.plist ~/Library/LaunchAgents/com.taketan.amber.resign.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.taketan.amber.resign.plist
+```
+
+一日一度見に来て、**残りが 4 日を切った日だけ**入れ直す。記録は
+`~/Library/Logs/amber-resign.log`。手で確かめるなら:
+
+```bash
+./scripts/resign.sh --check     残り日数を言うだけ
+./scripts/resign.sh --now       残りを見ずに、いま入れ直す
+```
+
+やめるとき:
+
+```bash
+launchctl bootout gui/$(id -u)/com.taketan.amber.resign
+rm ~/Library/LaunchAgents/com.taketan.amber.resign.plist
+```
+
+**`cron` ではなく `launchd` なのは、寝ていた時間に当たった回を起きたあとに
+走らせ直すから。** `cron` は黙って一回飛ばす。三日に一度しか機会がないものを
+`cron` に預けると、寝ていた回がそのまま消える。
+
+**これでも切れることはある。** 無料アカウントは、ときどき Xcode の画面で
+Apple ID に入り直すよう求める。人が居ない回は失敗するので、**期限が延びな
+かったら画面に知らせる** ── そのときは Xcode を開いて入り直す。
+
 七日ごとに端末を集めて回るのが続かないなら、**Apple Developer Program（年 99
 ドル）の TestFlight** にすると、ケーブルも Mac も要らず、招待のリンクから自分で
 入れられて 90 日動く。家族に配って使ってもらうならそちらが本筋。**お金の話なので

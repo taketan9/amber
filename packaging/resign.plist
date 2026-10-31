@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  無料署名の七日を、切れる前に延ばす（依頼 709）。
+
+  入れる:
+      cp packaging/resign.plist ~/Library/LaunchAgents/com.taketan.amber.resign.plist
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.taketan.amber.resign.plist
+
+  いま走らせる（待たずに試す）:
+      launchctl kickstart -p gui/$(id -u)/com.taketan.amber.resign
+
+  やめる:
+      launchctl bootout gui/$(id -u)/com.taketan.amber.resign
+      rm ~/Library/LaunchAgents/com.taketan.amber.resign.plist
+
+  一日一度しか見に来ませんが、入れ直すのは残りが 4 日を切った日だけです
+  （判断は scripts/resign.sh が持っています）。
+
+  **寝ていた時間に当たっても落ちません。** launchd は、起きたあとに
+  走らせ直します ── cron は黙って一回飛ばします。三日に一度しか機会が
+  ないものを cron に預けると、寝ていた回がそのまま消えます。
+
+  走る時刻を 3 時 17 分にしてあるのは、きりのよい時刻を避けるためです。
+  0 分と 30 分は、ほかの仕掛けも同じ時刻に動きます。
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.taketan.amber.resign</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/dateshimakaya/workspace/amber/scripts/resign.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>17</integer>
+    </dict>
+
+    <!-- ログインしたときにも一度見に来ます。残りが 4 日以上あれば何もしません。 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- launchd 自身が困ったことも残す（スクリプトの記録は別の場所です）。 -->
+    <key>StandardOutPath</key>
+    <string>/Users/dateshimakaya/Library/Logs/amber-resign-launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dateshimakaya/Library/Logs/amber-resign-launchd.log</string>
+</dict>
+</plist>

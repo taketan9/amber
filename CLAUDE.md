@@ -128,7 +128,9 @@ python3 packaging/amber.py           # 葉の形（終了コード 1 が合格�
 ```
 
 - **無料署名は 7 日で切れる。** 延ばすには証書を消してから入れ直す
-  （`rm ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovision`）
+  （`rm ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/*.mobileprovision`）。
+  **`launchd` に預けてある**（依頼 709・`scripts/resign.sh`・一日一度見て、
+  残り 4 日を切った日だけ入れ直す）。記録は `~/Library/Logs/amber-resign.log`
 - **初めてその端末に入れたときは、本人の操作が一度だけ要る** ──
   設定 → 一般 → VPN とデバイス管理 → デベロッパ APP → 信頼
 - **入れたあとは端末から版を読んで確かめる** ──
