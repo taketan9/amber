@@ -365,6 +365,121 @@ enum Walk {
             if !CalPrefs.sources().contains(where: { $0.key == "away:会社" }) { return "隠したものが一覧に無く、戻せません" }
             return nil
         }
+        // **予定表の一覧の名前**（依頼 705）。端末にどの予定表があるかに
+        // 寄りかからせない ── 見たいのは「OS が言ったことを core に渡して、
+        // デスクトップ版と同じ字で出す」ところだけ。
+        step("カレンダー表示設定：予定表の一覧は、出どころを括弧に入れて出す") {
+            let rows: [[String: Any]] = [
+                ["title": "ファミリー", "source": "iCloud", "writable": true],
+                ["title": "日本の祝日", "source": "その他", "writable": false],
+                ["title": "誕生日", "source": "iCloud", "writable": false],
+                ["title": "誕生日", "source": "Gmail", "writable": false],
+            ]
+            let out = try Cian.call("callist", ["rows": rows, "group": "ファミリー"])
+            guard let got = out["rows"] as? [[String: Any]] else { return "一覧が返りません" }
+            if got.count != 3 { return "行が \(got.count) 本です（同じ名前はまとめるはず）" }
+            let names = got.map { $0["name"] as? String ?? "" }
+            if names[0] != "ファミリー（iCloud・グループの予定表）" { return "出どころとグループが出ていません: \(names[0])" }
+            if names[1] != "日本の祝日（その他・読むだけ）" { return "読むだけと言っていません: \(names[1])" }
+            if names[2] != "誕生日（iCloud・Gmail・読むだけ）" { return "同じ名前をまとめていません: \(names[2])" }
+            // **鍵の形は変えない。** 変えると、引っ込めてある予定表の憶えが
+            // 当たらなくなって黙って出てくる。
+            if got[0]["key"] as? String != "here:ファミリー" { return "鍵の形が変わっています: \(got[0]["key"] ?? "")" }
+            return nil
+        }
+        // **端末の中だけの予定表を「Default」と出さない**（依頼 710）。
+        // iOS の API は、端末の中だけの出どころに「Default」という名前を返す
+        // （2026-10-31 に奥さんの iPhone で出た）。設定アプリは同じものを
+        // 「このiPhone」と書くので、API の字をそのまま出すと意味が通らない ──
+        // そして iCloud か端末の中だけかの違いが、**共有できるかどうかを
+        // 決めている。**
+        //
+        // **見るものが無かったら、そう言って落ちる。** 黙って通ると、
+        // 予定表を一つも読めていない回と、ちゃんと言い換えている回が
+        // 同じ顔になる。
+        step("カレンダー：端末の中だけの予定表を「Default」と呼ばない") {
+            let rows = Phone.shelves
+            if rows.isEmpty { return "予定表を一つも読めていないので、確かめられません" }
+            for r in rows {
+                let from = r["source"] as? String ?? ""
+                if from == "Default" {
+                    return "「\(r["title"] as? String ?? "")」の出どころが Default のままです"
+                }
+            }
+            return nil
+        }
+        // **読むだけの予定表をグループに指しても、選べる**（依頼 698・本人が
+        // 2026-10-31 に決めた）。効かないのは予定を足すところだけで、
+        // そこは「書けません」と正しく断る ── 前は「まだありません。少し
+        // 待ってから」と、あるものを無いと言っていた。
+        step("カレンダー：読むだけの予定表に足そうとしたら、書けないと言う") {
+            // **この端末にどの予定表があるかに寄りかからせない。** 読むだけの
+            // 予定表が無いシミュレータでは、前の書き方だと**黙って通った** ──
+            // 「指摘が消えた」と「検査が何も見ていない」は画面の上で同じ顔を
+            // している。だから言い分そのものを確かめる。
+            let 無い = Phone.Trouble.noNamed("あ").localizedDescription
+            let 読むだけ = Phone.Trouble.readOnly("あ").localizedDescription
+            if !無い.contains("まだありません") { return "無いときの言い分が違います: \(無い)" }
+            if !読むだけ.contains("読むだけ") { return "書けないときの言い分が違います: \(読むだけ)" }
+            // **二つが同じ文であってはいけない。** 分けたことの意味が無くなる。
+            if 無い == 読むだけ { return "無いときと書けないときが同じ文です" }
+            if 読むだけ.contains("少し待ってから") { return "待てば入ると思わせています: \(読むだけ)" }
+            // この端末に無い名前を指したら「無い」と言うこと。
+            do {
+                try Phone.add(title: "試し", day: "2026-09-11", at: "10:00",
+                              into: "この端末には無い予定表")
+                return "無い予定表に足せてしまいました"
+            } catch let e {
+                if !e.localizedDescription.contains("まだありません") {
+                    return "無い予定表の断り方が違います: \(e.localizedDescription)"
+                }
+            }
+            // 読むだけの予定表がこの端末にあるなら、そちらも見る。
+            if let name = Phone.shelves.first(where: { ($0["writable"] as? Bool) == false })?["title"] as? String {
+                do {
+                    try Phone.add(title: "試し", day: "2026-09-11", at: "10:00", into: name)
+                    return "読むだけの予定表に足せてしまいました: \(name)"
+                } catch let e {
+                    if !e.localizedDescription.contains("読むだけ") {
+                        return "読むだけの予定表の断り方が違います: \(e.localizedDescription)"
+                    }
+                }
+            }
+            return nil
+        }
+        // **グループの予定表を選び直したら、絞り込みは「両方」に戻る**
+        // （依頼 707）。戻らないと、選んだ予定表が空のときにカレンダーが
+        // 空になり、ノートに書いた予定も一緒に消える（あれはグループ側に
+        // 出ない作りなので）── 理由の分からない空の画面になる。
+        step("カレンダー表示設定：グループの予定表を選び直すと、絞り込みが両方に戻る") {
+            let (g, sd, gid) = (CalPrefs.groupName, CalPrefs.side, CalPrefs.groupId)
+            defer { CalPrefs.groupName = g; CalPrefs.side = sd; CalPrefs.groupId = gid }
+            CalPrefs.groupName = "ambər グループ"
+            CalPrefs.groupId = "c1@group.calendar.google.com"
+            CalPrefs.side = "group"
+            // **設定の画面が呼ぶのと同じ 1 つを呼ぶ。** 画面の中に判断が
+            // あると、ここでは手順を写すことしかできず、**書いたことを
+            // 書いたまま確かめる段**になる。
+            CalPrefs.pickGroup("ファミリー")
+            if CalPrefs.side != "both" { return "絞り込みが \(CalPrefs.side) のままです" }
+            if CalPrefs.groupName != "ファミリー" { return "選んだ予定表が憶えられていません: \(CalPrefs.groupName)" }
+            if !CalPrefs.groupId.isEmpty { return "よその予定表に付け替えたのに id が残っています" }
+            // **amber が作った名前に戻したときは、id を捨てない。**
+            CalPrefs.groupId = "c1@group.calendar.google.com"
+            CalPrefs.pickGroup(CalPrefs.groupWord)
+            if CalPrefs.groupId.isEmpty { return "自分が作った予定表なのに id を捨てました" }
+            CalPrefs.groupName = "ファミリー"
+            CalPrefs.groupId = ""
+            // **ノートの予定はグループ側に出ない。** ここが変わると、
+            // 「グループだけ」にしたときノートが消える話も変わる。
+            let note = Calendaring.Slot(day: "2026-09-01", at: nil, title: "t", path: "/x.md", kind: "note")
+            if CalPrefs.inGroup(note) { return "ノートの予定がグループに入っています" }
+            CalPrefs.side = "group"
+            if CalPrefs.visible(note) { return "グループだけにしたのにノートが見えます" }
+            CalPrefs.side = "both"
+            if !CalPrefs.visible(note) { return "両方にしたのにノートが見えません" }
+            return nil
+        }
         step("カレンダー表示設定：土日と個人カレンダーの色を憶える") {
             let (w, c) = (CalPrefs.weekend, CalPrefs.hereColor)
             defer { CalPrefs.weekend = w; CalPrefs.hereColor = c }

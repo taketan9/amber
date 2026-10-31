@@ -43,6 +43,45 @@ enum Phone {
         return seen
     }
 
+    /// この端末にある予定表を、**出どころと書けるかまで添えて**返す（依頼 705）。
+    ///
+    /// 一行に組むのは core（`callist`）── まとめ方も、括弧の中の並べ方も、
+    /// 「読むだけ」と言うかどうかも、ぜんぶあちらが決める。
+    /// **ここが決めるのは、この OS での出どころの呼び名だけ**（下の
+    /// `sourceWord`）── そこは iPhone と Mac で違っていてよい一つで、
+    /// iPhone は「このiPhone」、Mac は「このパソコン」と言う。
+    /// 前は名前だけだったので、画面側が括弧の中を「（この iPhone）」と
+    /// 決め打ちしていた。iCloud の予定表も Gmail の予定表も端末の中だけの
+    /// 予定表も同じ字になり、**何がなんの予定表か分からなかった**
+    /// （本人・2026-10-31）。
+    ///
+    /// **出どころの言葉は、たいてい OS のものをそのまま渡す。** iOS は
+    /// Google のアカウントを「Gmail」、購読しているものを「その他」と呼ぶ ──
+    /// 設定アプリで見ている字と揃う。
+    ///
+    /// **ただし端末の中だけの予定表は「Default」と返ってくる**
+    /// （2026-10-31 に奥さんの iPhone で実際に出た ── 依頼 710）。
+    /// 設定アプリは同じものを「このiPhone」と書くので、**API の字は人に
+    /// 見せられない。** そこだけこちらで言い換える。英語の一語が画面に出て
+    /// しまうのもあるが、それ以上に困るのは**意味が通らない**ことで、
+    /// 「Default」では iCloud なのか端末の中だけなのか分からない ──
+    /// そしてその違いが、**共有できるかどうかを決めている。**
+    static var shelves: [[String: Any]] {
+        guard allowed else { return [] }
+        return store.calendars(for: .event).map { c in
+            ["title": c.title,
+             "source": sourceWord(c.source),
+             "writable": c.allowsContentModifications]
+        }
+    }
+
+    /// 出どころの、人に見せる名前。
+    private static func sourceWord(_ s: EKSource?) -> String {
+        guard let s else { return "" }
+        if s.sourceType == .local { return "このiPhone" }
+        return s.title
+    }
+
     /// ひと月ぶん。
     static func month(_ year: Int, _ month: Int) -> [Calendaring.Slot] {
         guard allowed else { return [] }
@@ -110,8 +149,14 @@ enum Phone {
                     notes: String = "", into: String = "") throws {
         var target = store.defaultCalendarForNewEvents
         if !into.isEmpty {
-            target = calendarObjects.first { $0.title == into && $0.allowsContentModifications }
-            guard target != nil else { throw Trouble.noNamed(into) }
+            // **「無い」と「書けない」を分けて言う**（依頼 705・2026-10-31）。
+            // 前はどちらも「まだありません。少し待ってから」と言っていた ──
+            // 祝日や購読している予定表をグループに指した人は、あるものを
+            // 「無い」と言われ、待てば入ると思って何度も試すことになる。
+            let same = calendarObjects.filter { $0.title == into }
+            guard !same.isEmpty else { throw Trouble.noNamed(into) }
+            target = same.first { $0.allowsContentModifications }
+            guard target != nil else { throw Trouble.readOnly(into) }
         }
         guard let cal = target else {
             throw Trouble.noCalendar
@@ -214,6 +259,8 @@ enum Phone {
         case noCalendar, badDay, gone
         /// 名前で指した予定表が、この端末に見つからない（依頼 545）。
         case noNamed(String)
+        /// その予定表はあるが、読むだけで書けない（依頼 705）。
+        case readOnly(String)
         var errorDescription: String? {
             switch self {
             case .noCalendar: return "書ける予定表がこの iPhone にありません。"
@@ -224,6 +271,11 @@ enum Phone {
             case .noNamed(let name):
                 return "「\(name)」がこの iPhone のカレンダーにまだありません。"
                     + "少し待ってから、もう一度お試しください。"
+            // **待っても入らないことを言う。** 祝日や購読している予定表は
+            // 読むだけで、いつまで待っても書けるようにはならない。
+            case .readOnly(let name):
+                return "「\(name)」は読むだけの予定表なので、予定を足せません。"
+                    + "カレンダー表示設定の「グループ」で、書ける予定表を選んでください。"
             }
         }
     }

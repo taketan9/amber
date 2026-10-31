@@ -252,7 +252,14 @@ final class Drive {
             _ = try await signIn(want: want)
             if !grants(Self.calScope) { throw Trouble.bad("カレンダーへのアクセスが許可されませんでした") }
         }
-        let body = try JSONSerialization.data(withJSONObject: ["summary": name])
+        // **時間帯を言う**（依頼 706）。言わないと Google は UTC で作る ──
+        // 2026-10-31 に本人のアカウントを見たら、amber が作った
+        // 「ambər グループ」だけ UTC で、手で作ったものは Asia/Tokyo だった。
+        // あのカレンダーに Google の画面から予定を足すと、九時間ずれた
+        // 時刻が既定になる。
+        let body = try JSONSerialization.data(withJSONObject: [
+            "summary": name, "timeZone": TimeZone.current.identifier,
+        ])
         let got = try await json("/calendar/v3/calendars", method: "POST", body: body,
                                  contentType: "application/json")
         guard let id = got["id"] as? String else { throw Trouble.bad("カレンダーを作成できませんでした") }

@@ -147,7 +147,23 @@ struct Calendaring: View {
         .navigationBarBackButtonHidden(true)
         .toolbar { bar }
         .sheet(isPresented: $settings) {
-            CalSettings(changed: { prefsTick += 1; count() })
+            // **設定で変わったものを、画面にも伝える**（依頼 707・708）。
+            // `side` と `groupName` はこの画面の `@State` なので、`CalPrefs` を
+            // 書き換えただけでは描き直されない ── 依頼 534 で「作ったのに何も
+            // 変わらないように見える」を踏んだのと同じ形。
+            //
+            // **`groupName` を忘れると、グループが丸ごと無いことになる**
+            // （依頼 708）── 設定でグループの予定表を選んでも、見出しの
+            // 「自分だけ／グループ／両方」が出ず、予定を足す画面に
+            // 「グループと共有」も出ず、設定には「グループを作る」が残る。
+            // 別の画面へ行って戻るまでそのままなので、選んだ人には
+            // 「選んだのに何も起きない」としか見えない。
+            CalSettings(changed: {
+                side = CalPrefs.side
+                groupName = CalPrefs.groupName
+                prefsTick += 1
+                count()
+            })
         }
         .id(prefsTick)
         // 作る前の確認と、作ったあとの知らせ（依頼 532）。

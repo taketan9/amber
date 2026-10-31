@@ -1232,6 +1232,35 @@ await step('カレンダー：端末の予定表の予定も、メモ欄に書�
     if (!塗り.includes('c0392b')) return '札の塗りになっていません: ' + JSON.stringify(塗り);
     return evPaint({ color: '' }) === '' ? true : '色を書いていないのに塗っています';`, true);
 
+await step('カレンダー：予定表の一覧は、出どころを括弧に入れて出す', `
+    // **この Mac の予定表を読む許可は、試し場には無い**（道具が断る）。
+    // 見たいのは「OS が返したものを core に渡して、同じ字で出す」ところ
+    // なので、返ってきたことにして calShelves を直に呼ぶ。
+    const 来た = { ok: true, shelves: [
+        { title: 'ファミリー', source: 'iCloud', writable: true },
+        { title: '日本の祝日', source: 'その他', writable: false },
+        { title: '誕生日', source: 'iCloud', writable: false },
+        { title: '誕生日', source: 'Gmail', writable: false },
+    ] };
+    const 行 = await calShelves(来た);
+    if (行.length !== 3) return '行が ' + 行.length + ' 本です（同じ名前はまとめるはず）';
+    if (行[0].name !== 'ファミリー（iCloud）') return '出どころが出ていません: ' + JSON.stringify(行[0].name);
+    if (行[1].name !== '日本の祝日（その他・読むだけ）') return '読むだけと言っていません: ' + JSON.stringify(行[1].name);
+    if (行[2].name !== '誕生日（iCloud・Gmail・読むだけ）') return '同じ名前をまとめていません: ' + JSON.stringify(行[2].name);
+    // **鍵の形は変えない。** 変えると、引っ込めてある予定表の憶えが
+    // 当たらなくなって黙って出てくる。
+    if (行[0].key !== 'here:ファミリー') return '鍵の形が変わっています: ' + JSON.stringify(行[0].key);
+    // グループに選ばれているものは、そう言う。
+    const もと = groupCal;
+    groupCal = { id: '', name: 'ファミリー' };
+    const 入り = await calShelves(来た);
+    groupCal = もと;
+    if (入り[0].name !== 'ファミリー（iCloud・グループの予定表）') return 'グループと言っていません: ' + JSON.stringify(入り[0].name);
+    // **古い amber-cal は shelves を返さない。** そのときは名前だけで出す
+    // ── 知らないことを書かない。
+    const 古い = await calShelves({ ok: true, calendars: ['自宅'] });
+    return 古い[0].name === '自宅' ? true : '出どころを知らないのに括弧を出しています: ' + JSON.stringify(古い[0].name);`, true);
+
 await step('カレンダー：みんなの表は人ごとに色が違い、右押しで色を選べる', `
     calView = 'week'; calGroup = true; calDay = '2026-09-09';
     const was = teamPeople;

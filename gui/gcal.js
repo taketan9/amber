@@ -84,11 +84,19 @@ function createCal(opts) {
     /// 分かれるので、**作ったかどうかを憶えるのは呼ぶ側**（設定に id を置く）。
     /// ここで名前から探し直さないのは、`calendar.app.created` に一覧を読む力が
     /// 無いから ── 探せるふりをしない。
+    /// **時間帯を言う**（依頼 706）。言わないと Google は UTC で作る ──
+    /// 2026-10-31 に本人のアカウントを見たら、amber が作った
+    /// 「ambər グループ」だけ UTC で、手で作ったものは Asia/Tokyo だった。
+    /// あのカレンダーを Google の画面から予定を足すと、九時間ずれた時刻が
+    /// 既定になる。
     async function make(name) {
+        const body = { summary: name };
+        const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (zone) body.timeZone = zone;
         const got = await api('/calendars', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ summary: name }),
+            body: JSON.stringify(body),
         });
         return { id: got.id, name: got.summary || name };
     }

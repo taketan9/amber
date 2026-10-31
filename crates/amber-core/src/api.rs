@@ -872,6 +872,45 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(one(p["notes"].as_str().unwrap_or_default()))
         }
 
+        // **予定表の一覧の一行を組む**（依頼 705）。
+        //
+        // いままで括弧の中は画面側の決め打ちで、デスクトップ版は何であろうと
+        // 「（このパソコン）」、iPhone は「（この iPhone）」と書いていた ──
+        // 本人に「何がなんのカレンダーか分からない」と言われた（2026-10-31）。
+        // **出どころを読んで出す判断は、ここに一度だけ置く。**
+        "callist" => {
+            let shelves: Vec<crate::callist::Shelf> = p["rows"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|r| crate::callist::Shelf {
+                            title: r["title"].as_str().unwrap_or_default().to_string(),
+                            source: r["source"].as_str().unwrap_or_default().to_string(),
+                            // **言われなければ書けないものとして扱う。**
+                            // 書けないものに足そうとして落ちるより、
+                            // 選べないほうがよい。
+                            writable: r["writable"].as_bool().unwrap_or(false),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let group = p["group"].as_str().unwrap_or_default();
+            let out: Vec<_> = crate::callist::rows(&shelves, group)
+                .into_iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "key": r.key,
+                        "title": r.title,
+                        "name": r.name,
+                        "sources": r.sources,
+                        "writable": r.writable,
+                        "group": r.group,
+                    })
+                })
+                .collect();
+            Ok(serde_json::json!({ "rows": out }))
+        }
+
         // タグを書き換えた**メモ欄ぜんぶ**を返す。人の文章には触らない。
         // 書き戻すのは呼び出し側（`amber-cal notes <id> <テキスト>` / EventKit）。
         "caltagset" => {
@@ -2203,6 +2242,39 @@ mod tests {
         // 書く側も同じ1か所から。
         let out = call("paint", &serde_json::json!({ "text": "ここ", "color": "#d9822b" })).unwrap();
         assert_eq!(out["text"], "<span style=\"color:#d9822b\">ここ</span>");
+    }
+
+    #[test]
+    fn 予定表の一覧は_出どころを括弧に入れて返す() {
+        // **口が繋がっていることを見る。** 名前を組む判断（`callist`）の
+        // 試験はあちらにある ── ここで見たいのは、デスクトップ版と iPhone が
+        // 呼ぶ名前で同じ答えが返ってくることだけ。
+        let got = call(
+            "callist",
+            &serde_json::json!({
+                "rows": [
+                    { "title": "ファミリー", "source": "iCloud", "writable": true },
+                    { "title": "日本の祝日", "source": "その他", "writable": false },
+                ],
+                "group": "ファミリー",
+            }),
+        )
+        .unwrap();
+        let rows = got["rows"].as_array().unwrap();
+        assert_eq!(rows[0]["name"], "ファミリー（iCloud・グループの予定表）");
+        assert_eq!(rows[0]["key"], "here:ファミリー");
+        assert_eq!(rows[0]["group"], true);
+        assert_eq!(rows[1]["name"], "日本の祝日（その他・読むだけ）");
+        assert_eq!(rows[1]["writable"], false);
+
+        // **書けるかを言われなければ、書けないものとして扱う**
+        // ── 足せない予定表をグループに選ばせない。
+        let shy = call(
+            "callist",
+            &serde_json::json!({ "rows": [{ "title": "あ", "source": "iCloud" }] }),
+        )
+        .unwrap();
+        assert_eq!(shy["rows"][0]["writable"], false);
     }
 
     #[test]

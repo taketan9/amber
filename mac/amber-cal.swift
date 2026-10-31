@@ -59,11 +59,25 @@ switch what {
 case "ask":
     out(["ok": ask()])
 
-// この Mac の予定表の名前（表示の設定で、出す・出さないを選ぶのに使う）。
+// この Mac の予定表（表示の設定で、出す・出さないを選ぶのに使う）。
+//
+// **名前だけでなく、出どころと書けるかも返す**（依頼 705）。前は名前だけ
+// だったので、画面側は括弧の中を「（このパソコン）」と決め打ちするしか
+// なかった ── iCloud の予定表も Gmail の予定表も同じ字になっていた。
+// 一行に組むのは core（`callist`）で、ここは見たものをそのまま渡す。
+//
+// **並びはいままでどおり名前の順。** 本人が見ている順を、こちらの
+// 都合で変えない。
 case "calendars":
     need()
-    let names = store.calendars(for: .event).map { $0.title }.sorted()
-    out(["ok": true, "calendars": names])
+    let all = store.calendars(for: .event).sorted { $0.title < $1.title }
+    out(["ok": true,
+         "calendars": all.map { $0.title },
+         "shelves": all.map { [
+            "title": $0.title,
+            "source": sourceWord($0.source),
+            "writable": $0.allowsContentModifications,
+         ] }])
 
 case "month":
     need()
@@ -181,6 +195,19 @@ case "drop":
 
 default:
     no("知らない操作: \(what)")
+}
+
+/// 出どころの、人に見せる名前。
+///
+/// **端末の中だけの予定表は、API が「Default」と返すことがある** ── iPhone
+/// では実際にそう返った（2026-10-31・依頼 710）。この Mac で何と返るかは
+/// **確かめていません**（amber-cal は署名を打ち直すと予定表を読む許可を
+/// 失い、人が居ないと許可を出せない）。iPhone と同じ形で言い換えておく ──
+/// 「Default」のままよりも悪くなることはない。
+func sourceWord(_ s: EKSource?) -> String {
+    guard let s else { return "" }
+    if s.sourceType == .local { return "このパソコン" }
+    return s.title
 }
 
 func one(_ e: EKEvent, _ day: String, _ at: String?, _ to: String?) -> [String: Any] {

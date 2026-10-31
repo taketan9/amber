@@ -10615,12 +10615,30 @@ async function findGroupCal() {
     say('「' + GROUP_NAME + '」をグループカレンダーとして使います');
 }
 
+/// この Mac の予定表を、画面に出す一行まで組んだもの（依頼 705）。
+///
+/// **組むのは core**（`callist`）── iPhone と同じ字にする。古い `amber-cal`
+/// は `shelves` を返さないので、そのときは名前だけで組む（出どころの括弧は
+/// 出ない）── **知らないことを書かない。**
+async function calShelves(got) {
+    const shelves = (got && got.shelves)
+        || ((got && got.calendars) || []).map((c) => ({ title: c, source: '', writable: true }));
+    if (!shelves.length) return [];
+    const out = await window.amber.call('callist', { rows: shelves, group: groupCal ? groupCal.name : '' });
+    return (out && out.rows) || [];
+}
+
 /// 予定表の一覧。この Mac の予定表（無ければ空）・よその予定表・チーム・自分のノート。
 async function calSources() {
     const out = [{ key: 'me', name: '自分のノート（日付を書いたノート）' }];
     if (hereOn) {
+        // **出どころを読んで出す**（依頼 705）。前は何であろうと
+        // 「（このパソコン）」と決め打ちしていたので、iCloud の予定表も
+        // Gmail の予定表もこの Mac の中だけの予定表も同じ字になり、
+        // **何がなんのカレンダーか分からなかった**（本人・2026-10-31）。
+        // 一行に組むのは core（`callist`）── iPhone と同じ字にする。
         const got = await window.amber.cal(['calendars']);
-        for (const c of (got && got.calendars) || []) out.push({ key: 'here:' + c, name: c + '（このパソコン）' });
+        for (const r of await calShelves(got)) out.push({ key: r.key, name: r.name });
     }
     for (const a of away) out.push({ key: 'away:' + a.name, name: a.name + '（カレンダー設定で足したもの）' });
     for (const w of teamPeople) {

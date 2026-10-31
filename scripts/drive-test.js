@@ -49,7 +49,7 @@ const ok = (yes, what, got) => {
             if (req.method === 'POST') {
                 const made = JSON.parse(body || '{}');
                 const newId = 'c' + (++seen.made) + '@group.calendar.google.com';
-                seen.cals.set(newId, { id: newId, summary: made.summary || '' });
+                seen.cals.set(newId, { id: newId, summary: made.summary || '', timeZone: made.timeZone || '' });
                 res.writeHead(200, { 'content-type': 'application/json' });
                 res.end(JSON.stringify(seen.cals.get(newId)));
             } else if (req.method === 'DELETE') {
@@ -152,6 +152,14 @@ const ok = (yes, what, got) => {
         const cal = createCal({ token: () => Promise.resolve('acc-1'), apiUrl: at + '/cal' });
         const made = await cal.make('ambər グループ');
         ok(!!made.id && made.name === 'ambər グループ', '1 つ作れる', made);
+        // **時間帯を言って作る**（依頼 706）── 言わないと Google は UTC で
+        // 作る。2026-10-31 に本人のアカウントを見たら、amber が作った
+        // カレンダーだけ UTC で、手で作ったものは Asia/Tokyo だった。
+        // あのカレンダーに Google の画面から予定を足すと、九時間ずれた
+        // 時刻が既定になる。
+        const zone = seen.cals.get(made.id).timeZone;
+        ok(zone === Intl.DateTimeFormat().resolvedOptions().timeZone,
+           'この端末の時間帯を言って作る ── UTC で作らせない', zone);
         const again = await cal.get(made.id);
         ok(again && again.id === made.id, '作ったものを訊ける', again);
         await cal.rename(made.id, '家の予定');

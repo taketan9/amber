@@ -11,7 +11,7 @@ here="${0:A:h}"
 root="${here:h}"
 mkdir -p "$root/target/mac"
 # **名札を実行ファイルの中に埋める。** macOS は、なぜ予定表が要るのかを
-# 持っていない素の実行ファイルを**小デスクトップ版も出さずに断る** ── 埋めていなかった
+# 持っていない素の実行ファイルを**確認の画面も出さずに断る** ── 埋めていなかった
 # ときは「許可しますか」が一度も出なかった（依頼 466）。
 xcrun swiftc -O -swift-version 5 \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist \

@@ -140,10 +140,51 @@ enum CalPrefs {
         return side == "group" ? inGroup(s) : !inGroup(s)
     }
 
+    /// 端末の予定表を、画面に出す一行まで組んだもの（依頼 705）。
+    ///
+    /// **組むのは core**（`callist`）── デスクトップ版と同じ字にする。
+    /// 読めなければ空を返す（予定表を読む許可が無いときなど）。
+    static func shelfRows() -> [(key: String, title: String, name: String, writable: Bool)] {
+        let rows = Phone.shelves
+        guard !rows.isEmpty,
+              let out = try? Cian.call("callist", ["rows": rows, "group": groupName]),
+              let got = out["rows"] as? [[String: Any]]
+        else { return [] }
+        return got.map { r in
+            (key: r["key"] as? String ?? "",
+             title: r["title"] as? String ?? "",
+             name: r["name"] as? String ?? "",
+             writable: r["writable"] as? Bool ?? false)
+        }
+    }
+
+    /// **グループの予定表を選ぶ**（依頼 698・707）。
+    ///
+    /// 画面の中に書かず、ここに置く ── 画面の閉じたところに置くと、
+    /// 総ざらいから呼べず、**書いたことを書いたまま確かめる段**しか作れない。
+    ///
+    /// `name` が空なら「使わない」。
+    static func pickGroup(_ name: String) {
+        groupName = name
+        // **id は amber が作った予定表のものだけ**（招待と削除に使う）。
+        // 人が選んだ予定表には無いので、違う名前になったら捨てる ──
+        // 残すと、よその予定表を amber が消せるように見える。
+        if groupWord != name { groupId = "" }
+        groupAsked = true
+        // **選び直したら、絞り込みを「両方」に戻す**（依頼 707・2026-10-31）。
+        //
+        // 「グループを作る」を押した日に `side` が「グループ」で憶えられ、
+        // **予定表を選び直しても戻らなかった。** 選んだ予定表が空だと
+        // カレンダーが空になり、しかもノートに書いた予定はグループ側に
+        // 出ない作りなので**それも全部消える** ── 理由の分からない空の
+        // 画面になる。本人が「お互いの予定が見れない」と言った日の形がこれ。
+        side = "both"
+    }
+
     /// 出し入れできる予定表の一覧（デスクトップ版の `calSources` と同じ並び）。
     static func sources() -> [(key: String, name: String)] {
         var out: [(key: String, name: String)] = [("me", "自分のノート（日付を書いたノート）")]
-        for c in Phone.calendars { out.append(("here:" + c, c + "（この iPhone）")) }
+        for r in shelfRows() { out.append((r.key, r.name)) }
         for f in Away.feeds { out.append(("away:" + f.name, f.name + "（カレンダー設定追加で足したもの）")) }
         // 隠しているのに一覧に無いもの（もう無い予定表）も出す ── 戻せないと困る。
         for k in hide where !out.contains(where: { $0.key == k }) {
@@ -202,13 +243,22 @@ struct CalSettings: View {
                         get: { group },
                         set: { name in
                             group = name
-                            CalPrefs.groupName = name
-                            if CalPrefs.groupWord != name { CalPrefs.groupId = "" }
-                            CalPrefs.groupAsked = true
+                            CalPrefs.pickGroup(name)
                             changed()
                         })) {
                         Text("使わない").tag("")
-                        ForEach(Phone.calendars, id: \.self) { Text($0).tag($0) }
+                        // **どれでも選べるまま**（依頼 698・本人が 2026-10-31 に
+                        // 決めた）。読むだけの予定表（祝日・購読しているもの）を
+                        // グループに指すのは、ちゃんと意味がある ── 色分けと
+                        // 絞り込みは効く。効かないのは予定を足すところだけで、
+                        // そこは「書けません」と正しく断る（`Phone.add`）。
+                        //
+                        // **名前には出どころと、読むだけかどうかが入る**
+                        // （依頼 705）── 「ファミリー（iCloud）」
+                        // 「日本の祝日（その他・読むだけ）」。選ぶ前に分かる。
+                        ForEach(CalPrefs.shelfRows(), id: \.key) {
+                            Text($0.name).tag($0.title)
+                        }
                     }
                 } header: {
                     Text("グループ")
