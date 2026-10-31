@@ -31,6 +31,14 @@ struct Calendaring: View {
         var tags: [String] = []
         /// その予定の色の名前（依頼 702・前書きの `color:`）。空なら出どころの色。
         var color: String = ""
+        /// 何で塗るか（依頼 711）── core（`caltint`）が決めた言葉と、
+        /// 決まっているなら `#rrggbb`。
+        ///
+        /// **描くときではなく、読み込むときに決める。** 月の表は描き直しが
+        /// 多く、一つ描くごとに core を叩くと、予定の数だけ入口を往復する
+        /// ことになる（デスクトップ版はそれが別のプロセスへの往復になる）。
+        var paint: String = ""
+        var paintHex: String = ""
         var id: String { day + (at ?? "") + path + kind + title }
         var isPlan: Bool { kind != "note" }
         var isAway: Bool { kind == "away" }
@@ -81,8 +89,12 @@ struct Calendaring: View {
     @State private var newUntil = ""
     @State private var newAlarm = ""
     @State private var newAlarmFor = ""
+    /// 作る予定だけの色の名前（依頼 713）。空なら「自分の色」。
+    @State private var newColor = ""
     /// 直している、この iPhone の予定。
     @State private var editing: Slot?
+    /// 色を選ばせているところ（依頼 712）。
+    @State private var coloring: Slot?
     @State private var editTitle = ""
     /// 月／週／日（依頼 515・デスクトップ版と同じ3 つ）。
     ///
@@ -217,12 +229,13 @@ struct Calendaring: View {
             Button("OK") { made = "" }
         } message: { Text(made) }
         .modifier(Asking(
-            trouble: $trouble, adding: $adding, editing: $editing,
+            trouble: $trouble, adding: $adding, editing: $editing, coloring: $coloring,
             newTitle: $newTitle, newAt: $newAt, newEnd: $newEnd, editTitle: $editTitle,
             newToGroup: $newToGroup, newTags: $newTags,
             newUntil: $newUntil, newAlarm: $newAlarm, newAlarmFor: $newAlarmFor,
+            newColor: $newColor,
             day: spoken(picked), toPhone: Phone.allowed, groupName: groupName,
-            add: add, rename: rename, drop: drop))
+            add: add, rename: rename, drop: drop, recolor: recolor))
     }
 
     /// 題と、前後へ動く矢印（依頼 670）。**右上の角に固めない。**
@@ -553,14 +566,23 @@ struct Calendaring: View {
     /// だれの用事かは、左の色の帯で（依頼 547）。
     /// その予定の色（依頼 702）。
     ///
-    /// **ノートに書いてある色がいちばん強い** ── 前書きの `color:` は人が
-    /// 決めたもので、出どころより優先する。書いていなければ、いままでどおり
-    /// 出どころの色（よそは青・この端末は自分の色・自分のノートは琥珀）。
-    /// 知らない名前は無視する ── 変な色で塗るより、いつもの色のほうがよい。
+    /// **決める順は core**（`caltint`・依頼 711）── 読み込むときに決めて
+    /// `paint` に入れてある。ここがするのは、その言葉を色に直すだけ。
+    ///
+    /// **青と琥珀は core から来ない。** 明るい紙と暗い紙で濃さを変えたい
+    /// もので、`#rrggbb` に潰すと暗いところで読めなくなる。
+    ///
+    /// `paint` が空なのは、core に訊けなかったとき（まず起きない）。
+    /// そのときはいままでの決まりをここで通す ── 色が無いより、前の絵のほうがよい。
     private func tint(of s: Slot) -> Color {
-        if !s.color.isEmpty, let c = CalPrefs.colors.first(where: { $0.name == s.color }),
-           let got = Color(hex: c.hex) {
-            return got
+        switch s.paint {
+        case "event", "shelf":
+            if let got = Color(hex: s.paintHex) { return got }
+        case "away": return .blue
+        case "here": return CalPrefs.hereTint
+        case "plan": return .accentColor
+        case "other": return .secondary
+        default: break
         }
         if s.isAway { return .blue }
         if s.isPhone { return CalPrefs.hereTint }
@@ -796,6 +818,30 @@ struct Calendaring: View {
         }
     }
 
+    /// **この予定だけの色を書き換える**（依頼 712）。`name` が空ならやめる。
+    ///
+    /// メモ欄のいちばん最後の行（タグと同じ一行）に `#色:カーマイン` を置く。
+    /// **どこを書き換えるかを決めるのは core**（`caltagset`）── ここで
+    /// 切り出すと、同じ予定がデスクトップ版と iPhone で違う顔をする。
+    ///
+    /// **人が書いた文章には触らない。** 書き換わるのはその一行だけ。
+    ///
+    /// 文字を組むのは `CalPrefs.recolored` ── 総ざらいから呼べるように
+    /// 画面の外に置いてある。
+    private func recolor(_ name: String) {
+        guard let e = coloring else { return }
+        guard let notes = CalPrefs.recolored(notes: e.notes, tags: e.tags, color: name) else {
+            trouble = "色を書けませんでした。"
+            return
+        }
+        do {
+            try Phone.setNotes(e.path, notes)
+            count()
+        } catch {
+            trouble = error.localizedDescription
+        }
+    }
+
     private func step(_ n: Int) {
         if mode == "week" || mode == "day" {
             picked = Self.shift(picked, n * (mode == "week" ? 7 : 1))
@@ -963,6 +1009,36 @@ struct Calendaring: View {
         }
         // 見た名前は憶える ── 次に予定を登録するとき、打たずに選べる。
         for s in out { for t in s.tags { CalPrefs.rememberTag(t) } }
+        return paintAll(out)
+    }
+
+    /// **何で塗るかを、読み込むときに決めておく**（依頼 711）。
+    ///
+    /// 決めるのは core（`caltint`）。ここがするのは、**同じ答えになるものを
+    /// 二度訊かない**ことだけ ── ひと月ぶんの予定の組み合わせは、たいてい
+    /// 数通りしかない（予定表の色と、予定に書いてある色と、種類）。
+    private func paintAll(_ all: [Slot]) -> [Slot] {
+        CalPrefs.refreshShelfColors()
+        var out = all
+        var seen: [String: (String, String)] = [:]
+        for i in out.indices {
+            let shelf = out[i].isPhone ? CalPrefs.shelfHex(out[i].from) : ""
+            let key = [out[i].color, shelf, out[i].kind].joined(separator: "\u{1}")
+            if let got = seen[key] {
+                out[i].paint = got.0
+                out[i].paintHex = got.1
+                continue
+            }
+            guard let got = try? Cian.call("caltint", [
+                "color": out[i].color, "shelf": shelf,
+                "away": out[i].isAway, "here": out[i].isPhone, "plan": out[i].isPlan,
+            ]) else { continue }
+            let word = got["from"] as? String ?? ""
+            let hex = got["hex"] as? String ?? ""
+            seen[key] = (word, hex)
+            out[i].paint = word
+            out[i].paintHex = hex
+        }
         return out
     }
 
@@ -977,6 +1053,12 @@ struct Calendaring: View {
     /// 言ったのは、そこのこと。
     private func myColorName() -> String {
         CalPrefs.hereColor.isEmpty ? "" : CalPrefs.colorName(CalPrefs.hereColor)
+    }
+
+    /// この予定に書き込む色の名前（依頼 713）。決めるのは
+    /// `CalPrefs.colorToWrite` ── 総ざらいから呼べるように画面の外にある。
+    private func chosenColor() -> String {
+        CalPrefs.colorToWrite(chosen: newColor)
     }
 
     /// 足す。**この iPhone の予定表が使えるならそちらへ**（依頼 460）──
@@ -1005,7 +1087,7 @@ struct Calendaring: View {
             // 古い予定の色は動かない（ノートの道と同じ約束）。
             var notes = ""
             var ask: [String: Any] = [
-                "notes": "", "tags": toGroup ? newTags : [], "color": myColorName(),
+                "notes": "", "tags": toGroup ? newTags : [], "color": chosenColor(),
             ]
             if newAlarmFor == "全員" && !newAlarm.isEmpty { ask["alarm"] = newAlarm }
             // タグが書けなくても、予定そのものは登録する。
@@ -1037,7 +1119,7 @@ struct Calendaring: View {
             // **自分の色を書き込む**（依頼 702）── これがあるので、
             // 同期した先でも同じ色で出る。設定を変えても古い予定の色は
             // 変わらない（書いた時点の色が、そのノートの色）。
-            let mine = myColorName()
+            let mine = chosenColor()
             for (key, value) in [("remind", when), ("until", newUntil),
                                  ("alarm", newAlarm), ("alarm-who", newAlarmFor),
                                  ("color", mine)]
@@ -1062,6 +1144,8 @@ private struct Asking: ViewModifier {
     @Binding var trouble: String?
     @Binding var adding: Bool
     @Binding var editing: Calendaring.Slot?
+    /// 色を選ばせているところ（依頼 712）。
+    @Binding var coloring: Calendaring.Slot?
     @Binding var newTitle: String
     @Binding var newAt: String
     @Binding var newEnd: String
@@ -1071,12 +1155,16 @@ private struct Asking: ViewModifier {
     @Binding var newUntil: String
     @Binding var newAlarm: String
     @Binding var newAlarmFor: String
+    /// 作る予定だけの色の名前（依頼 713）。
+    @Binding var newColor: String
     let day: String
     let toPhone: Bool
     let groupName: String
     let add: () -> Void
     let rename: () -> Void
     let drop: () -> Void
+    /// その予定だけの色を書き換える（依頼 712）。空ならやめる。
+    let recolor: (String) -> Void
 
     func body(content: Content) -> some View {
         content
@@ -1090,6 +1178,7 @@ private struct Asking: ViewModifier {
                           title: $newTitle, at: $newAt, end: $newEnd,
                           toGroup: $newToGroup, tags: $newTags,
                           untilDay: $newUntil, alarmAt: $newAlarm, alarmFor: $newAlarmFor,
+                          color: $newColor,
                           add: add)
                     .presentationDetents([.large])
             }
@@ -1100,10 +1189,34 @@ private struct Asking: ViewModifier {
             ) {
                 TextField("タイトル", text: $editTitle)
                 Button("修正する") { rename() }
+                // **この予定だけ、別の色にする**（依頼 712・本人「タスクや
+                // 予定に対して、デフォルトと違う色を指定することができる
+                // ようにしてほしい」）。色を読む仕掛けは依頼 702 で入って
+                // いたが、**人が選ぶ口が無かった** ── amber が書くのは
+                // いつも「自分の色」だけで、押せるボタンが無かった。
+                //
+                // 色を並べるのは別の紙にする ── この紙は題を打つところで、
+                // 八つのボタンを足すと打つ欄が押し出される。
+                Button("色を変える") { coloring = editing }
                 Button("削除する", role: .destructive) { drop() }
                 Button("やめる", role: .cancel) {}
             } message: {
                 Text("この iPhone の予定表のものです。")
+            }
+            // **色を選ぶ**（依頼 712）。閉じるときに `coloring` を空にする。
+            .confirmationDialog("この予定の色", isPresented: Binding(
+                get: { coloring != nil }, set: { if !$0 { coloring = nil } }),
+                titleVisibility: .visible
+            ) {
+                ForEach(CalPrefs.colors, id: \.hex) { c in
+                    Button(c.name) { recolor(c.name) }
+                }
+                // **元に戻す道を残す。** 選んだあとに「もとはどうだったか」
+                // へ帰れないのは事故。空を書くと、予定表の色に落ちる。
+                Button("この予定だけの色をやめる") { recolor("") }
+                Button("やめる", role: .cancel) {}
+            } message: {
+                Text("選んだ色は予定そのものに付くので、同期している相手の amber でも同じ色で出ます")
             }
     }
 }
@@ -1125,6 +1238,8 @@ struct EventForm: View {
     /// アラームと、鳴らす人（依頼 701）。付けないなら空。
     @Binding var alarmAt: String
     @Binding var alarmFor: String
+    /// この予定だけの色の名前（依頼 713）。空なら「自分の色」。
+    @Binding var color: String
     let add: () -> Void
     /// **選びは、このダイアログが持つ**（依頼 547）── `@Binding` を直に触ると、
     /// 一つ選ぶたびに外の画面まで描き直されて、選んだマークが消える（画面で出た）。
@@ -1247,6 +1362,26 @@ struct EventForm: View {
                     // 判断した ── 実際に困ったら、そのとき足す。
                     if alarmWho == "全員" { Text("同期相手に通知されます") }
                 }
+                // **作るときに色を選べる**（依頼 713・本人が決めた）。
+                //
+                // はじめは足さなかった ── 既定（自分の色）で十分に動くし、
+                // 作る画面に一行増えると毎日押すものが一行ぶん下がる。
+                // **本人が「足す」と決めた**ので足した。
+                //
+                // 既定を先頭に置く ── ほとんどの予定はそれで、選ばなければ
+                // いままでと同じ色で入る。
+                Section {
+                    Picker("色", selection: $color) {
+                        Text("自分の色").tag("")
+                        ForEach(CalPrefs.colors, id: \.hex) { c in
+                            Text(c.name).tag(c.name)
+                        }
+                    }
+                } footer: {
+                    Text(color.isEmpty
+                         ? "設定の「自分の色」で塗ります"
+                         : "この予定だけ「\(color)」で塗ります。あとから変えられます")
+                }
             }
             .navigationTitle("予定を登録する")
             .navigationBarTitleDisplayMode(.inline)
@@ -1280,6 +1415,10 @@ struct EventForm: View {
                 canGroup = toPhone && !groupName.isEmpty && Phone.calendars.contains(groupName)
                 toG = nil
                 who = []
+                // **開くたびに「自分の色」へ戻す**（依頼 713）── 前に一度
+                // 選んだ色が黙って次の予定にも付くと、気づかないまま
+                // 色の意味が崩れる。
+                color = ""
             }
         }
     }

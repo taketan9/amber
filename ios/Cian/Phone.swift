@@ -66,11 +66,16 @@ enum Phone {
     /// しまうのもあるが、それ以上に困るのは**意味が通らない**ことで、
     /// 「Default」では iCloud なのか端末の中だけなのか分からない ──
     /// そしてその違いが、**共有できるかどうかを決めている。**
+    /// **その予定表の色も渡す**（依頼 711）── iPhone が予定表ごとに
+    /// 色を持っているので、それをそのまま使う。カレンダーアプリで
+    /// 見えている色と揃うし、**設定を一つも触らずに**奥さんの予定と
+    /// 分かれる。読めなければ空（画面がいままでの色で塗る）。
     static var shelves: [[String: Any]] {
         guard allowed else { return [] }
         return store.calendars(for: .event).map { c in
             ["title": c.title,
              "source": sourceWord(c.source),
+             "color": hexOf(c.cgColor),
              "writable": c.allowsContentModifications]
         }
     }
@@ -80,6 +85,20 @@ enum Phone {
         guard let s else { return "" }
         if s.sourceType == .local { return "このiPhone" }
         return s.title
+    }
+
+    /// 予定表の色を `#rrggbb` にする。読めなければ空。
+    ///
+    /// **sRGB に直してから読む。** 予定表の色は iPhone の広い色空間で
+    /// 来ることがあり、そのまま成分を取ると画面の色と合わない。
+    private static func hexOf(_ c: CGColor?) -> String {
+        guard let c,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let same = c.converted(to: space, intent: .defaultIntent, options: nil),
+              let p = same.components, p.count >= 3
+        else { return "" }
+        let v = p.prefix(3).map { Int((max(0, min(1, $0)) * 255).rounded()) }
+        return String(format: "#%02x%02x%02x", v[0], v[1], v[2])
     }
 
     /// ひと月ぶん。
@@ -246,6 +265,19 @@ enum Phone {
     static func rename(_ id: String, to title: String) throws {
         guard let e = store.event(withIdentifier: id) else { throw Trouble.gone }
         e.title = title
+        try store.save(e, span: .thisEvent)
+    }
+
+    /// メモ欄を丸ごと入れ替える（依頼 712・`amber-cal notes` と同じ）。
+    ///
+    /// タグの行だけを差し替えた文字列は**呼ぶ側が core に作らせて持ってくる**
+    /// （`caltagset`）── ここは OS への口だけで、「どこを書き換えるか」の
+    /// 判断は持たない。持つと、同じ予定が端末によって違う顔をする。
+    ///
+    /// **空にもできる。** 色もタグも全部外すと、メモが空になることがある。
+    static func setNotes(_ id: String, _ text: String) throws {
+        guard let e = store.event(withIdentifier: id) else { throw Trouble.gone }
+        e.notes = text.isEmpty ? nil : text
         try store.save(e, span: .thisEvent)
     }
 

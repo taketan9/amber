@@ -2232,6 +2232,10 @@ body.dropping::after {
       <label class="f"><span>終了</span><select id="evend"></select></label>
     </div>
     <div class="err" id="everr" hidden></div>
+    <!-- **作るときに色を選べる**（依頼 713・本人が決めた）。先頭は「自分の色」
+         ── ほとんどの予定はそれで、選ばなければいままでと同じ色で入る。
+         中身は renderer が core の八色から組む（決めるのは core・依頼 711）。 -->
+    <label class="f"><span>色</span><select id="evcolor"></select></label>
     <div class="acts"><button id="evcancel">やめる</button><button id="evok" class="go">登録する</button></div>
   </div></div>
   <!-- **新しいノートのダイアログ**（依頼 513・iPhone と同じ3 つ）。何も入れずに「作成」でも作れる。 -->

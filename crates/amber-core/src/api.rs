@@ -911,6 +911,38 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             Ok(serde_json::json!({ "rows": out }))
         }
 
+        // **その予定を何で塗るか**（依頼 711）。
+        //
+        // 本人が奥さんの予定表と同期できた日に言った ──「全部同じ色に
+        // 見えるな」。端末にある予定表が何本あってもぜんぶ一色だった。
+        // **予定表ごとの色を足した** ── iPhone が持っている色をそのまま
+        // 使うので、設定を一つも触らずに分かれる。
+        //
+        // 色そのものを返すのは、予定に書いてあった色と、予定表の色だけ。
+        // 青や琥珀は明るい紙と暗い紙で濃さを変えたいので、**どれで塗るかの
+        // 名前だけ返して、色は画面にまかせる。**
+        "caltint" => {
+            let got = crate::caltint::pick(
+                p["color"].as_str().unwrap_or_default(),
+                p["shelf"].as_str().unwrap_or_default(),
+                p["away"].as_bool().unwrap_or(false),
+                p["here"].as_bool().unwrap_or(false),
+                p["plan"].as_bool().unwrap_or(false),
+            );
+            Ok(serde_json::json!({ "from": got.word(), "hex": got.hex() }))
+        }
+
+        // **名前で呼べる八色**（依頼 540）。選ぶ丸を並べるために、画面も
+        // 同じ表を持っている ── 三つが揃っているかは
+        // `scripts/colors-test.js` が見る。
+        "calcolors" => {
+            let out: Vec<_> = crate::caltint::COLORS
+                .iter()
+                .map(|(hex, name)| serde_json::json!({ "hex": hex, "name": name }))
+                .collect();
+            Ok(serde_json::json!({ "colors": out }))
+        }
+
         // タグを書き換えた**メモ欄ぜんぶ**を返す。人の文章には触らない。
         // 書き戻すのは呼び出し側（`amber-cal notes <id> <テキスト>` / EventKit）。
         "caltagset" => {
@@ -2275,6 +2307,39 @@ mod tests {
         )
         .unwrap();
         assert_eq!(shy["rows"][0]["writable"], false);
+    }
+
+    #[test]
+    fn 予定を何で塗るかを_名前と色で返す() {
+        // **口が繋がっていることを見る。** 決める順（`caltint`）の試験は
+        // あちらにある。
+        let got = call(
+            "caltint",
+            &serde_json::json!({ "shelf": "#1fa3a3", "here": true }),
+        )
+        .unwrap();
+        assert_eq!(got["from"], "shelf");
+        assert_eq!(got["hex"], "#1fa3a3");
+
+        // 予定に書いてあった色は、名前で渡して色で返る。
+        let mine = call(
+            "caltint",
+            &serde_json::json!({ "color": "カーマイン", "shelf": "#1fa3a3", "here": true }),
+        )
+        .unwrap();
+        assert_eq!(mine["from"], "event");
+        assert_eq!(mine["hex"], "#c0392b");
+
+        // **色を決めないものは、色を返さない** ── 青と琥珀の濃さは画面が決める。
+        let plan = call("caltint", &serde_json::json!({ "plan": true })).unwrap();
+        assert_eq!(plan["from"], "plan");
+        assert_eq!(plan["hex"], "");
+
+        // 八色の表は、画面にもそのまま渡せる。
+        let table = call("calcolors", &serde_json::json!({})).unwrap();
+        assert_eq!(table["colors"].as_array().unwrap().len(), 8);
+        assert_eq!(table["colors"][5]["name"], "カーマイン");
+        assert_eq!(table["colors"][5]["hex"], "#c0392b");
     }
 
     #[test]

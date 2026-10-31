@@ -1261,6 +1261,47 @@ await step('カレンダー：予定表の一覧は、出どころを括弧に�
     const 古い = await calShelves({ ok: true, calendars: ['自宅'] });
     return 古い[0].name === '自宅' ? true : '出どころを知らないのに括弧を出しています: ' + JSON.stringify(古い[0].name);`, true);
 
+// **予定表ごとに色が分かれる**（依頼 711）。本人が奥さんの予定表と同期できた
+// 日に言った ──「全部同じ色に見えるな」。
+await step('カレンダー：予定表ごとに色が分かれる', `
+    const もと = JSON.stringify(calShelfColors);
+    try {
+        // **この Mac の予定表は試し場では読めない**（許可が無い）ので、
+        // 上書きの側だけを使う ── 見たいのは「予定表ごとに違う色になるか」。
+        calShelfColors = { 自宅: '#1fa3a3', 妻: '#c0392b' };
+        if (shelfHex('自宅') !== '#1fa3a3') return '選んだ色が効いていません: ' + shelfHex('自宅');
+        if (shelfHex('妻') === shelfHex('自宅')) return '別の予定表でも同じ色です';
+        if (shelfHex('知らない予定表') !== '') return '知らない予定表に色を付けています';
+        // 決める順は core（caltint）── 読み込むときに決めて、予定に憶えさせる。
+        const 予定 = [
+            { kind: 'here', from: '自宅', color: '' },
+            { kind: 'here', from: '妻', color: '' },
+            { kind: 'here', from: '自宅', color: 'カーマイン' },
+            // **ノートに書いた予定は once か repeat。** note は日付の
+            // 無いただのノートで、こちらは琥珀にしない。
+            // （この中にバッククォートは書けない ── テンプレートが閉じる）
+            { kind: 'once', from: '', color: '' },
+            { kind: 'note', from: '', color: '' },
+        ];
+        await paintAll(予定);
+        if (予定[0].paintHex !== '#1fa3a3') return '予定表の色で塗っていません: ' + 予定[0].paintHex;
+        if (予定[1].paintHex !== '#c0392b') return '二本目が同じ色です: ' + 予定[1].paintHex;
+        // **予定に書いてある色が、予定表の色に勝つ。**
+        if (予定[2].paintHex !== '#c0392b' || 予定[2].paint !== 'event') {
+            return '予定の色が負けています: ' + 予定[2].paint + ' ' + 予定[2].paintHex;
+        }
+        // **ノートの予定は色を返さない** ── 琥珀の濃さは CSS が決める。
+        if (予定[3].paint !== 'plan' || 予定[3].paintHex !== '') return 'ノートの予定に色を決めています: ' + 予定[3].paint + ' ' + 予定[3].paintHex;
+        // **日付の無いノートは、琥珀でもない。**
+        if (予定[4].paint !== 'other') return 'ただのノートを予定として塗っています: ' + 予定[4].paint;
+        // 札に付く style も、決まった色だけ。
+        if (!evPaint(予定[0]).includes('#1fa3a3')) return '札に色が付いていません: ' + evPaint(予定[0]);
+        if (evPaint(予定[3]) !== '') return 'ノートの予定に style を足しています: ' + evPaint(予定[3]);
+        return true;
+    } finally {
+        calShelfColors = JSON.parse(もと);
+    }`, true);
+
 await step('カレンダー：みんなの表は人ごとに色が違い、右押しで色を選べる', `
     calView = 'week'; calGroup = true; calDay = '2026-09-09';
     const was = teamPeople;

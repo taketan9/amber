@@ -9023,12 +9023,76 @@ const colorName = (hex) => (CAL_COLORS.find(([h]) => h === hex) || [])[1] || hex
 /// 色の名前から色そのものへ（依頼 702）。知らない名前は空 ── 変な色で
 /// 塗るより、いつもの色のままのほうがよい。
 const colorHex = (name) => (CAL_COLORS.find(([, n]) => n === name) || [])[0] || '';
-/// ノートに書いてある色を、札と行に当てる（依頼 702）。
+/// 予定表ごとの色の**上書き**（依頼 711）。`予定表の名前 → #rrggbb`。
+/// 入っていない予定表は、この Mac が持っている色をそのまま使う。
+let calShelfColors = {};
+/// この Mac が予定表ごとに持っている色（`amber-cal` から読む）。
+let osShelfColors = {};
+
+/// 予定表の色を読み直す（依頼 711）。
 ///
-/// **前書きの `color:` がいちばん強い** ── 人が決めたものなので、出どころ
-/// （よそ＝青、端末＝自分の色）より優先する。書いていなければ何も足さず、
-/// いままでの見た目のまま。iPhone の `tint(of:)` と同じ決まり。
+/// **一度読んだら憶えておく。** 月を動かすたびに読み直すと、`amber-cal` を
+/// 月の予定ぶんと色ぶんで二回呼ぶことになる。予定表の色はめったに
+/// 変わらないので、設定で選び直したときだけ `force` で読み直す。
+async function refreshShelfColors(force) {
+    if (!hereOn) { osShelfColors = {}; return; }
+    if (!force && Object.keys(osShelfColors).length) return;
+    try {
+        const got = await window.amber.cal(['calendars']);
+        const out = {};
+        for (const r of (got && got.shelves) || []) {
+            if (r && r.title && r.color) out[r.title] = r.color;
+        }
+        osShelfColors = out;
+    } catch { /* 読めなくても、予定そのものは出す */ }
+}
+
+/// その予定表を何色で塗るか（`#rrggbb`・決まらなければ空）。
+/// **人が選んだものが、この Mac の色より強い。**
+function shelfHex(title) {
+    if (!title) return '';
+    return calShelfColors[title] || osShelfColors[title] || '';
+}
+
+/// **何で塗るかを、読み込むときに決めておく**（依頼 711）。
+///
+/// 決めるのは core（`caltint`）。ここがするのは、**同じ答えになるものを
+/// 二度訊かない**ことだけ ── 予定の数だけ別のプロセスへ往復しない。
+/// iPhone の `paintAll` と同じ形。
+async function paintAll(slots) {
+    await refreshShelfColors();
+    const seen = new Map();
+    for (const s of slots) {
+        const shelf = s.kind === 'here' ? shelfHex(s.from || '') : '';
+        const key = [s.color || '', shelf, s.kind].join('\u0001');
+        if (seen.has(key)) { Object.assign(s, seen.get(key)); continue; }
+        try {
+            const got = await window.amber.call('caltint', {
+                color: s.color || '', shelf,
+                away: s.kind === 'away', here: s.kind === 'here', plan: s.kind !== 'note',
+            });
+            const paint = { paint: (got && got.from) || '', paintHex: (got && got.hex) || '' };
+            seen.set(key, paint);
+            Object.assign(s, paint);
+        } catch { /* 決まらなくても、予定そのものは出す */ }
+    }
+}
+
+/// ノートに書いてある色を、札と行に当てる（依頼 702・711）。
+///
+/// **決める順は core**（`caltint`）── 読み込むときに決めて `paint` に
+/// 入れてある。ここがするのは、色が決まっているものに style を足すだけ。
+///
+/// 青と自分の色は style を足さない ── CSS が持っていて、明るい紙と暗い紙で
+/// 濃さが変わる（`--cal-here`）。ここで `#rrggbb` に潰すとそれが効かなくなる。
+///
+/// `paint` が空なのは core に訊けなかったとき。そのときは依頼 702 の
+/// 決まりをここで通す ── 色が無いより、前の絵のほうがよい。
 function evPaint(s) {
+    if (s.paint === 'event' || s.paint === 'shelf') {
+        return s.paintHex ? ' style="color:' + escapeAttr(s.paintHex) + '"' : '';
+    }
+    if (s.paint) return '';
     const hex = colorHex(s.color || '');
     return hex ? ' style="color:' + escapeAttr(hex) + '"' : '';
 }
@@ -9301,6 +9365,10 @@ async function drawCal() {
     if (bad) say('カレンダーを読めません: ' + bad);
     // 誰の用事かのタグを、まとめて読む（依頼 539）。
     await readCalTags(calSlots);
+    // **何で塗るかも、ここで決めておく**（依頼 711）── 描くときに決めると、
+    // 予定の数だけ core へ往復する。タグを読んだあとに置くのは、予定に
+    // 書いてある色（`s.color`）を見てから決めるため。
+    await paintAll(calSlots);
     calSlots = calSlots.sort((a, b) =>
         a.day.localeCompare(b.day)
         || (a.at ? 0 : 1) - (b.at ? 0 : 1)
@@ -10193,8 +10261,19 @@ function askEvent(head, at0) {
         toGroup = b.dataset.to === 'group';
         paint();
     };
+    // **色の欄**（依頼 713）。中身は core の八色から組む（決めるのは core・
+    // 依頼 711）。先頭は「自分の色」で、選ばなければいままでと同じ色で入る。
+    const color = el('evcolor');
+    if (color && !color.options.length) {
+        color.innerHTML = ['<option value="">自分の色</option>']
+            .concat(CAL_COLORS.map(([, n]) =>
+                '<option value="' + escapeAttr(n) + '">' + escapeHtml(n) + '</option>')).join('');
+    }
     title.value = '';
     all.checked = false;
+    // **開くたびに「自分の色」へ戻す**（依頼 713）── 前に選んだ色が黙って
+    // 次の予定にも付くと、気づかないまま色の意味が崩れる。
+    if (color) color.value = '';
     start.value = at0 || '';
     end.value = at0 ? plus(at0, 60) : '';
     err.hidden = true;
@@ -10217,7 +10296,8 @@ function askEvent(head, at0) {
             if (end.value <= start.value) { err.textContent = '終了は開始より後にしてください'; err.hidden = false; end.focus(); return; }
         }
         shut({ title: t, allDay: all.checked, start: all.checked ? '' : start.value,
-               end: all.checked ? '' : end.value, toGroup: !!toGroup, tags: picked.slice() });
+               end: all.checked ? '' : end.value, toGroup: !!toGroup, tags: picked.slice(),
+               color: color ? color.value : '' });
     };
     el('evok').onclick = go;
     el('evcancel').onclick = () => shut(null);
@@ -10254,7 +10334,10 @@ async function calAdd(day, at0) {
         let notes = '';
         try {
             const made = await window.amber.call('caltagset', {
-                notes: '', tags: ev.toGroup ? ev.tags : [], color: colorName(calHereColor),
+                notes: '', tags: ev.toGroup ? ev.tags : [],
+                // **選ばれていればそれ、選ばれていなければ「自分の色」**
+                // （依頼 713）。
+                color: ev.color || colorName(calHereColor),
             });
             notes = (made && made.notes) || '';
         } catch { /* タグが書けなくても、予定そのものは足す */ }
@@ -10276,9 +10359,19 @@ async function calAdd(day, at0) {
             dir: state.root, title: title.trim(),
         });
         const got = await window.amber.call('read', { path: made.path });
-        const out = await window.amber.call('setfield', {
+        let out = await window.amber.call('setfield', {
             text: got.text, key: 'remind', value: when,
         });
+        // **色も前書きに書く**（依頼 713）。iPhone は依頼 702 から書いて
+        // いたのに、こちらは書いていなかった ── 同じ操作が端末によって
+        // 違う色になっていた。空なら書かない（空の鍵を残すと、読む側が
+        // 毎回「色がある」と数える）。
+        const mine = ev.color || colorName(calHereColor);
+        if (mine) {
+            out = await window.amber.call('setfield', {
+                text: out.text, key: 'color', value: mine,
+            });
+        }
         await window.amber.call('write', {
             path: made.path, text: out.text, stamp: got.stamp,
         });
@@ -10299,7 +10392,14 @@ async function calAdd(day, at0) {
 async function hereEdit(id) {
     const one = calSlots.find((s) => s.kind === 'here' && s.path === id);
     const pick = await askPick('この予定をどうしますか',
-        [{ name: '予定を修正する', value: 'rename' }, { name: '予定を削除する', value: 'drop' }],
+        [{ name: '予定を修正する', value: 'rename' },
+         // **この予定だけ、別の色にする**（依頼 712・本人「タスクや予定に
+         // 対して、デフォルトと違う色を指定することができるようにして
+         // ほしい」）。色を読む仕掛けは依頼 702 で入っていたが、**人が
+         // 選ぶ口が無かった** ── amber が書くのはいつも「自分の色」だけ。
+         { name: '色を変える', value: 'color',
+           sub: one && one.color ? 'いまは「' + one.color + '」' : '予定表の色で塗っています' },
+         { name: '予定を削除する', value: 'drop' }],
         one ? one.title : '', true);
     if (pick === null) return;
     if (pick === 'rename') {
@@ -10307,6 +10407,24 @@ async function hereEdit(id) {
         if (to === null || !to.trim()) return;
         const got = await window.amber.cal(['rename', id, to.trim()]);
         if (!got || got.error) { say('直せません: ' + (got?.error || '返事がありません')); return; }
+    } else if (pick === 'color') {
+        if (!one) { say('その予定は、もうありません'); return; }
+        const c = await askPick('この予定の色', CAL_COLORS.map(([h, n]) => ({
+            name: (n === one.color ? '● ' : '　 ') + n, value: n,
+        // **元に戻す道を残す。** 空を書くと、予定表の色に落ちる。
+        })).concat([{ name: '　 この予定だけの色をやめる', value: '' }]),
+        '選んだ色は予定そのものに付くので、同期している相手の amber でも同じ色で出ます', true);
+        if (c === null) return;
+        // **どこを書き換えるかを決めるのは core**（`caltagset`）── 人が
+        // 書いた文章には触らず、最後の一行だけを差し替える。
+        // **いまのタグも渡す** ── 渡さないと「タグをやめた」と読まれ、
+        // 色を変えただけで、だれの用事かが全員から消える。
+        const made = await window.amber.call('caltagset', {
+            notes: one.notes || '', tags: one.tags || [], color: c,
+        });
+        const text = (made && made.notes) || '';
+        const wrote = await window.amber.cal(['notes', id, text]);
+        if (!wrote || wrote.error) { say('色を書けません: ' + (wrote?.error || '返事がありません')); return; }
     } else {
         if (!await askYes('この予定を削除しますか')) return;
         const got = await window.amber.cal(['drop', id]);
@@ -10659,6 +10777,12 @@ async function cmdCalSettings() {
         }));
         rows.push({ name: (calWeekend ? '✓　' : '　　') + '土日表示', value: '*weekend', sub: calWeekend ? '' : '月〜金だけ出しています' });
         rows.push({ name: 'カラー設定 ── ' + (calHereColor ? colorName(calHereColor) : '緑（既定）'), value: '*color', sub: '押すと選べます' });
+        // **予定表ごとの色**（依頼 711）。この Mac が持っている色で最初から
+        // 分かれているので、ここを開くのは気に入らない色を変えたいときだけ。
+        if (hereOn) {
+            rows.push({ name: '予定表の色', value: '*shelfcolor',
+                sub: 'はじめはこの Mac が持っている色で塗ります。予定そのものに色を指しているものは、そちらが優先されます' });
+        }
         rows.push({ name: '出す時間帯 ── ' + calFrom + '時 〜 ' + calTill + '時', value: '*hours',
             sub: '「日」「週」「並べて」に出す幅。狭いほど一つ一つが読みやすくなります' });
         const pick = await askPick('カレンダー表示設定', rows, '押すと出し入れできます。閉じるまで続けて選べます', true);
@@ -10687,6 +10811,32 @@ async function cmdCalSettings() {
                 name: (h === (calHereColor || '#2f8a52') ? '● ' : '　 ') + n, value: h,
             })), '', true);
             if (c !== null) { calHereColor = c; window.amber.remember({ calHereColor }); paintHereColor(); }
+            continue;
+        }
+        if (pick === '*shelfcolor') {
+            // **どの予定表か決めて、色を決める。** 一度に両方訊かない
+            // （出す時間帯と同じ考え）。
+            await refreshShelfColors(true);
+            const got = await window.amber.cal(['calendars']);
+            const shelves = await calShelves(got);
+            if (!shelves.length) { say('この Mac の予定表を読めません'); continue; }
+            const which = await askPick('予定表の色 ── どの予定表',
+                shelves.map((r) => ({
+                    name: r.name, value: r.title,
+                    sub: calShelfColors[r.title] ? '選んだ色: ' + colorName(calShelfColors[r.title]) : '',
+                })), '押すと色を選べます', true);
+            if (which === null) continue;
+            const now = shelfHex(which);
+            const c = await askPick('「' + which + '」の色', CAL_COLORS.map(([h, n]) => ({
+                name: (h === now ? '● ' : '　 ') + n, value: h,
+            // **この Mac の色に戻す道を残す。** 選んだあとに「元はどうだった
+            // か」へ帰れないのは事故。
+            })).concat([{ name: '　 この Mac の色にもどす', value: '*reset' }]), '', true);
+            if (c === null) continue;
+            if (c === '*reset') delete calShelfColors[which];
+            else calShelfColors[which] = c;
+            window.amber.remember({ calShelfColors });
+            if (calOn) await drawCal();
             continue;
         }
         calHide = calHide.includes(pick) ? calHide.filter((k) => k !== pick) : calHide.concat(pick);
@@ -14589,6 +14739,14 @@ const escapeAttr = escapeHtml;
     }
     if (typeof saved.calHereColor === 'string' && /^#[0-9a-f]{6}$/i.test(saved.calHereColor)) calHereColor = saved.calHereColor;
     if (saved.calColors && typeof saved.calColors === 'object') calColors = saved.calColors;
+    // 予定表ごとに選んだ色（依頼 711）。**`#rrggbb` のものだけ取る** ──
+    // 控えを手で直した人の字が、そのまま style に入らないように。
+    if (saved.calShelfColors && typeof saved.calShelfColors === 'object') {
+        calShelfColors = {};
+        for (const [k, v] of Object.entries(saved.calShelfColors)) {
+            if (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)) calShelfColors[k] = v;
+        }
+    }
     paintHereColor();
     if (typeof saved.teamFile === 'string') { teamFile = saved.teamFile; teamClock(); }
     noBins = Array.isArray(saved.noBins) ? saved.noBins : [];

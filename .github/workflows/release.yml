@@ -135,6 +135,10 @@ jobs:
           node scripts/paint-test.js
           node scripts/words-test.js
           node scripts/office-test.js
+          # 八色の表が core と二つの画面で揃っているか（依頼 711）。
+          # ずれると、画面で選んだ色と塗られた色が違い、しかも片方の端末
+          # だけずれる ── 気づくのは「iPhone と Mac で色が違う」と言われたとき。
+          node scripts/colors-test.js
 
       # **Windows でも core の試験を回す。**
       #

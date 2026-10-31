@@ -76,6 +76,9 @@ case "calendars":
          "shelves": all.map { [
             "title": $0.title,
             "source": sourceWord($0.source),
+            // **その予定表の色も渡す**（依頼 711）── カレンダーアプリで
+            // 見えている色と揃える。読めなければ空。
+            "color": hexOf($0.cgColor),
             "writable": $0.allowsContentModifications,
          ] }])
 
@@ -208,6 +211,20 @@ func sourceWord(_ s: EKSource?) -> String {
     guard let s else { return "" }
     if s.sourceType == .local { return "このパソコン" }
     return s.title
+}
+
+/// 予定表の色を `#rrggbb` にする。読めなければ空。
+///
+/// **sRGB に直してから読む。** 予定表の色は広い色空間で来ることがあり、
+/// そのまま成分を取ると画面の色と合わない。
+func hexOf(_ c: CGColor?) -> String {
+    guard let c,
+          let space = CGColorSpace(name: CGColorSpace.sRGB),
+          let same = c.converted(to: space, intent: .defaultIntent, options: nil),
+          let p = same.components, p.count >= 3
+    else { return "" }
+    let v = p.prefix(3).map { Int((max(0, min(1, $0)) * 255).rounded()) }
+    return String(format: "#%02x%02x%02x", v[0], v[1], v[2])
 }
 
 func one(_ e: EKEvent, _ day: String, _ at: String?, _ to: String?) -> [String: Any] {

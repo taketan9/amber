@@ -10,6 +10,7 @@
 pub mod api;
 pub mod callist;
 pub mod caltag;
+pub mod caltint;
 pub mod cloud;
 pub mod emoji;
 pub mod history;

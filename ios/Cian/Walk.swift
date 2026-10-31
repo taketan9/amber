@@ -387,6 +387,81 @@ enum Walk {
             if got[0]["key"] as? String != "here:ファミリー" { return "鍵の形が変わっています: \(got[0]["key"] ?? "")" }
             return nil
         }
+        // **作るときに色を選べる**（依頼 713・本人が決めた）。
+        step("カレンダー：作るときに選んだ色が、既定より強い") {
+            let was = CalPrefs.hereColor
+            defer { CalPrefs.hereColor = was }
+            CalPrefs.hereColor = "#c0392b"
+            // 選ばなければ「自分の色」。
+            if CalPrefs.colorToWrite(chosen: "") != "カーマイン" {
+                return "自分の色になっていません: \(CalPrefs.colorToWrite(chosen: ""))"
+            }
+            // 選べばそれ。
+            if CalPrefs.colorToWrite(chosen: "シアン") != "シアン" {
+                return "選んだ色が効いていません: \(CalPrefs.colorToWrite(chosen: "シアン"))"
+            }
+            // **自分の色も決めていなければ、何も書かない** ── 既定を書き込むと、
+            // 選んでいない人の予定にまで色の名前が入る（依頼 702）。
+            CalPrefs.hereColor = ""
+            if !CalPrefs.colorToWrite(chosen: "").isEmpty { return "決めていない色を書いています" }
+            if CalPrefs.colorToWrite(chosen: "リーフ") != "リーフ" { return "選んだ色が消えました" }
+            return nil
+        }
+        // **予定ごとに、既定と違う色を指せる**（依頼 712）。読む仕掛けは
+        // 依頼 702 で入っていたのに、**人が選ぶ口が無かった** ── amber が
+        // 書くのはいつも「自分の色」だけだった。
+        step("カレンダー：予定ごとに色を指せて、タグが消えない") {
+            let memo = "駅前で待ち合わせ。\n\n#太郎 #色:リーフ"
+            guard let got = CalPrefs.recolored(notes: memo, tags: ["太郎"], color: "カーマイン")
+            else { return "色を書けません" }
+            if !got.contains("#色:カーマイン") { return "色が変わっていません: \(got)" }
+            // **タグが消えない。** 渡し忘れると、色を変えただけで
+            // 「だれの用事か」が同期した全員から消える（依頼 703 の罠）。
+            if !got.contains("#太郎") { return "タグが消えました: \(got)" }
+            // **人が書いた文章には触らない。**
+            if !got.hasPrefix("駅前で待ち合わせ。") { return "本文が変わりました: \(got)" }
+            // **やめる道がある** ── 空を書くと、予定表の色に落ちる。
+            guard let off = CalPrefs.recolored(notes: got, tags: ["太郎"], color: "")
+            else { return "色をやめられません" }
+            if off.contains("#色:") { return "色が残っています: \(off)" }
+            if !off.contains("#太郎") { return "色をやめたらタグも消えました: \(off)" }
+            return nil
+        }
+        // **予定表ごとに色が分かれる**（依頼 711）。本人が奥さんの予定表と
+        // 同期できた日に言った ──「全部同じ色に見えるな」。
+        step("カレンダー：予定表ごとに色が分かれる") {
+            // 決める順は core（`caltint`）。
+            guard let a = try Cian.call("caltint", ["shelf": "#1fa3a3", "here": true]) as [String: Any]?,
+                  let b = try Cian.call("caltint", ["shelf": "#c0392b", "here": true]) as [String: Any]?
+            else { return "塗りが返りません" }
+            if a["hex"] as? String != "#1fa3a3" { return "予定表の色で塗っていません: \(a["hex"] ?? "")" }
+            if b["hex"] as? String == a["hex"] as? String { return "別の予定表でも同じ色です" }
+            // **予定に書いてある色が勝つ。**
+            let mine = try Cian.call("caltint", ["color": "カーマイン", "shelf": "#1fa3a3", "here": true])
+            if mine["hex"] as? String != "#c0392b" { return "予定の色が負けています: \(mine["hex"] ?? "")" }
+            // **色が読めない予定表では、前と同じ絵のまま。**
+            let old = try Cian.call("caltint", ["here": true])
+            if old["from"] as? String != "here" { return "色が無いとき、前の決まりに落ちていません" }
+            if !(old["hex"] as? String ?? "x").isEmpty { return "自分の色まで core が決めています" }
+            return nil
+        }
+        // **人が選んだ色が、端末の色より強い**（依頼 711）。
+        step("カレンダー表示設定：予定表の色は、選んだものが端末の色より強い") {
+            let was = CalPrefs.shelfColors
+            defer { CalPrefs.shelfColors = was }
+            CalPrefs.refreshShelfColors()
+            // 端末にある予定表を一つ借りる ── 無ければ確かめられないと言う。
+            guard let title = Phone.shelves.compactMap({ $0["title"] as? String }).first(where: { !$0.isEmpty })
+            else { return "予定表を一つも読めていないので、確かめられません" }
+            CalPrefs.shelfColors = [title: "#8e5cb3"]
+            if CalPrefs.shelfHex(title) != "#8e5cb3" {
+                return "選んだ色が効いていません: \(CalPrefs.shelfHex(title))"
+            }
+            // **端末の色に戻す道がある。**
+            CalPrefs.shelfColors = [:]
+            if CalPrefs.shelfHex(title) == "#8e5cb3" { return "選んだ色を外せません" }
+            return nil
+        }
         // **端末の中だけの予定表を「Default」と出さない**（依頼 710）。
         // iOS の API は、端末の中だけの出どころに「Default」という名前を返す
         // （2026-10-31 に奥さんの iPhone で出た）。設定アプリは同じものを

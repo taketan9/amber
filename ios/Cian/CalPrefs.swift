@@ -18,6 +18,9 @@ enum CalPrefs {
     private static let groupIdKey = "amber.calGroupId"
     private static let groupAskedKey = "amber.calGroupAsked"
     private static let tagsKey = "amber.calTagsKnown"
+    /// 予定表ごとの色の**上書き**（依頼 711）。`予定表の名前 → #rrggbb`。
+    /// 入っていない予定表は、iPhone が持っている色をそのまま使う。
+    private static let shelfColorKey = "amber.calShelfColors"
 
     static var hide: [String] {
         get { UserDefaults.standard.stringArray(forKey: hideKey) ?? [] }
@@ -127,6 +130,39 @@ enum CalPrefs {
 
     static var hereTint: Color { Color(hex: hereColor.isEmpty ? "#2f8a52" : hereColor) ?? .green }
 
+    /// 予定表ごとの色の上書き（依頼 711）。`予定表の名前 → #rrggbb`。
+    static var shelfColors: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: shelfColorKey) as? [String: String] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: shelfColorKey) }
+    }
+
+    /// **iPhone が持っている、予定表ごとの色**（依頼 711）。
+    ///
+    /// **憶えておく。** 予定一つごとに EventKit を数え直すと、月の表を
+    /// 描くたびに予定表ぜんぶを走ることになる。中身を入れ直すのは、
+    /// 月を読み込むときと、設定を閉じたとき（`refreshShelfColors`）。
+    private static var osColors: [String: String] = [:]
+
+    /// 予定表の色を読み直す。
+    static func refreshShelfColors() {
+        var out: [String: String] = [:]
+        for r in Phone.shelves {
+            guard let title = r["title"] as? String, !title.isEmpty else { continue }
+            let hex = r["color"] as? String ?? ""
+            if !hex.isEmpty { out[title] = hex }
+        }
+        osColors = out
+    }
+
+    /// その予定表を何色で塗るか（`#rrggbb`・決まらなければ空）。
+    ///
+    /// **人が選んだものが、iPhone の色より強い。**
+    static func shelfHex(_ title: String) -> String {
+        if title.isEmpty { return "" }
+        if let mine = shelfColors[title], !mine.isEmpty { return mine }
+        return osColors[title] ?? ""
+    }
+
     /// その予定はどの予定表のものか（デスクトップ版の `whoOf` と同じ鍵）。
     static func key(of s: Calendaring.Slot) -> String {
         if s.kind == "away" { return "away:" + s.from }
@@ -144,18 +180,54 @@ enum CalPrefs {
     ///
     /// **組むのは core**（`callist`）── デスクトップ版と同じ字にする。
     /// 読めなければ空を返す（予定表を読む許可が無いときなど）。
-    static func shelfRows() -> [(key: String, title: String, name: String, writable: Bool)] {
+    static func shelfRows() -> [(key: String, title: String, name: String, writable: Bool, hex: String)] {
         let rows = Phone.shelves
         guard !rows.isEmpty,
               let out = try? Cian.call("callist", ["rows": rows, "group": groupName]),
               let got = out["rows"] as? [[String: Any]]
         else { return [] }
         return got.map { r in
-            (key: r["key"] as? String ?? "",
-             title: r["title"] as? String ?? "",
-             name: r["name"] as? String ?? "",
-             writable: r["writable"] as? Bool ?? false)
+            let title = r["title"] as? String ?? ""
+            return (key: r["key"] as? String ?? "",
+                    title: title,
+                    name: r["name"] as? String ?? "",
+                    writable: r["writable"] as? Bool ?? false,
+                    // **いま塗られている色**（依頼 711）── 人が選んだもの、
+                    // 無ければ iPhone が持っているもの。設定で丸に出す。
+                    hex: shelfColors[title] ?? (rows.first {
+                        $0["title"] as? String == title
+                    }?["color"] as? String ?? ""))
         }
+    }
+
+    /// **この予定に書き込む色の名前**（依頼 713）。
+    ///
+    /// 作る画面で選ばれていればそれ、選ばれていなければ「自分の色」。
+    /// 端末の予定表に入る予定（メモ欄）も、ノートに書く予定（前書き）も、
+    /// **ここ一つから取る** ── 二か所で決めると、同じ操作が行き先によって
+    /// 違う色になる。
+    ///
+    /// 画面の外に置くのは、総ざらいから呼べるようにするため（依頼 707）。
+    static func colorToWrite(chosen: String) -> String {
+        if !chosen.isEmpty { return chosen }
+        return hereColor.isEmpty ? "" : colorName(hereColor)
+    }
+
+    /// **その予定だけの色を書き換えたメモ欄**（依頼 712）。`color` が空なら
+    /// やめる。書けなければ `nil`。
+    ///
+    /// 画面の中に書かず、ここに置く ── 画面の閉じたところに置くと、
+    /// 総ざらいから呼べず、**書いたことを書いたまま確かめる段**しか作れない
+    /// （依頼 707 で踏んだ）。
+    ///
+    /// **いまのタグを渡すのが肝。** 渡さないと core は「タグをやめた」と
+    /// 読み、色を変えただけで、だれの用事かが同期した全員から消える
+    /// （依頼 703 の註に書いてあった罠）。
+    static func recolored(notes: String, tags: [String], color: String) -> String? {
+        guard let out = try? Cian.call("caltagset", [
+            "notes": notes, "tags": tags, "color": color,
+        ]), let text = out["notes"] as? String else { return nil }
+        return text
     }
 
     /// **グループの予定表を選ぶ**（依頼 698・707）。
@@ -203,6 +275,16 @@ struct CalSettings: View {
     @State private var weekend = CalPrefs.weekend
     @State private var color = CalPrefs.hereColor
     @State private var group = CalPrefs.groupName
+    /// 予定表の色を出す行（依頼 711）。**憶えておく** ── 色を選び直した
+    /// ときだけ数え直す（`reload`）。描くたびに数えると、EventKit を走って
+    /// core を叩く往復が、丸の数だけ増える。
+    @State private var shelves = CalPrefs.shelfRows()
+
+    /// 予定表の色を選び直したあと、丸の色を描き直す。
+    private func reload() {
+        shelves = CalPrefs.shelfRows()
+        changed()
+    }
 
     var body: some View {
         NavigationStack {
@@ -289,6 +371,54 @@ struct CalSettings: View {
                                 if c.hex == (color.isEmpty ? "#2f8a52" : color) { Image(systemName: "checkmark").foregroundStyle(.tint) }
                             }
                         }
+                    }
+                }
+                // **予定表ごとの色**（依頼 711）。本人が奥さんの予定表と
+                // 同期できた日に言った ──「全部同じ色に見えるな・・・。
+                // 各カレンダーの色をセットできるようにすると、僕と妻の
+                // カレンダーの色を分けれるよね？」
+                //
+                // **はじめから分かれている。** 丸に出ている色は iPhone が
+                // その予定表に持っている色で、カレンダーアプリで見えている
+                // ものと同じ ── ここを一度も開かなくても分かれる。
+                // 開くのは、気に入らない色を変えたいときだけ。
+                if !shelves.isEmpty {
+                    Section {
+                        ForEach(shelves, id: \.key) { r in
+                            Menu {
+                                ForEach(CalPrefs.colors, id: \.hex) { c in
+                                    Button {
+                                        var all = CalPrefs.shelfColors
+                                        all[r.title] = c.hex
+                                        CalPrefs.shelfColors = all
+                                        reload()
+                                    } label: { Text(c.name) }
+                                }
+                                Divider()
+                                // **iPhone の色に戻す道を残す。** 選んだあとに
+                                // 「元はどうだったか」へ帰れないのは事故。
+                                Button("iPhone の色にもどす") {
+                                    var all = CalPrefs.shelfColors
+                                    all[r.title] = nil
+                                    CalPrefs.shelfColors = all
+                                    reload()
+                                }
+                            } label: {
+                                HStack {
+                                    Circle().fill(Color(hex: r.hex) ?? .secondary)
+                                        .frame(width: 14, height: 14)
+                                    Text(r.title).foregroundStyle(.primary)
+                                    Spacer()
+                                    if CalPrefs.shelfColors[r.title] != nil {
+                                        Text("選んだ色").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("予定表の色")
+                    } footer: {
+                        Text("はじめは iPhone が持っている色で塗ります（カレンダーアプリと同じ色）。予定そのものに色を指しているものは、そちらが優先されます")
                     }
                 }
             }
