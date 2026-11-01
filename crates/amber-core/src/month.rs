@@ -339,16 +339,20 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let root = d.path();
         std::fs::write(root.join("当番.md"),
-            "---\ntitle: 夜の当番\nremind: 2026-11-07 22:00\nuntil: 2026-11-08 02:00\n---\n\n夜。\n").unwrap();
+            "---\ntitle: 夜の当番\nremind: 2026-11-07 22:00\nuntil: 2026-11-10 02:00\n---\n\n夜。\n").unwrap();
         let got = super::of(&walk(root), 2026, 11);
+        // `remind:` から出る行だけを見る。試験はノートを今日作るので、今日が
+        // 十一月のうちは「その日に書いたノート」の行も混ざってくる。
         let mine: Vec<(String, Option<String>)> = got.iter()
-            .filter(|s| s.title == "夜の当番")
+            .filter(|s| s.title == "夜の当番" && s.kind == super::Kind::Once)
             .map(|s| (s.day.to_string(), s.at.map(|t| t.format("%H:%M").to_string())))
             .collect();
         assert_eq!(mine, [
             ("2026-11-07".to_string(), Some("22:00".to_string())),
-            ("2026-11-08".to_string(), Some("02:00".to_string())),
-        ]);
+            ("2026-11-08".to_string(), None),
+            ("2026-11-09".to_string(), None),
+            ("2026-11-10".to_string(), Some("02:00".to_string())),
+        ], "始まる日と終わる日だけ時刻が付き、あいだの日は付かない");
     }
 
     #[test]
@@ -377,10 +381,15 @@ mod tests {
         std::fs::write(root.join("素.md"),
             "---\ntitle: 素のまま\nremind: 2026-11-11 09:00\n---\n\n何も書かない。\n").unwrap();
         let got = super::of(&walk(root), 2026, 11);
-        let one = got.iter().find(|s| s.title == "面談").unwrap();
+        // ここも `remind:` の行だけ。今日書いたノートの行が先に並ぶと、
+        // 色の付いていないほうを拾ってしまう。
+        let once = |t: &str| got.iter()
+            .find(|s| s.title == t && s.kind == super::Kind::Once)
+            .unwrap();
+        let one = once("面談");
         assert_eq!(one.color.as_deref(), Some("カーマイン"));
         assert!(one.alarm_all);
-        let bare = got.iter().find(|s| s.title == "素のまま").unwrap();
+        let bare = once("素のまま");
         assert_eq!(bare.color, None, "書いていなければ色は付かない");
         assert!(!bare.alarm_all, "書いていなければ自分だけ");
     }
