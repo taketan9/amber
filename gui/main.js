@@ -16,6 +16,27 @@ const { Engine } = require('./engine');
 const { createDrive, SCOPE, CAL_SCOPE } = require('./drive');
 const { createCal, shareUrl } = require('./gcal');
 
+/// OS の仕組み（ごみ箱・エクスプローラ）へ渡す前に、パスの区切りを揃える。
+///
+/// **Windows のごみ箱は、区切りが混ざったパスを受け付けない。** 画面の側は
+/// 保存ディレクトリと中のパスを `/` で繋いでいるので、Windows では
+/// `C:\Users\tP41927\Documents\OneNote/次期情報` という形になる。ファイルを
+/// 読み書きするぶんにはこれで通る（Node も Rust も受ける）ので、**取り込みも
+/// 表示も保存も動いていた**。通らないのはここだけ ── 現場で、中の 186 件ごと
+/// フォルダをごみ箱へ入れようとして「はい」を押しても何も起きなかった
+/// （2026-11-12・依頼 714）。
+///
+/// 区切りは**そのパスが使っているほう**に合わせる（環境では決めない）。
+/// crmaine の中では Windows のパスを別の環境の画面で扱うこともある。
+///
+/// **空のパスは空で返す。** `path.normalize('')` は `.` になり、いまの場所を
+/// 指してしまう ── ごみ箱へ渡せば、作業中のディレクトリが消える。
+function osPath(at) {
+    const s = String(at == null ? '' : at);
+    if (!s.trim()) return '';
+    return /^[a-z]:[\\/]|^\\\\/i.test(s) ? s.replace(/\//g, '\\') : s;
+}
+
 // **名前を先に決める。** これが `userData` の置き場所を決めるので、
 // 決めないと憶えごとが `.../Electron/` に入り、Electron を使う他のものと
 // 同じ引き出しを共有することになる。
@@ -656,7 +677,11 @@ app.whenReady().then(() => {
     // フォルダを人に分けるのはクラウドの画面の仕事だが、そこまで人に
     // 探させない ── その場所を開いて、選ばれた状態で見せる。
     ipcMain.handle('amber:reveal', (_e, at) => {
-        try { shell.showItemInFolder(at); return true; } catch { return false; }
+        // **ここも区切りを揃える。** `showItemInFolder` は受け付けないパスでも
+        // 例外を出さず、何も起きない ── 押した人には「効かないボタン」に見える。
+        const target = osPath(at);
+        if (!target) return false;
+        try { shell.showItemInFolder(target); return true; } catch { return false; }
     });
 
     // 名乗りの下書き。**この環境が既に知っていることを、もう一度打たせない。**
@@ -826,8 +851,10 @@ app.whenReady().then(() => {
     });
 
     ipcMain.handle('amber:trash', async (_e, at) => {
+        const target = osPath(at);
+        if (!target) return { ok: false, why: 'どこを消すのか分かりません' };
         try {
-            await shell.trashItem(String(at));
+            await shell.trashItem(target);
             return true;
         } catch (e) {
             console.error('ゴミ箱へ入れられません:', e.message);

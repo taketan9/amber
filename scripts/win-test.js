@@ -340,5 +340,130 @@ console.log('コードブロックを入れる札');
     ok(/putBlock\(FOLD/.test(src), '折りたたみも、その一本を通る');
 }
 
+// **OS の仕組みへ渡すパス**（依頼 714）。
+//
+// 会社の Windows で、フォルダを中の 186 件ごとごみ箱へ入れようとして
+// 「はい」を押しても何も起きなかった。画面の側は保存ディレクトリと中のパスを
+// `/` で繋ぐので、Windows では `C:\Users\…\OneNote/次期情報` という
+// **区切りの混ざったパス**になる。ファイルを読み書きするぶんにはこれで通る
+// （だから取り込みも表示も保存も動いていた）が、ごみ箱とエクスプローラは
+// 受け付けない ── mac では一生出ない。
+console.log('OS の仕組みへ渡すパスの、区切りを揃えるか');
+{
+    const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'gui', 'main.js'), 'utf8');
+    const cut = mainSrc.indexOf('function osPath(at)');
+    const end = mainSrc.indexOf('\n}', cut) + 2;
+    if (cut < 0 || end < 2) {
+        console.error('gui/main.js から osPath を切り出せません');
+        process.exit(2);
+    }
+    // eslint-disable-next-line no-eval
+    const osPath = (0, eval)(mainSrc.slice(cut, end) + '\nosPath');
+
+    // **画面側にも同じものがある。** 同梱する側（crmaine）は `amber:trash` を
+    // 自前で実装しているので、`main.js` だけ直しても crmaine の中の amber には
+    // 届かない。二つあるぶん**食い違う**ので、同じ答えを出すかをここで見る。
+    const rcut = src.indexOf('function osPath(at)');
+    const rend = src.indexOf('\n}', rcut) + 2;
+    if (rcut < 0 || rend < 2) {
+        console.error('gui/renderer.js から osPath を切り出せません');
+        process.exit(2);
+    }
+    // eslint-disable-next-line no-eval
+    const osPath2 = (0, eval)(src.slice(rcut, rend) + '\nosPath');
+
+    const mixed = 'C:\\Users\\tP41927\\Documents\\OneNote/次期情報';
+    ok(osPath(mixed) === 'C:\\Users\\tP41927\\Documents\\OneNote\\次期情報',
+        '混ざった区切りを、円記号に揃える', osPath(mixed));
+    ok(!osPath(mixed).includes('/'), '斜線が一つも残らない', osPath(mixed));
+    ok(osPath('C:/Users/t/a/b') === 'C:\\Users\\t\\a\\b',
+        '斜線だけの Windows のパスも揃える', osPath('C:/Users/t/a/b'));
+    // **会社で毎日書くネットワークの置き場所**（`\\\\server\\share`）。
+    ok(osPath('\\\\server\\share/資料') === '\\\\server\\share\\資料',
+        'ネットワークの置き場所も揃える（頭の円記号二つは残す）',
+        osPath('\\\\server\\share/資料'));
+    // mac のパスは触らない ── 円記号は mac では**ファイル名に使える文字**で、
+    // 区切りに直すと別のノートを指す。
+    ok(osPath('/Users/taketan/Documents/cian/仕事') === '/Users/taketan/Documents/cian/仕事',
+        'mac のパスは、そのまま', osPath('/Users/taketan/Documents/cian/仕事'));
+    ok(osPath('/Users/t/a\\b.md') === '/Users/t/a\\b.md',
+        'mac のファイル名の円記号は、区切りに直さない', osPath('/Users/t/a\\b.md'));
+    // **空を返す。** `path.normalize('')` は `.`（いまの場所）になる ──
+    // それをごみ箱へ渡すと、作業中のディレクトリが消える。
+    ok(osPath('') === '' && osPath(null) === '' && osPath(undefined) === '' && osPath('  ') === '',
+        '空のパスは、空のまま（いまの場所を指さない）');
+
+    // **二つの写しが、同じ答えを出すか。**
+    const same = ['C:\\a/b', 'C:/a/b', '\\\\s\\h/x', '/Users/t/a', '/Users/t/a\\b', '', '  ', null]
+        .every((v) => osPath(v) === osPath2(v));
+    ok(same, '画面側と main.js の osPath が、同じ答えを出す', '');
+
+    // 渡す側が、素のパスを渡していないか。
+    ok(/shell\.trashItem\(target\)/.test(mainSrc), 'ごみ箱は、揃えたパスを渡す');
+    ok(/shell\.showItemInFolder\(target\)/.test(mainSrc),
+        'エクスプローラで表示も、揃えたパスを渡す');
+    ok(!/shell\.trashItem\(String\(at\)\)/.test(mainSrc), '素のパスを渡す道が残っていない');
+
+    // **画面からは、口一つを通す。** 11 か所がそれぞれ `window.amber.trash` を
+    // 直に呼んでいると、足した一か所で揃えるのを忘れる。
+    ok(/const toBin = \(at\) => window\.amber\.trash\(osPath\(at\)\);/.test(src),
+        'ごみ箱へ入れる口は一つ（toBin）', '');
+    ok(/const revealAt = \(at\) => window\.amber\.reveal\(osPath\(at\)\);/.test(src),
+        'エクスプローラで表示の口も一つ（revealAt）', '');
+    const raw = (src.match(/window\.amber\.trash\(/g) || []).length
+        + (src.match(/window\.amber\.reveal\(/g) || []).length;
+    ok(raw === 2, '画面に、素の window.amber.trash / reveal が残っていない（口の定義だけ）', raw);
+}
+
+// **ごみ箱に断られたフォルダに、逃げ道があるか**（依頼 714）。
+//
+// ノートの側には前からあった（`cmdDelete` と `manyDelete` の「このまま
+// 消しますか」）。フォルダだけは「入れられません」で終わり、押した人には
+// 押せるのに効かないボタンに見えていた。
+console.log('ごみ箱に断られたフォルダを、消す道があるか');
+{
+    const cut = src.indexOf('async function railDrop(kind, what)');
+    const end = src.indexOf('\n}', src.indexOf('say(kind === ', cut)) + 2;
+    ok(cut > 0 && end > cut, 'railDrop を切り出せる');
+    const body = src.slice(cut, end);
+    ok(/このまま消しますか/.test(body), '断られたら、消すかを訊く', '');
+    ok(/もう戻せません/.test(body), '戻せないと言う', '');
+    ok(/drop: true/.test(body), '訊いたうえで、core に消させる', '');
+    // **保存ディレクトリそのものは消さない。** core の `drop` は
+    // `remove_dir_all` なので、ノートが全部消える。
+    //
+    // **効く歯止めは core 側にある**（`api.rs` の `if from == root`・試験は
+    // `フォルダは改名も削除もできるが_ノートの中に限る`）。ここで見るのは
+    // 画面側の歯止めで、文字で見ているぶん弱い ── 実際に
+    // `relOf(what) || '.'` と書き換えたら、前の書き方では黙った。
+    // だから**その一行をそのままの形で**見る。
+    ok(/\n\s*const rel = relOf\(what\);\n/.test(body),
+        '消す相手は、相対のパスをそのまま取る（既定値を足さない）', '');
+    ok(/\n\s*if \(!rel\) \{/.test(body), '相対が空なら、この道を使わない', '');
+    ok(body.indexOf('if (!rel)') < body.indexOf('drop: true'),
+        '歯止めは、消す前に置く', '');
+    ok(/markNoBin\(true\)/.test(body), 'ごみ箱が無いことを憶える', '');
+    ok(/markNoBin\(false\)/.test(body), '入ったときは、憶えを直す', '');
+}
+
+// **フォルダの名前は、パスの葉で出す**（依頼 596 と同じ取りこぼし）。
+console.log('左の帯のフォルダ名が、パスまるごとにならないか');
+{
+    ok(!/b\.split\('\/'\)\.pop\(\)/.test(src),
+        "フォルダ名を split('/') で取る道が残っていない", '');
+    const cut = src.indexOf('function leafOf(path)');
+    const end = src.indexOf('\n}', cut) + 2;
+    if (cut < 0 || end < 2) {
+        console.error('gui/renderer.js から leafOf を切り出せません');
+        process.exit(2);
+    }
+    // eslint-disable-next-line no-eval
+    const leafOf = (0, eval)(src.slice(cut, end) + '\nleafOf');
+    const win = 'C:\\Users\\tP41927\\Documents\\OneNote\\次期情報';
+    ok(leafOf(win) === '次期情報', 'Windows のパスでも葉だけ出る', leafOf(win));
+    const mixed = 'C:\\Users\\tP41927\\Documents\\OneNote/次期情報/サブ';
+    ok(leafOf(mixed) === 'サブ', '区切りが混ざっていても葉だけ出る', leafOf(mixed));
+}
+
 console.log(bad ? '\n' + bad + ' 件ちがいます' : '\nぜんぶ通りました');
 process.exit(bad ? 1 : 0);

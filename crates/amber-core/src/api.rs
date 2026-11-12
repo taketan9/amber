@@ -1072,6 +1072,18 @@ pub fn call(method: &str, p: &serde_json::Value) -> anyhow::Result<serde_json::V
             };
             let from = inside(&from)?;
             if p["drop"].as_bool().unwrap_or(false) {
+                // **保存ディレクトリそのものは消せない**（依頼 714）。
+                // この下は `remove_dir_all` なので、保存ディレクトリを指したまま
+                // 通るとノートが全部消える。`inside` では止まらない ──
+                // `root` は `root` の下にあるので、そこは通ってしまう。
+                //
+                // **文字では見ない。** 空のほかに `.` でも `仕事/..` でも
+                // 保存ディレクトリに行き着く（`.` で実際に消えた ── 試験が
+                // 見つけた）。畳んだあとのパスが保存ディレクトリと同じかを見る。
+                // 画面側にも歯止めはあるが、**消える側の歯止めはここに置く**。
+                if from == root {
+                    anyhow::bail!("保存ディレクトリそのものは消せません");
+                }
                 let n = crate::note::list(
                     &from,
                     crate::survey::Limits { depth: 9, rows: crate::survey::ALL, hidden: false, ..Default::default() },
@@ -2963,6 +2975,17 @@ mod tests {
         // 使えない名前。
         assert!(call("book", &serde_json::json!({ "path": at, "book": "しごと", "name": "a/b" })).is_err());
         assert!(call("book", &serde_json::json!({ "path": at, "book": "しごと", "name": "  " })).is_err());
+
+        // **保存ディレクトリそのものは消せない**（依頼 714）。
+        // この下は `remove_dir_all` なので、空の `book` が通ると
+        // ノートが全部消える。`inside` では止まらない（root は root の下）。
+        for book in ["", "  ", ".", "./", "しごと/.."] {
+            assert!(
+                call("book", &serde_json::json!({ "path": at, "book": book, "drop": true })).is_err(),
+                "book が {book:?} でも消せてしまった"
+            );
+            assert!(root.join("しごと").is_dir(), "保存ディレクトリが消えた（book が {book:?}）");
+        }
 
         // 捨てる ── 何本が道連れになるかを先に言う。
         let out = call("book", &serde_json::json!({ "path": at, "book": "しごと", "drop": true })).unwrap();

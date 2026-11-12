@@ -269,6 +269,38 @@ function leafOf(path) {
     return at < 0 ? s : s.slice(at + 1);
 }
 
+/// OS の仕組み（ごみ箱・エクスプローラ）へ渡すパスの、区切りを揃える。
+///
+/// **区切りが混ざったパスを、Windows のごみ箱は受け付けない。** この画面は
+/// 保存ディレクトリと中のパスを `/` で繋ぐので、Windows では
+/// `C:\Users\…\OneNote/次期情報` という形になる。ファイルを読み書きする
+/// ぶんにはこれで通る（Node も Rust も受ける）ので、**取り込みも表示も保存も
+/// 動いていた**。通らないのはここだけ ── 会社の Windows で、フォルダを
+/// 中の 186 件ごとごみ箱へ入れようとして「はい」を押しても何も起きなかった
+/// （2026-11-12・依頼 714）。
+///
+/// **ここは画面側に置く。** 同梱する側（crmaine）は `amber:trash` を自前で
+/// 実装しているので（`crmaine/gui/amber.js`）、amber の `main.js` で揃えても
+/// crmaine の中の amber には届かない。画面は `amber-gui.zip` で配られる。
+/// `main.js` の側にも同じものがある ── あちらは最後の歯止めで、
+/// 二つが食い違わないかは `scripts/win-test.js` が見る。
+///
+/// 区切りは**そのパスが使っているほう**に合わせる（環境では決めない）。
+/// 空のパスは空のまま返す ── 畳むと「いまの場所」になり、それを
+/// ごみ箱へ渡すと作業中のディレクトリが消える。
+function osPath(at) {
+    const s = String(at == null ? '' : at);
+    if (!s.trim()) return '';
+    return /^[a-z]:[\\/]|^\\\\/i.test(s) ? s.replace(/\//g, '\\') : s;
+}
+
+/// ごみ箱へ入れる。**`window.amber.trash` を直に呼ばない** ── 呼ぶ口を
+/// 一つにして、区切りを揃えるのを忘れられないようにする。
+const toBin = (at) => window.amber.trash(osPath(at));
+
+/// その場所を開いて、選ばれた状態で見せる。同じ理由で、ここを通す。
+const revealAt = (at) => window.amber.reveal(osPath(at));
+
 /// フォルダの見せ名。保存ディレクトリそのものなら、その名前。
 function bookName(dir) {
     const p = placeOf(dir);
@@ -459,7 +491,7 @@ function drawRail() {
                 // 錠のかかったフォルダには 🔒 を添える（依頼 629）── 右押しの
                 // メニューを開くまで分からないのでは、かけたことを忘れる。
                 const shut = state.locks.some((l) => b === l || b.startsWith(l + '/'));
-                rows.push(dest('book', b, b.split('/').pop() + (shut ? ' 🔒' : ''), n, on('book', b),
+                rows.push(dest('book', b, leafOf(b) + (shut ? ' 🔒' : ''), n, on('book', b),
                                relOf(b).split('/').length - 1 + base, state.colors[b]));
             }
         }
@@ -1343,7 +1375,7 @@ async function manyDelete() {
     let failed = 0;
     let asked = knew;
     for (const note of notes) {
-        const got = await window.amber.trash(note.path);
+        const got = await toBin(note.path);
         if (got === true) { binned++; if (noBin()) markNoBin(false); continue; }
         // 断られた ── **ここで初めて分かったときだけ、もう一度訊く。**
         markNoBin(true);
@@ -1658,7 +1690,7 @@ function drawStrip() {
                   run: () => { for (const o of tabs.slice()) if (o.path !== t.path) closeTab(o.path); } },
                 { name: '一覧でこのノートを選ぶ', sep: true, run: () => openNote(t.path, { keep: true }) },
                 { name: MAC ? 'Finder で表示' : 'エクスプローラーで表示',
-                  run: () => window.amber.reveal(t.path) },
+                  run: () => revealAt(t.path) },
             ], { x: e.clientX, y: e.clientY });
         };
     }
@@ -8957,7 +8989,7 @@ el('spare').addEventListener('click', async (e) => {
         let done = 0;
         const left = [];
         for (const at of sparePicked) {
-            const ok = await window.amber.trash(at);
+            const ok = await toBin(at);
             if (ok === true) done += 1; else left.push(at);
         }
         box.hidden = true;
@@ -11034,7 +11066,7 @@ const CMDS = [
     { id: 'copypath', name: '場所をコピー', need: 'note', menu: true,
       run: () => copyText(state.open.path, '保存場所') },
     { id: 'reveal', name: MAC ? 'Finder で表示' : 'エクスプローラーで表示',
-      need: 'note', menu: true, run: () => window.amber.reveal(state.open.path) },
+      need: 'note', menu: true, run: () => revealAt(state.open.path) },
     // **名前で出す。** 前は帯に ☰ と ⤢ が並んでいたが、どちらが目次で
     // どちらが拡大かは記号のどこにも書いていない ── 帯の幅を食っていた
     // うえ、押してみるまで分からなかった。
@@ -11539,7 +11571,7 @@ function railMenu(kind, what, at) {
             items.push({
                 name: 'グループへ招待',
                 sub: 'クラウドの画面が開きます',
-                run: () => window.amber.reveal(what),
+                run: () => revealAt(what),
             });
         }
         items.push({
@@ -11593,7 +11625,7 @@ async function railRename(kind, what) {
                 await ask('mkbook', { dir });
                 await ask('move', { path: n.path, dir, root });
             }
-            await window.amber.trash(what);
+            await toBin(what);
         } else {
             for (const n of hit) await retagOne(n, kind, what, name);
             // フォルダは空でも core が憶えている ── 中のノートだけ直しても、
@@ -11637,12 +11669,35 @@ async function railDrop(kind, what) {
                 + (hit.length ? '（中の ' + hit.length + ' 件はブックマークの直下へ）' : '')
             : '「' + what + '」の' + what2 + 'を ' + hit.length + ' 件から外しますか（ノートは残ります）';
     if (!await askYes(ask2)) return;
+    let erased = false;
     try {
         if (kind === 'book') {
-            const gone = await window.amber.trash(what);
+            const gone = await toBin(what);
             if (gone !== true) {
-                say(BIN + 'へ入れられません' + (gone && gone.why ? ': ' + gone.why : ''));
-                return;
+                // **断られたところで行き止まりにしない。** ノートの側には前から
+                // 逃げ道があるのに（`cmdDelete` と `manyDelete`）、フォルダだけは
+                // 「入れられません」で終わっていた ── 押した人には、押せるのに
+                // 効かないボタンに見える（現場で起きた・2026-11-12・依頼 714）。
+                // ネットワークやクラウドの置き場所にはごみ箱が無いので、
+                // そこでは「消す」しか道が無い。
+                const rel = relOf(what);
+                if (!rel) {
+                    // **保存ディレクトリそのものは、ここから消さない。**
+                    // core の `drop` は `remove_dir_all` なので、ノートが全部消える。
+                    say(BIN + 'へ入れられません' + (gone && gone.why ? ': ' + gone.why : ''));
+                    return;
+                }
+                markNoBin(true);
+                const go = await askYes(BIN + 'へ入れられませんでした'
+                    + (gone && gone.why ? '（' + gone.why + '）' : '')
+                    + '。「' + bookLabel(what) + '」を、中の ' + hit.length
+                    + ' 件ごとこのまま消しますか。もう戻せません');
+                if (!go) return;
+                await ask('book', { path: rootOf(what), book: rel, drop: true });
+                erased = true;
+            } else if (noBin()) {
+                // 入った ── ここにはごみ箱がある。前に断られていても憶えを直す。
+                markNoBin(false);
             }
         } else if (kind === 'star') {
             // **消したのはフォルダで、しおりではない。** 中に居たノートは
@@ -11660,7 +11715,8 @@ async function railDrop(kind, what) {
         state.open = null;
         applyView();
         await reload({ quiet: true });
-        say(kind === 'book' ? BIN + 'へ入れました'
+        say(kind === 'book'
+            ? (erased ? '消しました（' + hit.length + ' 件）' : BIN + 'へ入れました')
             : kind === 'star' ? '「' + what + '」を消しました'
                 : '外しました（' + hit.length + ' 件）');
     } catch (e) {
@@ -12408,7 +12464,7 @@ async function cmdShare(folder, off) {
         await askYes('「' + shown + '」を共有のフォルダにしました。\n\n'
             + 'あとは、このフォルダをクラウド側でグループの人に分けてください。'
             + '（いま開きますか）')
-            ? window.amber.reveal(folder)
+            ? revealAt(folder)
             : say('フォルダを右押し→「グループへ招待」から後でも設定できます');
     } catch (e) {
         say('できません: ' + why(e));
@@ -12629,7 +12685,7 @@ async function cmdDelete() {
     // **真偽でも、理由つきでも受ける。** 同梱している側は `false` を返す
     // ものもあれば、`{ ok:false, why }` を返すものもある ── どちらでも
     // 人には理由を見せる。理由が無いときだけ、無いなりの一行。
-    const done = await window.amber.trash(path);
+    const done = await toBin(path);
     if (done !== true) {
         // **断られたら、行き止まりにしない。**
         //
@@ -13101,7 +13157,7 @@ function oneShow() {
     sheet({ title: run.title, items, foot, bare: true }).then((v) => {
         if (my !== oneShown) return;
         oneOpen = false;
-        if (v === ' reveal') window.amber.reveal(run.dir);
+        if (v === ' reveal') revealAt(run.dir);
     });
 }
 
@@ -13399,7 +13455,7 @@ async function syncPlace(place, remote) {
                 one.touched = true;
             } else if (s.do === 'drophere') {
                 // 向こうで消え、こちらは触っていない ── **ゴミ箱へ**（消さない）。
-                await window.amber.trash(at);
+                await toBin(at);
                 gone.push(s.rel);
                 one.gone += 1;
                 one.touched = true;
