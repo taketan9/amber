@@ -108,6 +108,14 @@ fn summary(o: &Opened) -> serde_json::Value {
         "book": o.book,
         "units": units,
         "pages": o.units.iter().map(|u| u.pages.len()).sum::<usize>(),
+        // **読めなかった一本を、画面まで連れていく**（依頼 715）。
+        // フォルダを開いたときだけ入る。黙って落とすと、画面には
+        // 「取り込みました」と出て中身が足りない。
+        "skipped": o.skipped.iter().map(|s| serde_json::json!({
+            "name": s.name,
+            "bytes": s.bytes,
+            "why": s.why,
+        })).collect::<Vec<_>>(),
     })
 }
 
@@ -262,6 +270,39 @@ mod tests {
 
     fn samples() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../amber-onenote/tests/samples")
+    }
+
+    /// 依頼 715。**読めなかった一本を、画面まで連れていく。**
+    ///
+    /// フォルダの中の `.one` が一本読めないとき、前はフォルダまるごと
+    /// 落ちていた（`amber_onenote::open_dir` の `?`）。いまは残りを読んで、
+    /// どれがなぜ駄目だったかを返す ── 返さないと、画面には
+    /// 「取り込みました」と出て中身が足りない。
+    #[test]
+    fn 読めなかった一本は_名前と大きさと理由つきで返る() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::copy(
+            samples().join("notebook/New Section 1.one"),
+            d.path().join("あ 読める.one"),
+        )
+        .unwrap();
+        std::fs::write(d.path().join("ん 壊れている.one"), b"MSCF not really").unwrap();
+
+        let (key, sum) = open(d.path()).unwrap();
+        assert_eq!(sum["units"].as_array().unwrap().len(), 1, "読めた一本が無い");
+        let sk = sum["skipped"].as_array().unwrap();
+        assert_eq!(sk.len(), 1, "報せが無い: {sum}");
+        assert_eq!(sk[0]["name"], "ん 壊れている.one");
+        assert_eq!(sk[0]["bytes"], 15);
+        assert!(!sk[0]["why"].as_str().unwrap().is_empty());
+        close(key);
+
+        // 読めるものだけなら、報せは空の並び（欄そのものは必ず在る ──
+        // 無いと画面側が `undefined` を回すことになる）。
+        let (key2, sum2) = open(&samples().join("notebook")).unwrap();
+        assert!(sum2["skipped"].is_array());
+        assert_eq!(sum2["skipped"].as_array().unwrap().len(), 0);
+        close(key2);
     }
 
     #[test]

@@ -301,6 +301,10 @@ const toBin = (at) => window.amber.trash(osPath(at));
 /// その場所を開いて、選ばれた状態で見せる。同じ理由で、ここを通す。
 const revealAt = (at) => window.amber.reveal(osPath(at));
 
+/// 大きさを人の言葉で。一メガ以上はメガ、それ未満はキロ。
+const sizeWords = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
+    : Math.max(1, Math.round(n / 1024)) + ' KB');
+
 /// フォルダの見せ名。保存ディレクトリそのものなら、その名前。
 function bookName(dir) {
     const p = placeOf(dir);
@@ -12997,9 +13001,8 @@ async function pickOneNote(known) {
     const where = (at) => (at.startsWith(known.documents) ? 'ドキュメント'
         : at.startsWith(known.downloads) ? 'ダウンロード'
         : at.startsWith(known.desktop) ? 'デスクトップ' : shortPath(at));
-    const mb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
     const day = (t) => { const d = new Date(t * 1000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
-    const items = found.map((f) => ({ name: f.name + '.onepkg', sub: [where(f.path), day(f.modified), mb(f.bytes)].join(' · '), value: f.path }));
+    const items = found.map((f) => ({ name: f.name + '.onepkg', sub: [where(f.path), day(f.modified), sizeWords(f.bytes)].join(' · '), value: f.path }));
     items.push({ name: 'ファイルを選ぶ', sub: '.onepkg / .one', value: ' file' });
     items.push({ name: 'フォルダを選ぶ', sub: '.one が入ったフォルダ', value: ' dir' });
     const go = await askPick('OneNote を取り込む', items,
@@ -13047,7 +13050,7 @@ async function oneNoteOut(known) {
 }
 
 async function runOneNote(from, to) {
-    oneRun = { name: leafOf(from), rows: [], over: false, pages: 0, pictures: 0, failed: 0, to };
+    oneRun = { name: leafOf(from), rows: [], skipped: [], over: false, pages: 0, pictures: 0, failed: 0, to };
     const run = oneRun;
     run.title = '「' + run.name + '」を読んでいます';
     oneShow();
@@ -13069,11 +13072,23 @@ async function runOneNote(from, to) {
     run.rows = (got.units || []).map((u) => ({
         name: [...(u.groups || []), u.name].join('／'), pages: u.pages, state: 'wait',
     }));
+    // **読めなかった `.one` は、行とは別に持つ**（依頼 715）。
+    // 行の番号は core の `units` と一対一で、`onenote_write` にそのまま渡す
+    // ── ここに混ぜると、書き出すセクションが一つずれる。
+    run.skipped = got.skipped || [];
+    run.failed += run.skipped.length;
     if (!run.rows.length) {
         run.over = true;
         window.amber.onenote('onenote_close', { key: got.key }).catch(() => {});
-        run.title = '「' + run.name + '」には、セクションがありませんでした';
-        run.trouble = { what: '取り込むページが見つかりませんでした', hint: 'OneNote で ファイル → エクスポート → ノートブック → .onepkg を書き出して、それを選んでください', raw: '' };
+        if (run.skipped.length) {
+            // 一本も読めなかった。**どれがなぜ駄目だったかは、下の行に出る。**
+            run.title = '「' + run.name + '」の ' + run.skipped.length + ' 本とも読めませんでした';
+            run.trouble = { what: 'どれも読める形ではありませんでした',
+                hint: '下の行の「元の文言」をそのまま伝えてもらえると、原因が分かります', raw: '' };
+        } else {
+            run.title = '「' + run.name + '」には、セクションがありませんでした';
+            run.trouble = { what: '取り込むページが見つかりませんでした', hint: 'OneNote で ファイル → エクスポート → ノートブック → .onepkg を書き出して、それを選んでください', raw: '' };
+        }
         oneShow();
         return;
     }
@@ -13137,6 +13152,18 @@ function oneShow() {
         sub: r.state === 'fail' ? '書けませんでした: ' + r.why : r.pages + ' ページ',
         value: ' row',
     }));
+    // **読めなかった `.one` も並べる**（依頼 715）。前はフォルダの中の一本が
+    // 読めないとフォルダまるごと落ち、読めた `.one` も捨てられていた ──
+    // いまは残りを取り込んで、駄目だった一本をここに出す。大きさも出す
+    // （本人は「五十メガを超えると取り込めない」と見ていた ── 大きさが
+    // 見えないと、その見当が当たっているかを誰も確かめられない）。
+    for (const sk of run.skipped || []) {
+        items.push({
+            name: '✗ ' + sk.name,
+            sub: '読めませんでした（' + sizeWords(sk.bytes) + '）: ' + sk.why,
+            value: ' row',
+        });
+    }
     // **読んでいる間も、行を一つ出す** ── 題だけのダイアログは、止まっているのか
     // 動いているのか分からない（「裏で動いているのか？」と訊かれた）。
     if (!run.over && !run.rows.length) {

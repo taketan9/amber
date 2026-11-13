@@ -41,6 +41,18 @@ pub struct Opened {
     /// ノートブックの名前（`.onepkg` ならファイル名、`.one` 一本なら空）。
     pub book: String,
     pub units: Vec<Unit>,
+    /// 読めなかったファイル（フォルダを開いたときだけ入る・依頼 715）。
+    pub skipped: Vec<Skipped>,
+}
+
+/// 読めなかった一本。**何が駄目だったかを連れて帰る** ── 読めなかったことを
+/// 黙って落とすと、画面には「取り込みました」と出て中身が足りない。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Skipped {
+    /// ファイルの名前（道ではなく名前 ── 画面に出すので）。
+    pub name: String,
+    pub bytes: u64,
+    pub why: String,
 }
 
 /// セクション 1 つ。`groups` はセクショングループの階層（外側から順に）。
@@ -99,7 +111,7 @@ pub fn open(path: &Path) -> Result<Opened> {
             let nb = p
                 .parse_package(typed)
                 .with_context(|| format!("{} を開けません", path.display()))?;
-            Ok(Opened { book: stem, units: from_notebook(&nb) })
+            Ok(Opened { book: stem, units: from_notebook(&nb), skipped: Vec::new() })
         }
         "onetoc2" => {
             let nb = p
@@ -110,13 +122,13 @@ pub fn open(path: &Path) -> Result<Opened> {
                 .and_then(|d| d.file_name())
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            Ok(Opened { book, units: from_notebook(&nb) })
+            Ok(Opened { book, units: from_notebook(&nb), skipped: Vec::new() })
         }
         "one" => {
             let sec = p
                 .parse_section(typed)
                 .with_context(|| format!("{} を開けません", path.display()))?;
-            Ok(Opened { book: String::new(), units: vec![unit(&sec, Vec::new())] })
+            Ok(Opened { book: String::new(), units: vec![unit(&sec, Vec::new())], skipped: Vec::new() })
         }
         _ if path.is_dir() => open_dir(path),
         _ => anyhow::bail!("OneNote のファイルではありません: {}", path.display()),
@@ -213,12 +225,37 @@ fn open_dir(dir: &Path) -> Result<Opened> {
         return Ok(got);
     }
     let mut units = Vec::new();
+    let mut skipped = Vec::new();
     for p in entries {
-        if p.extension().map(|e| e.eq_ignore_ascii_case("one")).unwrap_or(false) {
-            units.extend(open(&p)?.units);
+        if !p.extension().map(|e| e.eq_ignore_ascii_case("one")).unwrap_or(false) {
+            continue;
+        }
+        // **一本読めなくても、残りは読む**（依頼 715）。
+        //
+        // 前は `open(&p)?` で、**読めない一本があるとフォルダまるごと
+        // 落ちていた** ── 読めた `.one` も捨てられ、画面には
+        // 「取り込めませんでした」しか出ないので、どの一本が駄目なのかも
+        // 分からなかった。会社の `.one`（五十メガを超えるもの）で起きた。
+        //
+        // 読み手の panic もここで止める ── 壊れた `.one` でパーサーが
+        // panic すると、エンジンごと落ちてアプリ全体が止まる。
+        // `amber_core::onenote::open` も止めているが、あちらは呼び出し
+        // 一回ぶんで、**ここは一本ぶん**。
+        let got = std::panic::catch_unwind(|| open(&p))
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("読めない形でした（壊れているかもしれません）")));
+        match got {
+            Ok(o) => units.extend(o.units),
+            Err(e) => skipped.push(Skipped {
+                name: p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                bytes: std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0),
+                why: format!("{e:#}"),
+            }),
         }
     }
-    Ok(Opened { book, units })
+    Ok(Opened { book, units, skipped })
 }
 
 fn from_notebook(nb: &Notebook) -> Vec<Unit> {
@@ -843,5 +880,57 @@ mod tests {
     #[test]
     fn onenote_でないものは断る() {
         assert!(open(&sample("README.md")).is_err());
+    }
+
+    /// 依頼 715。**フォルダの中に読めない `.one` があっても、残りは取り込む。**
+    ///
+    /// 前は `open(&p)?` で、一本読めないとフォルダまるごと落ちていた ──
+    /// 読めた `.one` も捨てられ、画面には「取り込めませんでした」しか
+    /// 出ないので、どの一本が駄目なのかも分からなかった。
+    #[test]
+    fn フォルダの中に読めない一本があっても_残りは取り込む() {
+        let tmp = std::env::temp_dir().join(format!("amber-onenote-skip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        // 読める一本（サンプルの写し）。
+        std::fs::copy(sample("notebook/New Section 1.one"), tmp.join("あ 読める.one")).unwrap();
+        // 読めない一本。**名前順で読める一本より後ろ**に置く ── 前に置くと、
+        // 「落ちる前に読めたぶんだけ返っていた」のと見分けがつかない。
+        std::fs::write(tmp.join("ん 壊れている.one"), b"MSCF not really a one file").unwrap();
+
+        let got = open(&tmp);
+        let _ = std::fs::remove_dir_all(&tmp);
+        let got = got.expect("フォルダが落ちた");
+
+        // セクションの名前はファイル名から取る（目次が無いので）。
+        assert_eq!(names(&got), ["あ 読める"], "読めた一本が入っていない");
+        assert_eq!(got.skipped.len(), 1, "読めなかった一本が報されていない");
+        let sk = &got.skipped[0];
+        assert_eq!(sk.name, "ん 壊れている.one");
+        assert_eq!(sk.bytes, 26, "大きさを連れて帰っていない");
+        assert!(!sk.why.is_empty(), "なぜ駄目だったかが空");
+
+        // 読めるものだけのフォルダでは、報せは空のまま。
+        let clean = open(&sample("notebook")).expect("見本のフォルダ");
+        assert!(clean.skipped.is_empty(), "{:?}", clean.skipped);
+    }
+
+    /// 読める一本が一つも無いときも、落ちずに理由を連れて帰る ──
+    /// 画面がどれがなぜ駄目だったかを並べられるように。
+    #[test]
+    fn 一本も読めないフォルダでも_理由を連れて帰る() {
+        let tmp = std::env::temp_dir().join(format!("amber-onenote-none-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("一.one"), b"xxxx").unwrap();
+        std::fs::write(tmp.join("二.one"), b"yyyy").unwrap();
+
+        let got = open(&tmp);
+        let _ = std::fs::remove_dir_all(&tmp);
+        let got = got.expect("フォルダが落ちた");
+
+        assert!(got.units.is_empty());
+        assert_eq!(got.skipped.len(), 2);
+        assert!(got.skipped.iter().all(|s| !s.why.is_empty()));
     }
 }
