@@ -139,6 +139,10 @@ jobs:
           # ずれると、画面で選んだ色と塗られた色が違い、しかも片方の端末
           # だけずれる ── 気づくのは「iPhone と Mac で色が違う」と言われたとき。
           node scripts/colors-test.js
+          # 試験用の家（`AMBER_TEST_HOME`）が本物の場所を一つも返さないか（依頼 717）。
+          # 外れると、総ざらいと撮影が本人の本物の amber.json を読み書きする ──
+          # 本物のノート一覧が写り、カレンダーの見方が書き換わった。
+          node scripts/home-test.js
 
       # **Windows でも core の試験を回す。**
       #

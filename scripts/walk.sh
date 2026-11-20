@@ -4,19 +4,21 @@
 #     scripts/walk.sh            # 総ざらい（walk.mjs）
 #     scripts/walk.sh grid       # 網 ── 位置×操作の総当たり（grid.mjs）
 #
-# やること: 試す場所を作る → 設定を退避 → デスクトップ版を出す → `walk.mjs` を走らせる
-#          → デスクトップ版を閉じる → 設定を戻す → 試す場所を消す
+# やること: 試す場所を作る → デスクトップ版を出す → `walk.mjs` を走らせる
+#          → デスクトップ版を閉じる → 本物の設定が変わっていないかを見る
 #
-# **本人のノートには触らない。** 触らないための仕掛けが二つ要る:
+# **本人のノートと設定には触らない。** デスクトップ版に試験用の家
+# （`AMBER_TEST_HOME`）を渡すと、設定（`amber.json`）・ドキュメント・
+# 初めて開いたときの置き場所・クラウドのフォルダが、ぜんぶその下に向く
+# （`gui/main.js`・依頼 717）。
 #
-#   一。ノートの置き場所 ── `$HOME` を作り替えて渡す。デスクトップ版は `documents` を
-#       そこから引くので、ノートは試す場所の中にできる。
+# **前は本物の設定を写して、終わったら書き戻していた。** macOS の Electron は
+# `$HOME` を作り替えても `appData` を移さないので、設定だけは本物のほうに
+# 落ちる（2026-09-09 に実際に書き込んでしまった）。写しと戻しには弱点が
+# 三つあった ── 途中で落ちると戻らない、走っているあいだは本物そのものが
+# 書き換わる、本人の amber が開いていると同じファイルを取り合う。
 #
-#   二。設定ファイル ── **macOS の Electron は `appData` に `$HOME` を
-#       見ない**。隔離した `$HOME` を渡しても、設定だけは本物のほうに
-#       落ちる（2026-09-09 に実際に書き込んでしまった ── `open` と `tabs`
-#       が消えるフォルダを指し、次に開いたとき「開けません」になるところ
-#       だった）。だから**始める前に写しを取り、終わったら必ず戻す**。
+# 終わりに**本物の設定の更新日時と中身を見比べ**、変わっていたら失敗で終える。
 set -e
 here="${0:A:h}"
 root="${here:h}"
@@ -27,22 +29,37 @@ root="${here:h}"
 # こちらで保存する」が落ちた（2026-10-17・二度続けて落として気づいた）。
 tmp="${TMPDIR:-/tmp}"
 work="${tmp%/}/amber-walk"
+# 本物の設定。**読むだけ** ── 変わっていないかを見比べるために、指紋を取る。
 mine="$HOME/Library/Application Support/amber/amber.json"
 port="${PORT:-9333}"
+# 試験用の家（`AMBER_TEST_HOME`）と、その中の設定。並びは `gui/main.js` の `testDirs`。
+home="$work/home"
+state="$home/appData/amber/amber.json"
+
+# 本物の設定の指紋（更新日時・大きさ・中身）。無ければ「なし」。
+print_mine() {
+  if [ -f "$mine" ]; then
+    echo "$(stat -f '%m %z' "$mine") $(shasum -a 256 "$mine" | cut -d' ' -f1)"
+  else
+    echo "なし"
+  fi
+}
 
 quit() {
   pkill -f 'Electron.*remote-debugging-port='"$port" 2>/dev/null || true
   pkill -f "http.server $siteport" 2>/dev/null || true
   pkill -f "fake-drive.js $driveport" 2>/dev/null || true
   sleep 1
-  # **設定を戻すのは、何があっても。** ここを飛ばすと本人のアプリが変わる。
-  if [ -f "$work/amber.json.mine" ]; then
-    mkdir -p "$(dirname "$mine")"
-    cp "$work/amber.json.mine" "$mine"
-    echo "設定を戻しました"
-  elif [ -f "$work/なかった" ]; then
-    rm -f "$mine"
-    echo "設定を消しました（もともと無かったので）"
+  # **本物の設定が変わっていないかを、何があっても見る。** 戻すのではなく
+  # 見るだけ ── 試験用の家が効いていれば、そもそも触っていない。
+  if [ -n "${before:-}" ]; then
+    if [ "$(print_mine)" = "$before" ]; then
+      echo "本物の設定は変わっていません"
+    else
+      echo "✗ 本物の設定（$mine）が変わりました"
+      echo "  試験用の家（AMBER_TEST_HOME）が効いていません。gui/main.js を見てください。"
+      exit 3
+    fi
   fi
 }
 trap quit EXIT INT TERM
@@ -70,10 +87,13 @@ MD
 
 # **本人の amber が開いていたら、始めない**（依頼 667・2026-10-17）。
 #
-# 引き出し（`userData`）は隔離できないので、**二つのアプリが同じ
-# `amber.json` を取り合う。** こちらが試し場に向けた設定を、向こうが
-# すぐ本物のノートで上書きし、**総ざらいが本人のノートの上で走る。**
-# 終わりの戻しも、向こうがその間に変えた設定を踏み潰す。
+# **この見張りを置いた理由は、依頼 717 で無くなった。** 前は引き出し
+# （`userData`）を隔離できず、二つのアプリが同じ `amber.json` を取り合って、
+# こちらが試し場に向けた設定を向こうがすぐ本物のノートで上書きし、
+# **総ざらいが本人のノートの上で走った。** いまは試験用の家
+# （`AMBER_TEST_HOME`）で引き出しが分かれているので、取り合わない。
+# **外すかどうかは本人が決める**ので、それまでは残す（見張りは外すほうが
+# 戻しにくい）。
 #
 # 2026-10-17 に実際に起きた ── 試験の画面が本人の `batchPro` のノートを開き、
 # 同期先が drive の `~/Documents/cian` を、**空の偽 Drive** に向けていた。
@@ -85,9 +105,6 @@ MD
 # amber が開いたまま総ざらいが走り出したのを見たとき。両方を見る。
 if pgrep -f 'Applications/(amb|cian).*\.app/Contents/MacOS/' >/dev/null 2>&1; then
   echo "amber が開いています。終了してから、もう一度走らせてください。"
-  echo
-  echo "  設定ファイル（amber.json）を二つのアプリで取り合うので、"
-  echo "  試し場への向け替えが上書きされ、本人のノートの上で走ります。"
   exit 1
 fi
 
@@ -141,17 +158,15 @@ if [ "$(busy)" != "0" ] || ! quiet 3 3; then
   echo "空きました。始めます。"
 fi
 
-# 設定の写し（無ければ「無かった」と憶えておく）
-if [ -f "$mine" ]; then cp "$mine" "$work/amber.json.mine"; else touch "$work/なかった"; fi
+# 本物の設定の指紋。終わりの片付けが見比べる。
+before="$(print_mine)"
 
 # **ようこそ画面と案内は、憶えた状態で始める**（依頼 654・656）── どちらも
 # 画面ぜんぶを覆い、案内は次へを押すまで進めない。憶えさせずに始めると
 # **282 段が一段目から通らない。**
 #
-# **ここは本物の設定に書く。** 引き出し（`userData`）は隔離していない（下の註）
-# ので、`$HOME` を作り替えても Electron はこちらを読む。上の写しと、終わりの
-# 戻しが守る ── `$work/home` の下に書いても、誰も読まない（一度そう書いて、
-# 画面が覆われたままなのを見た）。
+# **書くのは試験用の家の設定**（`$state`）。デスクトップ版に `AMBER_TEST_HOME` を
+# 渡すので、Electron はこちらを読む。本物の設定には触らない。
 #
 # 台本（`AMBER_DO`）で `showHello()` と `startTour()` を直に呼ぶ段があるので、
 # 出なくても確かめられる。
@@ -162,8 +177,8 @@ if [ -f "$mine" ]; then cp "$mine" "$work/amber.json.mine"; else touch "$work/�
 # **総ざらいが本人のノートの上で走る状態になっていた**（2026-10-17 に実際に
 # そうなった）。同期先も切る ── こちらが立てるのは空の偽 Drive なので、
 # 本物のノートに向けたまま同期が走ると「向こうでぜんぶ消えた」と読める。
-mkdir -p "$(dirname "$mine")"
-AMBER_STATE="$mine" AMBER_NOTES="$notes" python3 "$root/scripts/walk-first.py"
+mkdir -p "$(dirname "$state")"
+AMBER_STATE="$state" AMBER_NOTES="$notes" python3 "$root/scripts/walk-first.py"
 
 # ── 試すノート。**書けるものを一通り**入れておく ──
 cp "$root/packaging/welcome/attachments/amber.png" "$notes/attachments/" 2>/dev/null || true
@@ -351,17 +366,19 @@ sleep 0.5
 # **タイマーの絞りを切る。** デスクトップ版が隠れる（画面が消える・ほかのデスクトップ版の下に
 # 入る）と、Chromium は数分でタイマーを一分に一度まで絞る ── 夜通し回した
 # 総当たりが七時間かかり、「返ってきません」が混ざった（2026-09-10）。
-# **引き出し（`userData`）は隔離しない。** 一度 `app.setPath('userData')` を試す場所に
-# 向けてみたが、まっさらな引き出しで開いたデスクトップ版は数分で固まった（Chromium が鍵束に
-# 訊きに行って、裏の側が止まる ── 2026-09-11・二度）。設定は上の写しと戻しで守り、
-# **走っているあいだは本人のアプリを触らない**（本人が変えた見方が巻き戻る）。
+# **引き出し（`userData`）は試験用の家に置く**（`AMBER_TEST_HOME`・依頼 717）。
+# 2026-09-11 に一度これを試して、まっさらな引き出しで開いたデスクトップ版が数分で
+# 固まり、やめていた（Chromium が鍵束に訊きに行って、裏の側が止まる・二度）。
+# **固まったのは鍵束のせいで、その対策（下の `--use-mock-keychain`）が入ったのは
+# 9 日後の 2026-09-20** ── 対策の入ったいまは、まっさらな引き出しでも
+# 総ざらいが最後まで通ることを確かめてある（2026-11-20）。
 # `AMBER_AWAKE` ── 後ろに隠れたテスト用のアプリを App Nap に止めさせない（`main.js`）。
 # **`--use-mock-keychain` が要る。** `$HOME` を作り替えているので、Chromium が
 # 鍵束を `$HOME/Library/Keychains` に探しに行って見つからず、**本人の画面に
 # 「amber を保持するキーチェーンが見つかりません」を出して、答えるまで止まる**
 # （2026-09-20 に実際に出した ── 走らせている本人が強制終了することになった）。
 # この旗を渡すと、鍵束の代わりに其の場限りの入れ物を使うので、何も訊かない。
-(cd "$root/gui" && env HOME="$work/home" AMBER_AWAKE=1 AMBER_DRIVE_URL="http://127.0.0.1:$driveport" AMBER_DRIVE_TOKEN=fake \
+(cd "$root/gui" && env HOME="$home" AMBER_TEST_HOME="$home" AMBER_AWAKE=1 AMBER_DRIVE_URL="http://127.0.0.1:$driveport" AMBER_DRIVE_TOKEN=fake \
   npx electron --remote-debugging-port="$port" --use-mock-keychain \
   --disable-background-timer-throttling --disable-renderer-backgrounding \
   --disable-features=IntensiveWakeUpThrottling . \
@@ -373,5 +390,5 @@ done
 
 # どの台本を走らせるか（既定は総ざらい）。
 script="${1:-walk}"
-SITE="http://127.0.0.1:$siteport/" PORT="$port" NOTES="$notes" NOTES2="$notes2" TEAMCSV="$work/team.csv" \
+SITE="http://127.0.0.1:$siteport/" PORT="$port" NOTES="$notes" NOTES2="$notes2" TEAMCSV="$work/team.csv" TEST_HOME="$home" \
   DRIVE="http://127.0.0.1:$driveport" node "$here/$script.mjs"

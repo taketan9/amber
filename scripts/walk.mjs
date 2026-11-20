@@ -31,6 +31,31 @@ const path = (n) => `state.root + '/${n}'`;
 
 // 一。開いて、見る
 await ready();
+
+// **試験用の家が効いているか**（依頼 717）── 本物の場所を一つも返さない。
+//
+// デスクトップ版には `AMBER_TEST_HOME` を渡してある。効いていなければ、
+// ドキュメントやクラウドのフォルダは本人の家の下を指し、開いている保存
+// ディレクトリも本物の設定から来る（本物のノート一覧が出る）。**いちばん
+// 先に見る** ── ここが外れていたら、この先の段はぜんぶ本物の上で走っている。
+// この台本は本物の `$HOME` のまま走るので、`HOME` が本人の家。
+if (process.env.TEST_HOME) {
+    const testHome = process.env.TEST_HOME;
+    const realHome = process.env.HOME || '';
+    const realPlaces = ['Library/Application Support', 'Documents', 'Downloads', 'Desktop', 'Library/CloudStorage']
+        .map((d) => realHome + '/' + d);
+    await step('試験用の家：本物の場所を一つも返さない', `
+        const k = await window.amber.knownDirs();
+        const c = await window.amber.clouds();
+        const all = [k.documents, k.downloads, k.desktop, state.root].concat(c.map((x) => x.dir));
+        const home = ${JSON.stringify(testHome)};
+        const real = ${JSON.stringify(realPlaces)};
+        // 試験用の家の外か、本物の場所の下にあるものを拾う。
+        const out = all.filter((p) => !String(p).startsWith(home + '/')
+            || real.some((r) => String(p) === r || String(p).startsWith(r + '/')));
+        return out.join('、');
+    `, '');
+}
 await step('ノートを開く（よくばり）', `await openNote(${path('よくばり.md')}); return !!state.open;`, true);
 await step('表示 → コード', `setView('write'); return view;`, 'write');
 await step('コード → 並べて表示', `setView('split'); return view;`, 'split');

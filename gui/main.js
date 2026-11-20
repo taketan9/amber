@@ -37,6 +37,51 @@ function osPath(at) {
     return /^[a-z]:[\\/]|^\\\\/i.test(s) ? s.replace(/\//g, '\\') : s;
 }
 
+/// 試験と撮影のための家（`AMBER_TEST_HOME`）。**設定されているときだけ**、
+/// 憶えごと（`userData`）・ドキュメント・ダウンロード・デスクトップ・
+/// 初めて開いたときの置き場所・クラウドのフォルダを、この下に向ける。
+///
+/// macOS の Electron は `$HOME` を作り替えても `appData` と `documents` を
+/// 移さないので、試験と撮影が**本人の本物の `amber.json` を読み書きしていた**
+/// （crmaine の撮影で、撮った画面に本物のノート一覧が写り、カレンダーの
+/// 見方が書き換わった・2026-11-20・依頼 717）。こちらの試験の道具は、本物を
+/// 写しておいて終わったら書き戻していたが、途中で落ちると戻らず、走っている
+/// あいだは本物そのものが書き換わっていた。
+///
+/// 並びは crmaine（`CRMAINE_RECORD_HOME`）と同じにしてある ──
+/// 同じ家を渡せば、crmaine の中の amber と単体の amber が同じ試験用の
+/// `amber.json` を見る（本物と同じ関係になる）:
+///
+/// ```text
+/// <家>/appData/amber/amber.json
+/// <家>/Documents ・ <家>/Downloads ・ <家>/Desktop
+/// ```
+///
+/// **設定されていないときは、今までどおり OS に訊く** ── 会社の Windows では
+/// ドキュメントが OneDrive の下に移されていることがある。
+///
+/// **絶対パスでなければ起動しない。** 書き間違えたまま黙って本物の家で
+/// 走るのが、いちばん起きてほしくないこと。
+const TEST_HOME = (() => {
+    const raw = String(process.env.AMBER_TEST_HOME || '').trim();
+    if (!raw) return '';
+    if (!path.isAbsolute(raw)) {
+        console.error('AMBER_TEST_HOME は絶対パスで渡してください: ' + raw);
+        process.exit(2);
+    }
+    return path.normalize(raw);
+})();
+
+/// 試験用の家の中の並び。
+function testDirs(home) {
+    return {
+        appData: path.join(home, 'appData'),
+        documents: path.join(home, 'Documents'),
+        downloads: path.join(home, 'Downloads'),
+        desktop: path.join(home, 'Desktop'),
+    };
+}
+
 // **名前を先に決める。** これが `userData` の置き場所を決めるので、
 // 決めないと憶えごとが `.../Electron/` に入り、Electron を使う他のものと
 // 同じ引き出しを共有することになる。
@@ -51,7 +96,9 @@ function osPath(at) {
 //
 // なので引き出しを先に釘で留めてから、名前を替える。中の名前は変えない
 // （依頼 148 で決めたこと ── 設定キーとバンドル ID は動かさない）。
-app.setPath('userData', path.join(app.getPath('appData'), 'amber'));
+//
+// **試験と撮影のときは、引き出しを試験用の家に置く**（`AMBER_TEST_HOME`・上の註）。
+app.setPath('userData', path.join(TEST_HOME ? testDirs(TEST_HOME).appData : app.getPath('appData'), 'amber'));
 app.setName('ambər');
 // **走査のあいだは、macOS に眠らされない。** テスト用のアプリは本人のアプリの後ろに隠れるので、
 // App Nap で描く側が止められ、段の途中で返事が来なくなる（固まったように見えた・
@@ -168,7 +215,9 @@ function remember(patch) {
 /// （Dropbox も Google Drive も OneDrive も）。昔ながらの `~/Dropbox` も
 /// 残っている環境があるので、両方見て同じ場所は一度だけ出す。
 function clouds() {
-    const home = os.homedir();
+    // 試験と撮影のときは、試験用の家の下だけを見る ── 本物のクラウドの
+    // フォルダ名（会社名・メールアドレスが入る）を画面に出さない。
+    const home = TEST_HOME || os.homedir();
     const out = [];
     const seen = new Set();
     const add = (name, dir) => {
@@ -196,9 +245,13 @@ function clouds() {
         } catch { /* 一つも入っていない環境 */ }
     } else if (process.platform === 'win32') {
         add('iCloud Drive', path.join(home, 'iCloudDrive'));
-        add('OneDrive', process.env.OneDrive || process.env.OneDriveConsumer);
-        add('OneDrive（会社・学校）', process.env.OneDriveCommercial);
-        add('Google Drive', 'G:\\My Drive');
+        // ここから下の三つは家の外を指す（環境変数とドライブ名）── 試験用の
+        // 家では見ない。見ると本物の OneDrive が試験の画面に出る。
+        if (!TEST_HOME) {
+            add('OneDrive', process.env.OneDrive || process.env.OneDriveConsumer);
+            add('OneDrive（会社・学校）', process.env.OneDriveCommercial);
+            add('Google Drive', 'G:\\My Drive');
+        }
     }
     // どの土台でも見る、昔ながらの置き場所。
     add('Dropbox', path.join(home, 'Dropbox'));
@@ -229,7 +282,10 @@ function cloudName(raw) {
 /// そこにあり、名前が変わったからといって彼のノートを置き去りにする理由は
 /// 無い。無ければ `~/Documents/amber` を作る。
 function firstRoot() {
-    const docs = path.join(os.homedir(), 'Documents');
+    // 試験と撮影のときは、試験用の家のドキュメント。**ここを見落とすと、
+    // 試験用の家を渡しても本物の `~/Documents/cian` が開く**（撮った画面に
+    // 本物のノート一覧が写ったのは、この形でも起きる）。
+    const docs = TEST_HOME ? testDirs(TEST_HOME).documents : path.join(os.homedir(), 'Documents');
     const old = path.join(docs, 'cian');
     if (fs.existsSync(old) && fs.statSync(old).isDirectory()) return old;
     const fresh = path.join(docs, 'amber');
@@ -669,7 +725,10 @@ app.whenReady().then(() => {
     /// 訊く** ── 会社の Windows では、ドキュメントが OneDrive の下に
     /// 移されていることがある（`C:\Users\…\OneDrive - 会社\ドキュメント`）。
     ipcMain.handle('amber:knownDirs', () => {
-        const get = (k) => { try { return app.getPath(k); } catch { return ''; } };
+        // 試験と撮影のときは、試験用の家の下（`AMBER_TEST_HOME`）。
+        const get = TEST_HOME
+            ? (k) => testDirs(TEST_HOME)[k]
+            : (k) => { try { return app.getPath(k); } catch { return ''; } };
         return { documents: get('documents'), downloads: get('downloads'), desktop: get('desktop'), sep: path.sep };
     });
 
